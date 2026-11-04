@@ -1958,22 +1958,23 @@ impl App {
         Ok(requests.requests().iter().map(StubRequest::from).collect())
     }
 
-    /// A picture of the app's window as a PNG, also saved at `path`
+    /// A picture of the app: PNG bytes on graphical targets, UTF-8 Cell JSON
+    /// on `--target tui` (`nsh-tui-cells`, version 1), also saved at `path`
     /// (relative to the current directory, on this machine) when given: a
     /// real platform's (`nsh test --target`), which draws the app; a
     /// headless run draws nothing.
     pub async fn screenshot(this: Instance<Self>, path: Option<String>) -> Result<Vec<u8>, String> {
         let app = this.with(|a| a.steps.app.clone());
-        let png = on_app(&app, |a| a.screenshot()).await?;
+        let bytes = on_app(&app, |a| a.screenshot()).await?;
         if let Some(path) = path {
-            let saved = png.clone();
+            let saved = bytes.clone();
             blocking(move || {
                 std::fs::write(&path, saved).map_err(|e| format!("screenshot({path:?}): {e}"))
             })
             .await
             .map_err(|e| e.to_string())??;
         }
-        Ok(png)
+        Ok(bytes)
     }
 
     /// Makes the viewport `width` × `height` points (a rotation, a resized

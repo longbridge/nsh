@@ -556,6 +556,19 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
+    /// Include logical tree order when the mounted structure changes. Native
+    /// `Insert` items alone describe stacking order, which can differ by `zIndex`.
+    fn needs_tree_order(&self) -> bool {
+        false
+    }
+
+    /// Include the states views show as parts of a control
+    /// ([`nsh_core::MountItem::ProjectStates`]): for a platform that marks
+    /// a list's highlighted option itself, as a terminal does.
+    fn needs_projected_states(&self) -> bool {
+        false
+    }
+
     /// An error of the app, as text (the message and the stack): the
     /// bundle failed to load, an exception escaped a JS callback, the VM
     /// was stopped. Errors are always logged; development hosts also show
@@ -1479,6 +1492,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        core.set_tree_order_tracking(sink.needs_tree_order());
+        core.set_projected_state_mounting(sink.needs_projected_states());
         // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
         // sets the host serves.
         let sets: Vec<_> = nsh_core::runtime::registries()
@@ -2837,11 +2852,13 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         idiom: env.idiom,
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
+        ctrl_for_command: env.ctrl_for_command,
         host: env.host,
         lifecycle: env.lifecycle,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
         speech: env.speech,
+        cell: env.cell,
         web_input: env.web_input,
     }
 }

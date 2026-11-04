@@ -61,10 +61,12 @@ mod select;
 mod sheet;
 mod slider;
 mod sort;
+mod status_line;
 mod switch;
 mod syntax;
 mod table;
 mod tabs;
+pub mod terminal;
 pub mod text_view;
 
 /// The KaTeX fonts `TextView` draws formulas with, in one file,

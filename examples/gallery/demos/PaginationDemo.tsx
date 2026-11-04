@@ -1,6 +1,6 @@
 import { platform, signal, Text, View } from "nsh";
 import { Menu, MenuItem, Pagination, type PaginationItemState } from "nsh/base";
-import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, PopIn, popupSurface, Segmented, Toggle } from "../ui";
+import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, PopIn, popupSurface, Segmented, terminal, Toggle } from "../ui";
 
 // `nsh/base`'s `Pagination` owns which pages show (the first and the last,
 // the current one's neighbours, ellipses for the rest), the presses,
@@ -232,6 +232,8 @@ export function PaginationDemo() {
     const draw = (item: PaginationItemState) => {
       if (item.kind === "ellipsis") return <JumpMenu start={item.start!} end={item.end!} current={page()} onPick={go} />;
       if (item.kind === "page") return <Text style={{ fontVariant: ["tabular-nums"] }}>{grouped(item.page)}</Text>;
+      // A terminal draws no icons: the chevrons are glyphs.
+      if (terminal) return <Text style={{ color: colors.muted }}>{item.kind === "previous" ? "‹" : "›"}</Text>;
       return (
         <View style={item.kind === "previous" ? { transform: [{ rotate: "180deg" }] } : undefined}>
           <Icon name="chevron" size={14} tint={colors.muted} />
@@ -242,7 +244,17 @@ export function PaginationDemo() {
       <Card
         title="Ten thousand pages"
         subtitle="An ellipsis opens the pages it hides; the same few items however many pages"
-        right={<Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />}
+        right={
+          // The terminal's switch is a glyph: its label beside it says what it turns on.
+          platform.idiom === "terminal" ? (
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Text style={{ fontSize: 12, color: colors.muted }}>Offline</Text>
+              <Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />
+            </View>
+          ) : (
+            <Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />
+          )
+        }
       >
         <If when={pointer}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

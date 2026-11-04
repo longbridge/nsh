@@ -967,6 +967,8 @@ impl<M: TextEngine> Core<M> {
         }
         // Frames and text measurements are rounded to device pixels.
         self.pixel_ratio_changed(environment.pixel_ratio);
+        // On a grid surface, lengths and frames are put on its Cells.
+        self.cell_changed(environment.cell, environment.dark);
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
@@ -4974,6 +4976,15 @@ impl<M: TextEngine> Core<M> {
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
+            // A terminal decodes no images: the answer is at once, and no
+            // request goes to the platform.
+            Action::ImageInfo(_, answer)
+                if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
+            {
+                answer
+                    .borrow_mut()
+                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
+            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;
@@ -5327,7 +5338,7 @@ impl<M: TextEngine> Core<M> {
                     return false;
                 }
                 if binding == super::overlay::ESCAPE_BINDING {
-                    self.overlay_cancel();
+                    self.overlay_escape();
                     return true;
                 }
                 let found = self.components.executor.keys.borrow().handler(binding);
@@ -5584,7 +5595,10 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::KeyCommand,
-            enabled: rust || self.components.js_keys || self.overlay_state.cancel,
+            enabled: rust
+                || self.components.js_keys
+                || self.overlay_state.cancel
+                || self.overlay_state.hint_escape,
         });
     }
 

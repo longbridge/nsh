@@ -336,6 +336,7 @@ impl Rv {
                     KeyOptions {
                         when: When::Always,
                         repeat: spec.repeat,
+                        ..Default::default()
                     },
                     move |_| rv.key(&event),
                 );
@@ -759,6 +760,22 @@ impl Rv {
         }
         if editable && self.delete_by_key(event) {
             self.after_key(event);
+            return;
+        }
+        // Escape no plugin, node view or keymap took collapses a selection
+        // to its head. With nothing to collapse, a terminal's focus leaves
+        // the editor, so it is no trap there (Tab then goes on after it);
+        // the other platforms keep Escape as it was. It stays bound for the
+        // plugins' own Escape (a suggestion's).
+        if plain && event.key == "Escape" {
+            let sel = state.selection();
+            if sel.empty() {
+                if crate::terminal::is_terminal() {
+                    self.blur();
+                }
+            } else if let Ok(p) = state.doc().resolve(sel.head()) {
+                self.set_selection(Selection::near(&p, 1), false);
+            }
             return;
         }
         if let Some(m) = keys::movement(event) {

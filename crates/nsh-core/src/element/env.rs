@@ -43,6 +43,9 @@ pub struct Environment {
     /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
     /// theirs.
     pub apple_keyboard: bool,
+    /// Ctrl stands in for Command: labels show Command as Ctrl
+    /// ([`crate::platform::Environment::ctrl_for_command`]).
+    pub ctrl_for_command: bool,
     /// The embedding app answers `nsh/host`'s calls
     /// ([`crate::platform::Environment::host`]).
     pub host: bool,
@@ -58,6 +61,9 @@ pub struct Environment {
     /// The platform recognizes speech
     /// ([`crate::platform::Environment::speech`]).
     pub speech: bool,
+    /// The Cell size of a grid surface (a terminal): the core lays out in
+    /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
+    pub cell: Option<Size<Points>>,
     /// The platform gives web views trusted input
     /// ([`crate::platform::Environment::web_input`]).
     pub web_input: bool,
@@ -82,11 +88,13 @@ impl Default for Environment {
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
             apple_keyboard: false,
+            ctrl_for_command: false,
             host: false,
             lifecycle: Lifecycle::Active,
             screen_color: false,
             file_requests: false,
             speech: false,
+            cell: None,
             web_input: false,
         }
     }

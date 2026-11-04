@@ -1,9 +1,10 @@
 // The gallery uses the internal shared icon set, and Lucide's icons where a
 // demo needs more (`lucide.ts`, made by `scripts/lucide.py`).
-import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, Path2D, Text } from "nsh";
+import { terminal } from "../nsh-gallery-ui/theme";
 import { lucide, type LucideElement, type LucideName } from "./lucide";
 
-export { Icon, type IconName } from "../nsh-gallery-ui/icons";
+export { Icon, IconLabel, type IconName } from "../nsh-gallery-ui/icons";
 
 /** The Lucide icons the gallery draws. */
 export type LucideIconName = LucideName;
@@ -68,4 +69,10 @@ export function LucideIcon(props: { name: LucideIconName; size?: number; tint: s
       }}
     />
   );
+}
+
+/** An icon-only control's Lucide icon, or in the terminal its short
+ * `label` as text in the icon's tint (`IconLabel`'s Lucide form). */
+export function LucideLabel(props: { name: LucideIconName; label: string; size?: number; tint: string }) {
+  return terminal ? <Text style={{ color: props.tint }}>{props.label}</Text> : <LucideIcon name={props.name} size={props.size} tint={props.tint} />;
 }

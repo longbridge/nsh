@@ -164,7 +164,8 @@ enum Command {
         junit: Option<PathBuf>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
-        /// (macos, linux, windows, gpui, web, ios and android; web runs them
+        /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
+        /// an in-memory terminal; web runs them
         /// in a headless Chrome, Edge or Chromium, ios in a simulator,
         /// android on the first device adb lists).
         #[arg(long, value_enum)]
@@ -239,7 +240,7 @@ enum Command {
     Package(Box<PackageArgs>),
     /// Run an app in a development host with hot reload. Defaults to
     /// AppKit on macOS, GTK on Linux and Win32 on Windows; select mobile
-    /// hosts, Mac Catalyst, GPUI or a browser with --target.
+    /// hosts, Mac Catalyst, GPUI, a terminal or a browser with --target.
     Run {
         /// The entry module, or the app's directory (default: the current one),
         /// whose `App.tsx` is the entry.
@@ -265,7 +266,8 @@ enum Command {
         /// Show the performance monitor over the app: frame rate, frame and
         /// commit costs, CPU, GPU, memory (`--target macos`, which also logs
         /// its readings once a second; `--target linux`, `windows` and `ios`
-        /// log them).
+        /// log them). On `tui`, show FPS/idle, frame p95, apply/draw/flush
+        /// times, bytes and changed Cells; C-h p toggles the line.
         #[arg(long)]
         fps: bool,
         /// Where to run.
@@ -275,6 +277,9 @@ enum Command {
         /// the newest iPhone.
         #[arg(long)]
         device: Option<String>,
+        /// Points per terminal Cell, overriding nsh.json tui.pointsPerCell (default: 8x16).
+        #[arg(long, value_name = "WIDTHxHEIGHT", value_parser = run::parse_points_per_cell)]
+        points_per_cell: Option<String>,
         /// The app's name in the host (the menu bar, the window title;
         /// `nsh.json`'s name by default; `--target macos` only).
         #[arg(long)]
@@ -567,6 +572,24 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         Command::Run { port, .. } | Command::Dev { port, .. } => dev_port::Session::acquire(*port)?,
         _ => None,
     };
+    let _terminal_logs = match &command {
+        Command::Run {
+            entry,
+            target: run::Target::Tui,
+            ..
+        }
+        | Command::Dev {
+            entry,
+            target: run::Target::Tui,
+            server_only: false,
+            ..
+        } => {
+            let work = entry.parent().context("app directory")?.join(".nsh");
+            std::fs::create_dir_all(&work)?;
+            Some(ui::LogFile::open(&work.join("tui.log"))?)
+        }
+        _ => None,
+    };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
     // tested, run and packaged.
     let rust_command = matches!(
@@ -717,6 +740,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                         limits,
                         trace: false,
                         fps: false,
+                        points_per_cell: None,
                     },
                     target,
                     device.as_deref(),
@@ -778,13 +802,19 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             name,
             size,
             display,
+            points_per_cell,
         } => {
             no_limits_for_rust(&entry, limits)?;
             run::run(
                 &entry,
                 port,
                 release,
-                run::HostFlags { limits, trace, fps },
+                run::HostFlags {
+                    limits,
+                    trace,
+                    fps,
+                    points_per_cell,
+                },
                 target,
                 device.as_deref(),
                 run::HostWindow {

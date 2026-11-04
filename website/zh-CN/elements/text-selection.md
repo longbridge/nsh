@@ -96,6 +96,7 @@ import { TextView } from "nsh/base";
 - **TextView**：设置了 `selectable` 的 [`TextView`](./text-view.md) 自己作为一体选择：它的段落、列表项、单元格和代码块一起选择。放在可选择视图中时，它加入外层的选区。
 - **单独的文字**：不在任何可选择视图中、设置了 `userSelect: "text"` 的文字单独选择，见 [Text](./text.md#属性)。
 - **外观**是平台的高亮，颜色为每段文字的 `selectionColor`（`selection:text-*`）。
+- **分成多段文字的一行**：把一行排成多段文字的 Rust 组件（软换行的代码行）给后面的各段设置 `.continues_text(true)`；复制时这一行完整给出，断开处没有换行，三击会选中它的所有部分。[`DiffView`](./diff-view.md) 的换行就是这样处理的。
 - **列表**：在虚拟化的 [List](./list.md) 中，选区覆盖已挂载的行；回收到视野之外的行会离开选区。
 
 ## 相关内容

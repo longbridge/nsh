@@ -109,6 +109,17 @@ pub(crate) struct AppConfig {
     /// What the web's packages add to the page (`web.rs`).
     #[serde(default)]
     pub(crate) web: WebConfig,
+    /// Terminal layout options.
+    #[serde(default)]
+    pub(crate) tui: TuiConfig,
+}
+
+/// `nsh.json` `"tui"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TuiConfig {
+    /// Width and height of one Cell in points (`8x16` by default).
+    pub(crate) points_per_cell: Option<String>,
 }
 
 impl AppConfig {
@@ -196,6 +207,9 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     };
     let mut config: AppConfig =
         serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+    if let Some(value) = &config.tui.points_per_cell {
+        crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
+    }
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)

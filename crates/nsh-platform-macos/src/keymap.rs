@@ -20,7 +20,7 @@ use std::{cell::RefCell, ptr::NonNull, rc::Rc, sync::Arc};
 use block2::RcBlock;
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
-    keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
+    keymap::{Key, Keymap, Keystroke, Modifiers},
     platform::Os,
 };
 use objc2::{rc::Retained, runtime::AnyObject};
@@ -88,15 +88,17 @@ fn install(key: u64) -> Option<Retained<AnyObject>> {
 
 /// What the monitor does with key-down `event`, for a key given to a
 /// window that is not the key window (`nsh test`'s, whose events the
-/// monitor never sees): whether it fired a binding (then it is reported to
-/// JS, and the window must not get it).
+/// monitor never sees): whether a binding consumed it (then the window
+/// must not get it; a binding passing it through is reported and the
+/// window gets it).
 #[cfg(feature = "dev")]
 pub(crate) fn fires(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     pressed(surface, event)
 }
 
-/// Whether key-down `event` fired one of the surface's bindings (then it
-/// is reported to JS and consumed).
+/// Whether key-down `event` is consumed by one of the surface's bindings.
+/// A binding it fires is reported to JS, one passing the key through
+/// ([`nsh_core::keymap::KeyMatch::Notify`]) without consuming it.
 fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
@@ -121,7 +123,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     }
     let found = table.find(keystroke, editing, event.isARepeat());
-    if let KeyMatch::Fire(id) = found {
+    if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
             EventKind::KeyCommand,

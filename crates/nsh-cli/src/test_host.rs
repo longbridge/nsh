@@ -59,9 +59,11 @@ pub(crate) fn starter(
     }
     if !matches!(
         target,
-        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui | Target::Tui
     ) {
-        anyhow::bail!("nsh test --target takes macos, linux, windows, gpui, web, ios or android");
+        anyhow::bail!(
+            "nsh test --target takes macos, linux, windows, gpui, tui, web, ios or android"
+        );
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::test_host(target.platform())?;
@@ -76,7 +78,7 @@ pub(crate) fn starter(
 /// page) or they fill a device's screen.
 pub(crate) fn host_target(target: Target) -> nsh_testing::HostTarget {
     use nsh_testing::Platform;
-    // This machine's desktop: the GPUI host's.
+    // This machine's desktop: the GPUI and terminal hosts'.
     let desktop = if cfg!(target_os = "macos") {
         Platform::Macos
     } else if cfg!(windows) {
@@ -92,6 +94,8 @@ pub(crate) fn host_target(target: Target) -> nsh_testing::HostTarget {
         Target::Linux => ("linux", Platform::Linux, true),
         Target::Web => ("web", Platform::Web, true),
         Target::Gpui => ("gpui", desktop, true),
+        // The terminal reports this machine's OS, in the terminal idiom.
+        Target::Tui => ("tui", desktop, true),
     };
     let mut host = nsh_testing::HostTarget::default();
     host.name = name.to_owned();
@@ -157,6 +161,15 @@ fn start(
         .arg("--data-dir")
         .arg(&data)
         .stdin(Stdio::null());
+    if target == Target::Tui {
+        command.arg("--headless");
+        command.arg("--log-file").arg(data.join("host.log"));
+        let config = crate::package::read_config(&entry).map_err(|e| e.to_string())?;
+        if let Some(cells) = config.tui.points_per_cell {
+            crate::run::parse_points_per_cell(&cells)?;
+            command.args(["--points-per-cell", &cells]);
+        }
+    }
     if fps {
         command.arg("--fps");
     }

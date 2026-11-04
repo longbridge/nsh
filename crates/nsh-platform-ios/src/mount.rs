@@ -1617,6 +1617,7 @@ impl Mounter {
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
             MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
+            MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
         }
         false
     }

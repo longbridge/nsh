@@ -56,7 +56,13 @@
   boxes in the area's coordinates with scroll offsets applied, its text engine's hit test), feeds `SelectionModel` its
   gestures (press with the click count and Shift, drag, long press, a handle's drag, select all) and draws what
   `ranges` says with its own highlight (each text's `selectionColor`), handles and menu; Copy takes `text` (attachments
-  left out, texts on one row joined by a tab, the others by a line break). Positions are (text index, UTF-16 offset),
+  left out, texts on one row joined by a tab, the others by a line break, a text that continues the one before it by
+  nothing). A component that lays one line out as several texts (a code view's soft-wrapped line: `DiffView`) marks
+  the later parts with `Element::continues_text` (`ViewProps::continues_text`, the internal `Prop::ContinuesText`;
+  `SelectionTexts::continues` reads it): a copy gives the line whole, a triple click selects the whole line, and a
+  double click takes a word the wrap cut across its parts. Every backend reads it from its text views' props (Android
+  passes it to the model with the texts, `nativeSetTexts`); the web's copy joins such texts by nothing (the browser's
+  own selection takes the clicks). Positions are (text index, UTF-16 offset),
   never inside a surrogate pair. A point outside every text is hit-tested in reading order: the horizontally nearest
   text on its row, above every text the first text's start, below every text the last one's end, between rows the
   nearer of the end of the text above and the start of the text below. Words are runs of letters, digits and `_`, runs

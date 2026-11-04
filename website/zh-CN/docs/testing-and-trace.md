@@ -380,7 +380,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
-| `await app.screenshot(path?)` | 应用窗口的 PNG 截图（`Uint8Array`）；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
+| `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 
 步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的、会自行结束的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
@@ -484,7 +484,7 @@ test("calls reach the page's host", async () => {
 
 ### 在真实平台上运行
 
-`nsh test --target macos`（或 `linux`、`windows`、`gpui`、`web`、`ios`、`android`）在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
+`nsh test --target macos`（或 `linux`、`windows`、`gpui`、`tui`、`web`、`ios`、`android`）在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
 - 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
@@ -501,6 +501,7 @@ nsh test --target ios                         # 在 iOS 模拟器里运行
 nsh test --target android                     # 在 adb 列出的第一个 Android 设备或模拟器上运行
 nsh test --target gpui                        # 在 GPUI 窗口里运行（macOS、Windows、Linux）
 nsh test --target web                         # 在 headless 的 Chrome、Edge 或 Chromium 里运行
+nsh test --target tui                         # 在内存终端里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
@@ -519,6 +520,13 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
 不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
+
+`nsh test --target tui` 在内存终端中使用终端渲染器运行测试，适合 CI。每次 `open` 使用独立的 surface 和数据目录。
+用 `open(entry, { width, height })` 指定 point 尺寸；尺寸按应用 `nsh.json` 的 `tui.pointsPerCell` 向上取整为完整 Cell，
+默认每个 Cell 为 8 × 16 points。`app.screenshot("cells.json")` 返回并保存 UTF-8 JSON：`format: "nsh-tui-cells"`、
+`version: 1`、`width`、`height`，以及 `rows[y][x]` 中每个 Cell 的 `symbol`、`fg`、`bg`、`underline` 和 `modifiers`。
+颜色使用 `reset`、小写 ratatui 颜色名、`#rrggbb` 或 `indexed:N`；修饰符是已启用样式名的数组，例如 `bold`、`italic`、
+`underlined`。用 `new TextDecoder().decode(bytes)` 解码返回的字节，再解析 JSON，即可断言 Cell 快照。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或
 `--browser <PATH>` 指定的可执行文件（需要有浏览器：找不到时 `nsh test` 会列出它找过的位置）。整个运行共用一个浏览器，

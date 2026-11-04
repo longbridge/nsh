@@ -1,6 +1,6 @@
 import { cleanup, createAnimatedValue, effect, Image, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious } from "nsh/base";
-import { alpha, Badge, Button, Caption, Card, chart, colors, DemoPage, finish, focusRing, mono, photoUrl, type PhotoName, Press, radius } from "../ui";
+import { alpha, Badge, Button, Caption, Card, chart, colors, DemoPage, finish, focusRing, mono, photoUrl, type PhotoName, Press, radius, TERMINAL_GAP, terminal } from "../ui";
 import { LucideIcon, type LucideIconName } from "../icons";
 
 // `nsh/base`'s `Carousel` owns the scrolling (the platform's own: the
@@ -121,8 +121,21 @@ const NEWS = [
   "Search finds words inside images and PDFs",
 ];
 
-/** A round button over the content, or beside it: glass on a photo, raised on a card. */
+/**
+ * An arrow's icon, or in a terminal its glyph as text (a terminal draws no
+ * icons; text keeps the control's own label short).
+ */
+function Arrow(props: { icon: LucideIconName; glyph: string; size: number; tint: string }) {
+  return (
+    <If when={terminal} else={<LucideIcon name={props.icon} size={props.size} tint={props.tint} />}>
+      <Text style={{ color: props.tint }}>{props.glyph}</Text>
+    </If>
+  );
+}
+
+/** A round button over the content, or beside it: glass on a photo, raised on a card; in a terminal its glyph. */
 function arrow(glass: boolean): ViewStyle {
+  if (terminal) return { alignItems: "center", justifyContent: "center", flexShrink: 0, ...fade() };
   return {
     width: size.arrow,
     height: size.arrow,
@@ -192,7 +205,7 @@ export function CarouselDemo() {
             <CarouselContent style={{ height: pointer ? 160 : 188 }}>
               <Each of={STEPS}>
                 {(s, i) => (
-                  <CarouselItem accessibilityLabel={`${i() + 1} of ${STEPS.length}: ${s().title}`} style={{ width: "100%", alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 24 }}>
+                  <CarouselItem accessibilityLabel={`${i() + 1} of ${STEPS.length}: ${s().title}`} style={{ width: "100%", flexShrink: terminal ? 0 : undefined, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 24 }}>
                     <View
                       style={{
                         width: pointer ? 48 : 56,
@@ -228,9 +241,9 @@ export function CarouselDemo() {
               <View style={{ flex: 1, alignItems: "center" }}>
                 <CarouselPagination
                   accessibilityLabel="Steps"
-                  style={{ flexDirection: "row", alignItems: "center" }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 8 : undefined }}
                   // A pill a dot high and twice as wide, springing to the step shown.
-                  indicatorStyle={{ top: (size.hit - size.dot) / 2, bottom: (size.hit - size.dot) / 2, marginHorizontal: 1, borderRadius: size.dot / 2, backgroundColor: colors.accentFill }}
+                  indicatorStyle={terminal ? { display: "none" } : { top: (size.hit - size.dot) / 2, bottom: (size.hit - size.dot) / 2, marginHorizontal: 1, borderRadius: size.dot / 2, backgroundColor: colors.accentFill }}
                 >
                   <Each of={STEPS}>
                     {(s, i) => (
@@ -239,12 +252,16 @@ export function CarouselDemo() {
                         index={i()}
                         accessibilityLabel={`Step ${i() + 1}: ${s().title}`}
                         class="group"
-                        style={{ width: size.hit + 4, height: size.hit, alignItems: "center", justifyContent: "center", borderRadius: size.hit / 2 }}
+                        style={{ width: terminal ? undefined : size.hit + 4, height: terminal ? undefined : size.hit, alignItems: "center", justifyContent: "center", borderRadius: size.hit / 2 }}
                         focusStyle={focusRing()}
                       >
+                        {/* A terminal's dot is a glyph, filled on the step shown. */}
+                        <If when={terminal}>
+                          <Text style={{ color: i() === step() ? colors.accent : colors.muted }}>{i() === step() ? "●" : "○"}</Text>
+                        </If>
                         <View
                           class="opacity-70 group-hover:opacity-100 group-selected:opacity-0"
-                          style={{ width: size.dot, height: size.dot, borderRadius: size.dot / 2, backgroundColor: alpha(colors.text, 0.24), ...fade() }}
+                          style={{ display: terminal ? "none" : "flex", width: size.dot, height: size.dot, borderRadius: size.dot / 2, backgroundColor: alpha(colors.text, 0.24), ...fade() }}
                         />
                       </CarouselPaginationItem>
                     )}
@@ -300,7 +317,7 @@ export function CarouselDemo() {
               focusStyle={focusRing(2)}
               disabledStyle={spent}
             >
-              <LucideIcon name="chevron-left" size={size.arrowIcon} tint="#ffffff" />
+              <Arrow icon="chevron-left" glyph="‹" size={size.arrowIcon} tint="#ffffff" />
             </CarouselPrevious>
             <CarouselNext
               accessibilityLabel="Next photo"
@@ -310,7 +327,7 @@ export function CarouselDemo() {
               focusStyle={focusRing(2)}
               disabledStyle={spent}
             >
-              <LucideIcon name="chevron-right" size={size.arrowIcon} tint="#ffffff" />
+              <Arrow icon="chevron-right" glyph="›" size={size.arrowIcon} tint="#ffffff" />
             </CarouselNext>
           </View>
           <CarouselPagination accessibilityLabel="Choose a photo" style={{ flexDirection: "row", gap: 8 }}>
@@ -413,7 +430,7 @@ export function CarouselDemo() {
               style={arrow(false)}
               hoverStyle={finish.hover}
             >
-              <LucideIcon name={playing() ? "pause" : "play"} size={size.arrowIcon - 4} tint={colors.text} />
+              <Arrow icon={playing() ? "pause" : "play"} glyph={playing() ? "Pause" : "Play"} size={size.arrowIcon - 4} tint={colors.text} />
             </Press>
             <CarouselPagination
               accessibilityLabel="Choose a promotion"
@@ -448,10 +465,10 @@ export function CarouselDemo() {
     const first = signal(0);
     // Three to a view with a pointer, a card and a peek on a touch screen;
     // the content's negative margin and each card's padding make the gaps.
-    const basis = pointer ? "33.333%" : "78%";
+    const basis = pointer || terminal ? "33.333%" : "78%";
     const gap = 12;
     return (
-      <Card title="Collections" subtitle={pointer ? "Three to a view; the last ones rest together" : "One and a peek of the next"}>
+      <Card title="Collections" subtitle={pointer || terminal ? "Three to a view; the last ones rest together" : "One and a peek of the next"}>
         <Carousel
           accessibilityLabel="Collections"
           onChange={({ index }) => {
@@ -460,19 +477,19 @@ export function CarouselDemo() {
           }}
           style={{ gap: 10 }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
             <Text style={{ flex: 1, fontSize: size.caption, color: colors.muted }}>{`${COLLECTIONS.length} collections · from ${COLLECTIONS[first()].name}`}</Text>
             <CarouselPrevious accessibilityLabel="Previous collections" style={arrow(false)} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
-              <LucideIcon name="chevron-left" size={size.arrowIcon} tint={colors.text} />
+              <Arrow icon="chevron-left" glyph="‹" size={size.arrowIcon} tint={colors.text} />
             </CarouselPrevious>
             <CarouselNext accessibilityLabel="Next collections" style={arrow(false)} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
-              <LucideIcon name="chevron-right" size={size.arrowIcon} tint={colors.text} />
+              <Arrow icon="chevron-right" glyph="›" size={size.arrowIcon} tint={colors.text} />
             </CarouselNext>
           </View>
           <CarouselContent style={{ marginLeft: -gap, height: pointer ? 112 : 128 }}>
             <Each of={COLLECTIONS}>
               {(c, i) => (
-                <CarouselItem accessibilityLabel={`${i() + 1} of ${COLLECTIONS.length}: ${c().name}`} style={{ flexBasis: basis, paddingLeft: gap, height: "100%" }}>
+                <CarouselItem accessibilityLabel={`${i() + 1} of ${COLLECTIONS.length}: ${c().name}`} style={{ flexBasis: basis, flexShrink: terminal ? 0 : undefined, paddingLeft: gap, height: "100%" }}>
                   <View
                     style={{
                       flex: 1,
@@ -485,7 +502,7 @@ export function CarouselDemo() {
                       backgroundColor: colors.inset,
                     }}
                   >
-                    <View style={{ width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: alpha(c().tone(), 0.16) }}>
+                    <View style={{ display: terminal ? "none" : "flex", width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: alpha(c().tone(), 0.16) }}>
                       <LucideIcon name={c().icon} size={16} tint={c().tone()} />
                     </View>
                     <View style={{ gap: 2 }}>
@@ -527,11 +544,11 @@ export function CarouselDemo() {
               )}
             </Each>
           </CarouselContent>
-          <CarouselPrevious accessibilityLabel="Previous announcement" style={{ ...arrow(false), width: size.arrow - 6, height: size.arrow - 6 }} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
-            <LucideIcon name="arrow-up" size={size.arrowIcon - 4} tint={colors.text} />
+          <CarouselPrevious accessibilityLabel="Previous announcement" style={{ ...arrow(false), width: terminal ? undefined : size.arrow - 6, height: terminal ? undefined : size.arrow - 6 }} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
+            <Arrow icon="arrow-up" glyph="↑" size={size.arrowIcon - 4} tint={colors.text} />
           </CarouselPrevious>
-          <CarouselNext accessibilityLabel="Next announcement" style={{ ...arrow(false), width: size.arrow - 6, height: size.arrow - 6 }} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
-            <LucideIcon name="arrow-down" size={size.arrowIcon - 4} tint={colors.text} />
+          <CarouselNext accessibilityLabel="Next announcement" style={{ ...arrow(false), width: terminal ? undefined : size.arrow - 6, height: terminal ? undefined : size.arrow - 6 }} hoverStyle={finish.hover} activeStyle={sink} focusStyle={focusRing(2)} disabledStyle={spent}>
+            <Arrow icon="arrow-down" glyph="↓" size={size.arrowIcon - 4} tint={colors.text} />
           </CarouselNext>
         </Carousel>
         </View>

@@ -966,7 +966,7 @@ const platform: Platform;
 interface Platform {
   readonly os: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly version: string;
-  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   readonly desktop: boolean;
   readonly catalyst: boolean;
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
@@ -979,8 +979,8 @@ The platform the app runs on, constant while it runs.
 |---|---|---|
 | `os` | `os() -> Os` (`os().name()` is the TS string) | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`, browsers `"web"`. |
 | `version` | `os_version() -> (u16, u16)` | iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. Rust gives the major and minor version, or the API level and 0 on Android. |
-| `idiom` | `idiom() -> Idiom` | The kind of device: `"desktop"` exactly where `desktop` is `true`; elsewhere `"phone"`, `"pad"` (an iPad, an Android tablet, Mac Catalyst in the iPad idiom), `"mac"` (Mac Catalyst in UIKit's Mac idiom, a mobile idiom) or `"tv"` (Apple TV, Android TV). |
-| `desktop` | `is_desktop() -> bool` | Desktop behavior applies: macOS, Windows, Linux, and browsers with a mouse and a wide window. `desktop={{…}}` props, `select({ desktop })` and `idiom` `"desktop"` all follow it. Mac Catalyst runs the iOS backend, so it is mobile: `ios={{…}}` props apply there. [`nsh/desktop`](./nsh-desktop.md#isavailable)'s `isAvailable` is the narrower check for its window and menu APIs, which macOS, Windows and Linux have. |
+| `idiom` | `idiom() -> Idiom` | The kind of device: `"terminal"` in a terminal (`--target tui`): drawn on a grid of character cells, with desktop behavior (`desktop` is `true`; `os` is still the machine's); elsewhere `"desktop"` exactly where `desktop` is `true`, else `"phone"`, `"pad"` (an iPad, an Android tablet, Mac Catalyst in the iPad idiom), `"mac"` (Mac Catalyst in UIKit's Mac idiom, a mobile idiom) or `"tv"` (Apple TV, Android TV). |
+| `desktop` | `is_desktop() -> bool` | Desktop behavior applies: macOS, Windows, Linux, browsers with a mouse and a wide window, and terminals. `desktop={{…}}` props, `select({ desktop })` and `idiom` `"desktop"` (outside a terminal) all follow it. Mac Catalyst runs the iOS backend, so it is mobile: `ios={{…}}` props apply there. [`nsh/desktop`](./nsh-desktop.md#isavailable)'s `isAvailable` is the narrower check for its window and menu APIs, which macOS, Windows and Linux have. |
 | `catalyst` | `is_catalyst() -> bool` | The app runs under Mac Catalyst, in the Mac or the iPad idiom (`os` is `"ios"`). |
 | `select(spec)` | `match os() { … }` | The value for this platform (see below). |
 
@@ -1003,7 +1003,7 @@ interface PlatformSelectSpec<T> {
   linux?: T;
   web?: T;
   mobile?: T;   // platform.desktop false: iOS (Mac Catalyst included), Android, phone and tablet browsers
-  desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers
+  desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers, terminals
   native?: T;   // every platform but the web
   default?: T;
 }
@@ -2226,13 +2226,14 @@ const keymap: {
 interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
+  passThrough?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat })` | `on_key_with(keystroke, KeyOptions { when, repeat }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2384,7 +2385,7 @@ On iOS and Android, a key an input method is composing with (choosing a candidat
 
 ### Which binding runs
 
-A key that fires a binding is consumed: it is not typed, the system does not beep, and NSH's own keys do not see it (Escape going back, Tab moving the focus, the arrows scrolling). When several bindings have the same keystroke, the newest one that may fire runs, so a dialog can bind Escape over the screen's binding and the screen's comes back when the dialog's goes. Bindings are checked natively the moment the key is pressed; the handler runs right after, on the engine thread (Rust) or the JS thread (TSX).
+A key that fires a binding is consumed (a binding with `passThrough` lets it go on, below): it is not typed, the system does not beep, and NSH's own keys do not see it (Escape going back, Tab moving the focus, the arrows scrolling). When several bindings have the same keystroke, the newest one that may fire runs, so a dialog can bind Escape over the screen's binding and the screen's comes back when the dialog's goes. Bindings are checked natively the moment the key is pressed; the handler runs right after, on the engine thread (Rust) or the JS thread (TSX).
 
 Holding a key down fires its binding once, until the key is released; with `repeat: true` it fires again on every auto-repeat (to step through a list, say):
 
@@ -2394,6 +2395,16 @@ on_key_with("alt+down", KeyOptions { repeat: true, ..KeyOptions::default() }, mo
 
 ```tsx tabs
 keymap.bind("alt+down", nextItem, { repeat: true });
+```
+
+With `passThrough: true` the binding runs and the key goes on as if nothing were bound: Tab still moves the focus, a text input still types. A popup that closes when Tab leaves it binds Tab this way, and the focus moves to the next control:
+
+```rust tabs
+on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, move |_| close());
+```
+
+```tsx tabs
+keymap.bind("tab", close, { passThrough: true });
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.

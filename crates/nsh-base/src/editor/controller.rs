@@ -128,7 +128,7 @@ impl Ed {
         let font = Font {
             family: font_family(props.font_family.get_untracked()),
             size: props.font_size.get_untracked(),
-            line_height: props.line_height.get_untracked(),
+            line_height: crate::terminal::row_height(props.line_height.get_untracked()),
         };
         let measure = measurer(&font);
         let text = props
@@ -290,9 +290,10 @@ impl Ed {
             let font = Font {
                 family: font_family(ed.props.font_family.get()),
                 size: ed.props.font_size.get(),
-                line_height: ed.props.line_height.get(),
+                line_height: crate::terminal::row_height(ed.props.line_height.get()),
             };
             let mut st = ed.st.borrow_mut();
+            st.display.set_cells(crate::terminal::is_terminal());
             if st.font != font {
                 st.display.set_measure(measurer(&font));
                 st.font = font;
@@ -400,7 +401,12 @@ impl Ed {
                 return;
             }
             let apple = matches!(os(), Os::Ios | Os::MacOs);
-            for binding in keymap::default_bindings(apple) {
+            // Escape is bound below, only while it has carets or a
+            // selection to collapse.
+            for binding in keymap::default_bindings(apple)
+                .into_iter()
+                .filter(|b| b.command != Command::SingleSelection)
+            {
                 let e = ed.clone();
                 let command = binding.command;
                 on_key_with(
@@ -408,6 +414,7 @@ impl Ed {
                     KeyOptions {
                         when: When::Always,
                         repeat: binding.repeat,
+                        ..Default::default()
                     },
                     move |_| e.run(command),
                 );
@@ -423,6 +430,28 @@ impl Ed {
             on_key_with("mod+c", always(false), move |_| e.copy());
             let e = ed.clone();
             on_key_with("mod+x", always(false), move |_| e.cut());
+        });
+        // Escape collapses several carets or a selection to one caret;
+        // with nothing to collapse it is left to the page (a dialog closes,
+        // the focus can leave the editor), so the editor is no trap.
+        let collapsible = {
+            let ed = self.clone();
+            computed(move || {
+                ed.sel_rev.get();
+                let st = ed.st.borrow();
+                let all = st.selections.all();
+                all.len() > 1 || all.iter().any(|s| !s.is_empty())
+            })
+        };
+        let ed = self.clone();
+        effect(move || {
+            if !ed.focused.get() || !collapsible.get() {
+                return;
+            }
+            let e = ed.clone();
+            on_key_with("escape", always(false), move |_| {
+                e.run(Command::SingleSelection)
+            });
         });
     }
 
@@ -1576,6 +1605,7 @@ fn always(repeat: bool) -> KeyOptions {
     KeyOptions {
         when: When::Always,
         repeat,
+        ..Default::default()
     }
 }
 

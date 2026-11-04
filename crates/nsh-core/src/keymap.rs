@@ -593,6 +593,19 @@ pub fn apple_keys(os: Os, apple_keyboard: bool) -> bool {
 }
 
 impl Keystroke {
+    /// The keys pressed for this keystroke: where Ctrl stands in for
+    /// Command (`ctrl_for_command`, a terminal on macOS that cannot report
+    /// Command: [`crate::platform::Environment::ctrl_for_command`]), its
+    /// Command is Ctrl, so a label shows the key to press (`⌃O` for
+    /// `mod+o`). A keystroke with both keeps them.
+    pub fn pressed(mut self, ctrl_for_command: bool) -> Keystroke {
+        if ctrl_for_command && self.modifiers.cmd && !self.modifiers.ctrl {
+            self.modifiers.cmd = false;
+            self.modifiers.ctrl = true;
+        }
+        self
+    }
+
     /// The keystroke as menus and hints show it: `⌃⌥⇧⌘K` with Apple's
     /// conventions ([`apple_keys`]), else `Ctrl+Alt+Shift+K` (the Command
     /// modifier is `Win` on Windows, `Meta` in a browser, `Super`
@@ -704,6 +717,10 @@ pub struct KeyBinding {
     /// It fires again on the auto-repeats of a held key; else once until
     /// the key is released.
     pub repeat: bool,
+    /// It fires and lets the key go on as if there were no binding
+    /// ([`KeyMatch::Notify`]): Tab still moves the focus, a text input
+    /// still types. Else the platform consumes the key.
+    pub pass_through: bool,
 }
 
 impl KeyBinding {
@@ -720,7 +737,15 @@ impl KeyBinding {
             keystroke,
             in_text,
             repeat,
+            pass_through: false,
         }
+    }
+
+    /// The binding firing without consuming the key when `pass_through`
+    /// ([`Self::pass_through`]).
+    pub fn passing_through(mut self, pass_through: bool) -> KeyBinding {
+        self.pass_through = pass_through;
+        self
     }
 }
 
@@ -735,12 +760,27 @@ pub enum KeyMatch {
     /// An auto-repeat of a held key whose binding fires once: the platform
     /// consumes it and reports nothing.
     Held,
+    /// It fires binding `id`, which passes the key through
+    /// ([`KeyBinding::pass_through`]): the platform reports it
+    /// ([`crate::EventKind::KeyCommand`]) and lets the key go on as if there
+    /// were no keymap (Tab moves the focus after the report).
+    Notify(u32),
 }
 
 impl KeyMatch {
     /// The platform consumes the key.
     pub fn consumed(self) -> bool {
-        self != KeyMatch::None
+        matches!(self, KeyMatch::Fire(_) | KeyMatch::Held)
+    }
+
+    /// The binding the key fires, which the platform reports
+    /// ([`crate::EventKind::KeyCommand`]): a consumed one's or a passing
+    /// one's.
+    pub fn fired(self) -> Option<u32> {
+        match self {
+            KeyMatch::Fire(id) | KeyMatch::Notify(id) => Some(id),
+            KeyMatch::None | KeyMatch::Held => None,
+        }
     }
 }
 
@@ -769,7 +809,9 @@ impl Keymap {
     /// What a key does: the newest binding of `keystroke` that fires while
     /// `editing` (a text input or hosted native view has the keyboard
     /// focus) takes it; `repeat` is an auto-repeat of a held key, which only
-    /// fires bindings that ask for it.
+    /// fires bindings that ask for it. A binding that passes the key
+    /// through gives [`KeyMatch::Notify`], and its held key's auto-repeats
+    /// go on ([`KeyMatch::None`]) unless it repeats.
     pub fn find(&self, keystroke: Keystroke, editing: bool, repeat: bool) -> KeyMatch {
         let found = self
             .bindings
@@ -778,7 +820,9 @@ impl Keymap {
             .find(|b| b.keystroke == keystroke && (b.in_text || !editing));
         match found {
             None => KeyMatch::None,
+            Some(b) if repeat && !b.repeat && b.pass_through => KeyMatch::None,
             Some(b) if repeat && !b.repeat => KeyMatch::Held,
+            Some(b) if b.pass_through => KeyMatch::Notify(b.id),
             Some(b) => KeyMatch::Fire(b.id),
         }
     }
@@ -951,6 +995,16 @@ mod tests {
         assert_eq!(label("cmd+space", Os::Windows, false), "Win+Space");
         assert_eq!(label("f5", Os::Web, true), "F5");
         assert_eq!(label("mod+/", Os::Web, false), "Ctrl+/");
+        // Where Ctrl stands in for Command, the label shows Ctrl.
+        let pressed = |t| {
+            Keystroke::parse_with(t, true)
+                .unwrap()
+                .pressed(true)
+                .label(Os::MacOs, true)
+        };
+        assert_eq!(pressed("mod+o"), "⌃O");
+        assert_eq!(pressed("mod+shift+t"), "⌃⇧T");
+        assert_eq!(pressed("ctrl+cmd+f"), "⌃⌘F");
     }
 
     #[test]
@@ -1040,5 +1094,26 @@ mod tests {
         assert_eq!(map.find(e, false, true), KeyMatch::Fire(2));
         let always = Keymap::new(vec![KeyBinding::new(4, e, When::Always, false)]);
         assert_eq!(always.find(e, true, false), KeyMatch::Fire(4));
+    }
+
+    #[test]
+    fn a_passing_binding_fires_and_leaves_the_key() {
+        let tab = parse("tab").unwrap();
+        let map = Keymap::new(vec![
+            KeyBinding::new(1, tab, When::Auto, false).passing_through(true),
+        ]);
+        let found = map.find(tab, false, false);
+        assert_eq!(found, KeyMatch::Notify(1));
+        assert_eq!(found.fired(), Some(1));
+        assert!(!found.consumed());
+        // Its held key's repeats go on, unreported.
+        assert_eq!(map.find(tab, false, true), KeyMatch::None);
+        let repeating = Keymap::new(vec![
+            KeyBinding::new(2, tab, When::Auto, true).passing_through(true),
+        ]);
+        assert_eq!(repeating.find(tab, false, true), KeyMatch::Notify(2));
+        assert_eq!(KeyMatch::Fire(3).fired(), Some(3));
+        assert!(KeyMatch::Fire(3).consumed() && KeyMatch::Held.consumed());
+        assert_eq!(KeyMatch::Held.fired(), None);
     }
 }

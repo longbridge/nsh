@@ -53,6 +53,7 @@ export function Chat() {
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
   const native = platform.desktop && platform.os !== "web";
+  const terminal = platform.idiom === "terminal";
   const provider = signal<Provider>("Codex");
   let cancelLocal: (() => void) | undefined;
   const draft = signal("");
@@ -486,6 +487,12 @@ export function Chat() {
     );
   };
 
+  // A terminal Cell is 8 pt wide.
+  const titleColumn = Math.max(...featured.map((f) => scenarios.find((x) => x.id === f.id)!.chip.length)) * 8 + 8;
+  /** The list's width: the titles' column, the gap and the longest note, so
+   * the list centers as a block and its notes keep their lines. */
+  const listWidth = titleColumn + 16 + Math.max(...featured.map((f) => f.note.length)) * 8;
+
   const empty = (
     <View style={{ ...column, flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
         <Appear>
@@ -497,7 +504,30 @@ export function Chat() {
             </Text>
           </View>
         </Appear>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        {/* The terminal lists the suggestions, a line each: four cards of
+            a quarter's width would wrap their titles unevenly. */}
+        <If when={terminal}>
+          {/* The notes in a column of their own, two Cells after the
+              longest title; with less than 16 Cells left beside it, a
+              note goes under its title. Centered as a block under the
+              centered heading, its rows still aligned with each other. */}
+          <View style={{ alignSelf: "center", width: listWidth, maxWidth: "100%" }}>
+            <Each of={featured}>
+              {(f) => {
+                const s = scenarios.find((x) => x.id === f().id)!;
+                return (
+                  <Press onPress={() => play(s.id)} accessibilityLabel={s.chip}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16 }}>
+                      <Text style={{ width: titleColumn, flexShrink: 0, fontWeight: "600", color: colors.text }}>{s.chip}</Text>
+                      <Text style={{ flexGrow: 1, flexShrink: 1, flexBasis: 16 * 8, color: colors.muted }}>{f().note}</Text>
+                    </View>
+                  </Press>
+                );
+              }}
+            </Each>
+          </View>
+        </If>
+        <View style={{ display: terminal ? "none" : "flex", flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
           <Each of={featured}>
             {(f, i) => {
               const s = scenarios.find((x) => x.id === f().id)!;
@@ -704,8 +734,9 @@ export function Chat() {
           </View>
         </View>
 
-        {/* Suggestions while the conversation is empty. */}
-        <If when={!messages().length}>
+        {/* Suggestions while the conversation is empty (a terminal lists
+            them in the empty state instead, one per row). */}
+        <If when={!messages().length && !terminal}>
           <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
               <Each of={chips}>
@@ -744,7 +775,8 @@ export function Chat() {
           </If>
           <View
             style={{
-              borderRadius: 24,
+              // Square in the terminal, framed as its cards are.
+              borderRadius: terminal ? 0 : 24,
               borderCurve: "continuous",
               // Glass like the menu above it, without the blur: nothing scrolls under it.
               ...finish.menu,

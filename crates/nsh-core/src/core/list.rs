@@ -352,11 +352,16 @@ pub(super) struct ListState {
     /// (its sign is the scroll direction). The core's own moves (anchoring
     /// a splice, measured rows, following a pin) are not steps.
     lead: f32,
-    /// Scroll that keeps the visible content in place after a splice.
+    /// Scroll that keeps the visible content in place after a splice or a
+    /// change of columns.
     splice_anchor: f32,
     /// The target of the last scroll command, until it is reached with
     /// measured cells or the user scrolls away.
     pin: Option<Pin>,
+    /// The item the last change of columns kept at the top: while its row
+    /// is still the first visible one, the next change keeps it rather than
+    /// the row's first item, so resizing back and forth does not drift.
+    columns_anchor: Option<u32>,
     /// `viewport="parent"`: virtualized against the view around it.
     pub(super) parent: bool,
     /// The parent mode's view, once found.
@@ -422,6 +427,7 @@ impl ListState {
             lead: 0.0,
             splice_anchor: 0.0,
             pin: None,
+            columns_anchor: None,
             parent: false,
             outer: None,
             outer_start: f32::NAN,
@@ -526,22 +532,7 @@ impl ListState {
         self.items_changed = true;
         // The visible content keeps its place instead.
         self.pin = None;
-        // The first visible item and where it is in the viewport. An
-        // inverted list at its start (item 0 in view at the bottom) keeps
-        // its distance from the end instead, so what arrives there shows.
-        // In its parent's viewport, only while the list's start is scrolled
-        // past (when it shows, the content below it moves instead).
-        let anchor = (self.count > 0
-            && self.viewport > 0.0
-            && self.keeps_visible_rows()
-            && (!self.parent || self.offset > 0.0))
-            .then(|| {
-                let top = self.natural_offset();
-                let body = self.blocks().body;
-                let row = self.rows.find((top - body).max(0.0) as f64) as u32;
-                let index = (row * self.columns).min(self.count - 1);
-                (index, self.item_at(index) - top)
-            });
+        let anchor = self.visible_anchor();
         let natural_before = self.natural_offset();
         let end = (at + removed) as usize;
         self.sizes.splice(
@@ -608,11 +599,37 @@ impl ListState {
                 self.offset -= delta;
                 self.splice_anchor -= delta;
             } else {
-                let delta = self.item_at(moved_to) - from_top - self.natural_offset();
-                self.offset += delta;
-                self.splice_anchor += delta;
+                self.keep_in_place(moved_to, from_top);
             }
         }
+    }
+
+    /// The first visible item and where it is in the viewport, for a
+    /// change that should keep it in place. An inverted list at its start
+    /// (item 0 in view at the bottom) keeps its distance from the end
+    /// instead, so what arrives there shows. In its parent's viewport, only
+    /// while the list's start is scrolled past (when it shows, the content
+    /// below it moves instead).
+    fn visible_anchor(&self) -> Option<(u32, f32)> {
+        (self.count > 0
+            && self.viewport > 0.0
+            && self.keeps_visible_rows()
+            && (!self.parent || self.offset > 0.0))
+            .then(|| {
+                let top = self.natural_offset();
+                let body = self.blocks().body;
+                let row = self.rows.find((top - body).max(0.0) as f64) as u32;
+                let index = (row * self.columns).min(self.count - 1);
+                (index, self.item_at(index) - top)
+            })
+    }
+
+    /// Scrolls so item `index` starts `from_top` below the viewport's start
+    /// again (a list that is not inverted).
+    fn keep_in_place(&mut self, index: u32, from_top: f32) {
+        let delta = self.item_at(index) - from_top - self.natural_offset();
+        self.offset += delta;
+        self.splice_anchor += delta;
     }
 
     /// Whether changes before the viewport keep the visible rows in place:
@@ -920,12 +937,18 @@ impl ListState {
     }
 
     /// Size and position of each cell across the main axis: `(offset,
-    /// size)` of column `col`.
-    pub(super) fn column(&self, cross: f32, col: u32) -> (f32, f32) {
+    /// size)` of column `col`. On a terminal's grid of `cell` points
+    /// across, every column is as many whole Cells (the share rounded
+    /// down, the Cells left over after the last column): rounded each on
+    /// its own, they would run into the padding at the end.
+    pub(super) fn column(&self, cross: f32, col: u32, cell: Option<f32>) -> (f32, f32) {
         let (start, end) = self.cross_padding();
         let gap = self.cross_gap();
         let n = self.columns as f32;
-        let width = ((cross - start - end - gap * (n - 1.0)) / n).max(0.0);
+        let mut width = ((cross - start - end - gap * (n - 1.0)) / n).max(0.0);
+        if let Some(cell) = cell.filter(|&c| c > 0.0) {
+            width = (width / cell + 1e-3).floor() * cell;
+        }
         (start + col as f32 * (width + gap), width)
     }
 
@@ -961,19 +984,40 @@ impl ListState {
 
     pub(super) fn set_estimated(&mut self, estimated: f32) {
         if estimated > 0.0 && estimated != self.estimated {
+            // Rows not measured above the viewport change length: what is
+            // visible stays where it is.
+            let anchor = self.visible_anchor().filter(|_| !self.inverted);
             self.estimated = estimated;
             self.rebuild_offsets();
+            if let Some((index, from_top)) = anchor {
+                self.keep_in_place(index, from_top);
+            }
         }
     }
 
     pub(super) fn set_columns(&mut self, columns: u32) {
         let columns = columns.max(1);
         if columns != self.columns {
+            // The first visible item stays where it is (a window resized to
+            // fit more or fewer columns), not the offset: at the old offset
+            // the rows show other items.
+            let anchor = self.visible_anchor().filter(|_| !self.inverted).map(
+                |(index, from_top)| match self.columns_anchor {
+                    Some(kept) if kept < self.count && self.row_of(kept) == self.row_of(index) => {
+                        (kept, from_top)
+                    }
+                    _ => (index, from_top),
+                },
+            );
+            self.columns_anchor = anchor.map(|(index, _)| index);
             self.columns = columns;
             // Cells change width: their sizes are measured again.
             self.sizes.fill(f32::NAN);
             self.cells_cross = f32::NAN;
             self.rebuild_offsets();
+            if let Some((index, from_top)) = anchor {
+                self.keep_in_place(index, from_top);
+            }
         }
     }
 
@@ -1800,6 +1844,21 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_s_columns_are_whole_equal_cells() {
+        // 9 columns in 1360pt (170 Cells) padded a Cell each side, 2 Cells
+        // apart: 16.9 Cells each, rounded down. Each rounded on its own,
+        // the last would end in the padding.
+        let mut l = list(90, 50.0, 1000.0);
+        l.set_columns(9);
+        l.content.padding.left = crate::Points(8.0);
+        l.content.padding.right = crate::Points(8.0);
+        l.content.column_gap = crate::Points(16.0);
+        assert_eq!(l.column(1360.0, 1, Some(8.0)), (8.0 + 128.0 + 16.0, 128.0));
+        let (x, width) = l.column(1360.0, 8, Some(8.0));
+        assert!(x + width <= 1360.0 - 8.0, "the last inside the padding");
+    }
+
+    #[test]
     fn columns_share_rows() {
         let mut l = list(10, 50.0, 1000.0);
         l.set_columns(3);
@@ -1810,7 +1869,7 @@ mod tests {
         // A row is as tall as its tallest item.
         l.measured(4, 80.0);
         assert_eq!(l.item_at(6), 130.0);
-        assert_eq!(l.column(320.0, 2), (320.0 * 2.0 / 3.0, 320.0 / 3.0));
+        assert_eq!(l.column(320.0, 2, None), (320.0 * 2.0 / 3.0, 320.0 / 3.0));
         let mut binds = Vec::new();
         l.update_window(&mut binds);
         assert_eq!(binds.len(), 10);
@@ -2062,6 +2121,41 @@ mod tests {
         l.splice(90, 2, 0);
         assert_eq!(l.offset, offset);
         assert_eq!(l.count, 101);
+    }
+
+    #[test]
+    fn a_change_of_columns_keeps_the_first_visible_item_in_place() {
+        let mut l = list(90, 50.0, 400.0);
+        l.set_columns(9);
+        // Row 4 (items 36 to 44) at the top.
+        l.offset = 200.0;
+        assert_eq!(l.item_at(36) - l.offset, 0.0);
+        // Five columns: item 36 is in row 7, and still at the top.
+        l.set_columns(5);
+        assert_eq!(l.item_at(36), 350.0);
+        assert_eq!(l.offset, 350.0);
+        assert_eq!(l.take_splice_anchor(), 150.0);
+        // Back to nine: item 36 again, not the first of the row it was in
+        // (35), so resizing back and forth does not drift.
+        l.set_columns(9);
+        assert_eq!(l.offset, 200.0);
+        l.set_columns(7);
+        l.set_columns(4);
+        l.set_columns(9);
+        assert_eq!(l.offset, 200.0);
+        // A new estimate for the rows not measured keeps it too.
+        l.set_estimated(60.0);
+        assert_eq!(l.offset, 240.0);
+        l.set_estimated(50.0);
+        // Scrolled to another row, its first item is kept.
+        l.offset = 100.0;
+        l.set_columns(5);
+        assert_eq!(l.offset, 50.0 * (18 / 5) as f32);
+        // At the top it stays at the top.
+        let mut l = list(90, 50.0, 400.0);
+        l.set_columns(9);
+        l.set_columns(5);
+        assert_eq!(l.offset, 0.0);
     }
 
     #[test]

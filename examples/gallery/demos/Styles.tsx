@@ -1,5 +1,5 @@
 import { cleanup, Image, type JSX, List, Scroll, signal, Text, View, type ViewStyle } from "nsh";
-import { Animated, createAnimatedValue, Easing } from "nsh";
+import { Animated, createAnimatedValue, Easing, platform } from "nsh";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, hint, isDark, mono, Press, radius, Segmented, tints, Toggle } from "../ui";
 
 /** The stage every specimen stands on: the card's light, without its drop shadow. */
@@ -238,7 +238,18 @@ function Layers() {
   const level = signal<"0.2" | "0.45" | "1">("0.45");
   const stack = ["danger", "info", "up"] as const;
   return (
-    <Card icon="lists" title="Clipping and layers" subtitle="overflow · zIndex · opacity" right={<Toggle value={clip()} onChange={(v) => clip.set(v)} label="Clip" />}>
+    <Card icon="lists" title="Clipping and layers" subtitle="overflow · zIndex · opacity" right={
+        // The terminal's switch is a glyph: its label beside it says what it turns on.
+        platform.idiom === "terminal" ? (
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Text style={{ fontSize: 12, color: colors.muted }}>Clip</Text>
+            <Toggle value={clip()} onChange={(v) => clip.set(v)} label="Clip" />
+          </View>
+        ) : (
+          <Toggle value={clip()} onChange={(v) => clip.set(v)} label="Clip" />
+        )
+      }
+    >
       <Grid>
         <Tile label={clip() ? "Clipped" : "Visible"} code={`overflow: ${clip() ? "hidden" : "visible"}`} note={hint("Tap to switch", "Click to switch")} onPress={() => clip.set(!clip())}>
           <View
@@ -533,6 +544,10 @@ function RightToLeft() {
 }
 
 export function Styles() {
-  const sections = [Corners, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
+  // A terminal's Cells draw no curves, shadows or depth: it shows the
+  // cards its Cells hold (borders, clipping and layers, numerals, the
+  // writing direction) and leaves the others out.
+  const sections =
+    platform.idiom === "terminal" ? [Borders, Layers, Numerals, RightToLeft] : [Corners, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
   return <DemoPage cards={sections} />;
 }

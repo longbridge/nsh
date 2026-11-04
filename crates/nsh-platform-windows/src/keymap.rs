@@ -14,7 +14,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
-    keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
+    keymap::{Key, Keymap, Keystroke, Modifiers},
     platform::Os,
 };
 use windows::Win32::UI::WindowsAndMessaging::{MSG, PM_REMOVE, PeekMessageW, WM_CHAR, WM_SYSCHAR};
@@ -37,8 +37,9 @@ pub(crate) fn clear(surface: &Surface) {
     surface.keymap.table.borrow_mut().take();
 }
 
-/// A key down: whether it fired (or, held, repeats) one of the bindings;
-/// then it is consumed.
+/// A key down: whether one of the bindings consumes it (it fired one, or,
+/// held, repeats one). A binding passing the key through fires and leaves
+/// it to the window.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
@@ -52,7 +53,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
     let editing = crate::text_input::focused(surface).is_some();
     let found = table.find(keystroke, editing, event.repeat);
-    if let KeyMatch::Fire(id) = found {
+    if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
             EventKind::KeyCommand,

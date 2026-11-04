@@ -439,3 +439,67 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes
   after `+1`. Single runs establish unchanged work counts; timings are a smoke check, not a benchmark.
+
+## Terminal frame budget
+
+The terminal budget is **apply + draw p95 below 4 ms per frame at 200 × 60 Cells**, in a release build.
+The ignored host test follows the `bench_gallery_scroll` pattern:
+
+```sh
+cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --ignored --nocapture --test-threads=1
+```
+
+It loads a pinned copy of the former terminal gallery's `LongList` and `Page` layout (500 rows, dark palette,
+from revision `945be71d`, retained in `tests/fixtures/performance/LongList.tsx`), then a DataTable with
+10,000 rows and 24 columns, through `AppView`. Each workload scrolls by three rows per frame, reversing every
+100 frames. It discards 20 warm-up frames and measures 240 frames with a 16 ms wait between frames for engine
+work. Loading, bundling and waits are outside the samples. Median and nearest-rank p95 cover apply + draw;
+phase means identify apply, draw and flush costs. It prints mean bytes and changed Cells per frame, then fails
+if either workload exceeds the p95 budget. The flushed buffer must show the initial content and then scroll
+away from it, so an empty screen cannot establish a baseline.
+
+The backend is ratatui's `TestBackend`; the same diff also passes through `CrosstermBackend` into memory to
+count its encoded bytes. Those include cursor and style escapes, and the monitor's line. The reported flush
+cost includes this test transport and encoding, not a terminal emulator, SSH or a real stdout write. The live
+monitor measures the real writer. Apply + draw excludes the monitor's formatting, ratatui's diff and flushing.
+
+| Workload (200 × 60 Cells) | Apply + draw median / p95 | Apply / draw / flush means | Bytes / Cells per frame |
+|---|---|---|---|
+| Terminal Long list, 500 rows | 1.144 / 2.242 ms | 0.128 / 1.177 / 0.193 ms | 3,674 B / 959 Cells |
+| DataTable, 10,000 × 24 | 1.103 / 2.592 ms | 0.169 / 1.189 / 0.205 ms | 7,446 B / 1,052 Cells |
+
+Measured on Apple M4 Max, macOS 27.0.1, on the `tui-backend` branch after the terminal's surfaces, borders and
+focus bands, 240 frames each: both workloads pass the budget. Drawing each surface's fill, frame and marks raised
+the Long list's draw from 0.474 to 1.177 ms; the DataTable's fell from 1.765 to 1.189 ms.
+Tickets changing terminal rendering, input or layout
+bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
+commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.
+
+
+## Terminal idle CPU
+
+```sh
+cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
+```
+
+This ignored benchmark runs in an isolated scenario process and starts the actual host binary on a private
+100 × 24 PTY with a static Text app. The scenario watchdog and runner deadline cover setup and cleanup; their
+process costs are outside the sampled host PID. It
+runs once with the monitor hidden and once with `--fps`, lets startup and the idle HUD update settle for two
+seconds, then measures five seconds. CPU is the child's user + system CPU time divided by elapsed wall time
+(percent of one core), read through `proc_pid_rusage` on macOS or `/proc/<pid>/stat` on Linux. It reports terminal
+bytes during the same window, requires zero bytes and CPU below 2%, then sends SIGTERM and requires exit within
+one second. The separate lifecycle regressions close the PTY and check that the process exits, rather than
+measuring a disconnected process that should no longer exist.
+
+| Static app, 100 × 24 Cells | Idle CPU, one core | Bytes in 5 s |
+|---|---|---|
+| Monitor hidden | 0.003% | 0 |
+| `--fps`, after idle update | 0.003% | 0 |
+
+The reported incident was 10–45% CPU per orphan after a tmux terminal was killed, with SIGTERM unable to end it.
+Source inspection found crossterm's default Unix read loop retrying EOF/EIO without returning to the host's
+shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and makes input/output cancellable.
+The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
+Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f. Repeat the same command
+before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
