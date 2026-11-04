@@ -6706,6 +6706,94 @@ fn styles_clamp_cut_and_select_texts_and_say_which_views_take_touches() {
 }
 
 #[test]
+fn texts_inside_attachments_take_the_color_of_the_text_around() {
+    // `<Text style={{ color }}>a <Text>b <View><Text>chip</Text></View></Text></Text>`:
+    // the chip's text is the paragraph's color (CSS `color` inherits into
+    // an inline block), its font size its own, and it follows a change.
+    let mut c = core();
+    let raw = |id, text: &str| Op::CreateText {
+        id,
+        text: text.into(),
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let text = |id| Op::Create { id, tag: Tag::Text };
+    apply(
+        &mut c,
+        vec![
+            text(2),
+            style_op(
+                2,
+                &[
+                    ("color", StyleValue::Str("#ff0000")),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            raw(3, "a "),
+            text(4),
+            raw(5, "b "),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            text(7),
+            raw(8, "chip"),
+            // A second chip whose text sets its own color.
+            Op::Create {
+                id: 9,
+                tag: Tag::View,
+            },
+            text(10),
+            style_op(10, &[("color", StyleValue::Str("#0000ff"))]),
+            raw(11, "own"),
+            insert(7, 8),
+            insert(6, 7),
+            insert(10, 11),
+            insert(9, 10),
+            insert(4, 5),
+            insert(4, 6),
+            insert(4, 9),
+            insert(2, 3),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let style_of = |batch: &MountBatch, id| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id: i, text, .. } if *i == id => Some(text.spans[0].style),
+            _ => None,
+        })
+    };
+    let (red, green, blue) = (Color(0xff00_00ff), Color(0x00ff_00ff), Color(0x0000_ffff));
+    let batch = c.commit().unwrap();
+    let chip = style_of(&batch, 7).expect("the chip's text");
+    assert_eq!(chip.color, red);
+    assert_eq!(chip.font_size, ResolvedTextStyle::default().font_size);
+    assert_eq!(style_of(&batch, 10).map(|s| s.color), Some(blue));
+    // The paragraph's color changes: the chip's text follows.
+    c.apply(style_op(2, &[("color", StyleValue::Str("#00ff00"))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(style_of(&batch, 7).map(|s| s.color), Some(green));
+    // A span's color is nearer.
+    c.apply(style_op(4, &[("color", StyleValue::Str("#ffff00"))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        style_of(&batch, 7).map(|s| s.color),
+        Some(Color(0xffff_00ff))
+    );
+    // The one with a color of its own keeps it (and is not sent again).
+    assert_ne!(
+        style_of(&batch, 10).map(|s| s.color),
+        Some(Color(0xffff_00ff))
+    );
+}
+
+#[test]
 fn views_inside_text_are_attachments() {
     let mut c = core();
     let raw = |id, text: &str| Op::CreateText {

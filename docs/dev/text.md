@@ -111,7 +111,11 @@
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children; a text inside them built after the block
   resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
-  placeholders out.
+  placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
+  spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the
+  attachment's view), unless it sets its own; the rest of its text style (font, size, line height) is not passed in,
+  so the attachment's box is sized by its own content (`Core::inherited_text_style`). A color change on the text
+  rebuilds the texts inside its attachments.
 
 - **Rust components** nest texts the same way: `text("a ").child(text("b").underline().on_press(..)).child(view())` is
   one block; a plain string child is a raw text node (as JS's strings), a text's own content its first piece
