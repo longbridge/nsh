@@ -103,6 +103,8 @@ enum Key {
 /// Pointer state of one surface.
 #[derive(Default)]
 pub(crate) struct Input {
+    /// A draggable background press waiting to become a click or native drag.
+    window_press: RefCell<Option<(gdk::Event, f32, f32)>>,
     /// The pointers that are down.
     pointers: RefCell<Vec<Pointer>>,
     /// Two fingers pinching / rotating on the touchscreen.
@@ -521,6 +523,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         | T::TouchpadPinch
         | T::TouchpadHold => {}
         T::GrabBroken => {
+            surface.input.window_press.borrow_mut().take();
             cancel_all(surface);
             release_buttons(surface);
             return glib::Propagation::Proceed;
@@ -555,11 +558,15 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         // Touchscreens report touches; pointer events emulated from them
         // would press twice.
         T::ButtonPress | T::ButtonRelease | T::MotionNotify if event.is_pointer_emulated() => {}
-        // On a view that drags the window: the window's, not the app's.
+        // Window menus and double clicks keep their native handling.
         T::ButtonPress if crate::chrome::press(surface, event, x, y) => {
-            // The compositor moves the window or shows its menu and keeps
-            // the release: the button is not the app's to report as held.
+            // Native window actions may keep the release.
             release_buttons(surface);
+            return glib::Propagation::Stop;
+        }
+        T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) && window_drag(surface, x, y) => {
+            up(surface, Key::Mouse, x, y, time, true);
+            *surface.input.window_press.borrow_mut() = Some((event.clone(), x, y));
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
@@ -572,9 +579,35 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
+            let pending = surface.input.window_press.borrow_mut().take();
+            if let Some((press, px, py)) = pending {
+                down(
+                    surface,
+                    Key::Mouse,
+                    px,
+                    py,
+                    press.time() as f64,
+                    press.modifier_state(),
+                );
+                up(surface, Key::Mouse, x, y, time, false);
+                return glib::Propagation::Stop;
+            }
             up(surface, Key::Mouse, x, y, time, false)
         }
         T::MotionNotify => {
+            let pending = surface.input.window_press.borrow_mut().take();
+            if let Some((press, px, py)) = pending {
+                if surface
+                    .root
+                    .drag_check_threshold(px as i32, py as i32, x as i32, y as i32)
+                {
+                    crate::chrome::begin_move(surface, &press);
+                    release_buttons(surface);
+                } else {
+                    *surface.input.window_press.borrow_mut() = Some((press, px, py));
+                }
+                return glib::Propagation::Stop;
+            }
             let state = event.modifier_state();
             surface.input.last_state.set(Some(state));
             // `onMouseEnter` / `onMouseLeave` first (`motion` hovers), as

@@ -68,10 +68,10 @@ use nsh_core::{
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
-    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent,
-    NSEventModifierFlags, NSEventPhase, NSEventType, NSImage,
+    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage,
 };
-use objc2_foundation::NSSize;
+use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -82,6 +82,8 @@ use crate::{
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
 /// mice, accelerated by the system), as `NSScrollView`'s line scroll.
 const WHEEL_LINE: f32 = 10.0;
+/// Movement in points before a window press becomes a native drag.
+const WINDOW_DRAG_SLOP: f64 = 3.0;
 /// The mouse's middle button (`buttonNumber`).
 const MIDDLE_BUTTON: isize = 2;
 /// The mouse's back button (`buttonNumber`), as Linux's button 8.
@@ -630,7 +632,9 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
-            // A title bar of the app's own moves the window.
+            if window_press(surface, event, x, y, time) {
+                return;
+            }
             if crate::chrome::mouse_down(surface, event, x, y) {
                 return;
             }
@@ -1479,6 +1483,43 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
         _ => {}
     }
     put(surface, p);
+}
+
+/// Reports a drag region's click on release, or gives its movement to AppKit.
+fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) -> bool {
+    if event.clickCount() != 1 || !window_drag(surface, x, y) {
+        return false;
+    }
+    let Some(window) = surface.root.ns().window() else {
+        return false;
+    };
+    cancel_pointer(surface);
+    let start = event.locationInWindow();
+    // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
+    let mode = unsafe { NSEventTrackingRunLoopMode };
+    while let Some(next) = window.nextEventMatchingMask_untilDate_inMode_dequeue(
+        NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp,
+        Some(&NSDate::distantFuture()),
+        mode,
+        true,
+    ) {
+        let point = next.locationInWindow();
+        let distance = (point.x - start.x).hypot(point.y - start.y);
+        if distance >= WINDOW_DRAG_SLOP && next.r#type() == NSEventType::LeftMouseDragged {
+            // AppKit expects the original mouse-down event for native dragging.
+            crate::chrome::mouse_down(surface, event, x, y);
+            return true;
+        }
+        if next.r#type() == NSEventType::LeftMouseUp {
+            if distance < WINDOW_DRAG_SLOP {
+                surface.input.last.set(Some((x, y)));
+                down(surface, x, y, time, 1, event.modifierFlags());
+                up(surface, x, y, next.timestamp() * 1000.0);
+            }
+            return true;
+        }
+    }
+    true
 }
 
 fn up(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
