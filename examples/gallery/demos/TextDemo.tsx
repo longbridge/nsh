@@ -118,36 +118,39 @@ function Fonts() {
         </Text>
       </Specimen>
       <Specimen label="Shadows" code="textShadow">
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Text
-            style={{
-              fontSize: 26,
-              fontWeight: "800",
-              color: colors.accent,
-              textShadow: `0 0 10px ${alpha(colors.accent, isDark() ? 0.6 : 0.3)}`,
-            }}
-          >
-            Glow
-          </Text>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ flex: 1, height: 72, alignItems: "center", justifyContent: "center", borderRadius: radius.control, borderCurve: "continuous", backgroundColor: "#10130c" }}>
+            <Text
+              style={{
+                fontSize: 24,
+                fontWeight: "600",
+                letterSpacing: 0.5,
+                paddingHorizontal: 24,
+                paddingVertical: 14,
+                color: "#e4ffa3",
+                textShadow: "0 0 14px rgba(200,242,109,0.75)",
+              }}
+            >
+              Glow
+            </Text>
+          </View>
           <View
             style={{
-              height: 48,
-              paddingHorizontal: 14,
+              flex: 1,
+              height: 72,
+              alignItems: "center",
               justifyContent: "center",
               borderRadius: radius.control,
               borderCurve: "continuous",
-              backgroundColor: colors.raised,
-              ...finish.raised,
-              borderWidth: 1,
-              borderColor: colors.border,
+              backgroundImage: "linear-gradient(135deg, #1f6fa8 0%, #5fb2d9 100%)",
             }}
           >
             <Text
               style={{
-                fontSize: 26,
-                fontWeight: "800",
-                color: colors.info,
-                textShadow: isDark() ? "2px 3px 3px rgba(0,0,0,0.9)" : "2px 3px 3px rgba(20,20,10,0.22)",
+                fontSize: 24,
+                fontWeight: "600",
+                color: "#ffffff",
+                textShadow: "0 2px 6px rgba(6,28,48,0.55)",
               }}
             >
               Drop shadow

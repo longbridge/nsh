@@ -1,4 +1,4 @@
-//! Web and video: WKWebView / WebView, AVPlayer / MediaPlayer (as the TSX
+//! WebView and Video: WKWebView / WebView, AVPlayer / MediaPlayer (as the TSX
 //! gallery's `demos/Media.tsx`): an inline page in the gallery's colors
 //! with messages both ways, a web site with its navigation state, back and
 //! forward, and a video with controls of the demo's own or the system's.
@@ -353,9 +353,15 @@ fn messaging() -> impl IntoElement {
         }))
 }
 
-/// The demo's page: an inline page, a web site and a video, with what they
+/// The WebView demo's page: an inline page and a web site, with what they
 /// tell the app.
 #[component]
-pub(crate) fn Media() -> impl IntoElement {
-    DemoPage::new().card(messaging).card(site).card(player)
+pub(crate) fn WebViewPage() -> impl IntoElement {
+    DemoPage::new().card(messaging).card(site)
+}
+
+/// The Video demo's page: a player and what it tells the app.
+#[component]
+pub(crate) fn VideoPage() -> impl IntoElement {
+    DemoPage::new().card(player)
 }

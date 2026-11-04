@@ -242,48 +242,51 @@ fn fonts() -> Card {
             false,
             view()
                 .flex_row()
-                .items_center()
                 .gap_3()
                 .child(
-                    text("Glow")
-                        .text_size(px(26.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(colors::ACCENT)
-                        .text_shadow([TextShadow {
-                            radius: px(10.0),
-                            ..TextShadow::default()
-                        }])
-                        .text_shadow_color(AdaptiveColor::new(
-                            colors::ACCENT.light.opacity(0.3),
-                            colors::ACCENT.dark.opacity(0.6),
-                        )),
-                )
-                .child(
                     view()
-                        .h(px(48.0))
-                        .px(px(14.0))
+                        .flex_1()
+                        .h(px(72.0))
+                        .items_center()
                         .justify_center()
                         .rounded(px(radius::CONTROL))
                         .border_curve(BorderCurve::Continuous)
-                        .bg(colors::RAISED)
-                        .finish(Finish::Raised)
-                        .border_1()
-                        .border_color(colors::BORDER)
+                        .bg(rgb(0x10130c))
                         .child(
-                            text("Drop shadow")
-                                .text_size(px(26.0))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .text_color(colors::INFO)
+                            text("Glow")
+                                .text_size(px(24.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .letter_spacing(px(0.5))
+                                .text_color(rgb(0xe4ffa3))
                                 .text_shadow([TextShadow {
-                                    offset_x: px(2.0),
-                                    offset_y: px(3.0),
-                                    radius: px(3.0),
+                                    radius: px(14.0),
                                     ..TextShadow::default()
                                 }])
-                                .text_shadow_color(AdaptiveColor::new(
-                                    rgb_a(0x14140a, 0.22),
-                                    rgb_a(0x000000, 0.9),
-                                )),
+                                .text_shadow_color(rgb_a(0xc8f26d, 0.75)),
+                        ),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .h(px(72.0))
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(radius::CONTROL))
+                        .border_curve(BorderCurve::Continuous)
+                        .bg_linear_to_br()
+                        .gradient_from(rgb(0x1f6fa8))
+                        .gradient_to(rgb(0x5fb2d9))
+                        .child(
+                            text("Drop shadow")
+                                .text_size(px(24.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(0xffffff))
+                                .text_shadow([TextShadow {
+                                    offset_y: px(2.0),
+                                    radius: px(6.0),
+                                    ..TextShadow::default()
+                                }])
+                                .text_shadow_color(rgb_a(0x061c30, 0.55)),
                         ),
                 ),
         ))

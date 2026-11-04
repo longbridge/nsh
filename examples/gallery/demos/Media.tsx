@@ -180,7 +180,10 @@ function Player() {
   );
 }
 
-export function Media() {
-  const cards = [Messaging, Site, Player];
-  return <DemoPage cards={cards} />;
+export function WebViewDemo() {
+  return <DemoPage cards={[Messaging, Site]} />;
+}
+
+export function VideoDemo() {
+  return <DemoPage cards={[Player]} />;
 }

@@ -35,3 +35,9 @@ Normal builds follow these source imports with the NSH bundler. The website play
 uses `website/src/lib/inline-gallery-ui.ts`: it includes the imported shared modules in isolated scopes and applies
 this same theme before the first render. Changes to shared source should be checked in both the gallery and a
 website demo, in light and dark appearance, including the playground.
+
+## Visual bar
+
+Every example must be beautiful and refined: theme tokens for color, photographs or restrained gradients rather than
+saturated placeholder tints, nothing clipped, even spacing. See "Gallery examples must be beautiful and refined" in
+`AGENTS.md`.

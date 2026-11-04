@@ -33,7 +33,7 @@ mount(() => <Text class="text-lg font-semibold">Hello, NSH</Text>);
 
 > Only the app's code is JS: everything else is native.
 
-![Green mountains under low clouds](https://picsum.photos/id/1018/1200/750)
+![Starship between its towers at sunrise](https://pbs.twimg.com/media/HS8AAMSWwAEg-aG?format=jpg&name=medium)
 
 > [!TIP]
 > Long-press any paragraph to select and copy it.
@@ -94,11 +94,11 @@ const HTML = `<article>
       runtime behind it is open source.
     </p>
     <figure>
-      <a href="https://picsum.photos/id/1015/600/300"><img src="https://picsum.photos/id/1015/320/160" alt="A river valley under clouds" width="320" height="160"></a>
+      <a href="https://pbs.twimg.com/media/HTpJzwHWMAAIOgb?format=jpg&name=medium"><img src="https://pbs.twimg.com/media/HTpJzwHWMAAIOgb?format=jpg&name=small" alt="A booster under the arc of a launch" width="320" height="160"></a>
       <figcaption>The gallery on a phone, a desktop and the web, one app. <em>Tap to open it full size.</em></figcaption>
     </figure>
     <figure>
-      <img src="https://picsum.photos/id/1036/1200/750" alt="A tent in the snow below mountains" width="320" height="200">
+      <img src="https://pbs.twimg.com/media/HQ6i3NMW0AAA-TS?format=jpg&name=medium" alt="A Falcon Heavy on the pad under the moon" width="320" height="200">
       <figcaption>Where the renderer was written. <em>Press it to zoom in.</em></figcaption>
     </figure>
   </section>
