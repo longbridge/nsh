@@ -185,6 +185,14 @@ base_parts!(
     plot => nsh_part_plot,
 );
 
+/// Makes `TextView`'s formulas typeset: no app imports this. A published
+/// runtime keeps it in a side module the page loads for the first formula.
+#[cfg(feature = "base-full")]
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_feature_math() {
+    nsh_base::text_view::install_math();
+}
+
 /// `nsh/base` in the lite runtime (feature `base-full` off): its controls
 /// (the core and the parts split from it), so the larger parts' code stays
 /// out of the module.

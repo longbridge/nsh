@@ -5,6 +5,12 @@
 //! writes the [`HostPropSpec`]s the element types are generated from. The
 //! decoders read JS values through [`HostInput`], which `nsh-js` implements
 //! for QuickJS values: no JSON in between.
+//!
+//! A few props are not [`HostProps`]: the state styles and a page's header
+//! style, whose values each renderer decodes with its own style decoder, and
+//! the class lists of an element's parts. [`style_patch_prop`] and
+//! [`part_class_prop`] name them for both renderers (QuickJS' and the
+//! browser runtime's).
 
 use std::sync::Arc;
 
@@ -125,6 +131,51 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
                 0
             }
         }
+}
+
+/// A prop whose value is a style over the element's own: the style patch
+/// the renderer decodes from it as from a `style` (`None` when empty).
+pub type StylePatchProp = fn(Option<std::rc::Rc<crate::StylePatch>>) -> crate::Prop;
+
+/// The prop a state style or a page's header style sets (`activeStyle`,
+/// `hoverStyle`, ..., `headerStyle`). They are not [`HostProps`]: each
+/// renderer decodes their style with its own style decoder, then makes the
+/// prop with this, so QuickJS' and the browser's take the same names.
+#[inline]
+pub fn style_patch_prop(name: &str) -> Option<StylePatchProp> {
+    use crate::Prop;
+    Some(match name {
+        "activeStyle" => Prop::ActiveStyle,
+        "hoverStyle" => Prop::HoverStyle,
+        "focusStyle" => Prop::FocusStyle,
+        "disabledStyle" => Prop::DisabledStyle,
+        "selectedStyle" => Prop::SelectedStyle,
+        "checkedStyle" => Prop::CheckedStyle,
+        "indeterminateStyle" => Prop::IndeterminateStyle,
+        "expandedStyle" => Prop::ExpandedStyle,
+        "pressedStyle" => Prop::PressedStyle,
+        "focusWithinStyle" => Prop::FocusWithinStyle,
+        "headerStyle" => Prop::HeaderStyle,
+        _ => return None,
+    })
+}
+
+/// A prop whose value is a class list of a part of an element: the class
+/// names as the renderer reads them from the JS string.
+pub type PartClassProp = fn(Box<str>) -> crate::Prop;
+
+/// The prop a class list of a part of element `tag` sets: a page's header
+/// (`headerClass`) or a list's content (`contentClass`). A scroll view's
+/// `contentClass` is not one: it styles the scroll view's content container,
+/// which a renderer makes itself rather than the core.
+#[inline]
+pub fn part_class_prop(name: &str, tag: Option<crate::Tag>) -> Option<PartClassProp> {
+    use crate::{Prop, Tag};
+    match name {
+        "headerClass" => Some(Prop::HeaderClass),
+        "contentClass" if tag != Some(Tag::Scroll) => Some(Prop::ListContentClass),
+        _ => None,
+    }
 }
 
 /// A prop's value: how it comes out of a JS value and its TypeScript type.
