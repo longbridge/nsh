@@ -7,7 +7,7 @@ use nsh_core::prelude::*;
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, RoundButton,
-    Segment, Tone, caption, colors, icon, press, radius, segmented,
+    Segment, Tone, caption, colors, icon, press, radius, segmented, terminal,
 };
 
 /// The web site of the second web view.
@@ -299,8 +299,15 @@ fn nav_button(
                 .border_color(colors::BORDER)
                 .items_center()
                 .justify_center()
-                .when(flip, |v| v.rotate(deg(180.0)))
-                .child(icon().name(IconName::Chevron).size(18.0).tint(colors::TEXT)),
+                // A terminal shows the label, unturned.
+                .when(flip && !terminal(), |v| v.rotate(deg(180.0)))
+                .child(
+                    icon()
+                        .name(IconName::Chevron)
+                        .size(18.0)
+                        .tint(colors::TEXT)
+                        .label(Some(SharedString::from(label))),
+                ),
         )
 }
 

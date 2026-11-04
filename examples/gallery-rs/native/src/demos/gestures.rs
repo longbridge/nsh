@@ -583,7 +583,13 @@ fn PressEvents() -> impl IntoElement {
                     .size(px(56.0))
                     .items_center()
                     .justify_center()
-                    .child(icon().name(IconName::Star).size(24.0).tint(colors::WARN)),
+                    .child(
+                        icon()
+                            .name(IconName::Star)
+                            .size(24.0)
+                            .tint(colors::WARN)
+                            .label(Some(SharedString::from("Star"))),
+                    ),
             ),
         )
         .child(
