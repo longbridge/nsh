@@ -159,6 +159,11 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// A see-through window: the view draws no window background and
+    /// [`open_app_window`] asks for a transparent one, so what the app
+    /// leaves unpainted shows what is behind the window (desktop widgets,
+    /// overlays). False by default.
+    pub transparent: bool,
 }
 
 impl Default for AppOptions {
@@ -178,6 +183,7 @@ impl Default for AppOptions {
             storage: None,
             context: Default::default(),
             host: nsh_engine::HostChannel::default(),
+            transparent: false,
         }
     }
 }
@@ -273,6 +279,7 @@ impl AppView {
         bind_keys(cx);
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
+        surface.transparent.set(options.transparent);
         if options.fps {
             *surface.stats.borrow_mut() = Some(Default::default());
         }
@@ -838,6 +845,11 @@ pub fn open_app_window(
         // run at the display's rate wherever the keyboard is, as in the
         // other backends.
         inactive_frame_interval: None,
+        window_background: if options.transparent {
+            gpui::WindowBackgroundAppearance::Transparent
+        } else {
+            gpui::WindowBackgroundAppearance::Opaque
+        },
         ..Default::default()
     };
     let handle = cx.open_window(window_options, move |window, cx| {

@@ -11,6 +11,15 @@ Initial commits measured 1164 → 1139 µs; press commits 380 → 329 µs. These
 counts on the counter's unchanged-cursor path. A batch compares cursor values while applying view styles, then
 refreshes once if any changed; other batches skip the cursor hit test.
 
+GPUI idle wakeups (Linux x86_64, debug `nsh-gpui-host --bundle`, lavapipe, a headless Wayland compositor answering
+frame callbacks at 60 Hz; voluntary context switches per second, all threads, over 10 s; against main `da3f1683`):
+static text 4.1 → 4.2 (the `blocking` pool's two threads; no frame drawn); an `autoFocus` field while it blinks
+64 → 63; the same field 14–24 s after it was focused 68 → 2.1 (the caret stays shown after GTK's 10 s); the field's
+window suspended while it keeps the keyboard 13.7 → 2.1 (the blink timer stopped); unfocused 2.1 → 2.1; after a 1 s
+fade ended 2.1 → 2.1. Each blink drew a frame, about 30 wakeups under lavapipe (the four `llvmpipe` threads and the
+renderer's). Under X11 (Xvfb) GPUI's refresh timer keeps the main thread at ~64 a second whatever the app does
+(`docs/dev/gpui.md` "Idle windows").
+
 
 Span test-id metadata (macOS arm64, debug CLI, three runs per revision against `e02b40f8`):
 `echo 'await app.press("Rename ID")' | nsh test crates/nsh-testing/tests/testing/queries/Spans.tsx --trace`.
@@ -232,6 +241,27 @@ message or a due timer (7, none between pastes).
   `<If>`, a 3-row `<Each>`) on both: bundle 886 B JS / 1.7 KB bytecode vs 14 KB / 19.6 KB, eval ~95µs vs ~390µs, tap
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
+
+## Shader pictures on Linux
+
+What the GTK backend reads back for shaders' pictures (`nsh-platform-linux` `shader.rs`, `docs/dev/shaders.md`), and
+when. A picture is drawn, rendered by the window's GSK renderer into a texture and downloaded synchronously on the
+main thread, so the work is held by counts the backend's tests check on Xvfb, not by timings of one machine:
+
+- An effect or a running transition pictures its children only when GTK drew one of them again since the last
+  picture (`same_nodes` over the render nodes GTK kept) or the core marked them (`ShaderInput`). An effect that reads
+  `nsh.time` draws itself on every frame, which takes the children's kept nodes and compares them, without rendering
+  or downloading: ten frames over unchanged children are one picture, a child drawn again one more
+  (`an_effect_renders_its_children_again_only_after_they_change`). Before, every frame rendered and downloaded the
+  box and its overflow (400 × 400 points at 2× is 2.5 MB a frame).
+- A view that reads `sample_backdrop` takes what is behind it again (the surface's views drawn anew up to it,
+  rendered, downloaded and hashed) at most once per painted frame: after a batch (the core marks every backdrop
+  reader once anything changed, `ShaderInput`) and after a view that draws before it changed on the UI thread (an
+  ancestor's own drawing, or a view drawn earlier); a change on the UI thread in it, above it or in a shader's own
+  frame takes nothing. A picture whose pixels hash as the last one's is not given to the shader, which then renders
+  no frame for it: a change that leaves the view's box as it was costs the drawing, the readback and the hash, not
+  an upload and a shader frame. Each reader is listed once, however often its layer is sent (every uniform update
+  sends it). Before, any change on the UI thread took every reader's backdrop again and gave it to its shader.
 
 ## The browser engine (published web apps)
 

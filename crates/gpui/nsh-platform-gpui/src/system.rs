@@ -267,6 +267,7 @@ pub(crate) fn watch_environment(
             visible: window.is_visible(),
         });
     });
+    crate::text_input::window_visibility(surface, window.is_visible());
     cx.observe_window_appearance(window, |view, window, cx| {
         let surface = view.surface().clone();
         appearance_changed(&surface, window);
@@ -281,9 +282,9 @@ pub(crate) fn watch_environment(
     })
     .detach();
     cx.observe_window_visibility(window, |view, visibility, _, cx| {
-        with_watched(view.surface().key(), |w| {
-            w.visible = visibility.is_visible()
-        });
+        let surface = view.surface().clone();
+        with_watched(surface.key(), |w| w.visible = visibility.is_visible());
+        crate::text_input::window_visibility(&surface, visibility.is_visible());
         lifecycle_changed();
         crate::rt::flush(cx);
     })
