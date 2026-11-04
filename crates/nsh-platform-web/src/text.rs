@@ -509,10 +509,13 @@ impl WebTextEngine {
                 let mut height = 0.0f32;
                 let mut above = 0.0f32;
                 // Below the baseline, and whether an attachment reaches below
-                // it (the line is then as tall as its extents; lines of
-                // attachments on the baseline keep their height).
+                // it or above the text (the line is then as tall as its
+                // extents, as a replaced inline box grows a CSS line; lines
+                // of attachments on the baseline that fit keep their height).
                 let mut below = 0.0f32;
                 let mut reaches_below = false;
+                let mut text_above = 0.0f32;
+                let mut attachment_above = 0.0f32;
                 let range = if line.start < end {
                     line.start..end
                 } else {
@@ -523,15 +526,17 @@ impl WebTextEngine {
                     let (h, lead) = s.line();
                     height = height.max(h);
                     above = above.max(lead + s.ascent);
+                    text_above = text_above.max(lead + s.ascent);
                     below = below.max(h - lead - s.ascent);
                     if let AtomKind::Attachment(_, _, up, down) = atom.kind {
                         above = above.max(up);
+                        attachment_above = attachment_above.max(up);
                         height = height.max(up + down);
                         below = below.max(down);
                         reaches_below |= down > 0.0;
                     }
                 }
-                if reaches_below {
+                if reaches_below || attachment_above > text_above {
                     height = height.max(above + below);
                 }
                 if height == 0.0 && !p.styles.is_empty() {

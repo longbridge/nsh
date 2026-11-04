@@ -151,7 +151,7 @@ Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying th
 The style key `verticalAlign` places an inline element in its line, as CSS's `vertical-align` places an image:
 `"baseline"` (the default) stands its bottom on the baseline, `"text-top"` and `"text-bottom"` put its top or bottom
 at the top or bottom of the text's font, and `"middle"` centers it half the font's x height above the baseline. The
-line grows to hold the element wherever it reaches past the font. An icon at the start of a paragraph that should
+line grows to hold the element wherever it reaches past the font, also with a fixed `lineHeight`. An icon at the start of a paragraph that should
 line up with the text's bottom, as Android's `ImageSpan` draws it, takes `"text-bottom"`. The classes are
 `align-baseline`, `align-text-top`, `align-text-bottom` and `align-middle`; in Rust `.align_text_bottom()` and the
 others of the same names.

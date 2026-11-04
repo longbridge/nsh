@@ -105,7 +105,10 @@
   Java with `Paint.getFontMetrics` and the bounds of `x`; Pango a shape whose logical rectangle is the extent and ink
   the box; DirectWrite and GPUI their line boxes; the web its line box, taking the extents only when an attachment
   reaches below the baseline so baseline-only lines keep their height) and places its top `ascent` above the
-  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. CSS's
+  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. With a fixed
+  `lineHeight` a line holding an attachment is at least as tall as its text's lines (the font with the line height
+  spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
+  line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
