@@ -777,3 +777,161 @@ fn a_selection_dragged_past_its_scroll_views_edge_scrolls_it_and_extends() {
         Some("ne\ntwo\nthree\nfour\nfive\nsix")
     );
 }
+
+/// Where `word` is first drawn in `terminal`.
+fn word_at(terminal: &Terminal<TestBackend>, word: &str) -> (u16, u16) {
+    super::dock::find(terminal, word)
+        .unwrap_or_else(|| panic!("{word} not drawn\n{}", super::dock::dump(terminal)))
+}
+
+#[test]
+fn a_pressable_container_keeps_its_texts_weights_and_shows_focus_with_a_rail() {
+    use ratatui_core::style::Modifier;
+    // A gauge (a pressable box of three rows on a light fill that stands
+    // out from its card) and a one-row button on the same fill.
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, View, Text } from "nsh";
+        mount(() => <View style={{ padding: 16, backgroundColor: "#27272a" }}>
+            <View style={{ padding: 16, backgroundColor: "#d4d4d8" }} onPress={() => {}}>
+                <Text style={{ color: "#18181b" }}>Groceries</Text>
+                <Text style={{ color: "#18181b" }}>half spent</Text>
+                <Text style={{ color: "#18181b" }}>of the budget</Text>
+            </View>
+            <View style={{ backgroundColor: "#d4d4d8" }} onPress={() => {}}>
+                <Text style={{ color: "#18181b" }}>Go</Text>
+            </View>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = ramp_surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Groceries");
+    let bold = |terminal: &Terminal<TestBackend>, word: &str| {
+        let (x, y) = word_at(terminal, word);
+        terminal.backend().buffer()[(x, y)]
+            .modifier
+            .contains(Modifier::BOLD)
+    };
+    assert!(
+        !bold(&terminal, "Groceries"),
+        "a container's text keeps its weight\n{}",
+        super::dock::dump(&terminal)
+    );
+    assert!(bold(&terminal, "Go"), "a one-row button's label is bold");
+    // Focused, the container shows a rail down its leading column.
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let (x, y) = word_at(&terminal, "Groceries");
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        if (0..x).any(|left| buffer[(left, y)].symbol() == "▎") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no focus rail\n{}",
+            super::dock::dump(&terminal)
+        );
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        !bold(&terminal, "Groceries"),
+        "focus leaves its text's weight"
+    );
+}
+
+#[test]
+fn a_bar_filled_out_of_a_sunken_track_stands_apart_from_the_box_around_it() {
+    // A gauge's track, darker than the gauge, and its fill, lighter than
+    // the track: a step back up would be the gauge's own.
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, View, Text } from "nsh";
+        mount(() => <View style={{ padding: 16, backgroundColor: "#3f3f46" }}>
+            <Text>Gauge</Text>
+            <View style={{ height: 10, width: 160, backgroundColor: "#27272a" }}>
+                <View style={{ height: 10, width: 80, backgroundColor: "#52525b" }} />
+            </View>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = ramp_surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Gauge");
+    let (x, y) = word_at(&terminal, "Gauge");
+    let buffer = terminal.backend().buffer();
+    let around = buffer[(x, y)].bg;
+    let (filled, track) = (buffer[(x, y + 1)].bg, buffer[(x + 15, y + 1)].bg);
+    assert_ne!(track, around, "the track is a step of its own");
+    assert_ne!(filled, track, "the fill differs from the track");
+    assert_ne!(
+        filled,
+        around,
+        "the fill differs from the box around the track\n{}",
+        super::dock::dump(&terminal)
+    );
+}
+
+#[test]
+fn a_focused_one_row_field_whose_line_has_no_room_is_underlined_in_the_accent() {
+    use nsh_platform_tui::MouseButton::Left;
+    // Hopper's: the app shows focus with its border's color, which a box
+    // one row tall cannot draw.
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, signal, View, Text } from "nsh";
+        import { Input } from "nsh/base";
+        const state = signal("blurred");
+        mount(() => <View>
+            <Input value="120" style={{ width: 160, height: 16, borderWidth: 1,
+                    borderColor: "#3f3f46", backgroundColor: "#27272a" }}
+                onFocus={() => state.set("focused")} />
+            <Text>{state()}</Text>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = ramp_surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "blurred");
+    let (x, y) = word_at(&terminal, "120");
+    assert!(
+        !terminal.backend().buffer()[(x, y)]
+            .modifier
+            .contains(ratatui_core::style::Modifier::UNDERLINED),
+        "no mark at rest"
+    );
+    view.handle(mouse(MouseKind::Down(Left), x, y));
+    view.handle(mouse(MouseKind::Up(Left), x, y));
+    draw_until(&mut view, &mut terminal, &rx, "focused");
+    let buffer = terminal.backend().buffer();
+    // The whole row, the text and the blank Cells after it.
+    for at in [x, x + 10] {
+        let cell = &buffer[(at, y)];
+        assert!(
+            cell.modifier
+                .contains(ratatui_core::style::Modifier::UNDERLINED),
+            "underlined at {at}"
+        );
+        assert_eq!(cell.underline_color, Color::Blue, "in the accent at {at}");
+    }
+}

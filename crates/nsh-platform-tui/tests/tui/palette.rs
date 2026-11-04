@@ -1662,3 +1662,64 @@ fn a_pale_leaf_box_keeps_its_hue_and_a_pale_card_is_a_step() {
         "a card holding text is a gray step: {card:?}"
     );
 }
+
+/// A carousel's thumbnails: pressables three rows tall (containers),
+/// the first one the selected photo.
+#[component]
+fn Thumbnails() -> impl IntoElement {
+    let thumb = |label: &'static str, chosen: bool| {
+        // A carousel's thumbnail: its picture keeps it three rows tall (a
+        // box of text alone would be a one-row control), its label drawn
+        // over the picture.
+        let mut thumb = view()
+            .w(px(64.0))
+            .h(px(48.0))
+            .label(label)
+            .on_press(|_: &()| {})
+            .child(image("missing.png").flex_1());
+        if chosen {
+            thumb = thumb.accessibility_state(selected());
+        }
+        thumb
+    };
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x222222))
+        .child(
+            view()
+                .flex_row()
+                .child(thumb("One", true))
+                .child(thumb("Two", false)),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_selected_container_shows_focus_with_its_label_underlined() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Thumbnails>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let underlined = |buffer: &Buffer, word: &str| {
+        let (x, y) = cell_of(buffer, word);
+        (x..x + 3).all(|x| buffer[(x, y)].modifier.contains(Modifier::UNDERLINED))
+    };
+    let at_rest = {
+        let buffer = terminal.backend().buffer();
+        assert!(!underlined(buffer, "One"), "unfocused, the label is plain");
+        buffer[cell_of(buffer, "One")].bg
+    };
+    // The selected one already stands on the select band: the focus
+    // underlines its label.
+    tab_until(&mut view, &mut terminal, &rx, "the selected one's focus", |buffer| {
+        underlined(buffer, "One")
+    });
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[cell_of(buffer, "One")].bg, at_rest, "its band stays");
+    // The other takes a band of its own: no underline.
+    tab_until(&mut view, &mut terminal, &rx, "the other one's focus", |buffer| {
+        !underlined(buffer, "One") && buffer[cell_of(buffer, "Two")].bg != buffer[(19, 0)].bg
+    });
+    assert!(!underlined(terminal.backend().buffer(), "Two"));
+}

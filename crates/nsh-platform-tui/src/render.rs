@@ -412,7 +412,10 @@ impl Painter<'_> {
             _ => Surface::None,
         };
         if let Some(ramp) = parent.ramp {
-            ground.level = palette::step(filled, parent.level);
+            ground.level = palette::step_apart(filled, parent);
+            if matches!(filled, Surface::Raised | Surface::Sunken) {
+                ground.around = parent.level;
+            }
             ground.surface = match filled {
                 Surface::None => parent.surface,
                 Surface::Accent(rgb) if !control => {
@@ -432,7 +435,7 @@ impl Painter<'_> {
             && view.tracked & state::HOVERED != 0
             && view.states & state::HOVERED != 0
         {
-            palette::step(palette::surface(view.rest_fill, parent), parent.level)
+            palette::step_apart(palette::surface(view.rest_fill, parent), parent)
         } else {
             ground.level
         };
@@ -1137,7 +1140,8 @@ const ROUND_SHARE: f32 = 0.74;
 /// in `…` by the overlay.
 const CUT_WORD_CELLS: u32 = 12;
 
-const ACCENT: Color = Color::Blue;
+/// The accent of what the keys act on: the terminal palette's blue.
+pub(crate) const ACCENT: Color = Color::Blue;
 
 /// Where the focus is, as the views around it are marked (their children
 /// first): nowhere in the subtree, inside it with no box showing it yet,
@@ -1782,7 +1786,8 @@ fn mark_state(
         }
         return;
     }
-    if let Some(accent) = marks.emphasis {
+    // As with surfaces: a pressable container's text keeps its weights.
+    if let Some(accent) = marks.emphasis.filter(|_| inner.height < CONTAINER_ROWS) {
         for y in inner.y..inner.bottom() {
             for x in inner.x..inner.right() {
                 let cell = &mut buffer[(x, y)];
@@ -1845,7 +1850,8 @@ fn mark_state(
 /// the accent band, hovered ones the hover band (a step over the view at
 /// rest, `hover_level`, so a `hover:` fill of the app's own is not
 /// lifted twice), pressed ones the select band; a focused
-/// field brightens its line (or sinks); tabs are bold when chosen and on
+/// field brightens its line (or, with no room for one, is lifted and
+/// underlined in the accent); tabs are bold when chosen and on
 /// the select band unless the app underlines them, muted otherwise;
 /// disabled views are faint, with no band.
 #[allow(clippy::too_many_arguments)]
@@ -1874,6 +1880,10 @@ fn mark_surface(
     let pressed = flags & state::PRESSED != 0 && !disabled;
     let hovered = flags & state::HOVERED != 0 && !disabled && pressable(view);
     let step = |target: usize| ramp.band(own, level, target);
+    // A control's own fill that stands out makes its label bold (a
+    // primary button's); a pressable container (a card, a gauge) holds
+    // text of its own weights, which it leaves as they are.
+    let emphasis = emphasis.filter(|_| inner.height < CONTAINER_ROWS);
     if let Some(accent) = emphasis {
         drawn(buffer, inner, |cell| {
             if accent != Color::Reset {
@@ -1890,8 +1900,15 @@ fn mark_surface(
         return;
     }
     if field {
+        // A field whose box has no room for its line (one row tall) is
+        // lifted a step and underlined in the accent along its last row:
+        // a step alone is too faint to tell where the keys go.
         if focused && !recolor_border(buffer, bounds, visible, edges, ramp.focus_line()) {
             band(buffer, visible, step(HOVER), own);
+            if !visible.is_empty() {
+                let last = Rect::new(visible.x, visible.bottom() - 1, visible.width, 1);
+                focus_underline(buffer, last, false);
+            }
         }
         return;
     }
@@ -2019,9 +2036,10 @@ fn mark_surface(
             cell.modifier.insert(Modifier::BOLD);
         }
         // Focused as well as chosen (the page of a pagination, a
-        // segment): the label is underlined, as the band alone is the
-        // selection's.
-        if focused && !container && !marked {
+        // segment, a carousel's current thumbnail, which as a container
+        // takes no focus band): the label is underlined, as the band
+        // alone is the selection's.
+        if focused && !marked {
             drawn(buffer, inner, |cell| {
                 cell.modifier.insert(Modifier::UNDERLINED)
             });
@@ -2030,8 +2048,16 @@ fn mark_surface(
     if framed {
         // The line shows it.
     } else if focused && container {
+        // A step up alone reads as one more raised surface: an accent
+        // rail down its leading column marks it, as a focused pane's
+        // line does, or its label without a free column for one.
         if !selected {
             band(buffer, visible, step(HOVER), own);
+        }
+        if !focus_rail(buffer, visible, inner) {
+            drawn(buffer, inner, |cell| {
+                cell.modifier.insert(Modifier::BOLD | Modifier::UNDERLINED)
+            });
         }
     } else if focused && !covered && keys {
         accent_band(buffer, visible, inner, ramp, selected);
@@ -2045,6 +2071,28 @@ fn mark_surface(
     } else if hovered && !selected {
         band(buffer, visible, ramp.band(own, hover_level, HOVER), own);
     }
+}
+
+/// Marks a focused container with no line of its own: `▎` in the accent
+/// on the blank Cells of its leading column (its padding), on the rows of
+/// `inner` in sight. Whether it found any.
+fn focus_rail(buffer: &mut Buffer, visible: Rect, inner: Rect) -> bool {
+    let rows = inner.intersection(visible);
+    if rows.is_empty() {
+        return false;
+    }
+    let x = visible.x;
+    let mut any = false;
+    for y in rows.y..rows.bottom() {
+        let cell = &mut buffer[(x, y)];
+        if cell.symbol() == " " {
+            cell.set_symbol("▎");
+            cell.fg = ACCENT;
+            cell.modifier -= Modifier::DIM;
+            any = true;
+        }
+    }
+    any
 }
 
 /// The accent band of what the keys act on (a focused control, the

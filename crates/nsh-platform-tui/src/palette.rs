@@ -78,6 +78,10 @@ pub(crate) struct Ground {
     pub(crate) ramp: Option<Ramp>,
     /// The step of the ramp under this point ([`LADDER`]'s index).
     pub(crate) level: usize,
+    /// The step around the surface this point is on: the one its fill
+    /// stepped from (`level` itself on the page), so a fill inside it
+    /// never takes that step again and merge with what is around it.
+    pub(crate) around: usize,
     /// The terminal background drawn under this point: `Reset` on the
     /// page, a step or an accent tint on a filled surface, a swatch's own
     /// color.
@@ -100,6 +104,7 @@ impl Ground {
             depth,
             ramp: None,
             level: 0,
+            around: 0,
             surface: Color::Reset,
             swatch: false,
         }
@@ -590,6 +595,30 @@ pub(crate) fn step(surface: Surface, level: usize) -> usize {
         Surface::Sunken if level == 0 => SUNKEN,
         Surface::Sunken => 0,
     }
+}
+
+/// The step of a fill read as `surface` on `ground`: [`step`] from its
+/// level, unless that is the step around the ground's own surface (a
+/// filled bar raised out of a sunken track back to the card's step):
+/// then the nearest step that is neither, the same way first, so the fill
+/// stands apart from both the surface it is on and what is around that.
+pub(crate) fn step_apart(surface: Surface, ground: Ground) -> usize {
+    let (level, around) = (ground.level, ground.around);
+    let to = step(surface, level);
+    if to != around || around == level {
+        return to;
+    }
+    let way: isize = match surface {
+        Surface::Raised => 1,
+        _ => -1,
+    };
+    let to = to as isize;
+    (1..LADDER.len() as isize)
+        .flat_map(|distance| [to + way * distance, to - way * distance])
+        .filter(|&at| (0..LADDER.len() as isize).contains(&at))
+        .map(|at| at as usize)
+        .find(|&at| at != level && at != around)
+        .unwrap_or(to as usize)
 }
 
 fn mix(from: Rgb, to: Rgb, share: f32) -> Rgb {

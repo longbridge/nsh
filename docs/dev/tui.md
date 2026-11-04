@@ -385,9 +385,11 @@ color, however translucent: an accent wash over a selected row) or, blended over
 darker than the ground, is a band over the view's whole frame, behind its children; a text without a background
 of its own paints none. The app's page color (an opaque fill over the whole screen with nothing filled above it)
 is the terminal's background: no band, and the ground the steps below it are taken from. Lighter is
-raised, one step above its ground's step (a fill inside a raised card is lighter still); darker is sunken; a
+raised, one step above its ground's step (a fill inside a raised card is lighter still); darker is sunken; a fill
+never takes the step around its ground (a bar filled out of a sunken track goes a step past the box around it); a
 saturated fill (a primary button, a badge) is its color mixed 20% into the step under it, its text the accent of
-its hue (the default foreground when the app's text is light), bold on a control. A filled view has no line:
+its hue (the default foreground when the app's text is light), bold on a control under three rows tall (a
+pressable container's text keeps its weights). A filled view has no line:
 its band is its edge, unless the app's border is hued or stands out at least twice as far from the ground as the
 fill does, or the box is framed with corners (a one-time code's cell): the terminal layout decides, and the painter
 draws every side it gave a width. A dot (a round box of a hued fill, holding no text, that the layout pins to one
@@ -439,8 +441,10 @@ own background, so what its children filled stays, and it is at least one step a
 - a selected or current item (a toggle that is on included) is a select band and bold, never the accent; a
   focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
   when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
-  container three or more rows tall shows its line in the focus color (a hover band without a line); a focused
-  text field shows its line in the focus color, or a sunken band without one, and the caret; a framed box of any
+  container three or more rows tall shows its line in the focus color (without a line, a hover band and an accent
+`▎` rail down its leading column); a focused
+  text field shows its line in the focus color and the caret; one whose box has no room for its line (one row tall)
+  is a hover band with an accent underline along its row instead, a step alone being too faint to find; a framed box of any
   size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
   children's fills (a swatch's color, a chip's own fill, a pagination's bar) or that holds no glyph shows it as an
   accent underline under its Cells, its fills kept (a swatch, all fill and no glyph, underlined in the color its
@@ -483,8 +487,8 @@ Bandless:
   its foreground (OSC 10, else white or black), at the terminal's depth; a pressed one is the same band at 18%.
   Modifiers stay as they are. With only the 16 standard colors there is no hover band, and a pressed view
   reverses its label;
-- a control whose own opaque fill stands out from what it is on (a saturated fill, or one 40 L* from its
-  ground: a primary button) shows its text bold, in the fill's accent when it has one; the fill itself is not
+- a control under three rows tall whose own opaque fill stands out from what it is on (a saturated fill, or one
+  40 L* from its ground: a primary button) shows its text bold, in the fill's accent when it has one; the fill itself is not
   drawn;
 - a disabled view is dim and never bold.
 
