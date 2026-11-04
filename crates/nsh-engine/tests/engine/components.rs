@@ -2062,8 +2062,8 @@ fn menu_icons_reach_the_platform_as_image_sources() {
         })
         .collect();
     assert_eq!(
-        icons[0].as_ref(),
-        Some(inline),
+        icons[0].as_ref().map(|icon| &*icon.uri),
+        Some(&*inline.uri),
         "the same image, the same key"
     );
     let logo = icons[1].as_ref().expect("the imported image");
