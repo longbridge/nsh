@@ -26,6 +26,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod app_windows;
 mod blur;
 mod canvas;
 mod chrome;
