@@ -26,4 +26,6 @@ wuff.workspace = true
 [dev-dependencies]
 # The integration tests use the macros as an app's crate does, through
 # nsh-core's re-exports and the `__private` items they expand to.
-nsh-core.workspace = true
+# By path only, so `cargo publish` drops it: nsh-core depends on this crate,
+# which could not be packaged until nsh-core is on crates.io.
+nsh-core = { path = "../nsh-core" }

@@ -39,6 +39,16 @@ const start = async (reducedMotion = false) => {
   app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {}, reducedMotion });
   await app.press("role:button[Plot]");
   await app.waitFor("Live price");
+  // The page makes its charts as they scroll near: down until the last one
+  // (the watchlist) is made, then back to the top, so every test finds its
+  // chart. The page's first screen is made with it.
+  expect(app.shows("id:watchlist")).toBe(false);
+  let pages = 0;
+  while (!app.shows("id:watchlist")) {
+    expect(++pages).toBeLessThan(12);
+    await app.scroll("Live price", 1200);
+  }
+  await app.scroll("Live price", -1200 * pages);
 };
 beforeEach(() => start());
 
