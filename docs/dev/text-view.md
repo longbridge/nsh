@@ -16,7 +16,8 @@ colored with the theme's tokens; the app restyles each part over it.
 | `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair |
 | `html/` | HTML into the model (html5ever, as a reader mode reads a page) |
 | `common.rs` | What both parsers share: `pattern` extensions on inline content, headings' anchors |
-| `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the embedded KaTeX fonts (`fonts/katex.pack.zst`); feature `math`, which the platforms turn on |
+| `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the KaTeX fonts (`fonts/katex.pack.zst`; embedded, or fetched on the web: "Formulas on the web"); feature `math`, which the platforms turn on |
+| `formula.rs` | What the view calls: `math.rs` directly on native, and on the web once its side module and fonts arrived |
 
 ## How it works
 
@@ -217,6 +218,16 @@ checkboxes, `<math>` with a TeX annotation, `language-*` classes of code). Depth
 Headings have role `header`, links (and footnote references) role `link` with their title as the hint, task markers
 role `checkbox` with their checked state, a disclosure's summary role `button` with its `expanded` state, images role
 `image` with their alt text as the label. The texts are real texts, so screen readers read the document in order.
+
+## Formulas on the web
+
+The typesetter (`text_view/math.rs`: RaTeX and the glyph outlines) and the KaTeX fonts are about 0.5 MB of Brotli that
+pages without formulas should not pay for. `nsh package` keeps the code in a side module with the gate
+`nsh_feature_math` (`onDemand`, so neither `prefetchSides` nor `preloadSides` touches it) and publishes the fonts as
+`nsh-math.bin`. The first formula a `TextView` makes calls `runtime_data::load("math")`: `loadData` loads the side
+module, runs its gate, then hands over the fonts. Until then the formula shows as its TeX; the rows that have one are
+made again afterwards (`text_view/formula.rs`). A page without a `sides` table (the dev host) runs the gate from the
+module, which has everything.
 
 ## Performance
 

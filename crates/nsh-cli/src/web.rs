@@ -148,6 +148,9 @@ pub(crate) fn package(
             let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
             if let Some(gate) = &side.gate {
                 entry["gate"] = gate.as_str().into();
+                if gate == MATH_GATE {
+                    entry["onDemand"] = true.into();
+                }
                 published.insert(gate.clone());
             }
             sides.insert(side.name.clone(), entry);
@@ -156,6 +159,7 @@ pub(crate) fn package(
         split.main
     };
     let wasm = site.add("nsh.wasm", &linked)?;
+    let has_math = published.contains(MATH_GATE);
     // What the runtime fetches when it first needs it: the syntaxes it
     // highlights code with, which every page would download otherwise.
     let mut data = serde_json::Map::new();
@@ -164,6 +168,12 @@ pub(crate) fn package(
         data.insert(
             "syntaxes".into(),
             site.add(runtime::SYNTAXES, &bytes)?.into(),
+        );
+    }
+    if has_math {
+        data.insert(
+            "math".into(),
+            site.add(MATH_FONTS_FILE, nsh_base::MATH_FONTS)?.into(),
         );
     }
     // The wasm-bindgen glue of a runtime whose crates call JS through
@@ -271,6 +281,12 @@ pub(crate) fn package(
     Ok(())
 }
 
+const TEXT_VIEW_GATE: &str = "nsh_part_text_view";
+/// The gate of `TextView`'s formula typesetter; no chunk names it.
+const MATH_GATE: &str = "nsh_feature_math";
+/// The KaTeX fonts of the typesetter, which the page fetches with its code.
+const MATH_FONTS_FILE: &str = "nsh-math.bin";
+
 /// Whether `name` is the export of a part of `nsh/base`, of a standard
 /// module, of a feature (shaders) or of one of the app's own UI sets
 /// ([`ui_set_gate`]), which a runtime linked for an app keeps only when it
@@ -353,7 +369,13 @@ impl GatePlan {
 
     /// Every gate some chunk loads later, each once, sorted.
     fn lazy(&self) -> Vec<&str> {
-        let set: BTreeSet<&str> = self.chunks.values().flatten().map(String::as_str).collect();
+        let mut set: BTreeSet<&str> =
+            self.chunks.values().flatten().map(String::as_str).collect();
+        // `TextView`'s formulas: asked for by the first one, wherever the
+        // view is.
+        if set.contains(TEXT_VIEW_GATE) || self.main.iter().any(|g| g == TEXT_VIEW_GATE) {
+            set.insert(MATH_GATE);
+        }
         set.into_iter().collect()
     }
 
@@ -738,6 +760,7 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
     if let Some(syntaxes) = syntaxes {
         files.push((runtime::SYNTAXES.to_owned(), syntaxes));
     }
+    files.push((MATH_FONTS_FILE.to_owned(), nsh_base::MATH_FONTS.to_vec()));
     Ok((page, files))
 }
 
@@ -1391,7 +1414,10 @@ mod tests {
                 ),
             ])
         );
-        assert_eq!(plan.lazy(), ["nsh_part_editor", "nsh_part_text_view"]);
+        assert_eq!(
+            plan.lazy(),
+            ["nsh_feature_math", "nsh_part_editor", "nsh_part_text_view"]
+        );
         // The page's map: only gates with a published side module.
         let published = BTreeSet::from(["nsh_part_editor".to_owned()]);
         assert_eq!(
@@ -1506,7 +1532,10 @@ mod tests {
         let (plain, plain_files) = dev_host(&runtime, false).unwrap();
         assert!(plain.contains("const GLUE = null;"), "{plain}");
         let names = |files: &Files| files.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
-        assert_eq!(names(&plain_files), ["nsh.js", "nsh.wasm", "nsh.version"]);
+        assert_eq!(
+            names(&plain_files),
+            ["nsh.js", "nsh.wasm", "nsh.version", MATH_FONTS_FILE]
+        );
         let glue = dir.join("nsh-dev-bindgen.js");
         fs::write(&glue, "export {};").unwrap();
         let snippet = crate::bindgen::output_dir(&glue).join("snippets/app-1/inline0.js");
@@ -1527,7 +1556,8 @@ mod tests {
                 "nsh.wasm",
                 "nsh.version",
                 "nsh-bindgen.js",
-                "snippets/app-1/inline0.js"
+                "snippets/app-1/inline0.js",
+                MATH_FONTS_FILE
             ]
         );
         // Another glue is another runtime: an open page loads again.

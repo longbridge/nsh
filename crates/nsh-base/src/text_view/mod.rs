@@ -8,25 +8,9 @@ mod extension;
 mod highlight;
 mod html;
 mod markdown;
+mod formula;
 #[cfg(feature = "math")]
 mod math;
-// Without the fonts formulas show as their TeX, as TeX RaTeX rejects does.
-#[cfg(not(feature = "math"))]
-mod math {
-    pub(super) enum Formula {}
-
-    pub(super) fn typeset(_tex: &str, _display: bool) -> Option<Formula> {
-        None
-    }
-
-    pub(super) fn render(
-        formula: &Formula,
-        _size: f32,
-        _display: bool,
-    ) -> nsh_core::prelude::AnyElement {
-        match *formula {}
-    }
-}
 mod parts;
 mod view;
 
@@ -46,3 +30,9 @@ pub use self::{
         text_view,
     },
 };
+
+/// Makes formulas typeset in a web runtime: the gate of its side module
+/// (`nsh_feature_math`), which holds what this reaches and nothing else does.
+#[cfg(all(feature = "math", target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use self::formula::install as install_math;

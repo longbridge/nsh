@@ -1090,7 +1090,8 @@ class Player {
    * them per chunk: the parts of `nsh/base`, standard modules and features
    * the main module was published without) in parallel, each after the
    * side modules it imports from, and calls each gate once. `table` is the
-   * page's `sides`: by name, `{ url, gate?, needs }`. A page awaits it
+   * page's `sides`: by name, `{ url, gate?, needs, onDemand? }` (`onDemand`:
+   * only `loadData` asks for it, nothing fetches it ahead). A page awaits it
    * before a chunk that needs them runs (its `prepareChunk`).
    */
   loadSides(names, table) {
@@ -1104,7 +1105,7 @@ class Player {
    * which tries again. `preloadSides` then instantiates them.
    */
   prefetchSides(table) {
-    const names = Object.keys(table ?? {});
+    const names = Object.keys(table ?? {}).filter((name) => !table[name].onDemand);
     for (const name of names) {
       if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
       const compiled = this.compileSide(table[name].url, { priority: "low" });
@@ -1119,7 +1120,7 @@ class Player {
    * components registered.
    */
   preloadSides(table) {
-    const names = Object.keys(table ?? {});
+    const names = Object.keys(table ?? {}).filter((name) => !table[name].onDemand);
     if (!names.length) return;
     const idle = globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 200));
     idle(() => this.loadSides(names, table).catch((err) => console.warn(`[nsh] preloading side modules: ${err?.message ?? err}`)));
@@ -1486,12 +1487,16 @@ class Player {
    * Fetches the runtime's data `name` (`nsh-<name>.bin`, or the URL
    * `data[name]` names) and hands it to the engine; a file that is missing
    * or does not load is handed over as none (the code it would highlight
-   * stays plain).
+   * stays plain). The code of the gate `nsh_feature_<name>`, if any, comes
+   * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
     const url = this.options.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
     let bytes = null;
     try {
+      const gate = `nsh_feature_${name}`;
+      if (this.options.sides?.[gate]) await this.loadSide(gate, this.options.sides);
+      else this.wasm[gate]?.();
       const response = await fetch(url);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
       bytes = new Uint8Array(await response.arrayBuffer());

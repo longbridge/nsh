@@ -4,8 +4,9 @@
 //! [`typeset`] parses and lays out the TeX into RaTeX's display list
 //! (glyphs of KaTeX's fonts, rules and paths, placed in ems from the
 //! formula's top left); [`render`] draws it on a canvas, each glyph as its
-//! outline from the KaTeX fonts embedded here (`fonts/katex.pack.zst`, OFL), so a
-//! formula looks the same on every platform and needs no font installed.
+//! outline from the KaTeX fonts (`fonts/katex.pack.zst`, OFL; embedded in the
+//! native runtimes, the page's on the web: `formula.rs`), so a formula looks
+//! the same on every platform and needs no font installed.
 //! Glyphs and rules take the text's color (`currentColor`), but where the
 //! TeX sets one (`\color`). TeX RaTeX cannot read fails, and the view shows
 //! the TeX itself.
@@ -19,13 +20,13 @@ use ratex_types::{Color as TexColor, DisplayItem, DisplayList, MathStyle, PathCo
 
 /// A formula laid out, in ems.
 #[derive(Debug, Clone)]
-pub(super) struct Formula {
+struct Formula {
     list: DisplayList,
 }
 
 /// Parses and lays out `tex`; `display` for a block of its own (limits
 /// over operators, full-size fractions). `None` for TeX RaTeX cannot read.
-pub(super) fn typeset(tex: &str, display: bool) -> Option<Formula> {
+fn typeset(tex: &str, display: bool) -> Option<Formula> {
     let nodes = ratex_parser::parse(tex).ok()?;
     let options = LayoutOptions {
         style: if display {
@@ -81,17 +82,20 @@ const FONTS: [(FontId, &str); 19] = [
     (FontId::TypewriterRegular, "Typewriter-Regular"),
 ];
 
-/// The KaTeX fonts in one file, zstd-compressed (about 230 kB of 500 kB; license in `fonts/katex.LICENSE.txt`):
-/// each font's length (`u32`, little endian), then its bytes, in the order
-/// of [`FONTS`]. `pack_katex_fonts` (a test, ignored) writes it from
-/// KaTeX's `fonts/` directory.
-const PACK: &[u8] = include_bytes!("../../fonts/katex.pack.zst");
+/// The KaTeX fonts in one file ([`crate::MATH_FONTS`]): each font's length
+/// (`u32`, little endian), then its bytes, in the order of [`FONTS`].
+fn pack() -> &'static [u8] {
+    #[cfg(target_arch = "wasm32")]
+    return super::formula::fonts();
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::MATH_FONTS
+}
 
 /// The KaTeX font a display list names, unpacked on the first formula.
 fn face(font: &str) -> Option<&'static ttf_parser::Face<'static>> {
     static FACES: OnceLock<HashMap<FontId, ttf_parser::Face<'static>>> = OnceLock::new();
     let faces = FACES.get_or_init(|| {
-        let Ok(pack) = zstd::decode_all(PACK) else {
+        let Ok(pack) = zstd::decode_all(pack()) else {
             log::error!("the KaTeX fonts do not unpack");
             return HashMap::new();
         };
@@ -268,7 +272,7 @@ const AXIS: f64 = 0.25;
 /// `formula` drawn at `size` points per em. Inline (not `display`), the box
 /// is padded so its middle is the formula's math axis, which
 /// `align-middle` puts at the middle of the text's x height.
-pub(super) fn render(formula: &Formula, size: f32, display: bool) -> AnyElement {
+fn render(formula: &Formula, size: f32, display: bool) -> AnyElement {
     let list = &formula.list;
     let (above, below) = if display {
         (list.height, list.depth)
@@ -285,6 +289,11 @@ pub(super) fn render(formula: &Formula, size: f32, display: bool) -> AnyElement 
         .h(px(height))
         .flex_none()
         .into_element()
+}
+
+/// `tex` typeset and drawn at `size` points per em.
+pub(super) fn formula(tex: &str, display: bool, size: f32) -> Option<AnyElement> {
+    Some(render(&typeset(tex, display)?, size, display))
 }
 
 #[cfg(test)]
