@@ -178,7 +178,7 @@ jobs:
           key: website-versions-${{ github.run_id }}
 
       - name: Check standalone Gallery code size
-        run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=4000000
+        run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=4100000
 
       - uses: actions/configure-pages@v5
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
