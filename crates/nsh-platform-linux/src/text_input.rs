@@ -1486,6 +1486,11 @@ mod tests {
                 line_height: Points(24.0),
                 ..Default::default()
             };
+            // The text view's own font, as `css` gives it: the line box is
+            // measured for it, and the theme's may be another height.
+            let provider = gtk::CssProvider::new();
+            provider.load_from_string("textview { font-size: 15px; }");
+            add_provider(&view, &provider);
             set_line_box(&view, &style);
             let window = gtk::Window::new();
             window.set_child(Some(&view));
