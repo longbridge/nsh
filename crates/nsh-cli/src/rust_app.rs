@@ -44,6 +44,7 @@
 //! to that checkout. It builds in the app's own `target`, as a Cargo project in the app's
 //! directory would, or in `CARGO_TARGET_DIR`.
 
+use crate::other_version::{OtherVersion, Wanted};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -193,8 +194,9 @@ impl Nsh {
     /// dependencies say (`cargo metadata --no-deps`): from crates.io, which
     /// must accept [`VERSION`], or by path from one checkout of that
     /// version. Git dependencies use Cargo's resolved checkout, including
-    /// patched registry dependencies. Mixed sources, or another version,
-    /// stop the command before a build fails on two `nsh-core`s.
+    /// patched registry dependencies. Mixed sources stop the command before
+    /// a build fails on two `nsh-core`s; another version is [`OtherVersion`],
+    /// for the nsh of that version to run the command.
     fn of(crates: &[AppCrate]) -> anyhow::Result<Nsh> {
         let wanted = semver::Version::parse(VERSION).context("nsh's own version")?;
         // The first dependency on nsh seen, and what it is (for errors).
@@ -224,10 +226,12 @@ impl Nsh {
                     }
                     None => {
                         if !semver::VersionReq::parse(req).is_ok_and(|r| r.matches(&wanted)) {
-                            bail!(
+                            let message = format!(
                                 "{} asks for {name} {req} and this nsh is {VERSION}: install nsh {req}, or ask for {name} = \"{VERSION}\"",
                                 c.package
                             );
+                            let wanted = Wanted::Requirement(req.to_owned());
+                            return Err(OtherVersion { wanted, message }.into());
                         }
                         (
                             Nsh::Registry,
@@ -248,25 +252,21 @@ impl Nsh {
         if let Some(dir) = nsh.source() {
             let version = checkout_version(dir)?;
             if version != VERSION {
-                bail!("{}", nsh.another_version(dir, &version));
+                let message = format!(
+                    "the app's crates take nsh from {}, which is nsh {version}, and this nsh is {VERSION}: run the nsh built in that checkout",
+                    dir.display()
+                );
+                let wanted = match &nsh {
+                    Nsh::Git { checkout, .. } => Wanted::Git {
+                        checkout: checkout.clone(),
+                        version,
+                    },
+                    _ => Wanted::Source(dir.to_owned()),
+                };
+                return Err(OtherVersion { wanted, message }.into());
             }
         }
         Ok(nsh)
-    }
-
-    /// The error for a checkout `dir` at `version`, not this nsh's, with the
-    /// fix for where the checkout comes from.
-    fn another_version(&self, dir: &Path, version: &str) -> String {
-        let fix = match self {
-            Nsh::Git { .. } => format!(
-                "set the app's nsh dependencies to {VERSION} in Cargo.toml, or install nsh {version} (curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v{version} sh)"
-            ),
-            _ => "run the nsh built in that checkout".to_owned(),
-        };
-        format!(
-            "the app's crates take nsh from {}, which is nsh {version}, and this nsh is {VERSION}: {fix}",
-            dir.display()
-        )
     }
 
     /// The checkout, if it is one.
@@ -2984,26 +2984,6 @@ mod tests {
         // No nsh at all: crates.io (the build then asks for the entry).
         assert_eq!(of(&[("a", "serde = \"1\"\n".into())]), Ok(Nsh::Registry));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn another_version_says_what_to_do_for_where_nsh_comes_from() {
-        let dir = Path::new("/nsh");
-        let git = Nsh::Git {
-            checkout: dir.into(),
-            url: "https://example.com/nsh.git".into(),
-        };
-        let error = git.another_version(dir, "0.0.1");
-        assert!(
-            error.contains(&format!("dependencies to {} in Cargo.toml", super::VERSION)),
-            "{error}"
-        );
-        assert!(error.contains("NSH_VERSION=v0.0.1"), "{error}");
-        let error = Nsh::Source(dir.into()).another_version(dir, "0.0.1");
-        assert!(
-            error.contains("run the nsh built in that checkout"),
-            "{error}"
-        );
     }
 
     #[test]
