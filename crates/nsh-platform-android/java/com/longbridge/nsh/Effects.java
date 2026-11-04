@@ -63,10 +63,10 @@ final class Effects {
     }
 
     /** A list of gradients (`encode.rs` `gradients`). */
-    private static Decor.Gradient[] gradients(ByteBuffer b) {
-        int n = b.getInt();
-        Decor.Gradient[] list = new Decor.Gradient[n];
-        for (int i = 0; i < n; i++) {
+    private static Decor.Gradient[] gradients(ByteBuffer b, float density) {
+        int count = b.getInt();
+        Decor.Gradient[] list = new Decor.Gradient[count];
+        for (int i = 0; i < count; i++) {
             Decor.Gradient g = new Decor.Gradient();
             g.kind = b.getInt();
             switch (g.kind) {
@@ -124,8 +124,8 @@ final class Effects {
             e.shadowColors[i] = b.getInt();
             e.shadows[i * 5 + 4] = b.getInt() != 0 ? 1 : 0;
         }
-        e.gradients = gradients(b);
-        e.masks = gradients(b);
+        e.gradients = gradients(b, density);
+        e.masks = gradients(b, density);
         e.filters = filters(b, density);
         e.backdrop = filters(b, density);
         e.blend = b.getInt();
