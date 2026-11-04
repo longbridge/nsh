@@ -1047,7 +1047,8 @@ panic = \"abort\"
                  [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\nnsh-core = {}\n{}\n",
                 self.bin("describe"),
                 self.bin("describe"),
-                self.nsh.dep("nsh-core", ""),
+                // The sets' declarations make `.nsh/types`.
+                self.nsh.dep("nsh-core", ", features = [\"declarations\"]"),
                 self.dependencies(),
             ),
         )?;

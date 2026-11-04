@@ -27,5 +27,7 @@ nsh-platform-windows.workspace = true
 # The headless test runs `App.tsx` against this crate's set: `nsh-testing`
 # builds it (with the bundler and QuickJS) and runs it.
 [dev-dependencies]
+# The declarations tests read the set's TypeScript (nsh-core `declarations`).
+nsh-core = { workspace = true, features = ["declarations"] }
 nsh-engine.workspace = true
 nsh-testing = { workspace = true, features = ["bundle"] }

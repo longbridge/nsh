@@ -3379,6 +3379,7 @@ dependencies = [
  "syntect",
  "two-face",
  "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

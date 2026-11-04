@@ -73,11 +73,13 @@ pub(crate) mod virtual_list;
 pub(crate) mod watch;
 
 /// Whether this build carries the text of declarations: the documentation
-/// and TypeScript of the specs, which only make `.nsh/types`. The
-/// WebAssembly runtime, which pages download and which writes no
-/// declarations, goes without ([`decl!`](crate::decl)); the specs keep
-/// their shape (names, kinds, whether a method returns).
-pub const DECLARATIONS: bool = !cfg!(target_arch = "wasm32");
+/// and TypeScript of the specs, which only make `.nsh/types` (feature
+/// `declarations`, which `nsh` and the program describing an app's UI sets
+/// turn on). Apps and the WebAssembly runtime, which write no declarations,
+/// go without ([`decl!`](crate::decl)): building the text took a native app
+/// about a megabyte at startup. The specs keep their shape (names, kinds,
+/// whether a method returns).
+pub const DECLARATIONS: bool = cfg!(any(test, feature = "declarations"));
 
 /// Declaration text: `$text` where the build carries it
 /// ([`DECLARATIONS`]), `""` (a list: `&[]`) where it does not. In a
