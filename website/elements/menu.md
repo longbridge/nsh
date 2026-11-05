@@ -16,7 +16,7 @@ A menu is a list of actions its trigger opens. One structure serves every device
 
 Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
 by the secondary button (a right click) at the pointer, by a finger held on its trigger on touch screens, or below its
-trigger by the keyboard in the browser and by screen readers on macOS and Windows.
+trigger by the keyboard in the browser and on Linux, and by screen readers on macOS and Windows.
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused.
@@ -123,7 +123,7 @@ On the desktops the secondary button opens it where the pointer is. On touch scr
 opens it as a sheet; the trigger's own presses and the scroll views around it keep working, and moving the finger
 cancels the hold.
 
-Keyboard and screen reader users open it too. In the browser, Shift+F10 and the Menu key on the focused trigger open
+Keyboard and screen reader users open it too. In the browser and on Linux, Shift+F10 and the Menu key on the focused trigger open
 it. On macOS, VoiceOver's "show menu" action (VO-Shift-M) opens it, and on Windows, a screen reader's "show context
 menu" action through UI Automation does. These openings place the menu below the trigger, starting at its start edge, with the keyboard focus on
 its first enabled item, as WAI-ARIA describes for context menus. Make the trigger `focusable` so the keyboard reaches

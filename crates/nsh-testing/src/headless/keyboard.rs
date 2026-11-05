@@ -7,7 +7,7 @@
 //! between the inputs and the views that are its stops (those that take
 //! presses, and `focusable` ones that take none) where the platform
 //! does (macOS, the web), Return and Space press the pressable it is on,
-//! Shift+F10 asks it for its context menu (the web), the
+//! Shift+F10 asks it for its context menu (the web, Linux), the
 //! focused input takes the keys that edit it, and Escape goes back.
 
 use nsh_core::{
@@ -81,11 +81,11 @@ impl Headless {
         let plain = !(m.ctrl || m.alt || m.cmd);
         // Shift+F10 asks the focused view for its context menu where views
         // take the keyboard focus and the key is the platform's: the web
-        // (macOS has no such key; Windows and Linux focus fields only). The
+        // and Linux (macOS has no such key; Windows focuses fields only). The
         // nearest view around it listening hears `onContextMenu`, with no
         // pointer, at its bottom-start corner; a focused input keeps the
         // key for its own edit menu.
-        if self.environment.os == Os::Web
+        if matches!(self.environment.os, Os::Web | Os::Linux)
             && nsh_core::input::opens_context_menu(false, Some(stroke.key), m)
         {
             if self.screen.focused().is_none()
@@ -152,10 +152,10 @@ impl Headless {
         self.send(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     }
 
-    /// Whether Tab stops at views (not only inputs), as on macOS, the web
-    /// and in a terminal (the other platforms move it between fields only).
+    /// Whether Tab stops at views (not only inputs), as on macOS, the web,
+    /// Linux and in a terminal (the other platforms move it between fields only).
     fn tabs_to_views(&self) -> bool {
-        matches!(self.environment.os, Os::MacOs | Os::Web)
+        matches!(self.environment.os, Os::MacOs | Os::Web | Os::Linux)
             || self.environment.idiom == nsh_core::platform::Idiom::Terminal
     }
 
