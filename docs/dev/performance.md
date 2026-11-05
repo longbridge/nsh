@@ -4,6 +4,16 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
+sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
+behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
+far from the screen waits for the end of the drag, so that commit does the measuring the drag skipped, on the engine
+thread. What remains scales with the page: Taffy and emitting frames over every node, and AppKit's walks over the view
+tree.
+
+The same on Linux (GTK 4 under Xvfb in a container, a page of 120 Markdown messages, `xdotool` setting about 115 sizes per
+second): sizes the app handled per second 41 → 60.
+
 Windows cursor refresh after a style batch, against main `a5036af4`, debug host, one native run per revision:
 `echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --target windows --trace`.
 Both runs produce 56 ops / 50 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes after the press.

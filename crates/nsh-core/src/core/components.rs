@@ -568,7 +568,7 @@ pub(super) struct Components {
     picks: FxHashMap<
         u32,
         (
-            crate::picker::PickRequest,
+            crate::picker::Pick,
             AnswerSlot<Vec<crate::picker::PickedFile>>,
         ),
     >,
@@ -5241,10 +5241,43 @@ impl<M: TextEngine> Core<M> {
                 }
                 let id = self.components.next_pick;
                 self.components.next_pick += 1;
-                self.components.picks.insert(id, (request, answer));
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Images(request), answer));
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::PickImages { id, request },
+                });
+            }
+            Action::PickFiles(request, answer) => {
+                if !self.access.allows_picker() {
+                    answer.borrow_mut().deliver(Vec::new());
+                    self.deny(
+                        "the picker is not granted: add `\"picker\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(picker) = self.picker.clone() {
+                    let picked = picker.pick_files(request.clone());
+                    crate::element::task::spawn_raw(
+                        &self.components.executor,
+                        crate::ROOT_ID,
+                        Box::pin(async move {
+                            let files = crate::picker::finish_files(&request, picked.await);
+                            answer.borrow_mut().deliver(files);
+                        }),
+                    );
+                    return;
+                }
+                let id = self.components.next_pick;
+                self.components.next_pick += 1;
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Files(request.clone()), answer));
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickFiles { id, request },
                 });
             }
             Action::ReadClipboard(read) => {
@@ -5671,7 +5704,7 @@ impl<M: TextEngine> Core<M> {
                     return false;
                 };
                 if let Some((asked, answer)) = self.components.picks.remove(request) {
-                    let files = crate::picker::finish(&asked, files.clone());
+                    let files = asked.finish(files.clone());
                     answer.borrow_mut().deliver(files);
                 }
                 true

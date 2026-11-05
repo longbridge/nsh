@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -203,21 +202,7 @@ public class NshView extends FrameLayout {
         // The keyboard's curve and duration, as it starts to move: what makes
         // room for it moves with it (`LayoutCurve::Keyboard`).
         if (Build.VERSION.SDK_INT >= 30) {
-            setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
-                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
-                @Override
-                public void onPrepare(WindowInsetsAnimation animation) {
-                    // Before the end state's insets are applied.
-                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
-                    keyboardDuration = animation.getDurationMillis();
-                    mounter.keyboardMotion(animation.getInterpolator(), keyboardDuration);
-                }
-
-                @Override
-                public WindowInsets onProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> running) {
-                    return insets;
-                }
-            });
+            KeyboardAnimation.install(this, mounter);
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
@@ -600,6 +585,7 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        mounter.cancelAnimations();
         endShaders();
     }
 
@@ -612,6 +598,7 @@ public class NshView extends FrameLayout {
     void appStopped() {
         main.post(() -> {
             mounter.destroyComponents();
+            mounter.cancelAnimations();
             endShaders();
         });
     }
@@ -661,7 +648,7 @@ public class NshView extends FrameLayout {
      */
     private int lifecycle;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
-    private long keyboardDuration = 250;
+    long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
     private java.util.Locale hostLocale;
     private float hostFontScale;

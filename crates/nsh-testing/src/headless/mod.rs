@@ -192,7 +192,7 @@ pub enum DialogAnswer {
 /// Answers a pick: the files the user picks for the request (none: the
 /// picker cancelled).
 type PickHandler =
-    Box<dyn FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile> + Send>;
+    Box<dyn FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile> + Send>;
 
 /// Who answers the picks a step asks for.
 enum Picks {
@@ -578,11 +578,11 @@ impl Headless {
         self.done()
     }
 
-    /// Answers the picks steps ask for (`Picker.pickImages`) with
+    /// Answers the picks steps ask for (`Picker.pickImages`, `Picker.pickFiles`) with
     /// `handler`, the files the user picks, instead of cancelling them.
     pub fn on_pick(
         &mut self,
-        handler: impl FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile>
+        handler: impl FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile>
         + Send
         + 'static,
     ) {
@@ -624,12 +624,12 @@ impl Headless {
     }
 
     /// The oldest pick asked and not answered yet.
-    pub fn pending_pick(&self) -> Option<nsh_core::picker::PickRequest> {
+    pub fn pending_pick(&self) -> Option<nsh_core::picker::Pick> {
         self.screen.pending_pick().map(|(_, request)| request)
     }
 
     /// The picks the app asked for so far, in order.
-    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+    pub fn picks(&self) -> Vec<nsh_core::picker::Pick> {
         self.screen.picks()
     }
 

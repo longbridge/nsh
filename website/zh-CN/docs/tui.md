@@ -1,11 +1,11 @@
 ---
-title: 终端
+title: TUI
 description: "在终端里运行 Rust 和 TSX 编写的 NSH 应用：Cell 布局、键盘与鼠标输入、终端的颜色、组件和弹出层在字符网格上的样子、在应用代码中识别终端、测试，以及在 ratatui 应用中嵌入 AppView。"
-order: 15.7
+order: 16.5
 group: platforms
 ---
 
-# 终端
+# TUI
 
 NSH 应用也能在终端里运行。终端后端用 [ratatui](https://ratatui.rs) 把应用绘制在终端的字符 Cell 网格上，使用终端自己的
 字体和颜色，并从键盘和鼠标接收输入。核心、响应式图、渲染器、组件和原生模块与其他平台完全相同，因此在窗口里运行的应用

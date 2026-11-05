@@ -277,6 +277,7 @@ impl ContinuousShadow {
                 snapshot.append_node(&node);
                 return;
             };
+            forget_freed_nodes_textures(&renderer);
             let drawing = gtk::Snapshot::new();
             drawing.scale(scale, scale);
             drawing.append_node(&node);
@@ -296,6 +297,24 @@ impl ContinuousShadow {
             }
             shadows.push_front((self, scale, cached, pixels));
         });
+    }
+}
+
+/// GTK's `gl` renderer caches the offscreens of blur and other nodes under the
+/// node's address without holding the node, and drops them only two frames
+/// later. A new node allocated at a freed node's address is then drawn with
+/// that node's image, so a shadow baked from one could be wrong for as long as
+/// it is cached. Two empty frames drop them all before a node that must be right.
+fn forget_freed_nodes_textures(renderer: &gsk::Renderer) {
+    if renderer.type_().name() != "GskGLRenderer" {
+        return;
+    }
+    let empty = gsk::ColorNode::new(
+        &gdk::RGBA::TRANSPARENT,
+        &graphene::Rect::new(0.0, 0.0, 1.0, 1.0),
+    );
+    for _ in 0..2 {
+        renderer.render_texture(&empty, None);
     }
 }
 
@@ -1121,6 +1140,7 @@ mod tests {
             let pointer =
                 |n: &gsk::RenderNode| -> *mut gsk::ffi::GskRenderNode { n.to_glib_none().0 };
             let pixels = |node: &gsk::RenderNode| {
+                forget_freed_nodes_textures(&renderer);
                 let drawing = gtk::Snapshot::new();
                 drawing.scale(window.scale_factor() as f32, window.scale_factor() as f32);
                 drawing.append_node(node);

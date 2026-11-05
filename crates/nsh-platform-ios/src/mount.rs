@@ -1715,6 +1715,15 @@ impl Mounter {
             (Command::Notification(command), _) if id == nsh_core::ROOT_ID => {
                 crate::notifications::command(&self.control, &command);
             }
+            (
+                Command::PickFiles {
+                    id: request,
+                    request: asked,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => {
+                crate::picker::pick_files(request, asked, native.view(), &self.control);
+            }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
             }

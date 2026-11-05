@@ -85,6 +85,12 @@ pub(crate) enum Action {
         crate::picker::PickRequest,
         AnswerSlot<Vec<crate::picker::PickedFile>>,
     ),
+    /// Shows the system's picker for files of any type; the files picked
+    /// (none when cancelled) resolve the slot.
+    PickFiles(
+        crate::picker::FilePickRequest,
+        AnswerSlot<Vec<crate::picker::PickedFile>>,
+    ),
     /// Calls function `name` of the embedding app (`nsh/host`); its
     /// value, or why it failed, resolves the slot.
     HostCall {

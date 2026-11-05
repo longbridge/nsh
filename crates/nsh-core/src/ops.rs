@@ -784,7 +784,7 @@ pub enum EventPayload {
     TextLayout(Vec<crate::text::TextLine>),
     /// The files the user picked ([`EventKind::Pick`]), with their bytes.
     Picked {
-        /// The request ([`Command::PickImages`]).
+        /// The request ([`Command::PickImages`], [`Command::PickFiles`]).
         id: u32,
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
@@ -1843,6 +1843,16 @@ pub enum Command {
         id: u32,
         /// What to show and how to prepare the images.
         request: crate::picker::PickRequest,
+    },
+    /// Show the system's picker for files of any type (on the root;
+    /// `Picker.pickFiles`) and report the picked ones, their bytes as they
+    /// are, as [`EventKind::Pick`] ([`EventPayload::Picked`] `id`; no files
+    /// when cancelled; [`crate::picker`]).
+    PickFiles {
+        /// The request.
+        id: u32,
+        /// What to show.
+        request: crate::picker::FilePickRequest,
     },
     /// Open `url` outside the app (on the root; `openUrl` of `nsh/device`,
     /// [`crate::open_url`]): the browser, the mail or phone app, the app
