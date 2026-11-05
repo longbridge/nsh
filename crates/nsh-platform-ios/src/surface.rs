@@ -684,6 +684,7 @@ impl RootView {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
             clock: Default::default(),
+            seed: None,
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
