@@ -1110,10 +1110,14 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 ## registerFont
 
 ```ts
-function registerFont(source: string | Uint8Array): Promise<string>;
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
 ```
 
-在应用运行时注册字体，并解析为它的字体族名，供 `fontFamily` 使用：应用下载或生成的字体，即 TrueType、OpenType、WOFF 或 WOFF2 数据，或者字体文件的 URL（应用自己的文件 `asset:/...`，或网络上的文件，按 `fetch` 的方式读取：适用 `network` 权限）。此后使用该字体族的文字都会用它排版，之前已显示的文字也会重新排版。URL 无法加载或数据不是字体时以 `Error` 拒绝。Rust：`register_font(data) -> Answer<Result<String, String>>`，在任务中等待。应用发布的字体则在第一帧之前注册（[字体](../docs/fonts.md#在应用运行时注册字体)）。
+在应用运行时注册字体，结果是 `{ family }`，即它的字体族名，供 `fontFamily` 使用：应用下载或生成的字体，即 TrueType、OpenType、WOFF 或 WOFF2 数据，或者字体文件的 URL（应用自己的文件 `asset:/...`，或网络上的文件，按 `fetch` 的方式读取：适用 `network` 权限）。此后使用该字体族的文字都会用它排版，之前已显示的文字也会重新排版。`network` 权限不允许该 URL 或它重定向到的 URL 时，以一个 `Error` 拒绝，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"network"`，`resource` 为被拒绝的 URL，与 `fetch` 相同；URL 无法加载或数据不是字体时以 `Error` 拒绝。Rust：`register_font(data) -> Answer<Result<String, String>>`，在任务中等待。应用发布的字体则在第一帧之前注册（[字体](../docs/fonts.md#在应用运行时注册字体)）。
 
 ## PanResponder
 

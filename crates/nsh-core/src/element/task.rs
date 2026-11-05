@@ -75,7 +75,7 @@ pub(crate) enum Action {
     /// its failure) resolves the slot.
     Fetch(
         Box<crate::platform::HttpRequest>,
-        AnswerSlot<Result<super::services::HttpResponse, String>>,
+        AnswerSlot<Result<super::services::HttpResponse, super::services::FetchFailure>>,
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),

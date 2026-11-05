@@ -4,7 +4,7 @@ function App() {
   const family = signal("none");
   const register = (source: string | Uint8Array) =>
     registerFont(source).then(
-      (name) => family.set(name),
+      (font) => family.set(font.family),
       (e) => family.set(`refused (${e instanceof Error})`),
     );
   const button = (id: string, source: string | Uint8Array) => (

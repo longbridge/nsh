@@ -69,7 +69,7 @@ Each platform keeps the list's order with its own font machinery: a cascade list
 
 ## Registering a font while the app runs
 
-A font that is not known when the app ships (one a user picks from a catalog, one a server sends with a document, one the app makes) is registered while the app runs: `register_font(data)` in Rust, `registerFont(source)` in TSX. It takes TrueType, OpenType, WOFF or WOFF2 data (in TSX a `Uint8Array`, or the URL of the file: one of the app's, `asset:/...`, or one on the network, read as `fetch` reads it, so the `network` capability applies) and resolves to the font's family name. Text that names the family is laid out with it from then on, and text shown before the font arrived is laid out again:
+A font that is not known when the app ships (one a user picks from a catalog, one a server sends with a document, one the app makes) is registered while the app runs: `register_font(data)` in Rust, `registerFont(source)` in TSX. It takes TrueType, OpenType, WOFF or WOFF2 data (in TSX a `Uint8Array`, or the URL of the file: one of the app's, `asset:/...`, or one on the network, read as `fetch` reads it, so the `network` capability applies) and resolves to the font's family name (in TSX as `{ family }`). Text that names the family is laid out with it from then on, and text shown before the font arrived is laid out again:
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -88,12 +88,12 @@ text("Branded").font_family(move || family.get())
 import { registerFont, signal, Text } from "nsh";
 
 const family = signal("");
-registerFont("https://fonts.example.com/Brand.woff2").then((name) => family.set(name));
+registerFont("https://fonts.example.com/Brand.woff2").then((font) => family.set(font.family));
 
 <Text style={{ fontFamily: family() }}>Branded</Text>
 ```
 
-`registerFont` rejects with an `Error` when the URL does not load or the data is no font; Rust's `register_font` resolves to the reason. Registering the same font again is harmless. Like an imported font, a registered one is the app's alone and is not installed on the device.
+`registerFont` rejects with an `Error` when the URL does not load or the data is no font, its `code` `"ERR_ACCESS_DENIED"` when the `network` capability does not grant the URL or a redirect of it; Rust's `register_font` resolves to the reason. Registering the same font again is harmless. Like an imported font, a registered one is the app's alone and is not installed on the device.
 
 ## Weights and italics
 

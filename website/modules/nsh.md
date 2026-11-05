@@ -1121,10 +1121,14 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 ## registerFont
 
 ```ts
-function registerFont(source: string | Uint8Array): Promise<string>;
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
 ```
 
-Registers a font while the app runs and resolves to its family name, for `fontFamily`: a font the app downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data, or the URL of one (a file of the app's, `asset:/...`, or one on the network, read as `fetch` reads it: the `network` capability applies). Text that names the family is laid out with it from then on, and text shown before again. Rejects with an `Error` when the URL does not load or the data is no font. Rust: `register_font(data) -> Answer<Result<String, String>>`, awaited in a task. Fonts the app ships are registered before the first frame instead ([Fonts](../docs/fonts.md#registering-a-font-while-the-app-runs)).
+Registers a font while the app runs and resolves with `{ family }`, its family name, for `fontFamily`: a font the app downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data, or the URL of one (a file of the app's, `asset:/...`, or one on the network, read as `fetch` reads it: the `network` capability applies). Text that names the family is laid out with it from then on, and text shown before again. When the `network` capability does not grant the URL, or a URL it redirects to, it rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"network"` and `resource` the URL refused, as `fetch` does; it rejects with an `Error` when the URL does not load or the data is no font. Rust: `register_font(data) -> Answer<Result<String, String>>`, awaited in a task. Fonts the app ships are registered before the first frame instead ([Fonts](../docs/fonts.md#registering-a-font-while-the-app-runs)).
 
 ## PanResponder
 
