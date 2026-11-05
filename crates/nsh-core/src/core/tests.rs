@@ -3105,6 +3105,81 @@ fn input_values_from_js_and_native_edits() {
     assert!(c.commit().is_none());
 }
 
+/// An input with `style`, in a row with `flex: 1` when `flex`, or alone, in a
+/// view its content sizes.
+fn hugged_input(style: &[(&str, StyleValue<'_>)], flex: bool) -> Core<FakeEngine> {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 7,
+            tag: Tag::View,
+        },
+        style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::View,
+        },
+        style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+        Op::Create {
+            id: 2,
+            tag: Tag::Input,
+        },
+        style_op(2, style),
+    ];
+    if flex {
+        ops.push(style_op(2, &[("flex", StyleValue::Number(1.0))]));
+    }
+    for (parent, child) in [(3, 2), (7, 3), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c
+}
+
+#[test]
+fn an_inputs_width_does_not_come_from_its_text() {
+    for flex in [false, true] {
+        let mut c = hugged_input(&[], flex);
+        // Twenty digits at 8pt, whatever it holds.
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(160.0));
+        c.input_changed(2, "x", 1);
+        // Typing does not move it, if its frame is sent at all.
+        let width = |batch: Option<MountBatch>| {
+            batch
+                .and_then(|b| frame_of(&b, 3))
+                .map_or(160.0, |f| f.size.width.0)
+        };
+        assert_eq!(width(c.commit()), 160.0);
+        c.input_changed(2, &"x".repeat(30), 2);
+        assert_eq!(width(c.commit()), 160.0);
+    }
+    // A multiline one wraps at that width: 30
+    // characters at 8pt in 160pt is two lines.
+    let mut c = hugged_input(&[], false);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    c.input_changed(2, &"x".repeat(30), 1);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 32.0))
+    );
+    // A width of its own stays.
+    let batch = hugged_input(&[("width", StyleValue::Number(90.0))], false)
+        .commit()
+        .unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(90.0));
+}
+
 #[test]
 fn multiline_inputs_grow_with_their_text() {
     let mut c = input_core();

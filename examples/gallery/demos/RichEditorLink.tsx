@@ -7,7 +7,7 @@ import { colors } from "../ui";
 import { IconButton } from "./RichEditorUi";
 
 const field =
-  "h-8 w-[220px] rounded-md border border-border bg-card px-2 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-ring";
+  "h-8 min-w-[220px] flex-1 rounded-md border border-border bg-card px-2 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-ring";
 
 /** What the link menu shows: nothing, a link's actions, or the address field. */
 export type LinkMode = "closed" | "link" | "edit";
