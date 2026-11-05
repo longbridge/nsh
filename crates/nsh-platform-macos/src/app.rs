@@ -729,6 +729,7 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
+    view.surface().standalone.set(true);
     window.setContentView(Some(&view.view()));
     window.center();
     if let Some(display) = options.display {
