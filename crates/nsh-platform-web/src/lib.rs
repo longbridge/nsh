@@ -968,7 +968,8 @@ fn send(f: impl FnOnce(&mut Running)) -> f64 {
     pump()
 }
 
-/// A display frame (`requestAnimationFrame`, `now` in ms): ticks the
+/// A display frame (`requestAnimationFrame`, `now` in ms), or one the page
+/// runs at a deadline while frames stop ([`nsh_deadline`]): ticks the
 /// native animations and runs JS's frame callbacks. Returns the pump
 /// delay.
 #[unsafe(no_mangle)]
@@ -991,6 +992,21 @@ pub extern "C" fn nsh_frame(now: f64) -> f64 {
         }
     });
     pump()
+}
+
+/// When the native animations next have something to end that the app
+/// hears of (an animation's `finished`): a time in ms on [`nsh_frame`]'s
+/// clock, given the time `now` on it, or -1 for nothing (none runs, or
+/// only ones that loop forever). While animation frames stop (a hidden
+/// tab), the page runs an [`nsh_frame`] by then (`Player.keepDeadline`).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_deadline(now: f64) -> f64 {
+    let at = APP.with(|a| {
+        let app = a.borrow();
+        // The animation graph's clock is in seconds.
+        app.as_ref()?.animation.deadline(now / 1000.0)
+    });
+    at.map_or(-1.0, |at| at * 1000.0)
 }
 
 /// An event on view `id`, named by its prop (`onPress`), with its payload

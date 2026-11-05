@@ -1923,7 +1923,7 @@ fn placeholder(
 fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
     let weak = Rc::downgrade(input);
     let mut frames = 0;
-    surface.add_frame_callback(move |_, _| {
+    surface.add_draw_callback(move |_, _| {
         frames += 1;
         let Some(input) = weak.upgrade() else {
             return false;

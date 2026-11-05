@@ -9,6 +9,11 @@ const REST_VELOCITY: f32 = 0.001;
 /// Decay stops when it moves less than this per millisecond.
 const DECAY_REST_SPEED: f32 = 0.0005;
 
+/// How often an animation whose end is not known in advance (a spring, a
+/// decay that bounces) is checked while no frames are drawn
+/// ([`Running::deadline`]): it settles within this of its real end.
+pub(crate) const CHECK_SECONDS: f64 = 0.1;
+
 /// One animation running on a value.
 #[derive(Debug, Clone)]
 pub(crate) struct Running {
@@ -60,6 +65,35 @@ impl Running {
                 Some(start),
             ) => (start + (delay_ms.max(0.0) + duration_ms.max(0.0)) as f64 / 1000.0).min(now),
             _ => now,
+        }
+    }
+
+    /// When this animation ends, as far as it can tell before it does
+    /// (seconds, the clock `now` is on): a timing's end; a decay without
+    /// bounds when it slows to rest; a spring or a bounded decay, which
+    /// bounce, [`CHECK_SECONDS`] from `now`. `now` before its first step,
+    /// which gives it its start.
+    pub(crate) fn deadline(&self, now: f64) -> f64 {
+        let Some(start) = self.start else { return now };
+        match self.driver {
+            Driver::Timing {
+                duration_ms,
+                delay_ms,
+                ..
+            } => start + (delay_ms.max(0.0) + duration_ms.max(0.0)) as f64 / 1000.0,
+            Driver::Decay {
+                deceleration,
+                clamp: None,
+                ..
+            } => {
+                let speed = (self.velocity / 1000.0).abs();
+                if speed < DECAY_REST_SPEED {
+                    return start;
+                }
+                let ms = (speed / DECAY_REST_SPEED).ln() / decay_rate(deceleration);
+                start + ms as f64 / 1000.0
+            }
+            Driver::Spring { .. } | Driver::Decay { .. } => now + CHECK_SECONDS,
         }
     }
 

@@ -7,7 +7,7 @@ name: Website
 # (`website/public/CNAME`). App Stories (/apps) come from the reviewed
 # catalog in longbridge/nsh-showcases, whose own workflow dispatches this one
 # after each merge and its weekly star refresh. Languages other than English
-# and Chinese come from huacnlee/nsh-website-translates, also at publish time.
+# and Chinese come from longbridge/nsh-website-translates, also at publish time.
 
 on:
   push:
@@ -167,7 +167,7 @@ jobs:
       - name: Take the machine translations
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          git clone --depth=1 https://github.com/huacnlee/nsh-website-translates website/translations
+          git clone --depth=1 https://github.com/longbridge/nsh-website-translates website/translations
           rm -rf website/translations/.git
 
       # The published site, after the tests of main's own build: main again
