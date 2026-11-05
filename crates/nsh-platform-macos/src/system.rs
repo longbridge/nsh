@@ -403,6 +403,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
         Command::Speech(command) => surface.control(|c| crate::speech::command(c, command)),
+        Command::Audio(command) => surface.control(|c| {
+            let base = surface.asset_base.borrow().clone();
+            crate::audio::command(&surface.audio, c, command, base.as_ref())
+        }),
         Command::Notification(command) => {
             surface.control(|c| crate::notifications::command(c, command))
         }

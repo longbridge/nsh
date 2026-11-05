@@ -467,7 +467,7 @@ fn initial_environment() -> Environment {
         file_requests: true,
         speech: true,
         notifications: true,
-        audio: false,
+        audio: true,
         web_input: true,
         ..Environment::default()
     }
