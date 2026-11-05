@@ -133,6 +133,18 @@ impl Installation {
                 self.executable.display()
             )));
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if fs::metadata(new.join(&self.executable))?
+                .permissions()
+                .mode()
+                & 0o111
+                == 0
+            {
+                return Err(Error::Install("the new app is not executable".into()));
+            }
+        }
         if cfg!(target_os = "macos") {
             let status = Command::new("/usr/bin/codesign")
                 .args(["--verify", "--deep", "--strict"])
@@ -379,6 +391,11 @@ mod tests {
         fs::create_dir_all(resources.join("assets")).unwrap();
         fs::write(resources.join("assets").join(crate::CONFIG_ASSET), CONFIG).unwrap();
         fs::write(&exe, version).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::write(
             resources.join("app.json"),
             serde_json::json!({ "id": id, "version": version }).to_string(),
@@ -544,6 +561,29 @@ mod tests {
         let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
         assert!(installation.install(&archive).is_err());
         assert_eq!(fs::read_to_string(&exe).unwrap(), "1.0.0");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_executable_update_leaves_the_old_app_intact() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, new_exe) = package(&build, name(), "com.example.app", "2.0.0");
+        sign(&new);
+        fs::set_permissions(new_exe, fs::Permissions::from_mode(0o644)).unwrap();
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        assert!(
+            installation
+                .install(&archive)
+                .unwrap_err()
+                .to_string()
+                .contains("not executable")
+        );
+        assert_eq!(version(&root), "1.0.0");
+        assert_eq!(fs::read_to_string(exe).unwrap(), "1.0.0");
     }
 
     #[test]
