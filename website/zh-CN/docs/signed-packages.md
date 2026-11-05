@@ -101,7 +101,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 | `--strip-debug` | 字节码中不保留行号和列号表：包更小，但报错调用栈里没有位置。 |
 | `--min-runtime <version>` | 能运行该包的最低运行时版本，例如 `0.2.0`（`nsh.json` 中的 `minRuntime`）。默认：本 CLI 的版本。见[哪些运行时能运行包](#哪些运行时能运行包)。 |
 
-凡是设备会拒绝的包，`nsh publish` 也拒绝签名：证书必须覆盖该 app id 和当前时间。
+凡是设备会拒绝的包，`nsh publish` 也拒绝签名：app id 必须是单独一级路径，且证书必须覆盖该 app id 和当前时间。
 
 ```text
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
@@ -198,7 +198,7 @@ valid: com.example.counter 1.0.0 (build 2), release key 3428d7136788c9ee, sha256
 1. 证书由受信任的根签名；
 2. 发布密钥未被吊销；
 3. 包由发布密钥签名；
-4. 证书覆盖该 app id 和签名时间；
+4. app id 是单独一级路径（不含 `/`、`\`、`:` 或 NUL，也不是 `.` 或 `..`：设备用它给包的目录命名），且证书覆盖该 app id 和签名时间；
 5. 包所需的最低运行时版本；
 6. 文件表与数据完全吻合，且每个文件都与其哈希一致；
 7. 包本身未被吊销；
