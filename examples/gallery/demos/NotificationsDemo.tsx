@@ -1,4 +1,4 @@
-import { Notifications, signal, Text } from "nsh";
+import { Notifications, signal } from "nsh";
 import { Badge, Button, Caption, Card, DemoPage, Row } from "../ui";
 
 /**
@@ -39,7 +39,7 @@ export function NotificationsDemo() {
               <Button label="Replace" variant="secondary" onPress={() => show("chat:ada", "Ada", "I saved you a seat.")} />
               <Button label="Remove" variant="ghost" onPress={() => Notifications.close("chat:ada")} />
             </Row>
-            <Caption>{last()}</Caption>
+            <Caption label={last()} />
           </Card>
         ),
         () => (
@@ -47,7 +47,7 @@ export function NotificationsDemo() {
             <Row>
               <Button label="Add one" onPress={() => setBadge(badge() + 1)} />
               <Button label="Clear" variant="ghost" onPress={() => setBadge(0)} />
-              <Text>{badge()}</Text>
+              <Badge label={String(badge())} />
             </Row>
           </Card>
         ),

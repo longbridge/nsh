@@ -1741,8 +1741,8 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 | macOS | 通知中心，需要已签名的应用包；`nsh run` 的非应用包宿主上为 `unavailable` | Dock，无需权限 |
 | iOS | 通知中心 | 主屏幕，需要权限 |
 | Android | 系统通知，Android 13 需要 `POST_NOTIFICATIONS`（`nsh package` 会为获得 `notifications` 能力的应用声明） | 没有可设置的数字：启动器会标记有通知显示的应用，数字随之后显示的通知一起传递 |
-| Windows | 暂不支持：`unavailable` | 暂不支持 |
-| Linux | 暂不支持：`unavailable` | 暂不支持 |
+| Windows | Toast 通知，除非用户在设置里关闭了应用的通知（即 `denied`）。Windows 没有授权弹窗，`requestPermission` 不会询问用户。嵌入其他应用的 surface 为 `unavailable` | 任务栏按钮上的数字，最多显示 `99+`；任务栏使用小按钮时不显示 |
+| Linux | 桌面的通知守护进程（`org.freedesktop.Notifications`）：运行时为 `granted`，不弹提示，否则为 `unavailable` | Unity launcher API，支持它的 Dock 才显示（Plasma、Ubuntu Dock、Dash to Dock），其他环境不显示 |
 | Web | `Notification`，需要浏览器允许页面直接显示（Android 上不行） | Badging API，仅限已安装的应用 |
 | 终端、GPUI | `unavailable` | 无 |
 
@@ -1752,7 +1752,7 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 ### Notifications.on
 
-`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
 
 ### Notifications.permission
 

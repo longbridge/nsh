@@ -1770,8 +1770,8 @@ Rust code calls `request_notification_permission`, `show_notification`, `close_n
 | macOS | The notification center, in a signed app bundle; `unavailable` in `nsh run`'s unbundled host | The Dock, without a permission |
 | iOS | The notification center | The home screen, with the permission |
 | Android | The system's, with `POST_NOTIFICATIONS` on Android 13 (`nsh package` declares it for apps granted `notifications`) | No count to set: launchers mark an app that has notifications showing, and the count goes with those shown after it |
-| Windows | Not yet: `unavailable` | Not yet |
-| Linux | Not yet: `unavailable` | Not yet |
+| Windows | A toast, shown unless the user turned the app's notifications off in Settings, which is `denied`. Windows has no prompt, so `requestPermission` asks nothing. A surface embedded in another app is `unavailable` | The count on the taskbar button, up to `99+`; not shown when the taskbar uses small buttons |
+| Linux | The desktop's notification daemon (`org.freedesktop.Notifications`): `granted` while one runs, with no prompt, `unavailable` otherwise | The Unity launcher API, on docks that read it (Plasma, Ubuntu's, Dash to Dock); elsewhere nothing shows |
 | Web | `Notification`, where the browser shows them from a page (not on Android) | The Badging API, in an installed app |
 | Terminal, GPUI | `unavailable` | None |
 
@@ -1786,7 +1786,8 @@ shows while the app is in front as it does behind it. Showing another with the s
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
 listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
 activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
-embedding app that has a notification center delegate keeps it, and its delegate gets the presses.
+embedding app that has a notification center delegate keeps it, and its delegate gets the presses. On Linux a press reaches
+only the running app: one left on screen after the app exits does nothing.
 
 ### Notifications.permission
 
