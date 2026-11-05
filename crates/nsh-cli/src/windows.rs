@@ -123,7 +123,7 @@ fn file_stem(name: &str) -> String {
 
 /// The development host's arguments for the app `entry`: its name
 /// (`--name`) and its icon (`--icon`), `nsh.json` `"icon"` made an `.ico`
-/// in `work` (`.nsh`), made again when the image is newer. A broken icon
+/// in `work` (`.nsh`). A broken icon
 /// warns and leaves the host's.
 pub(crate) fn host_args(entry: &Path, work: &Path) -> Vec<OsString> {
     let config = crate::package::read_config(entry).unwrap_or_default();
@@ -139,14 +139,10 @@ pub(crate) fn host_args(entry: &Path, work: &Path) -> Vec<OsString> {
     args
 }
 
-/// Writes `icon` as the `.ico` file `ico`, unless it is newer than `icon`.
+/// Writes the currently selected `icon` as the `.ico` file `ico`.
 fn host_icon(icon: &Path, ico: &Path) -> anyhow::Result<()> {
-    let modified = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
-    if let (Some(made), Some(source)) = (modified(ico), modified(icon))
-        && made >= source
-    {
-        return Ok(());
-    }
+    // Source timestamps cannot identify the selected image: switching to an
+    // older file (or restoring one) must also update the host's icon.
     let images = icon_images(icon)?;
     if let Some(dir) = ico.parent() {
         fs::create_dir_all(dir)?;
@@ -432,6 +428,39 @@ mod tests {
         assert_eq!(data.len(), 40 + 16 * 16 * 4 + 16 * 4);
         assert_eq!(&data[8..12], &32i32.to_le_bytes());
         assert_eq!(&data[40..44], &[3, 2, 1, 4]);
+    }
+
+    #[test]
+    fn host_icon_changes_when_the_config_selects_an_older_file() {
+        let dir = std::env::temp_dir().join(format!("nsh-icon-switch-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let red = dir.join("red.png");
+        let blue = dir.join("blue.png");
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 0, 0, 255]))
+            .save(&red)
+            .unwrap();
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([0, 0, 255, 255]))
+            .save(&blue)
+            .unwrap();
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        for source in [&red, &blue] {
+            fs::File::options()
+                .write(true)
+                .open(source)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(old))
+                .unwrap();
+        }
+        let ico = dir.join("icon.ico");
+        host_icon(&red, &ico).unwrap();
+        let first = fs::read(&ico).unwrap();
+        host_icon(&blue, &ico).unwrap();
+        let second = fs::read(&ico).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            first != second,
+            "selecting a different existing icon must regenerate the ICO"
+        );
     }
 
     #[test]
