@@ -15,17 +15,18 @@
   the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
   indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). On Linux, Windows and desktop Web, the indicator shows while scrolling or when the pointer reaches its draggable thumb;
   moving over content leaves its visibility and fade timer unchanged. macOS follows the system's scroll-bar
-  visibility preference (`WhenScrolling` suppresses content-hover reveal). Horizontal
-  views keep theirs with `scrollbar={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
-  desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
+  visibility preference (`WhenScrolling` suppresses content-hover reveal). `scrollbar={false}` hides the
+  indicator on either axis (the platforms' `scroll::config`; on the web `barShown`, in the desktop idiom): a mouse
+  without a horizontal wheel moves a horizontal view with Shift + wheel, with the vertical wheel where nothing
+  around it scrolls vertically (`scroll_target`), and with the keys. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
 - **Scroll bars of the app's own** (`nsh/base`'s `Scrollbar`, `docs/dev/components.md` "Scroll bars"): a view the
   app places that names a scroll view or a list (`scroll={ref}`), with its look (`class`, `thumbClass`) and `mode`;
   the target's own indicator off with `scrollbar={false}`. It follows the target through the core
   (`element::watch_scroll`: the offset every platform reports, the content size the layout sends), so it
   works on every backend, and scrolls it with `ScrollTo`. With an app theme (`Scrollbar.setTheme`) or a view's own
-  (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`,
-  which also hides the horizontal views' kept indicator on the desktops); `docs/dev/components.md` "Scroll bars".
+  (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`);
+  `docs/dev/components.md` "Scroll bars".
 - **Carousels** (`nsh/base`'s `Carousel`, `docs/dev/components.md` "Carousels"): a horizontal or vertical scroll view
   whose `snapToOffsets` are its slides' laid-out starts, with `disableIntervalMomentum`; the slide is read where the
   scroll comes to rest (`onScrollEnd`) and discrete changes are `ScrollTo`s.

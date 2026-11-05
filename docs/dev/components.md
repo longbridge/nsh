@@ -1353,7 +1353,7 @@ appends goes before it; out of what counts as the view's children (`first:`, `la
 its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
 range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
 waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
-`replaced` it, so the desktop backends' horizontal views do not keep theirs beside it. A new theme makes every bar
+`replaced` it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
 input in its parent, stacked with it, laid out at its frame and made again where the input moves. Its
