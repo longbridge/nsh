@@ -379,7 +379,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   fed the mount items' animation ops and scroll values, its finished animations reported (`animations_finished`); a
   step is quiet only when no animation that ends by itself runs;
 - a back (`Headless::back`, and the app's `Command::Back`) does what `nsh-platform-macos`'s `default_back` does: in the
-  newest modal, else the screen, the innermost stack that can go back pops its top screen (hidden in the model until
+  newest modal, else the screen, the innermost stack that can go back and is laid out with a size
+  (`nsh_core::navigation::shown_in_layout`) pops its top screen (hidden in the model until
   the app removes it, `onDismiss`) or asks it (`preventBack`: `onBackRequest`); else the newest modal gets
   `onRequestClose`, and `onDismiss` when it is `dismissible`;
 - dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else

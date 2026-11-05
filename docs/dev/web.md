@@ -682,6 +682,11 @@ browsers' touches into what phones report:
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
   which going back passes over (`history.back()` again) as if the app had been left from its first page. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
+  Only shown stacks count, for the entries and for what going back acts on (`stackShown`: in the tree, visible, and
+  laid out with a size, since `display: none`, a tab not selected, is laid out by the core at zero size, which
+  `checkVisibility` does not see: the rule of `nsh_core::navigation::shown_in_layout`, which every backend asks); a
+  stack's frame becoming empty or not (`op_f`) syncs the entries again (a view around a stack of its own size
+  becoming empty does not: the entries follow at the next push, pop or back).
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

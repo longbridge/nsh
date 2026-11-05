@@ -997,6 +997,11 @@ impl Nav {
     fn back_stack(&self, within: Option<&NshView>) -> Option<NodeId> {
         let wants = |st: &StackNav| {
             st.view.is_mapped()
+                && nsh_core::navigation::shown_in_layout(
+                    std::iter::successors(Some(st.view.clone()), NshView::parent_view)
+                        .filter(|v| v.parent_view().is_some())
+                        .map(|v| v.state().frame),
+                )
                 && within.is_none_or(|w| st.view.is_ancestor(w))
                 && st.screens.takes_back(|top| {
                     self.screens
