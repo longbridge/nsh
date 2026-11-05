@@ -127,6 +127,7 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
     demos: [
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
+      { name: "Updater", detail: "nsh/updater: ask for a newer version, download it, replace the app", icon: "system", screen: lazy(() => import("./demos/Updater").then((m) => m.UpdaterDemo)) },
       { name: "Notifications", detail: "Asking for the permission, a notification shown, replaced and pressed, the badge on the app's icon", icon: "spark", screen: lazy(() => import("./demos/NotificationsDemo").then((m) => m.NotificationsDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],

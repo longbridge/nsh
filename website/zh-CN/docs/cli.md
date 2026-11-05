@@ -242,6 +242,14 @@ nsh keygen <NAME>
 
 创建一对 Ed25519 密钥：`<NAME>.secret` 和 `<NAME>.pub`（例如 `nsh keygen keys/root`）。根密钥的 `.secret` 应离线保存；应用信任的是它的 `.pub`。
 
+### nsh update-manifest
+
+```sh
+nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+```
+
+根据各平台 `nsh package` 产出的压缩包写出 `latest.json`（加 `--key` 时还有 `latest.json.sig`），详见[应用更新](/zh-CN/docs/app-updates)。
+
 ### nsh certify
 
 ```sh

@@ -59,6 +59,7 @@ jobs:
               - "crates/nsh-js/**"
               - "crates/nsh-macros/**"
               - "crates/nsh-package/**"
+              - "crates/nsh-updater/**"
               - "crates/nsh-testing/**"
               - "tests/compat/**"
               - "examples/counter/**"
