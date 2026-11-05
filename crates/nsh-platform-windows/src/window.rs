@@ -104,7 +104,7 @@ thread_local! {
 /// The dispatcher window of the main thread ([`invoke`]).
 static DISPATCHER: AtomicIsize = AtomicIsize::new(0);
 
-fn instance() -> HINSTANCE {
+pub(crate) fn instance() -> HINSTANCE {
     // SAFETY: the module handle of this executable.
     unsafe { GetModuleHandleW(None) }
         .map(|m| HINSTANCE(m.0))
@@ -595,10 +595,22 @@ fn handle(
         crate::notifications::button_created(surface);
         return None;
     }
+    if data.top_level && msg == crate::tray::taskbar_created() {
+        crate::tray::readd(hwnd);
+        return None;
+    }
     match msg {
         WM_NSH_WAKE => surface.drain(),
         WM_NSH_TICK => surface.tick(),
         WM_NSH_MENU => crate::chrome::show_popup(surface),
+        crate::tray::WM_NSH_TRAY => {
+            crate::tray::message(surface, hwnd, wparam, lparam);
+            return Some(LRESULT(0));
+        }
+        WM_HOTKEY => {
+            crate::global_shortcut::pressed(hwnd, wparam);
+            return Some(LRESULT(0));
+        }
         WM_NCCALCSIZE => return crate::chrome::nc_calc_size(surface, hwnd, wparam, lparam),
         WM_NCHITTEST if data.top_level => {
             return crate::chrome::nc_hit_test(surface, hwnd, lparam);
@@ -654,6 +666,7 @@ fn handle(
             };
             sync_size(surface, hwnd);
             crate::chrome::dpi_changed(surface);
+            crate::tray::refresh(hwnd);
         }
         WM_GETMINMAXINFO => {
             // SAFETY: `lparam` is the window's MINMAXINFO.
@@ -872,6 +885,8 @@ fn handle(
         // An embedded surface's: its root window's ([`observe_root`]).
         WM_NSH_ROOT => crate::system::lifecycle_changed(surface),
         WM_DESTROY => {
+            crate::tray::destroyed(hwnd);
+            crate::global_shortcut::destroyed(hwnd);
             surface.stop();
             surface.set_hwnd(HWND::default());
         }

@@ -397,10 +397,10 @@ interface TrayModule {
 
 | Option | Description |
 | --- | --- |
-| `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS an SVG is a template drawn in the menu bar's text color. |
+| `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
 | `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
 | `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
-| `onClick` | Called when the icon is clicked with the primary button. |
+| `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too). |
 
 Call `set` again to change it; inside an `effect` it follows the signals it reads.
 
@@ -435,6 +435,8 @@ interface GlobalShortcutModule {
 A global shortcut reaches the app whichever app has the keyboard. `register` takes a keystroke written as a menu item's `shortcut` (`"mod+shift+k"`) and resolves with whether the system took it: `false` when another app holds it, or off desktops. Registering a keystroke again replaces its function.
 
 On macOS they ask the user for no permission. A letter is the key that types it on the keyboard layout at registration, so `k` stays `k` on Dvorak.
+
+On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
 
 On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
 

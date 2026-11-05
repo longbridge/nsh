@@ -171,6 +171,16 @@ pub(crate) fn system_dark() -> bool {
     ) == Some(0)
 }
 
+/// True when the taskbar is dark (Settings > Personalization > Colors,
+/// "Windows mode"), which the tray's template icons are painted for.
+pub(crate) fn taskbar_dark() -> bool {
+    reg_dword(
+        HKEY_CURRENT_USER,
+        w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+        w!("SystemUsesLightTheme"),
+    ) != Some(1)
+}
+
 /// True when the surface draws in its dark appearance. The environment is
 /// kept current by this module, so drawing never reads the registry.
 pub(crate) fn dark(surface: &Surface) -> bool {
@@ -201,6 +211,8 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
 pub(crate) fn settings_changed(surface: &Rc<Surface>) {
     refresh_accent();
     update(surface, settings());
+    // The taskbar's colors may have changed: a template tray icon follows.
+    crate::tray::refresh(surface.hwnd());
     // The accent may have changed without the environment.
     surface.invalidate();
 }

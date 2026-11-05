@@ -363,10 +363,10 @@ interface TrayModule {
 
 | 选项 | 说明 |
 | --- | --- |
-| `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 上 SVG 是模板图标，用菜单栏的文字颜色绘制。 |
+| `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
 | `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
 | `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
-| `onClick` | 左键点击图标时调用。 |
+| `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用）。 |
 
 再次调用 `set` 即可修改；放在 `effect` 里时会跟随它读取的 signal 更新。
 
@@ -401,6 +401,8 @@ interface GlobalShortcutModule {
 全局快捷键不论哪个应用持有键盘都会送到本应用。`register` 的按键写法与菜单项的 `shortcut` 相同（`"mod+shift+k"`），返回系统是否接受：被其他应用占用、或不在桌面平台时为 `false`。同一按键再次注册会替换回调。
 
 在 macOS 上不需要用户授予权限。字母对应注册时键盘布局上输入该字母的键，所以 Dvorak 布局下 `k` 仍是 `k`。
+
+在 Windows 上一个按键只属于一个应用：已被其他应用占用或由系统保留（Win+L）时返回 `false`。按住不放只触发一次。
 
 在 Linux 上通过桌面 portal（`org.freedesktop.portal.GlobalShortcuts`）注册，这是 Wayland 下唯一的方式。按键只是建议值：桌面可能请用户确认或改选其他按键。Hyprland 在自己的配置里绑定，按应用 id 和小写的按键名：`bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`。
 
