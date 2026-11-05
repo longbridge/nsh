@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar.astro';
 import Toc, { type Heading } from '../components/Toc.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import { EDIT_BASE, type Lang } from '../lib/site';
-import { chromeLang, isMachine, label, machineLocales, ui } from '../lib/locales';
+import { chromeLang, direction, isMachine, label, machineLocales, ui } from '../lib/locales';
 import { SECTIONS, pages, type Page } from '../lib/sections';
 
 export interface Props {
@@ -52,7 +52,7 @@ const nextLabel = machine ? ui(locale, 'next') : t.next;
 const sectionOf = (p: Page) => label(SECTIONS.find((s) => s.id === p.section)!.label, locale);
 ---
 
-<BaseLayout title={page.title} description={page.description} lang={machine && !page.translated ? 'en' : locale} alternates={alternates} robots={machine && !page.translated ? 'noindex' : undefined}>
+<BaseLayout title={page.title} description={page.description} lang={machine && !page.translated ? 'en' : locale} dir={machine && !page.translated ? 'ltr' : direction(locale)} alternates={alternates} robots={machine && !page.translated ? 'noindex' : undefined}>
   <Nav lang={lang} locale={locale} currentPath={Astro.url.pathname} langHref={langHref} languages={languages.map((l) => ({ code: l.code, name: l.name, href: l.page?.href }))} />
 
   <div class="docs-layout">
@@ -89,13 +89,13 @@ const sectionOf = (p: Page) => label(SECTIONS.find((s) => s.id === p.section)!.l
         <nav class="doc-pager" aria-label={t.pager}>
           {prev ? (
             <a class="doc-pager__link" href={prev.href} rel="prev">
-              <span class="doc-pager__label">← {prevLabel}{prev.section !== page.section && ` · ${sectionOf(prev)}`}</span>
+              <span class="doc-pager__label"><span class="doc-pager__arrow" aria-hidden="true">←</span> {prevLabel}{prev.section !== page.section && ` · ${sectionOf(prev)}`}</span>
               <span class="doc-pager__title">{prev.title}</span>
             </a>
           ) : <span />}
           {next && (
             <a class="doc-pager__link doc-pager__link--next" href={next.href} rel="next">
-              <span class="doc-pager__label">{next.section !== page.section && `${sectionOf(next)} · `}{nextLabel} →</span>
+              <span class="doc-pager__label">{next.section !== page.section && `${sectionOf(next)} · `}{nextLabel} <span class="doc-pager__arrow" aria-hidden="true">→</span></span>
               <span class="doc-pager__title">{next.title}</span>
             </a>
           )}

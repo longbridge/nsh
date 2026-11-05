@@ -1134,7 +1134,7 @@ fn wait_for_frame(surface: &Rc<Surface>, view: &NshView) {
         return;
     }
     let weak = Weak::from_retained(&Retained::from(&**view as &ViewObj));
-    surface.add_frame_callback(move |surface, _| {
+    surface.add_draw_callback(move |surface, _| {
         if let Some(view) = weak.load().and_then(|v| NshView::from_ns(&v))
             && view.state().image.as_ref().is_some_and(|i| i.pending)
         {

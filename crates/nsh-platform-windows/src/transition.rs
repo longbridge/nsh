@@ -34,7 +34,11 @@ use nsh_core::{
     transition::{self, Extra},
 };
 
-use crate::{geom::Mat4, surface::Surface, view::NshView};
+use crate::{
+    geom::Mat4,
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// `m` followed by `extra` (in the view's local space: like `m`'s own
 /// entries, it applies to points before them).
@@ -215,9 +219,10 @@ fn ancestor_dying(view: &NshView) -> bool {
     false
 }
 
-/// One frame of `view`'s animations at `now` (ms): false once nothing is
-/// left to animate (the frame client is dropped).
-fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
+/// One frame of `view`'s animations at `now` (ms): what it has left, its
+/// next end in seconds; done once nothing is left to animate (the frame
+/// client is dropped).
+fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Next {
     if !view.attached() {
         // Out of the tree: a deleted subtree stops for good (dropping the
         // client releases it); a view only moved out resumes when it is
@@ -233,7 +238,7 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
             if let Some(live) = view.state_mut().live.as_deref_mut() {
                 live.set_ticking(false);
             }
-            return false;
+            return Next::Done;
         }
     }
     // A view deleted inside a deleted subtree leaves with its ancestor
@@ -242,22 +247,22 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
     let starting_out = view.state().live.as_ref().is_some_and(|l| l.leaving());
     let inherited = starting_out && ancestor_dying(view);
 
-    let step = {
+    let (step, deadline) = {
         let mut s = view.state_mut();
         let s = &mut *s;
         let Some(mut live) = s.live.take() else {
-            return false;
+            return Next::Done;
         };
         if inherited {
             live.leave_with_ancestor();
         }
-        // Finishing clears `ticking`: returning false drops the frame
-        // client.
+        // Finishing clears `ticking`: being done drops the frame client.
         let step = live.step(now, &mut s.frame, &mut s.style);
+        let deadline = live.deadline(now);
         if !live.idle() {
             s.live = Some(live);
         }
-        step
+        (step, deadline)
     };
 
     if step.removed {
@@ -267,10 +272,15 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
             Ok(mounter) => mounter.detach(surface, view),
             Err(_) => view.unparent(),
         }
-        return false;
+        return Next::Done;
     }
     view.moved();
-    !step.finished
+    match deadline {
+        _ if step.finished => Next::Done,
+        Some(ms) => Next::At(ms / 1000.0),
+        // Only keyframes repeating for good: they only draw.
+        None => Next::Frame,
+    }
 }
 
 #[cfg(test)]

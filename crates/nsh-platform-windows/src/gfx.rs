@@ -30,8 +30,10 @@ use windows::{
             },
             Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-                D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+                D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+                ID3D11Device,
             },
             DirectWrite::{DWRITE_FACTORY_TYPE_SHARED, DWriteCreateFactory, IDWriteFactory2},
             Dxgi::{
@@ -119,7 +121,17 @@ impl Gfx {
 
 fn create_d3d(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
     let mut device = None;
-    let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+    // NSH draws with a device from the thread that made it (video decoding,
+    // which also uses it, takes Direct3D's multithread lock). The worker
+    // threads drivers otherwise start for each device (about 28 on NVIDIA,
+    // 15 on AMD) take that submission off the drawing thread, but here they
+    // only contend with the UI threads, costing CPU and, with a device per
+    // thread, frames (docs/dev/windows.md "Devices"). The flag changes no
+    // thread safety: calls stay valid from any thread, the driver just does
+    // its work on the calling one.
+    let base = D3D11_CREATE_DEVICE_BGRA_SUPPORT
+        | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+    let flags = base | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
     // SAFETY: out pointer to a local; default feature levels.
     let video = unsafe {
         D3D11CreateDevice(
@@ -142,7 +154,7 @@ fn create_d3d(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
                 None,
                 driver,
                 Default::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                base,
                 None,
                 D3D11_SDK_VERSION,
                 Some(&mut device),

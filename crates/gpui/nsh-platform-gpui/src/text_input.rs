@@ -1647,7 +1647,9 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
     }
     let view = view.clone();
     let mut frames = 0;
-    surface.on_frame(move |surface, _| {
+    // The batch that inserts it ticks the surface even while no frames are
+    // drawn ([`Surface::deadline`]).
+    surface.on_draw(move |surface, _| {
         frames += 1;
         if view.attached() {
             set_focus(surface, Some(&view));

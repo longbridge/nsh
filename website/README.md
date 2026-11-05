@@ -29,11 +29,15 @@ Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
 This repository holds English and Chinese only, and a change updates only those.
 Every other language is machine translated in
-[huacnlee/nsh-website-translates](https://github.com/huacnlee/nsh-website-translates),
+[longbridge/nsh-website-translates](https://github.com/longbridge/nsh-website-translates),
 which also lists the languages and runs the translation. The published root clones
 it to `translations/` (git-ignored); older versions, pull requests and local builds
 do without. Each translated page says it is a machine translation and links to the
 English; a page with no translation shows the English, not indexed.
+A language the registry marks `"dir": "rtl"` (Arabic) is laid out mirrored:
+the site's styles use logical properties (`margin-inline-start`,
+`inset-inline-end`, `text-align: start`), so keep to them; code, demos and
+keys stay left to right.
 
 Translation pull requests are not accepted: a fix goes to the English page.
 

@@ -4,11 +4,16 @@ import type { Lang } from './site';
 
 /**
  * Languages beyond English and Chinese are translated by machine and kept in
- * huacnlee/nsh-website-translates: a published root's build clones it to
+ * longbridge/nsh-website-translates: a published root's build clones it to
  * `website/translations/`. Without that directory (pull requests, older
  * versions, local builds) they are simply absent.
  */
-export interface MachineLocale { code: string; name: string }
+export interface MachineLocale {
+  code: string;
+  name: string;
+  /** `rtl` for a language written right to left (Arabic); left to right when absent. */
+  dir?: 'ltr' | 'rtl';
+}
 
 const ROOT = join(process.cwd(), 'translations');
 const REGISTRY = join(ROOT, 'locales.json');
@@ -16,6 +21,11 @@ const REGISTRY = join(ROOT, 'locales.json');
 export const machineLocales: MachineLocale[] = existsSync(REGISTRY)
   ? (JSON.parse(readFileSync(REGISTRY, 'utf8')) as MachineLocale[]).filter((l) => existsSync(join(ROOT, l.code, 'ui.json')))
   : [];
+
+/** The direction a page in `locale` is written in. */
+export function direction(locale: string): 'ltr' | 'rtl' {
+  return machineLocales.find((l) => l.code === locale)?.dir === 'rtl' ? 'rtl' : 'ltr';
+}
 
 export function isMachine(locale: string): boolean {
   return locale !== 'en' && locale !== 'zh-CN';
