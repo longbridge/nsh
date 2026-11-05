@@ -349,6 +349,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // The Dock shows apps, not windows (an app leaves it with
+        // `LSUIElement`).
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let (Some(window), Some(mtm)) = (window(surface), MainThreadMarker::new()) {
                 window.deminiaturize(None);

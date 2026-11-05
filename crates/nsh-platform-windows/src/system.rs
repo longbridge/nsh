@@ -179,7 +179,9 @@ pub(crate) fn dark(surface: &Surface) -> bool {
 
 /// The color behind the app's views (the default theme's background).
 pub(crate) fn window_background(surface: &Surface) -> Color {
-    if dark(surface) {
+    if surface.transparent() {
+        Color::TRANSPARENT
+    } else if dark(surface) {
         Color(0x0a0a_0aff)
     } else {
         Color(0xffff_ffff)

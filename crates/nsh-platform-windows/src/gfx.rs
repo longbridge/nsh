@@ -198,11 +198,25 @@ pub(crate) struct SwapChain {
     last: Option<Vec<RECT>>,
     /// A frame was presented since the buffers were made or resized.
     shown: bool,
+    /// A transparent window's: composed, premultiplied alpha.
+    premultiplied: bool,
 }
 
 impl SwapChain {
-    /// A swap chain for `hwnd` of `size` pixels.
-    pub(crate) fn new(gfx: &Gfx, hwnd: HWND, size: (u32, u32)) -> Result<SwapChain> {
+    /// A swap chain for `hwnd` of `size` pixels; for a transparent window,
+    /// a premultiplied one shown by its `composition` instead.
+    pub(crate) fn new(
+        gfx: &Gfx,
+        hwnd: HWND,
+        size: (u32, u32),
+        composition: Option<&crate::compose::Composition>,
+    ) -> Result<SwapChain> {
+        if let Some(composition) = composition {
+            let size = (size.0.max(1), size.1.max(1));
+            let swap = crate::compose::composition_swap_chain(gfx, size)?;
+            composition.set_base(&swap)?;
+            return Ok(SwapChain::made(gfx, swap, size, true));
+        }
         // SAFETY: plain factory creation.
         let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))? };
         let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -224,19 +238,30 @@ impl SwapChain {
         };
         // SAFETY: `hwnd` is a live window of this thread; `desc` is valid.
         let swap = unsafe { factory.CreateSwapChainForHwnd(&gfx.d3d, hwnd, &desc, None, None)? };
+        Ok(SwapChain::made(gfx, swap, size, false))
+    }
+
+    fn made(gfx: &Gfx, swap: IDXGISwapChain1, size: (u32, u32), premultiplied: bool) -> SwapChain {
         // One frame queued at most: input is drawn by the next vblank.
         if let Ok(device) = gfx.d3d.cast::<IDXGIDevice1>() {
             // SAFETY: a COM call on a live device.
             let _ = unsafe { device.SetMaximumFrameLatency(1) };
         }
-        Ok(SwapChain {
+        SwapChain {
             swap,
             target: None,
             size: (size.0.max(1), size.1.max(1)),
             generation: generation(),
             last: None,
             shown: false,
-        })
+            premultiplied,
+        }
+    }
+
+    /// A transparent window's (composed, premultiplied alpha).
+    #[cfg(test)]
+    pub(crate) fn premultiplied(&self) -> bool {
+        self.premultiplied
     }
 
     /// The window shows a frame of these buffers, which stays until the next.
@@ -282,8 +307,10 @@ impl SwapChain {
         // SAFETY: COM calls on live objects; buffer 0 exists.
         let bitmap = unsafe {
             let surface: IDXGISurface = self.swap.GetBuffer(0)?;
-            gfx.dc
-                .CreateBitmapFromDxgiSurface(&surface, Some(&target_properties(scale, false)))?
+            gfx.dc.CreateBitmapFromDxgiSurface(
+                &surface,
+                Some(&target_properties(scale, self.premultiplied)),
+            )?
         };
         self.target = Some(bitmap.clone());
         Ok(bitmap)

@@ -801,6 +801,9 @@ pub enum DesktopCommand {
     SetFrame(WindowFrame),
     /// The window's level (a floating window stays above normal ones).
     SetLevel(WindowLevel),
+    /// Keeps the window out of the taskbar (`true`) or puts it back
+    /// (Windows; other platforms leave it to the system).
+    SetSkipTaskbar(bool),
     /// Brings the window to the front of its level and focuses it (the app
     /// activates).
     OrderFront,

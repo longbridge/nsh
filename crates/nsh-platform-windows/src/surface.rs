@@ -196,6 +196,10 @@ pub(crate) struct Surface {
     placed: RefCell<Vec<(Rc<dyn Hosted>, RECT)>>,
     /// The window's composition while it has web views (each holds it).
     composition: RefCell<Weak<crate::compose::Composition>>,
+    /// A transparent window's composition, made with the window and kept
+    /// with it: its swap chain is a visual at the bottom of the tree
+    /// ([`AppOptions::transparent`](crate::AppOptions::transparent)).
+    pub(crate) base: RefCell<Option<Rc<crate::compose::Composition>>>,
     /// Composed items (web views) drawn by the last frame.
     composed: RefCell<Vec<Rc<dyn Hosted>>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
@@ -261,6 +265,7 @@ impl Surface {
             keymap: Default::default(),
             placed: RefCell::default(),
             composition: RefCell::default(),
+            base: RefCell::default(),
             composed: RefCell::default(),
             on_resized: RefCell::default(),
             resize_late: Cell::new(false),
@@ -640,6 +645,11 @@ impl Surface {
         *placed = next;
     }
 
+    /// The window is see-through where the app draws nothing.
+    pub(crate) fn transparent(&self) -> bool {
+        self.base.borrow().is_some()
+    }
+
     /// The window's composition, if it has web views.
     pub(crate) fn composition(&self) -> Option<Rc<crate::compose::Composition>> {
         self.composition.borrow().upgrade()
@@ -648,6 +658,11 @@ impl Surface {
     /// The window's composition, made for a web view if there is none.
     pub(crate) fn compose(&self) -> windows::core::Result<Rc<crate::compose::Composition>> {
         if let Some(c) = self.composition() {
+            return Ok(c);
+        }
+        // A transparent window's own: its swap chain is already a visual.
+        if let Some(c) = self.base.borrow().clone() {
+            *self.composition.borrow_mut() = Rc::downgrade(&c);
             return Ok(c);
         }
         let hwnd = self.hwnd();
@@ -968,7 +983,7 @@ mod tests {
         let saved = cursor_info();
         let surface = Surface::new(Environment::default());
         let hwnd =
-            crate::window::create(&surface, "NSH cursor regression", (320, 240), None).unwrap();
+            crate::window::create(&surface, "NSH cursor regression", (320, 240), None, false).unwrap();
         let mut desktop = Desktop {
             hwnd,
             saved,
