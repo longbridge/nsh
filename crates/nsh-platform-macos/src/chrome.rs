@@ -56,12 +56,11 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSImage, NSMenu,
-    NSMenuItem, NSNormalWindowLevel, NSRunningApplication, NSScreen, NSToolbar, NSWindow,
-    NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility,
-    NSWindowToolbarStyle,
+    NSApplication, NSEvent, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
+    NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton,
+    NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
-use objc2_core_graphics::{CGImage, kCGDesktopIconWindowLevel};
+use objc2_core_graphics::CGImage;
 use objc2_foundation::{
     NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };

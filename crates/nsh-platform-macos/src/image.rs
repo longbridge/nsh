@@ -487,8 +487,9 @@ fn in_background(f: impl FnOnce() + Send + 'static) {
     .exec_async(f);
 }
 
-/// Runs `f` on the main queue.
-fn on_main_queue(f: impl FnOnce() + Send + 'static) {
+/// Runs `f` on the main queue (also [`AppContext::run`](crate::AppContext::run),
+/// which a host uses to come back to the app's thread).
+pub(crate) fn on_main_queue(f: impl FnOnce() + Send + 'static) {
     DispatchQueue::main().exec_async(f);
 }
 

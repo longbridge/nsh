@@ -1,6 +1,7 @@
 //! `AppView` (one surface as a GTK widget, for embedding) and the
 //! standalone app ([`run_app`]: one `AppView` filling a window;
-//! [`run_app_with`]: the same, and the panels its setup hook opens).
+//! [`run_app_with`]: the same, handing its setup hook the [`AppContext`]
+//! that opens the app's panels).
 
 use std::{
     cell::RefCell,
@@ -12,6 +13,7 @@ use std::{
 
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{
+    desktop::{PanelError, PanelOptions},
     geometry::px,
     platform::{Appearance, Locale},
 };
@@ -411,32 +413,76 @@ fn initial_environment() -> Environment {
 /// belong to the main loop.
 pub(crate) static APP_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
+/// The app's thread, as handed to [`run_app_with`]'s setup hook: panels are
+/// opened on it ([`open_panel`](Self::open_panel)), and
+/// [`run`](Self::run) brings work back to it later.
+///
+/// It names no state of its own, and it is `Copy`: the host may keep it
+/// past the hook (for a shortcut that opens a panel, say). The thread is
+/// the one that runs the GTK main loop, where GTK's windows live, which
+/// [`run_app_with`] records for [`Panel::open`] to check.
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    /// Nothing, and private: the field keeps the context from being made
+    /// anywhere but in this module, on the thread that runs the main loop.
+    _private: (),
+}
+
+impl AppContext {
+    /// Opens a panel window on the app's thread ([`Panel::open`]):
+    /// `options` is the window's look, and `app` and `source` the app it
+    /// runs and where that app comes from.
+    ///
+    /// # Errors
+    ///
+    /// [`PanelError::WrongThread`] when this is not the thread that runs
+    /// the app's GTK main loop, and [`PanelError::Invalid`] when the
+    /// panel's size is not positive.
+    pub fn open_panel(
+        &self,
+        options: PanelOptions,
+        app: AppOptions,
+        source: AppSource,
+    ) -> Result<Panel, PanelError> {
+        Panel::open(options, app, source)
+    }
+
+    /// Runs `f` on the app's thread, where GTK's windows live: queued to
+    /// its loop ([`gtk4::glib::MainContext::invoke`]), it returns at once,
+    /// and `f` may run before it does when this is already that thread. An
+    /// app's call or post comes in on the engine thread, so this brings
+    /// the work it asks for (opening a panel, say) back to the main loop.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) {
+        glib::MainContext::default().invoke(f);
+    }
+}
+
 /// Runs `source` in a window until it is closed.
 ///
 /// [`run_app_with`] is the same, with a setup hook that opens the app's
-/// panels.
+/// panels through the app's [`AppContext`].
 pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
-    run_app_with(source, options, |_| Vec::new())
+    run_app_with(source, options, |_| {})
 }
 
-/// Runs `source` in a window until it is closed, and keeps the panels
-/// `setup` makes (`docs/dev/linux.md`).
+/// Runs `source` in a window until it is closed, and hands `setup` the
+/// app's [`AppContext`], which opens the app's panels
+/// (`docs/dev/linux.md`).
 ///
-/// A panel is created on the thread that runs the app's GTK main loop, from
-/// this setup hook: `setup` runs once, in the app's window, when GTK has
-/// started (its display is open) — the thread that runs the main loop, where
-/// [`crate::Panel::open`] may be called and anywhere else returns
-/// [`crate::PanelError::WrongThread`]. [`Panel`] is not `Send`, so the
-/// panels `setup` returns stay on that thread.
+/// The hook runs once, at the start of `connect_activate`, when GTK has
+/// started (its display is open): on the thread that runs the main loop,
+/// where [`AppContext::open_panel`] may open a panel and anywhere else
+/// returns [`PanelError::WrongThread`] ([`Panel`] is not `Send`).
 ///
-/// The window keeps those panels: they live as long as it, and dropping them
-/// (when it is destroyed) closes them and stops their apps, as dropping a
-/// [`Panel`] does. The host shows them itself ([`crate::Panel::show`], in
-/// `setup` or later), so a panel that is not shown stays hidden.
+/// The hook gives nothing back, so the host keeps the panels it opens and
+/// `run_app_with` keeps none: a panel lives as long as its [`Panel`] does,
+/// and dropping it (or closing its window) stops its app.
+/// [`AppContext::run`] brings work back to the main loop later (opening a
+/// panel from a shortcut, say), as the setup hook cannot run again.
 pub fn run_app_with(
     source: AppSource,
     options: AppOptions,
-    setup: impl FnOnce(&AppOptions) -> Vec<Panel> + Send + 'static,
+    setup: impl FnOnce(&AppContext) + Send + 'static,
 ) -> glib::ExitCode {
     // Before GTK starts: every widget of the app is made on this thread, so
     // a panel opened anywhere else is a mistake (`Panel::open` checks).
@@ -456,12 +502,11 @@ pub fn run_app_with(
         let Some(source) = source.borrow_mut().take() else {
             return;
         };
-        // GTK is up (the display is open): the panels may open, and their
-        // apps start beside the window's.
-        let panels = match setup.borrow_mut().take() {
-            Some(setup) => setup(&options),
-            None => Vec::new(),
-        };
+        // GTK is up (the display is open): the setup hook may open panels,
+        // whose apps start beside the window's.
+        if let Some(setup) = setup.borrow_mut().take() {
+            setup(&AppContext { _private: () });
+        }
         let window = gtk::ApplicationWindow::builder()
             .application(app)
             .title(&options.title)
@@ -477,10 +522,8 @@ pub fn run_app_with(
             AppSource::DevServer(url) => crate::dev::start(&view, url),
         }
         install_shortcuts(app, &window);
-        // The window keeps the view (and its engine) alive, and the panels
-        // the setup hook opened, which go with it.
+        // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
-        keep_panels(&window, panels);
         window.present();
     });
     // GTK must not parse the host's own arguments.
@@ -547,18 +590,6 @@ fn unsafe_keep(window: &gtk::ApplicationWindow, view: Rc<AppView>) {
     window.connect_destroy(move |_| {
         if let Some(view) = cell.borrow_mut().take() {
             view.stop();
-        }
-    });
-}
-
-/// Ties the panels [`run_app_with`]'s setup hook opened to `window`'s
-/// lifetime: the window keeps them, and destroying it drops them (which
-/// closes their windows and stops their apps).
-fn keep_panels(window: &gtk::ApplicationWindow, panels: Vec<Panel>) {
-    let cell = RefCell::new(Some(panels));
-    window.connect_destroy(move |_| {
-        if let Some(panels) = cell.borrow_mut().take() {
-            drop(panels);
         }
     });
 }

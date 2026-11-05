@@ -11,8 +11,9 @@
 //! - Native animations run on the root's frame clock ([`animation`]).
 //!
 //! [`AppView`] is one surface as a widget (for embedding); [`run_app`]
-//! opens one in a window, and [`run_app_with`] the panels its setup hook
-//! makes beside it ([`Panel`]). Off Linux this crate is empty.
+//! opens one in a window, and [`run_app_with`] hands its setup hook an
+//! [`AppContext`] to open the app's panels beside it ([`Panel`]). Off Linux
+//! this crate is empty.
 
 #![cfg(target_os = "linux")]
 
@@ -61,7 +62,10 @@ pub use nsh_engine::{
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, run_app, run_app_with, set_components, set_ui_sets},
+    app::{
+        AppContext, AppOptions, AppSource, AppView, run_app, run_app_with, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
     panel::{Panel, PanelError, PanelOptions, WindowLevel},

@@ -1,16 +1,20 @@
 //! Runs the panel example: a main window and the panel window beside it.
 //!
-//! The panel is opened in `run_app_with`'s setup hook, which runs on the
-//! thread that runs the app's message loop (the main thread on macOS and
-//! Linux, the app thread `run_app` spawns on Windows). A panel is not `Send`,
-//! so it cannot be opened first and moved to that thread: the hook creates
-//! it there, and the host keeps it until the app ends.
+//! The panel is opened in `run_app_with`'s setup hook, which hands the host
+//! an `AppContext` for the thread that runs the app's message loop (the
+//! main thread on macOS and Linux, the app thread `run_app` spawns on
+//! Windows). A panel is not `Send`, so it cannot be opened first and moved
+//! to that thread: the host opens it through the context and keeps it until
+//! the app ends, and a later `AppContext::run` brings more work back to the
+//! loop.
 //!
 //! Components run on the engine thread and cannot open windows, so
 //! `nsh run examples/panel` shows only the main window: its root component
 //! is `PanelApp`. Run this binary for the panel: `cargo run -p panel-native`.
 
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+use std::cell::RefCell;
 
 use nsh_core::geometry::{Points, Size};
 use nsh_engine::{HostChannel, JsonValue};
@@ -20,6 +24,13 @@ use nsh_platform_linux as platform;
 use nsh_platform_macos as platform;
 #[cfg(target_os = "windows")]
 use nsh_platform_windows as platform;
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+thread_local! {
+    /// The host's handle on the panel: dropping it closes the panel's
+    /// window, so it is kept for as long as the app runs.
+    static PANEL: RefCell<Option<platform::Panel>> = const { RefCell::new(None) };
+}
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn main() -> impl std::process::Termination {
@@ -33,37 +44,37 @@ fn main() -> impl std::process::Termination {
             size: (720, 480),
             ..Default::default()
         },
-        |_| match open_panel(app_id) {
+        |context| match open_panel(context, app_id) {
             Ok(panel) => {
-                // The host keeps the panels the hook returns; one that is
-                // never shown stays hidden.
+                // A panel opens hidden: show it, then keep the host's only
+                // handle here (the hook gives nothing back).
                 panel.show();
-                vec![panel]
+                PANEL.with(|slot| *slot.borrow_mut() = Some(panel));
             }
-            Err(error) => {
-                eprintln!("can't open the panel window: {error}");
-                Vec::new()
-            }
+            Err(error) => eprintln!("can't open the panel window: {error}"),
         },
     )
 }
 
-/// Opens the example's panel: a titled window that floats above the Dock or
-/// the taskbar, over the main window.
+/// Opens the example's panel: a titled window at the Dock's level or above
+/// the app's other windows.
 ///
 /// Runs in `run_app_with`'s setup hook, on the thread that runs the app's
-/// message loop; `Panel::open` anywhere else fails with
+/// message loop; `AppContext::open_panel` anywhere else fails with
 /// [`platform::PanelError::WrongThread`].
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-fn open_panel(app_id: &str) -> Result<platform::Panel, platform::PanelError> {
+fn open_panel(
+    context: &platform::AppContext,
+    app_id: &str,
+) -> Result<platform::Panel, platform::PanelError> {
     let options = platform::PanelOptions::new()
         .with_title("Panel")
         .with_size(Size::new(Points(420.0), Points(300.0)))
         // A title bar to close the example with; the default is none.
         .with_borderless(false)
-        .with_level(platform::WindowLevel::AboveDock)
-        // macOS moves it by its background; Windows and Linux ignore it.
-        .with_movable_by_background(true);
+        // Above the Dock or the taskbar (macOS and Windows; GTK 4 has no
+        // window levels, so Linux places it like any other window).
+        .with_level(platform::WindowLevel::AboveDock);
     // What the panel's app reads as `host.params` when it starts
     // (`host.params.quick` in TSX: the host and its app share one channel,
     // `nsh/host`). A launch parameter is read once, when the app starts, so
@@ -80,7 +91,7 @@ fn open_panel(app_id: &str) -> Result<platform::Panel, platform::PanelError> {
         host,
         ..Default::default()
     };
-    platform::Panel::open(
+    context.open_panel(
         options,
         app,
         platform::AppSource::Rust(platform::Root::of::<panel_native::PanelContent>()),

@@ -10,6 +10,7 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::{PanelError, PanelOptions},
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -460,16 +461,6 @@ impl AppView {
         &self.surface
     }
 
-    /// Makes the surface transparent: the background under the root shows
-    /// what is behind the window, unless the app paints an opaque one of
-    /// its own (see `PanelOptions::transparent`).
-    pub(crate) fn set_transparent(&self) {
-        if self.surface.transparent.replace(true) {
-            return;
-        }
-        crate::system::environment_applied(&self.surface);
-    }
-
     /// The view the surface is in (overlays go above it).
     pub(crate) fn container(&self) -> &NSView {
         &self.container
@@ -681,25 +672,73 @@ fn name_app(name: &str) {
     }
 }
 
+/// The app's thread, as handed to [`run_app_with`]'s setup hook: panels are
+/// opened on it ([`open_panel`](Self::open_panel)), and
+/// [`run`](Self::run) brings work back to it later.
+///
+/// It names no state of its own, and it is `Copy`: the host may keep it
+/// past the hook (for a shortcut that opens a panel, say). The thread is
+/// the one that runs AppKit's message loop, where the app's windows live,
+/// which is the only thread a panel (a window of its own) may be opened on.
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    /// Nothing, and private: the field keeps the context from being made
+    /// anywhere but where `run_app_with` hands it over, on the main thread.
+    _private: (),
+}
+
+impl AppContext {
+    /// Opens a panel window on the app's thread ([`Panel::open`]):
+    /// `options` is the window's look, and `app` and `source` the app it
+    /// runs and where that app comes from.
+    ///
+    /// # Errors
+    ///
+    /// [`PanelError::WrongThread`] when this is not the thread that runs
+    /// AppKit's message loop, and [`PanelError::Invalid`] when the panel's
+    /// size is not positive.
+    pub fn open_panel(
+        &self,
+        options: PanelOptions,
+        app: AppOptions,
+        source: AppSource,
+    ) -> Result<Panel, PanelError> {
+        Panel::open(options, app, source)
+    }
+
+    /// Runs `f` on the app's thread, where the app's windows live: queued to
+    /// the main dispatch queue, it returns at once. An app's call or post
+    /// comes in on the engine thread, so this brings the work it asks for
+    /// (opening a panel, say) back to the main thread.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) {
+        crate::image::on_main_queue(f);
+    }
+}
+
 /// Runs `source` in a window until it is closed. Must be called on the
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
 /// The caller can finish cleanup or relaunch after this function returns.
 ///
-/// [`run_app_with`] with no panels.
+/// [`run_app_with`] is the same, with a setup hook that opens nothing.
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
-    run_app_with(source, options, |_| Vec::new())
+    run_app_with(source, options, |_| {})
 }
 
-/// Runs `source` in a window until it is closed, with the panels `setup`
-/// returns (a host's second window, or more).
+/// Runs `source` in a window until it is closed, and hands `setup` the
+/// app's [`AppContext`] to open the app's panels with (a host's second
+/// window, or more).
 ///
-/// `setup` runs on the main thread once the window is up and before the
-/// app's event loop takes over: that is where a panel is opened
-/// ([`Panel::open`]), as a host's runner does, since a panel belongs to the
-/// thread that runs the app's message loop. The panels it returns live for
-/// as long as the app runs and are dropped after the loop returns, which
-/// closes their windows and stops their apps.
+/// The hook runs once, on the main thread, once the window is up and before
+/// the app's event loop takes the thread: that is where
+/// [`AppContext::open_panel`] may open a panel, and anywhere else returns
+/// [`PanelError::WrongThread`] ([`Panel`] is not `Send`).
+///
+/// The hook gives nothing back, so the host keeps the panels it opens and
+/// `run_app_with` keeps none: a panel lives as long as its [`Panel`] does,
+/// and dropping it (or closing its window) stops its app.
+/// [`AppContext::run`] brings work back to the main thread later (opening a
+/// panel from a shortcut, say), as the setup hook cannot run again.
 ///
 /// Otherwise as [`run_app`]: `source` in [`AppOptions`]'s window, on the
 /// main thread.
@@ -710,7 +749,7 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
 pub fn run_app_with(
     source: AppSource,
     options: AppOptions,
-    setup: impl FnOnce(&AppOptions) -> Vec<Panel> + Send + 'static,
+    setup: impl FnOnce(&AppContext) + Send + 'static,
 ) -> std::process::ExitCode {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
@@ -795,13 +834,10 @@ pub fn run_app_with(
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
-    // The panels come up on the main thread, with AppKit initialized and the
-    // app's window in place, before the event loop takes the thread.
-    let panels = setup(&options);
+    // The setup hook runs on the main thread, with AppKit initialized and
+    // the app's window in place, before the event loop takes the thread.
+    setup(&AppContext { _private: () });
     app.run();
-    // The panels outlive the loop: dropping one closes its window and stops
-    // its app, which is AppKit's to do once its loop returned.
-    drop(panels);
     stop_running();
     app.setDelegate(None);
     drop(delegate);

@@ -225,24 +225,25 @@
   the types are `nsh_core::desktop`'s (`PanelOptions`, `WindowLevel`, `PanelError`), the toolkit-free part of a
   platform's window, and a backend only maps and opens them. `PanelOptions` is `#[non_exhaustive]`, built with
   `PanelOptions::new()` and its `with_*` methods. A host that needs a second window of its own (a floating palette, a
-  quick-look window) returns its panels from `run_app_with`'s `setup` hook, which runs on the thread that runs the
-  app's message loop (the main thread on macOS and Linux, the `nsh-ui` thread `run_app` spawns on Windows) — the only
-  thread `Panel::open` opens one on, as `Panel` is not `Send` (anywhere else it is `PanelError::WrongThread`). Each is
-  opened with `Panel::open(options, app, source)`, giving it an `AppSource` of its own (a Rust root, a bundle, a dev
-  server): the panel runs its own app and engine (`AppView`) beside the main window's, and lives as long as the app.
-  A panel has no title bar by default (`with_borderless(false)` gives it one), floats at a `WindowLevel` (`Normal`, `Floating` —
-  above other apps' windows — or `AboveDock`), may be transparent, move by its background, hide when the app is
-  inactive and take the keyboard without activating the app (`nonactivating`); `show`, `hide`, `set_frame`,
-  `set_level` and `set_title` change it while it is open, and `close` (or dropping the `Panel`) closes the window and
-  stops its app. `PanelOptions::size`'s `None` opens it at 70% of the screen, and `PanelOptions::position`
-  (`Option<Point<Points>>`) places its top-left corner from the primary screen's, as `WindowFrame`'s `x` and `y` do.
-  `hides_on_resign_key` hides it when it loses the keyboard (macOS's `windowDidResignKey:`, Win32's `WM_KILLFOCUS`),
-  the signal a `nonactivating` panel has, which never deactivates the app. `examples/panel/native/src/main.rs` opens
-  one from the `setup` hook and gives its app launch parameters through `AppOptions::host` (the app reads them as
-  `host.params`). The limits are the platforms': Win32 maps the options to window styles and z-order levels
-  (`Floating` and `AboveDock` are both topmost) and has no transparency, deactivation hide or background drag; GTK 4
-  cannot float a window above others, position one or keep it from activating the app, and a transparent panel is
-  best effort; each backend's module docs list what it leaves out.
+  quick-look window) opens it from `run_app_with`'s `setup` hook, which hands it an `AppContext` for the thread that
+  runs the app's message loop (the main thread on macOS and Linux, the `nsh-ui` thread `run_app` spawns on Windows):
+  the only thread a panel opens on, as `Panel` is not `Send` (anywhere else `AppContext::open_panel` is
+  `PanelError::WrongThread`). The hook returns nothing, so the host keeps the `Panel`s it opens — dropping one closes
+  its window and stops its app — and `AppContext::run` brings a later closure (a shortcut that opens another panel,
+  say) back to that same thread. Each panel is opened with `AppContext::open_panel(options, app, source)`, giving it
+  an `AppSource` of its own (a Rust root, a bundle, a dev server): the panel runs its own app and engine (`AppView`)
+  beside the main window's, and lives as long as the host holds it.
+  A panel has no title bar by default (`with_borderless(false)` gives it one), floats at a `WindowLevel` (`Normal`,
+  `Floating` — above other apps' windows — or `AboveDock`), and hides when it loses the keyboard
+  (`hides_on_focus_loss`: macOS's `windowDidResignKey:`, Win32's `WM_KILLFOCUS` from outside the panel, GTK's active
+  window); `show`, `hide`, `set_frame`, `set_level` and `set_title` change it while it is open, and `close` (or
+  dropping the `Panel`) closes the window and stops its app. `PanelOptions::size`'s `None` opens it at 70% of the
+  screen, and `PanelOptions::position` (`Option<Point<Points>>`) places its top-left corner from the primary
+  screen's, as `WindowFrame`'s `x` and `y` do. `examples/panel/native/src/main.rs` opens one from the `setup` hook,
+  keeps it, and gives its app launch parameters through `AppOptions::host` (the app reads them as `host.params`). The
+  limits are the platforms': Win32 maps the options to window styles and z-order levels (`Floating` and `AboveDock`
+  are both topmost) and cannot move a panel by its background; GTK 4 cannot float a window above others or position
+  one; each backend's module docs list what it leaves out.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

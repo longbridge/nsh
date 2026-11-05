@@ -3,14 +3,16 @@
 //! A panel is a window of its own, as a floating palette or a popover is:
 //! it shows an [`AppSource`] of its own (a Rust root, a bundle or a dev
 //! server), so it can run a different app than the main window, with an
-//! engine of its own ([`AppView`]). It has no title bar by default, can
-//! float above other apps' windows ([`WindowLevel`]) and can take the
-//! keyboard without activating the app ([`PanelOptions::nonactivating`]).
+//! engine of its own ([`AppView`]). It has no title bar by default and can
+//! float above other apps' windows ([`WindowLevel`]).
 //!
 //! A panel is opened on the thread that runs the app's message loop: the
 //! main thread, where [`run_app`](crate::run_app) runs, from the setup hook of
-//! [`run_app_with`](crate::run_app_with) (which keeps the panels it returns
-//! for as long as the app runs). [`Panel::open`] anywhere else fails with
+//! [`run_app_with`](crate::run_app_with), which hands the host the app's
+//! [`AppContext`](crate::AppContext); panels are opened with
+//! [`AppContext::open_panel`](crate::AppContext::open_panel). That hook
+//! belongs to the host, which keeps the panels it opens for as long as the
+//! app runs; [`Panel::open`] anywhere else fails with
 //! [`PanelError::WrongThread`]. Rust components run on the engine thread,
 //! so a panel is opened by the host's main-thread code (as an app's runner
 //! does), not from a component's event handler.
@@ -22,8 +24,9 @@
 //!
 //! A [`PanelOptions::position`] places the window's top-left corner from
 //! the primary screen's top-left one, as [`WindowFrame`]'s `x` and `y` do.
-//! [`PanelOptions::hides_on_resign_key`] listens for the window losing the
-//! keyboard (`windowDidResignKey:`), the signal a nonactivating panel has.
+//! [`PanelOptions::hides_on_focus_loss`] hides the window when it loses the
+//! keyboard's focus (`windowDidResignKey:`): a click on another window or
+//! app takes it off screen.
 
 use std::{
     cell::{Cell, RefCell},
@@ -40,9 +43,9 @@ use objc2::{
     runtime::ProtocolObject,
 };
 use objc2_app_kit::{
-    NSApplicationActivationOptions, NSBackingStoreType, NSColor, NSFloatingWindowLevel,
-    NSNormalWindowLevel, NSPanel, NSResponder, NSRunningApplication, NSScreen, NSWindow,
-    NSWindowDelegate, NSWindowLevel, NSWindowStyleMask, NSWorkspace,
+    NSApplicationActivationOptions, NSBackingStoreType, NSFloatingWindowLevel, NSNormalWindowLevel,
+    NSPanel, NSResponder, NSRunningApplication, NSScreen, NSWindow, NSWindowDelegate,
+    NSWindowLevel, NSWindowStyleMask, NSWorkspace,
 };
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey, kCGDesktopIconWindowLevel};
 use objc2_foundation::{
@@ -61,8 +64,9 @@ use crate::{App, AppOptions, AppSource, AppView};
 ///
 /// [`Panel::open`] must run on the main thread, as `run_app` does (Rust
 /// components run on the engine thread). A host opens its panels from the
-/// setup hook of [`run_app_with`](crate::run_app_with), which keeps them
-/// alive for as long as the app runs. The JS side's `Window.openPanel`
+/// setup hook of [`run_app_with`](crate::run_app_with)
+/// ([`AppContext::open_panel`](crate::AppContext::open_panel)) and keeps them
+/// for as long as the app runs. The JS side's `Window.openPanel`
 /// needs a `DesktopCommand` and a hop back to the main thread, which is
 /// future work: a panel is opened from Rust only for now.
 ///
@@ -97,9 +101,9 @@ struct PanelState {
     app: Rc<AppView>,
     /// The app in front before the panel showed, to give the focus back.
     previous: RefCell<Option<Retained<NSRunningApplication>>>,
-    /// [`PanelOptions::hides_on_resign_key`]: the window can be its own
+    /// [`PanelOptions::hides_on_focus_loss`]: the window can be its own
     /// delegate for the close button too, so it reads the option here.
-    hides_on_resign_key: bool,
+    hides_on_focus_loss: bool,
     /// The window closed: `close`, the window's own close button and `Drop`
     /// end here, once.
     closed: Cell<bool>,
@@ -169,18 +173,13 @@ impl Panel {
         let mtm = MainThreadMarker::new().ok_or(PanelError::WrongThread)?;
         let visible = NSScreen::mainScreen(mtm).map(|screen| screen.visibleFrame());
         let (width, height) = panel_size(options.size, visible)?;
-        let mut style = if options.borderless {
+        let style = if options.borderless {
             NSWindowStyleMask::Borderless
         } else {
             NSWindowStyleMask::Titled
                 | NSWindowStyleMask::Closable
                 | NSWindowStyleMask::Miniaturizable
         };
-        if options.nonactivating {
-            // Only an NSPanel takes this mask: the window does not activate
-            // the app when it is clicked.
-            style |= NSWindowStyleMask::NonactivatingPanel;
-        }
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
         // The app first: the panel's state, shared with the window, stops it
         // when the window closes.
@@ -189,7 +188,7 @@ impl Panel {
         let state = Rc::new(PanelState {
             app: view.clone(),
             previous: RefCell::new(None),
-            hides_on_resign_key: options.hides_on_resign_key,
+            hides_on_focus_loss: options.hides_on_focus_loss,
             closed: Cell::new(false),
         });
         // SAFETY: NSPanel's designated initializer; the alloc is the panel's
@@ -206,25 +205,10 @@ impl Panel {
         // SAFETY: the panel keeps the window in `self.window` until it closes
         // it (or is dropped), so AppKit must not release it on close.
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setOpaque(!options.transparent);
-        let background = if options.transparent {
-            NSColor::clearColor()
-        } else {
-            NSColor::windowBackgroundColor()
-        };
-        window.setBackgroundColor(Some(&background));
         window.setHasShadow(true);
-        window.setMovableByWindowBackground(options.movable_by_background);
-        window.setHidesOnDeactivate(options.hides_on_deactivate);
         window.setLevel(level_of(options.level));
         window.setTitle(&NSString::from_str(&options.title));
         crate::system::open_window(&window, appearance);
-        if options.transparent {
-            // The window is see-through; its content surface must be too
-            // (`system::follow_background` keeps a transparent background
-            // unless the app paints an opaque one).
-            view.set_transparent();
-        }
         window.setContentView(Some(&view.view()));
         window.center();
         if let Some(position) = options.position {
@@ -351,12 +335,15 @@ pub(crate) fn level_of(level: WindowLevel) -> NSWindowLevel {
         // The desktop widget's level, under every window, as the main
         // window's `Window.setLevel('desktopIcon')` takes it (`chrome.rs`).
         WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
+        // A level of a newer nsh-core than this backend: it falls back to
+        // the floating band, as `WindowLevel`'s documentation says.
+        _ => NSFloatingWindowLevel,
     }
 }
 
 define_class!(
-    /// A panel window whose borderless (and nonactivating) style still takes
-    /// the keyboard: AppKit's `NSPanel` takes it only with a title bar.
+    /// A panel window whose borderless style still takes the keyboard:
+    /// AppKit's `NSPanel` takes it only with a title bar.
     #[unsafe(super(NSPanel, NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = Rc<PanelState>]
@@ -381,7 +368,7 @@ define_class!(
 
     unsafe impl NSWindowDelegate for PanelWindow {
         // The window lost the keyboard: the user moved on to another window
-        // or app. A panel that hides on resign goes off screen, without
+        // or app. A panel that hides on focus loss goes off screen, without
         // touching the app in front (the user chose it); every panel forgets
         // the app that had the focus before it showed, so a later hide or
         // drop does not activate it.
@@ -392,7 +379,7 @@ define_class!(
                 return;
             }
             state.previous.borrow_mut().take();
-            if state.hides_on_resign_key {
+            if state.hides_on_focus_loss {
                 self.orderOut(None);
             }
         }

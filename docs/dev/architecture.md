@@ -30,10 +30,12 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
 - **Panels** (`Panel`, `nsh_core::desktop::PanelOptions`): a host's second window. It is created on the app's UI
-  thread — the thread that applies commits and runs the message loop — inside `run_app_with`'s setup hook, before the
-  loop starts; `Panel` is not `Send`, and `Panel::open` anywhere else is `PanelError::WrongThread`. It runs an
-  `AppView` and an engine of its own: the same commit pipeline, one main-queue hop per commit, no thread of a third
-  kind (macOS and Linux use the main thread, Windows the `nsh-ui` thread `run_app` spawns).
+  thread — the thread that applies commits and runs the message loop — from the `AppContext` that `run_app_with`'s
+  setup hook hands the host, before the loop starts; the host keeps the panels it opens (a panel is closed by
+  dropping it), `AppContext::run` brings later work back to that thread, `Panel` is not `Send`, and opening one
+  anywhere else is `PanelError::WrongThread`. A panel runs an `AppView` and an engine of its own: the same commit
+  pipeline, one main-queue hop per commit, no thread of a third kind (macOS and Linux use the main thread, Windows
+  the `nsh-ui` thread `run_app` spawns).
 - Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
   order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
   nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.

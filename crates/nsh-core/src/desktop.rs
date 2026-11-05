@@ -143,6 +143,11 @@ impl JsValue for WindowFrame {
 }
 
 /// How high a window floats (`Window.setLevel`).
+///
+/// The enum is `#[non_exhaustive]`: it grew in the past (with
+/// [`AboveDock`](Self::AboveDock)) and can grow again, and a backend that
+/// does not know a level falls back to its floating band.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum WindowLevel {
     /// The normal level.
@@ -204,45 +209,14 @@ pub struct PanelOptions {
     /// No title bar and no frame (the default): the app draws every part of
     /// the window.
     pub borderless: bool,
-    /// The window's own background is transparent, so what is behind it
-    /// shows until the app paints over it (false by default). macOS makes
-    /// the window's background clear; Linux clears the GTK window's own
-    /// background — best effort, it needs a compositing window manager, and
-    /// the app's root still paints its own background; Windows has no such
-    /// window and ignores it (a Direct2D swap chain does not draw through a
-    /// layered window).
-    pub transparent: bool,
-    /// Hides the window while the app is not the active one (false by
-    /// default). A nonactivating panel never deactivates the app, so it
-    /// never fires for one: a panel that takes the keyboard without
-    /// activating the app wants [`hides_on_resign_key`](Self::hides_on_resign_key)
-    /// instead. macOS follows the app's activation; Windows and Linux
-    /// ignore it, having no per-panel activation to follow (GTK 4 has no
-    /// per-application activation at all), and a panel there that hides
-    /// when the focus leaves it asks for
-    /// [`hides_on_resign_key`](Self::hides_on_resign_key).
-    pub hides_on_deactivate: bool,
     /// Hides the window when it loses the keyboard's focus (false by
     /// default): a click on another window, or a shortcut that moves the
     /// focus elsewhere, takes the panel off screen.
     ///
-    /// This is the signal a nonactivating panel has, which never deactivates
-    /// the app; a panel that does activate it can use either. macOS hides it
-    /// when it resigns key; Windows when it gets `WM_KILLFOCUS` from outside
-    /// the panel (a click on one of its own views keeps it); Linux when it
-    /// stops being GTK's active window.
-    pub hides_on_resign_key: bool,
-    /// Moves the window when its background is dragged (false by default).
-    /// macOS does it in the window server; Windows and Linux have no such
-    /// window and ignore it.
-    pub movable_by_background: bool,
-    /// Takes the keyboard without activating the app (false by default):
-    /// the panel stays above the app's other windows while the app the user
-    /// was in keeps working. macOS makes it a nonactivating panel; Windows
-    /// adds `WS_EX_NOACTIVATE` and focuses the panel on a click so it still
-    /// gets the keyboard; GTK 4 has no nonactivating window, so Linux
-    /// ignores it.
-    pub nonactivating: bool,
+    /// macOS hides it when it resigns key, Windows when it gets
+    /// `WM_KILLFOCUS` from outside the panel (a click on one of its own
+    /// views keeps it), and Linux when it stops being GTK's active window.
+    pub hides_on_focus_loss: bool,
 }
 
 impl PanelOptions {
@@ -281,33 +255,9 @@ impl PanelOptions {
         self
     }
 
-    /// Sets [whether the window's background is transparent](Self::transparent).
-    pub fn with_transparent(mut self, transparent: bool) -> Self {
-        self.transparent = transparent;
-        self
-    }
-
-    /// Sets [whether the window hides while the app is inactive](Self::hides_on_deactivate).
-    pub fn with_hides_on_deactivate(mut self, hides: bool) -> Self {
-        self.hides_on_deactivate = hides;
-        self
-    }
-
-    /// Sets [whether the window hides when it loses the keyboard](Self::hides_on_resign_key).
-    pub fn with_hides_on_resign_key(mut self, hides: bool) -> Self {
-        self.hides_on_resign_key = hides;
-        self
-    }
-
-    /// Sets [whether a background drag moves the window](Self::movable_by_background).
-    pub fn with_movable_by_background(mut self, movable: bool) -> Self {
-        self.movable_by_background = movable;
-        self
-    }
-
-    /// Sets [whether the panel takes the keyboard without activating the app](Self::nonactivating).
-    pub fn with_nonactivating(mut self, nonactivating: bool) -> Self {
-        self.nonactivating = nonactivating;
+    /// Sets [whether the window hides when it loses the keyboard](Self::hides_on_focus_loss).
+    pub fn with_hides_on_focus_loss(mut self, hides: bool) -> Self {
+        self.hides_on_focus_loss = hides;
         self
     }
 }
@@ -320,11 +270,7 @@ impl Default for PanelOptions {
             position: None,
             level: WindowLevel::Floating,
             borderless: true,
-            transparent: false,
-            hides_on_deactivate: false,
-            hides_on_resign_key: false,
-            movable_by_background: false,
-            nonactivating: false,
+            hides_on_focus_loss: false,
         }
     }
 }
@@ -1029,11 +975,7 @@ mod tests {
         assert_eq!(options.position, None);
         assert_eq!(options.level, WindowLevel::Floating);
         assert!(options.borderless);
-        assert!(!options.transparent);
-        assert!(!options.hides_on_deactivate);
-        assert!(!options.hides_on_resign_key);
-        assert!(!options.movable_by_background);
-        assert!(!options.nonactivating);
+        assert!(!options.hides_on_focus_loss);
     }
 
     #[test]
@@ -1044,11 +986,7 @@ mod tests {
             .with_position(Point::new(Points(10.0), Points(20.0)))
             .with_level(WindowLevel::AboveDock)
             .with_borderless(false)
-            .with_transparent(true)
-            .with_hides_on_deactivate(true)
-            .with_hides_on_resign_key(true)
-            .with_movable_by_background(true)
-            .with_nonactivating(true);
+            .with_hides_on_focus_loss(true);
         assert_eq!(options.title, "Quick Look");
         assert_eq!(options.size, Some(Size::new(Points(420.0), Points(300.0))));
         assert_eq!(
@@ -1057,11 +995,7 @@ mod tests {
         );
         assert_eq!(options.level, WindowLevel::AboveDock);
         assert!(!options.borderless);
-        assert!(options.transparent);
-        assert!(options.hides_on_deactivate);
-        assert!(options.hides_on_resign_key);
-        assert!(options.movable_by_background);
-        assert!(options.nonactivating);
+        assert!(options.hides_on_focus_loss);
     }
 
     #[test]

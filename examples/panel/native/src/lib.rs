@@ -40,7 +40,7 @@ pub fn PanelApp() -> impl IntoElement {
         .text_color(TEXT)
         .child(text("nsh panel example"))
         .child(
-            text("The panel window floats above this one; on macOS, drag it by its background.")
+            text("The panel is the app's second window: it stays above this one on macOS and Windows.")
                 .text_color(MUTED),
         )
 }
@@ -61,6 +61,6 @@ pub fn PanelContent() -> impl IntoElement {
         .gap_2()
         .bg(PAGE)
         .text_color(TEXT)
-        .child(text("This is a panel window."))
-        .child(text("It has a title bar here; without one it floats the same.").text_color(MUTED))
+        .child(text("This is a panel window, with an app of its own."))
+        .child(text("It has a title bar here; closing it closes the panel.").text_color(MUTED))
 }

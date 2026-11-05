@@ -97,17 +97,18 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   thread-locals are released at a plain thread exit. Released by the main thread's thread-local destructors instead,
   they would run inside `ExitProcess`, after the graphics DLLs are gone, and the process would end with a stray exit
   code. The UI thread sets per-monitor DPI awareness and `OleInitialize`s (clipboard, drag and drop, WIC).
-- **Panels** (`run_app_with`, `panel.rs`): a host's second window opens in `run_app_with`'s setup hook, after the
-  main window is shown and before its message loop runs, and lives on that same `nsh-ui` thread: its methods call
-  Win32 directly there, and it has no thread, channel or `PostThreadMessageW` of its own. `Panel::open` anywhere else
-  is `PanelError::WrongThread`. Its `AppView`'s main-queue hops go through the window module's dispatcher window
-  (`WM_NSH_CALL`), which the app's one message loop dispatches as it does the main window's: no second loop, and no
-  synchronous round trip for a modal loop to drop.
+- **Panels** (`run_app_with`, `panel.rs`): a host opens a panel from `run_app_with`'s setup hook, which hands it an
+  `AppContext` for the `nsh-ui` thread: `AppContext::open_panel` opens one there, the host keeps the `Panel` it gets
+  back, and `AppContext::run` brings a later closure back to that thread. The panel lives on that same thread — its
+  methods call Win32 directly there, and it has no thread, channel or `PostThreadMessageW` of its own — and opening
+  one anywhere else is `PanelError::WrongThread`. Its `AppView`'s main-queue hops go through the window module's
+  dispatcher window (`WM_NSH_CALL`), which the app's one message loop dispatches as it does the main window's: no
+  second loop, and no synchronous round trip for a modal loop to drop.
   The loop counts a panel as one of the app's top-level windows, so closing the main window keeps the app alive until
-  the last panel closes. Hiding on resign key watches `WM_KILLFOCUS` for a window outside the panel's subtree (a click
-  on one of its own children keeps it), and a `WS_EX_NOACTIVATE` panel takes the keyboard on `WM_MOUSEACTIVATE`.
-  `Floating` and `AboveDock` are both `HWND_TOPMOST`, `DesktopIcon` is `HWND_BOTTOM`, and `transparent`,
-  `hides_on_deactivate` and `movable_by_background` do nothing.
+  the last panel closes. Hiding on focus loss watches `WM_KILLFOCUS` for a window outside the panel's subtree (a
+  click on one of its own children keeps it) and forgets the window that was in front, so a panel hidden that way is
+  not reopened by a later `hide`, `close` or drop. `Floating` and `AboveDock` are both `HWND_TOPMOST`, `DesktopIcon`
+  is `HWND_BOTTOM`, and a level from a newer core falls back to topmost.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a window: a child of the embedding app's window, or top-level;
   the host's message loop runs it. `set_ui_sets` serves the UI sets beside the runtime's modules
   (`nsh/base` by default; an app with Rust components of its own passes `nsh_base::registry()` and its sets).

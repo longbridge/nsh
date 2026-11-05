@@ -5,37 +5,31 @@
 //! server), so it can run a different app than the main window, with an
 //! engine of its own ([`AppView`]). It has no title bar by default. A panel
 //! lives exactly as long as its [`Panel`] does: dropping it closes the
-//! window and stops its app.
+//! window and stops its app. Closing the window itself (a decorated panel's
+//! close button) stops its app too, once, and the [`Panel`] does nothing
+//! afterwards, as macOS's `windowWillClose:` leaves its panel.
 //!
 //! A panel is opened on the thread that runs the app's GTK main loop, from
-//! [`run_app_with`](crate::run_app_with)'s setup hook: [`Panel::open`]
-//! returns [`PanelError::WrongThread`] on any other thread, and [`Panel`] is
-//! not `Send`. Rust components run on the engine thread, so a panel is
-//! opened by the host's main-loop code (as an app's runner does), not from a
-//! component's event handler.
+//! [`run_app_with`](crate::run_app_with)'s setup hook, through the
+//! [`AppContext`](crate::AppContext) it hands over (its
+//! [`open_panel`](crate::AppContext::open_panel) opens one): [`Panel::open`]
+//! returns [`PanelError::WrongThread`] on any other thread, and [`Panel`]
+//! is not `Send`. Rust components run on the engine thread, so a panel is
+//! opened by the host's main-loop code (as an app's runner does), not from
+//! a component's event handler.
 //!
 //! GTK 4 has no panel concept, and several options have no equivalent:
 //!
-//! - [`PanelOptions::transparent`]: the window's own background is
-//!   transparent. It is best effort (the compositor must composite the
-//!   windows), and the app's root still paints its own background: one that
-//!   would show what is behind the window gives its root a transparent
-//!   background too.
 //! - [`PanelOptions::level`]: GTK 4 removed the API to keep a window above
 //!   others (GTK 3's `gtk_window_set_keep_above`), and the compositor stacks
 //!   windows: the level has no effect on Linux, and [`Panel::set_level`]
 //!   does nothing.
-//! - [`PanelOptions::nonactivating`]: GTK 4 has no "take the keyboard
-//!   without activating the app"; the panel is a normal window.
-//! - [`PanelOptions::hides_on_deactivate`]: GTK 4 cannot observe the app's
-//!   deactivation (there is no per-application activation), so the option
-//!   does nothing: a panel that hides when the focus leaves it asks for
-//!   [`PanelOptions::hides_on_resign_key`].
 //! - [`PanelOptions::position`]: GTK 4 has no window positioning (Wayland
 //!   forbids it and X11's is not exposed), so it is ignored and the
 //!   compositor places the window.
-//! - [`PanelOptions::movable_by_background`]: a GTK window moves by its
-//!   title bar when it is decorated; there is no client-side equivalent.
+//! - [`PanelOptions::hides_on_focus_loss`]: GTK 4 has no per-application
+//!   activation to follow, so the panel hides when it stops being GTK's
+//!   active window (the one with the keyboard).
 //!
 //! [`Panel::set_frame`] sizes the window; GTK 4 has no window positioning
 //! (Wayland forbids it and X11's is not exposed), so `x` and `y` are
@@ -43,7 +37,10 @@
 //! window to focus next, as there is no API to hand the focus back to the
 //! window that was in front.
 
-use std::{cell::Cell, rc::Rc, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use gtk4::{self as gtk, prelude::*};
 pub use nsh_core::desktop::{PanelError, PanelOptions, WindowLevel};
@@ -56,8 +53,10 @@ use nsh_engine::App;
 use crate::{AppOptions, AppSource, AppView};
 
 /// A panel window (see the [module](self)'s documentation): its own window
-/// and app, closed and stopped when it is dropped. Drop it on the thread
-/// that runs the GTK main loop, where it was opened.
+/// and app, closed and stopped when it is dropped. Closing the window itself
+/// (a decorated panel's close button) stops its app too, once, and leaves the
+/// panel a no-op. Drop it on the thread that runs the GTK main loop, where it
+/// was opened.
 ///
 /// The `app`'s [`AppOptions`] are the app's own, not the window's: its
 /// `data_dir`, `limits` and `components` come from the host, as they do for
@@ -75,10 +74,10 @@ use crate::{AppOptions, AppSource, AppView};
 /// belong to it.
 pub struct Panel {
     window: gtk::Window,
-    app: Rc<AppView>,
-    /// Whether [`Panel::close`] already closed the window, so [`Drop`] does
-    /// not close it again.
-    closed: Cell<bool>,
+    /// Whether the window was destroyed (by [`Panel::close`] or its own
+    /// close button): the panel has nothing left to do, and every method is
+    /// a no-op.
+    closed: Rc<Cell<bool>>,
 }
 
 impl Panel {
@@ -108,27 +107,21 @@ impl Panel {
             .default_height(height)
             .decorated(!options.borderless)
             .build();
-        if options.transparent {
-            // GTK paints the window's own background from this class; the
-            // app's root paints its own, inside the window.
-            window.add_css_class("nsh-panel-transparent");
-            register_transparent_css();
-        }
-        if options.hides_on_resign_key {
+        if options.hides_on_focus_loss {
             // GTK 4's active window is the one with the keyboard: losing it
             // is the signal a panel asks for here. App deactivation has no
-            // GTK 4 signal (`hides_on_deactivate` does nothing on Linux).
+            // GTK 4 signal.
             window.connect_is_active_notify(|window| {
                 if !window.is_active() {
                     window.set_visible(false);
                 }
             });
         }
-        let view = AppView::new(AppOptions {
+        let view = Rc::new(AppView::new(AppOptions {
             size: (width, height),
             title: options.title.clone(),
             ..app
-        });
+        }));
         window.set_child(Some(&view.widget()));
         match source {
             AppSource::Rust(root) => view.load(App::Rust(root)),
@@ -136,32 +129,56 @@ impl Panel {
             #[cfg(feature = "dev")]
             AppSource::DevServer(url) => crate::dev::start(&view, url),
         }
-        Ok(Self {
-            window,
-            app: view,
-            closed: Cell::new(false),
-        })
+        // The window's destroy is the one place the app stops: it comes from
+        // [`Panel::close`], from [`Drop`], or from the close button of a
+        // decorated panel (as macOS's `windowWillClose:`). The handler takes
+        // the view with it, so the engine stops once, and the panel is a
+        // no-op afterwards.
+        let closed = Rc::new(Cell::new(false));
+        {
+            let closed = Rc::clone(&closed);
+            let view = RefCell::new(Some(Rc::clone(&view)));
+            window.connect_destroy(move |_| {
+                closed.set(true);
+                if let Some(view) = view.borrow_mut().take() {
+                    view.stop();
+                }
+            });
+        }
+        Ok(Self { window, closed })
     }
 
-    /// Shows the window and gives it the focus.
+    /// Shows the window and gives it the focus. Does nothing when the window
+    /// was closed.
     pub fn show(&self) {
+        if self.closed.get() {
+            return;
+        }
         self.window.present();
     }
 
     /// Hides the window; the compositor picks the window to focus next.
+    /// Does nothing when the window was closed.
     pub fn hide(&self) {
+        if self.closed.get() {
+            return;
+        }
         self.window.set_visible(false);
     }
 
-    /// Whether the window is on screen.
+    /// Whether the window is on screen: `false` when the window was closed.
     #[must_use]
     pub fn is_visible(&self) -> bool {
-        self.window.is_visible()
+        !self.closed.get() && self.window.is_visible()
     }
 
     /// Sizes the window: a field left out keeps its value. GTK 4 has no
-    /// window positioning, so `x` and `y` are ignored.
+    /// window positioning, so `x` and `y` are ignored. Does nothing when the
+    /// window was closed.
     pub fn set_frame(&self, frame: WindowFrame) {
+        if self.closed.get() {
+            return;
+        }
         if let Some(width) = frame.width {
             self.window.set_default_width(width.0.round() as i32);
         }
@@ -175,25 +192,27 @@ impl Panel {
     /// [module](self)'s documentation).
     pub fn set_level(&self, _level: WindowLevel) {}
 
-    /// Sets the window's title.
+    /// Sets the window's title. Does nothing when the window was closed.
     pub fn set_title(&self, title: &str) {
+        if self.closed.get() {
+            return;
+        }
         self.window.set_title(Some(title));
     }
 
-    /// Closes the window, stops its app and gives the window's memory back:
-    /// [`Drop`] then has nothing left to do.
+    /// Closes the window and stops its app: the window's destroy does both,
+    /// and the panel is a no-op afterwards ([`Drop`] closes nothing again).
     pub fn close(self) {
-        self.closed.set(true);
-        self.app.stop();
-        self.window.close();
+        if !self.closed.get() {
+            self.window.destroy();
+        }
     }
 }
 
 impl Drop for Panel {
     fn drop(&mut self) {
         if !self.closed.get() {
-            self.app.stop();
-            self.window.close();
+            self.window.destroy();
         }
     }
 }
@@ -202,27 +221,6 @@ impl Drop for Panel {
 /// it runs: the one a panel opens on, where GTK is up.
 fn app_thread() -> Option<std::thread::ThreadId> {
     crate::app::APP_THREAD.get().copied()
-}
-
-/// Registers the stylesheet that makes a `nsh-panel-transparent` window's
-/// own background transparent, once: a display keeps every provider added
-/// to it, so one provider per panel would pile up and restyle every window
-/// again.
-fn register_transparent_css() {
-    static REGISTERED: OnceLock<()> = OnceLock::new();
-    let _ = REGISTERED.get_or_init(|| {
-        // GTK 4 draws windows with alpha when the compositor supports it.
-        let provider = gtk::CssProvider::new();
-        provider
-            .load_from_string("window.nsh-panel-transparent { background-color: transparent; }");
-        if let Some(display) = gtk::gdk::Display::default() {
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &provider,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
-    });
 }
 
 /// The window's size in points: the options', or 70% of the first monitor's

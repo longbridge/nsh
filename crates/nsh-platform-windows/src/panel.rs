@@ -3,11 +3,10 @@
 //! A panel is a window of its own, as a floating palette or a popover is:
 //! it shows an [`AppSource`] of its own (a Rust root, a bundle or a dev
 //! server), so it can run a different app than the main window, with an
-//! engine of its own ([`AppView`]). It has no title bar by default, can
-//! float above other apps' windows ([`WindowLevel`]) and can take the
-//! keyboard without activating the app ([`PanelOptions::nonactivating`]).
-//! A panel lives exactly as long as its [`Panel`] does: dropping it closes
-//! the window and stops its app.
+//! engine of its own ([`AppView`]). It has no title bar by default and can
+//! float above other apps' windows ([`WindowLevel`]). A panel lives exactly
+//! as long as its [`Panel`] does: dropping it closes the window and stops
+//! its app.
 //!
 //! A panel belongs to the thread that runs the app's message loop: the
 //! `nsh-ui` thread [`run_app`](crate::run_app) spawns, where
@@ -25,20 +24,15 @@
 //! the window that was in front), and [`WindowLevel::Floating`] and
 //! [`WindowLevel::AboveDock`] are both `HWND_TOPMOST` (Windows has no
 //! separate band above the taskbar; topmost is the one over the normal
-//! windows). [`WindowLevel::DesktopIcon`] is `HWND_BOTTOM`, the closest
-//! Win32 has, as for the main window. [`PanelOptions::position`] places the
-//! window's top-left corner in screen points at its own scale, and
-//! [`PanelOptions::hides_on_resign_key`] hides it from the window procedure
-//! as it loses the keyboard (`WM_KILLFOCUS`) to a window outside it: the
-//! signal a nonactivating panel has, which never gets an activation
-//! message.
-//!
-//! [`PanelOptions::transparent`], [`PanelOptions::hides_on_deactivate`] and
-//! [`PanelOptions::movable_by_background`] have no Win32 equivalent here
-//! and do nothing: transparency would need a layered window the Direct2D
-//! swap chain does not draw through, hiding on deactivation would need the
-//! app's activation, which a panel does not change, and moving by
-//! background would need its hit tests.
+//! windows, and a level from a newer core is topmost too).
+//! [`WindowLevel::DesktopIcon`] is `HWND_BOTTOM`, the closest Win32 has, as
+//! for the main window. [`PanelOptions::position`] places the window's
+//! top-left corner in screen points at its own scale, and
+//! [`PanelOptions::hides_on_focus_loss`] hides it from the window procedure
+//! as it loses the keyboard (`WM_KILLFOCUS`) to a window outside it; a
+//! panel hidden that way forgets the window that was in front, so a later
+//! `hide` or drop does not give the focus to a window the user did not
+//! choose.
 
 use std::{cell::Cell, ffi::c_void, rc::Rc};
 
@@ -60,8 +54,8 @@ use windows::{
                 SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetWindowLongPtrW,
                 SetWindowPos, SetWindowTextW, ShowWindow, SystemParametersInfoW, WINDOW_EX_STYLE,
-                WINDOW_STYLE, WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
-                WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+                WINDOW_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+                WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
             },
         },
     },
@@ -95,9 +89,6 @@ pub struct Panel {
     app: Rc<AppView>,
     /// The level the window has, to re-assert it when it shows again.
     level: Cell<WindowLevel>,
-    /// The window in front before the panel showed, to give it the focus
-    /// back.
-    previous: Cell<Option<HWND>>,
     /// The window is closed: [`close`](Self::close) and [`Drop`] then have
     /// nothing left to do.
     closed: Cell<bool>,
@@ -147,7 +138,6 @@ impl Panel {
             window: view.hwnd(),
             app: view,
             level: Cell::new(options.level),
-            previous: Cell::new(None),
             closed: Cell::new(false),
         })
     }
@@ -163,7 +153,7 @@ impl Panel {
         // SAFETY: a plain query.
         let foreground = unsafe { GetForegroundWindow() };
         if !foreground.is_invalid() && foreground != hwnd {
-            self.previous.set(Some(foreground));
+            crate::window::set_previous(hwnd, foreground);
         }
         // SAFETY: plain calls on the panel's live window; `SW_SHOWNA`
         // shows it without activating it, and the level is re-asserted
@@ -236,7 +226,9 @@ impl Panel {
     /// [`WindowLevel::Floating`] and [`WindowLevel::AboveDock`] (Windows
     /// has one band above the normal windows, split with the taskbar),
     /// `HWND_NOTOPMOST` for [`WindowLevel::Normal`] and `HWND_BOTTOM` for
-    /// [`WindowLevel::DesktopIcon`].
+    /// [`WindowLevel::DesktopIcon`]. A level this backend does not know
+    /// (`WindowLevel` is `#[non_exhaustive]`) floats as
+    /// [`WindowLevel::Floating`].
     pub fn set_level(&self, level: WindowLevel) {
         self.level.set(level);
         let Some(hwnd) = self.live() else {
@@ -296,11 +288,14 @@ impl Panel {
     /// Hides the window and gives the focus back to the window that was in
     /// front before it showed.
     fn dismiss(&self) {
-        if let Some(hwnd) = self.live() {
-            // SAFETY: a plain call on a live window.
-            let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
-        }
-        if let Some(previous) = self.previous.take()
+        let Some(hwnd) = self.live() else {
+            return;
+        };
+        // SAFETY: a plain call on a live window.
+        let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+        // The window in front when it showed, unless the panel hid by
+        // itself as it lost the keyboard.
+        if let Some(previous) = crate::window::take_previous(hwnd)
             && !previous.is_invalid()
             // SAFETY: a plain query on a window that may have closed.
             && unsafe { IsWindow(Some(previous)) }.as_bool()
@@ -339,18 +334,10 @@ fn apply(view: &AppView, options: &PanelOptions, size: (i32, i32)) {
         let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         // The panel is a tool window, not an app window.
         ex_style |= WS_EX_TOOLWINDOW.0;
-        if options.nonactivating {
-            // Clicks do not activate the app; the window procedure takes
-            // the keyboard for the panel instead (`WM_MOUSEACTIVATE`).
-            ex_style |= WS_EX_NOACTIVATE.0;
-        }
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style as isize);
-        // The window procedure takes the keyboard for a nonactivating
-        // panel, and hides the panel when it loses the keyboard, when the
-        // options ask for it (no activation message reaches a panel's
-        // window otherwise).
-        crate::window::set_no_activate(hwnd, options.nonactivating);
-        crate::window::set_hides_on_resign_key(hwnd, options.hides_on_resign_key);
+        // The window procedure hides the panel as it loses the keyboard,
+        // when the options ask for it.
+        crate::window::set_hides_on_focus_loss(hwnd, options.hides_on_focus_loss);
         // A window's size is its outer frame, a panel's is its content: a
         // borderless popup has the whole window as its client area, so it
         // is sized to the points the panel asked for, once the frame is
@@ -425,6 +412,9 @@ fn order_of(level: WindowLevel) -> HWND {
         WindowLevel::Normal => HWND_NOTOPMOST,
         WindowLevel::Floating | WindowLevel::AboveDock => HWND_TOPMOST,
         WindowLevel::DesktopIcon => HWND_BOTTOM,
+        // A level this backend does not know (`WindowLevel` is
+        // `#[non_exhaustive]`): the floating band, as `Floating`.
+        _ => HWND_TOPMOST,
     }
 }
 

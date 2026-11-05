@@ -323,11 +323,7 @@ fn follow_background(surface: &Surface) {
             (fills && color.0 & 0xff == 0xff).then_some(color)
         });
     let color = app.unwrap_or_else(|| {
-        if surface.transparent.get() {
-            // A transparent panel: what is behind the window shows, until
-            // the app paints an opaque background of its own.
-            nsh_core::Color::rgba(0, 0, 0, 0)
-        } else if surface.environment.get().color_scheme == ColorScheme::Dark {
+        if surface.environment.get().color_scheme == ColorScheme::Dark {
             nsh_core::Color::rgba(10, 10, 10, 255)
         } else {
             nsh_core::Color::rgba(255, 255, 255, 255)

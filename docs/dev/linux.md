@@ -72,13 +72,13 @@ works and its runner only needs GTK.
   `nsh_base::registry()` and its sets).
 - **Panels** (`run_app_with`, `panel.rs`): GTK's widgets belong to the main loop, so `run_app` records the GTK main
   thread and a panel opens on it only: `run_app_with`'s setup hook runs at the start of `connect_activate`, with GTK
-  up, and `Panel::open` anywhere else is `PanelError::WrongThread` (it does not start GTK itself). A panel is a GTK
-  window with an `NshView` and engine of its own; GTK 4 has no window positioning and no window levels, so `position`
-  and `set_level` do nothing (`WindowLevel::AboveDock` leaves the stacking to the window manager), as do
-  `movable_by_background`, `nonactivating` and `hides_on_deactivate` (GTK 4 has no per-application activation, so a
-  panel that hides when the focus leaves it asks for `hides_on_resign_key`: losing GTK's active window is that signal).
-  `transparent` is best effort: it clears the window's own background (one CSS provider for every panel, added once)
-  and needs a compositing window manager; the app's root still paints its own background.
+  up, and hands the host an `AppContext` (`open_panel` on that thread, `run` through `glib`'s main context);
+  `open_panel` anywhere else is `PanelError::WrongThread` — it does not start GTK itself. A panel is a GTK window
+  with an `NshView` and engine of its own, and the host keeps the handle it gets back: dropping it closes the window,
+  and closing the window (a decorated panel's close button) stops the panel's app once and leaves the `Panel` a
+  no-op, as macOS's `windowWillClose:` does. GTK 4 has no window positioning and no window levels, so `position` and
+  `set_level` do nothing (`WindowLevel::AboveDock` leaves the stacking to the window manager). Hiding on focus loss
+  hides the window when it stops being GTK's active window: GTK 4 has no per-application activation to follow.
 
 ## How each area maps to GTK
 

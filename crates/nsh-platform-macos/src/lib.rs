@@ -18,7 +18,8 @@
 //!
 //! [`AppView`] is one surface as a view (for embedding); [`run_app`] opens
 //! one in a window, and [`Panel`] a second one of its own, opened from the
-//! setup hook of [`run_app_with`]. Off macOS this crate is empty.
+//! setup hook of [`run_app_with`] through the [`AppContext`] it is handed.
+//! Off macOS this crate is empty.
 
 #![cfg(target_os = "macos")]
 
@@ -75,7 +76,7 @@ pub use objc2_foundation;
 pub use crate::app::set_root;
 pub use crate::{
     app::{
-        AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, run_app_with,
+        AppContext, AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, run_app_with,
         set_components, set_ui_sets,
     },
     image::AssetBase,

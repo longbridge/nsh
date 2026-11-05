@@ -170,9 +170,9 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes and registering native components, with Rust and TypeScript tests of the TSX entry; counter,
                       with a test; host-echo: an app calling its web page's host (`nsh`'s `host`, nsh.json `web.host`), the host
-                      module and their tests; panel: a host's second window (`Panel`) opened in `run_app_with`'s setup, with an
-                      app and engine of its own — `cargo run -p panel-native` (`nsh run examples/panel` mounts only its main
-                      window, whose components cannot open windows)), embedding samples
+                      module and their tests; panel: a host's second window (`Panel`) opened from `run_app_with`'s setup hook through its
+                      `AppContext`, with an app and engine of its own — `cargo run -p panel-native` (`nsh run examples/panel`
+                      mounts only its main window, whose components cannot open windows)), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
                       `cargo run -p example-embed-gpui`) and the app they run (embedded: uses a native component the samples
                       register); bench: component benchmarks

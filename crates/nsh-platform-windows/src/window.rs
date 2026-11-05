@@ -95,11 +95,12 @@ struct WindowData {
     /// observes ([`observe_root`]); none for a top-level one.
     root: Cell<Option<HWND>>,
     /// Hides the window when it loses the keyboard (a panel's
-    /// [`nsh_core::desktop::PanelOptions::hides_on_resign_key`]).
-    hides_on_resign_key: Cell<bool>,
-    /// Takes the keyboard when it is clicked without activating the app (a
-    /// panel's [`nsh_core::desktop::PanelOptions::nonactivating`]).
-    no_activate: Cell<bool>,
+    /// [`nsh_core::desktop::PanelOptions::hides_on_focus_loss`]).
+    hides_on_focus_loss: Cell<bool>,
+    /// The window in front before a panel showed, to give it the focus back
+    /// when it hides: a panel's `hide` takes it ([`take_previous`]), and
+    /// the hide of [`WM_KILLFOCUS`] clears it first.
+    previous: Cell<Option<HWND>>,
 }
 
 thread_local! {
@@ -185,8 +186,8 @@ pub(crate) fn create(
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
         root: Cell::new(None),
-        hides_on_resign_key: Cell::new(false),
-        no_activate: Cell::new(false),
+        hides_on_focus_loss: Cell::new(false),
+        previous: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -460,20 +461,26 @@ fn data(hwnd: HWND) -> Option<&'static WindowData> {
 }
 
 /// Hides the window when it loses the keyboard (a panel's
-/// `PanelOptions::hides_on_resign_key`), or restores it.
-pub(crate) fn set_hides_on_resign_key(hwnd: HWND, hide: bool) {
+/// `PanelOptions::hides_on_focus_loss`), or restores it.
+pub(crate) fn set_hides_on_focus_loss(hwnd: HWND, hide: bool) {
     if let Some(data) = data(hwnd) {
-        data.hides_on_resign_key.set(hide);
+        data.hides_on_focus_loss.set(hide);
     }
 }
 
-/// Takes the keyboard in the window when it is clicked without activating
-/// the app (a panel's `PanelOptions::nonactivating`), or restores the
-/// default.
-pub(crate) fn set_no_activate(hwnd: HWND, no_activate: bool) {
+/// Remembers `previous`, the window in front before a panel showed, so that
+/// hiding the panel gives it the focus back (`Panel::show`).
+pub(crate) fn set_previous(hwnd: HWND, previous: HWND) {
     if let Some(data) = data(hwnd) {
-        data.no_activate.set(no_activate);
+        data.previous.set(Some(previous));
     }
+}
+
+/// Takes the window in front before a panel showed ([`set_previous`]), for
+/// the `hide` that gives it the focus back: `None` once it was taken, or
+/// when the panel hid by itself, as it lost the keyboard.
+pub(crate) fn take_previous(hwnd: HWND) -> Option<HWND> {
+    data(hwnd).and_then(|data| data.previous.take())
 }
 
 fn lo(l: isize) -> i32 {
@@ -878,31 +885,26 @@ fn handle(
         WM_SETFOCUS => crate::text_input::window_focus(surface, true),
         WM_KILLFOCUS => {
             crate::text_input::window_focus(surface, false);
-            // A panel that hides on resign leaves the screen as it loses
-            // the keyboard, unless the focus moves into the panel itself
-            // (its WebView2 or a native child, whose window comes as the
-            // one receiving the focus): that is not leaving the panel. A
-            // nonactivating panel never deactivates the app, so there is
-            // no `WM_ACTIVATE` for it to hide on.
+            // A panel that hides on focus loss leaves the screen as it
+            // loses the keyboard, unless the focus moves into the panel
+            // itself (its WebView2 or a native child, whose window comes
+            // as the one receiving the focus): that is not leaving the
+            // panel.
             //
             // `WM_KILLFOCUS`'s `wParam` is the window that takes the focus
             // (`lParam` is unused).
             let next = HWND(wparam.0 as *mut _);
             // SAFETY: a plain query on the window receiving the focus.
             let is_child = unsafe { IsChild(hwnd, next) }.as_bool();
-            if data.hides_on_resign_key.get() && leaves_focus(hwnd, next, is_child) {
+            if data.hides_on_focus_loss.get() && leaves_focus(hwnd, next, is_child) {
+                // The user did not dismiss the panel: it forgets the window
+                // that was in front when it showed, so that a later hide,
+                // close or drop gives the focus to no window the user did
+                // not choose.
+                data.previous.set(None);
                 // SAFETY: a plain call on the live window.
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
             }
-        }
-        WM_MOUSEACTIVATE if data.no_activate.get() => {
-            // A `WS_EX_NOACTIVATE` window is clicked without activating
-            // the app, which would also leave it without the keyboard
-            // (the click is aimed at it): take the focus here and tell
-            // Win32 not to activate the window.
-            // SAFETY: a plain call on this window.
-            let _ = unsafe { SetFocus(Some(hwnd)) };
-            return Some(LRESULT(MA_NOACTIVATE as isize));
         }
         WM_GETOBJECT => return crate::access::get_object(surface, hwnd, wparam, lparam),
         WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
@@ -971,11 +973,11 @@ fn count_clicks(data: &WindowData, lparam: LPARAM) -> u32 {
 }
 
 /// Whether the keyboard moving from `focus` to the window `next` leaves
-/// `focus` and its children — the window of a panel that hides on resign,
-/// say — so that the keyboard went elsewhere: another of the app's windows,
-/// another app's, or nowhere Win32 names at all (`WM_KILLFOCUS`'s `wParam` is
-/// often `NULL`). A window that is `focus` itself, or one of its children
-/// (`is_child`: `IsChild`'s answer, taken by the caller), keeps it.
+/// `focus` and its children — the window of a panel that hides on focus
+/// loss, say — so that the keyboard went elsewhere: another of the app's
+/// windows, another app's, or nowhere Win32 names at all (`WM_KILLFOCUS`'s
+/// `wParam` is often `NULL`). A window that is `focus` itself, or one of its
+/// children (`is_child`: `IsChild`'s answer, taken by the caller), keeps it.
 fn leaves_focus(focus: HWND, next: HWND, is_child: bool) -> bool {
     next != focus && (next.is_invalid() || !is_child)
 }
