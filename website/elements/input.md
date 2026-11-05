@@ -50,6 +50,8 @@ function NameField() {
 }
 ```
 
+With no width from its style or its parent, an input is as wide as twenty digits in its font, as an HTML `<input>` is: what it holds does not change its width.
+
 ## Controlled and uncontrolled
 
 - **Controlled**: pass `value` and update it in `onChange`. The app can rewrite what the user typed (trim it, format

@@ -920,7 +920,12 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                         title_double_click(window);
                     }
                     MouseButton::Left => surface.chrome.drag.set(Some((x, y))),
-                    MouseButton::Right if PLATFORM == Platform::Linux => {
+                    // (a view of the app's own with a context menu there
+                    // hears the click instead)
+                    MouseButton::Right
+                        if PLATFORM == Platform::Linux
+                            && !crate::input::hears_context_menu(&surface.root, x - ox, y - oy) =>
+                    {
                         window.show_window_menu(e.position);
                     }
                     _ => return,

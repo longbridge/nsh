@@ -4,6 +4,16 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
+sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
+behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
+far from the screen waits for the end of the drag, so that commit does the measuring the drag skipped, on the engine
+thread. What remains scales with the page: Taffy and emitting frames over every node, and AppKit's walks over the view
+tree.
+
+The same on Linux (GTK 4 under Xvfb in a container, a page of 120 Markdown messages, `xdotool` setting about 115 sizes per
+second): sizes the app handled per second 41 → 60.
+
 Windows cursor refresh after a style batch, against main `a5036af4`, debug host, one native run per revision:
 `echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --target windows --trace`.
 Both runs produce 56 ops / 50 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes after the press.
@@ -263,6 +273,54 @@ main thread, so the work is held by counts the backend's tests check on Xvfb, no
   an upload and a shader frame. Each reader is listed once, however often its layer is sent (every uniform update
   sends it). Before, any change on the UI thread took every reader's backdrop again and gave it to its shader.
 
+## Continuous corners on Linux
+
+Measured on 2026-11-05 using the actual `NshView` snapshot implementation:
+GTK 4.24.1, Intel Arrow Lake-S GPU, Vulkan renderer, Wayland, 1200 × 800
+points at 2×, 60 Hz. The debug test moves and redraws 100 identical
+110 × 70 point cards (radius 20) every tick, warms up for 30 ticks and
+samples 180 frame-clock intervals. No screenshots or texture downloads
+occur during measurement. CPU is process CPU time / wall time, where
+100% means one core; it includes warm-up.
+
+```sh
+cargo test -p nsh-platform-linux --lib continuous_corner_frame_cost -- --ignored --nocapture
+```
+
+Before path reuse (`237dfd88` plus the background benchmark), continuous
+backgrounds averaged 33.33 ms / 30 updates per second; circular backgrounds
+averaged 16.67 ms / 60. Reusing paths alone restored backgrounds and clipped
+borders to about 60, but 100 blurred continuous shadows still averaged
+39.73 ms / 25.2 updates per second. Retaining their vector render nodes alone
+was insufficient (32.36 ms / 30.9).
+
+The final implementation retains equal paths and renders unchanged continuous
+shadows to GPU textures once, without readback. Shadows include all shape,
+color, offset, spread, blur and inset inputs in their cache key, together with
+device scale. Scaling, rotation and perspective transforms use the original
+vector drawing to preserve quality. Path retention is limited to 128 entries;
+shadow retention to 64 entries and 16 million pixels, with a 4 million pixel
+limit per shadow. Larger shadows use vector drawing.
+
+| Scene | Corners | Mean interval | p95 | p99 | Updates/s | CPU | Intervals >25 ms |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Background | Circular | 16.67 ms | 18.03 ms | 18.10 ms | 60.0 | 27.0% | 0 |
+| Background | Continuous | 16.67 ms | 18.30 ms | 18.46 ms | 60.0 | 31.8% | 0 |
+| Clipped child + 2 pt border | Circular | 16.66 ms | 18.23 ms | 18.52 ms | 60.0 | 37.5% | 0 |
+| Clipped child + 2 pt border | Continuous | 16.67 ms | 18.51 ms | 18.67 ms | 60.0 | 35.7% | 0 |
+| 8 pt blurred outer shadow | Circular | 16.66 ms | 18.30 ms | 18.47 ms | 60.0 | 33.7% | 0 |
+| 8 pt blurred outer shadow | Continuous | 16.67 ms | 18.41 ms | 18.66 ms | 60.0 | 33.7% | 0 |
+
+These are update intervals, not GPU execution times or confirmed presentation
+timestamps. GPU utilization, cold-cache cost, heterogeneous-card cache pressure,
+animated shape/blur changes, transformed shadows and 120 Hz were not measured.
+The test is explicit/ignored and does not impose timing assertions in CI.
+Pixel tests compare cached inset/outset shadows with vector rendering and check
+that changed radius, blur and color do not reuse stale images.
+
+The separate five-layer backdrop-blur probe (~15 FPS including full texture
+readback) is not this implementation. Linux `backdropFilter` remains unsupported.
+
 ## The browser engine (published web apps)
 
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
@@ -279,6 +337,15 @@ Headless Chromium over CDP, a published package (`nsh package --target web`), 20
   and draws only those that changed, and draws a canvas again when its size changes, not when it moves. The wheel,
   300 steps of 30pt: main thread ~3.8s instead of ~4.5s, median frame ~9.2ms instead of ~12.2ms; its scroll bar
   dragged 150 steps: script ~4.3ms per batch instead of ~5.6ms.
+- Shader views (`nsh.js`, `docs/dev/shaders.md` "The web"), the gallery's Shaders page in a Chrome window over CDP
+  (1200 × 713 points at 2×, 120 Hz, Apple M5 through ANGLE's Metal renderer, the development host), 2026-11-04:
+  two `nsh.time` shaders in sight, then the `ScreenEffect` (Duotone) turned on below them. With the screen effect,
+  each frame asked for two `shaderFrame` callbacks, so the frames doubled until one display frame took 9 to 24 s;
+  now it holds 120 fps (p50 8.3 ms, p95 9.5 ms), ~3.3 ms of `shaderFrame` a frame, ~3 ms of it the surface's picture
+  (`paintInputs`). Each view drawing into the corner of a shared canvas that fits the largest and copying it out,
+  instead of resizing the canvas to each view and transferring it whole: ~0.1 ms a view (`drawShader`) instead of
+  ~0.65 ms, and of ~1.6 ms with the screen effect, whose size the canvas took and gave back on every frame; the page
+  without the screen effect ~0.3 ms of `shaderFrame` a frame instead of ~2 ms.
 
 ## The performance monitor (`nsh_engine::perf`)
 

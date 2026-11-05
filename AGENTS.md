@@ -82,6 +82,7 @@ crates/
                        feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
+  nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
@@ -158,6 +159,9 @@ crates/
                        `compat record <version>`: records a release there)
 tests/compat/         The apps whose scripts check the API apps use (`nsh-compat` builds and runs them): `cases/<domain>/` (one app per
                       domain, a module per case, `script.txt`), `examples/<app>.txt` (the scripts of examples)
+skills/               The skills for coding agents that build apps with NSH (`npx skills add longbridge/nsh`): `skills/nsh`, `skills/nsh-design-guides`;
+                      their guides are verbatim copies of `website/docs/`, their recipes of `examples/tasks-rs` and `examples/tasks`, and `website/tests/skills.test.ts`
+                      fails when a copy differs: after changing one, copy it (`cp website/docs/coding-guides.md skills/nsh/references/`)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README

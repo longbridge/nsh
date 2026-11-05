@@ -1315,7 +1315,10 @@ mod tests {
     #[test]
     fn native_exports_are_the_names_imported_unless_a_specifier_is_computed() {
         let mut app = uses(&[("nsh", Some(&["View"])), ("nsh/base", None)]);
-        assert_eq!(native_exports(Some(&app)), serde_json::json!({ "nsh": ["View"] }));
+        assert_eq!(
+            native_exports(Some(&app)),
+            serde_json::json!({ "nsh": ["View"] })
+        );
         app.computed_import = true;
         assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
     }

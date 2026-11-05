@@ -114,8 +114,14 @@
      edge catching light, faint enough not to double the border under it. */
   --highlight: rgb(255 255 255 / 5%);
   --band-tinted: linear-gradient(180deg, #0c0d0f, #0c0d0f);
-  --logo-dot: #eef0f2;
-  --logo-ring: transparent;
+  --logo-top: #d3f07c;
+  --logo-body: #a9d63f;
+  --logo-low: #b9e24f;
+  --logo-edge: #55800c;
+  --logo-shine: #eefcc0;
+  --logo-bead-lo: #c9ced4;
+  --logo-bead-hi: #ffffff;
+  --logo-bead-rim: #7c838c;
   --code-surface: rgb(0 0 0 / 14%);
   --code-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 22px rgb(0 0 0 / 22%);
   --chip-bg: rgb(255 255 255 / 6.5%);
@@ -126,8 +132,6 @@
   --glass-thumb: linear-gradient(180deg, rgb(255 255 255 / 12.4%), rgb(255 255 255 / 8.6%));
   --glass-edge: inset 0 1px 0 rgb(255 255 255 / 12%), inset 0 -1px 0 rgb(0 0 0 / 25%), inset 0 0 0 1px rgb(255 255 255 / 6%), 0 2px 8px rgb(0 0 0 / 25%);
   --glass-thumb-edge: inset 0 1px 0 rgb(255 255 255 / 22%), inset 0 -1px 0 rgb(0 0 0 / 20%), 0 1px 3px rgb(0 0 0 / 35%);
-  --logo-top: #e2fb9f;
-  --logo-bottom: #a9d63f;
   --accent-border: transparent;
   --nav-active: rgb(255 255 255 / 6%);
   --nav-hover: rgb(255 255 255 / 3.5%);
@@ -191,8 +195,14 @@ html.light {
   --page-light: rgb(255 255 255 / 70%);
   --highlight: #ffffff;
   --band-tinted: linear-gradient(180deg, #edede8, #ecece6);
-  --logo-dot: #15161a;
-  --logo-ring: transparent;
+  --logo-top: #a7d834;
+  --logo-body: #7cb015;
+  --logo-low: #8cc01d;
+  --logo-edge: #3f6606;
+  --logo-shine: #d4f178;
+  --logo-bead-lo: #1b1e24;
+  --logo-bead-hi: #565c66;
+  --logo-bead-rim: #07080a;
   --code-surface: rgb(120 120 90 / 4%);
   --code-shadow: 0 1px 2px rgb(20 20 10 / 5%), 0 6px 18px rgb(20 20 10 / 5%);
   --chip-bg: rgb(21 22 26 / 5.5%);
@@ -201,8 +211,6 @@ html.light {
   --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 81.1%));
   --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(20 20 10 / 8%);
   --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(20 20 10 / 14%);
-  --logo-top: #a3d13a;
-  --logo-bottom: #6a9a12;
   --nav-active: rgb(0 0 0 / 4.5%);
   --nav-hover: rgb(0 0 0 / 2.8%);
   --callout-tint: 7%;
@@ -360,7 +368,7 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
 .site-nav__projects summary:hover { background: var(--nav-hover); color: var(--foreground); }
 .site-nav__projects summary svg { width: 1rem; height: 1rem; }
 .site-nav__projects-menu {
-  position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 50; min-width: 16rem; padding: 0.35rem;
+  position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 50; width: max-content; padding: 0.35rem;
   border: 1px solid var(--line); border-radius: 10px; background: var(--background);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
 }
@@ -370,7 +378,7 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
 }
 .site-nav__project-logo { display: block; flex-shrink: 0; width: 1.75rem; height: 1.75rem; }
 .site-nav__project-copy { display: flex; flex-direction: column; gap: 0.1rem; }
-.site-nav__projects-menu a span { color: var(--muted-foreground); font-size: 0.75rem; }
+.site-nav__projects-menu a span { color: var(--muted-foreground); font-size: 0.75rem; white-space: nowrap; }
 .site-nav__projects-menu a:hover, .site-nav__projects-menu a.is-current { background: var(--nav-hover); }
 
 .site-nav__versions { position: relative; flex-shrink: 0; }
@@ -478,10 +486,22 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   .site-nav__actions > a[aria-label="GitHub"] { display: none; }
 }
 
-@media (max-width: 380px) {
+/* The name goes before the actions stop fitting, with room for a longer
+   version label. */
+@media (max-width: 460px) {
   .site-nav__inner { gap: 0.5rem; }
-  .site-nav__projects { display: none; }
+  .site-nav__projects { margin-left: 0; }
+  .site-nav__projects-menu { position: fixed; top: 3.5rem; left: 1rem; right: 1rem; width: auto; }
+  .site-nav__projects-menu a span { white-space: normal; }
   .site-nav__brand > span { display: none; }
+}
+
+@media (max-width: 380px) {
+  .site-nav__projects { display: none; }
+}
+
+@media (max-width: 340px) {
+  .site-nav__versions { display: none; }
 }
 
 /* ====================================================================
@@ -1273,3 +1293,9 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
 }
+
+.doc-machine-notice {
+  margin: 0 0 1.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem;
+  color: var(--muted-foreground); font-size: 0.8125rem;
+}
+.doc-machine-notice a { color: var(--foreground); text-decoration: underline; }

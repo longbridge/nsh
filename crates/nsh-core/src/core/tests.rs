@@ -690,6 +690,123 @@ fn text_out_of_the_layout_shows_no_glyphs() {
     assert_eq!(text_of(&c.commit().unwrap()), Some(("–".to_owned(), 0)));
 }
 
+/// A column styled `column` whose width comes from its content, in a parent
+/// that does not stretch it, around a row or column with text: the frames of
+/// the column and of the text.
+fn max_width_column(
+    column: &[(&str, StyleValue<'_>)],
+    row: bool,
+    chars: usize,
+) -> (Option<Bounds<Points>>, Option<Bounds<Points>>) {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 7,
+            tag: Tag::View,
+        },
+        style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        style_op(2, column),
+        Op::Create {
+            id: 3,
+            tag: Tag::View,
+        },
+        style_op(
+            3,
+            &[(
+                "flexDirection",
+                StyleValue::Str(if row { "row" } else { "column" }),
+            )],
+        ),
+        Op::Create {
+            id: 6,
+            tag: Tag::View,
+        },
+        style_op(
+            6,
+            &[("width", StyleValue::Number(if row { 40.0 } else { 0.0 }))],
+        ),
+        Op::Create {
+            id: 4,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 5,
+            text: "x".repeat(chars),
+        },
+    ];
+    if row {
+        ops.push(style_op(4, &[("flex", StyleValue::Number(1.0))]));
+    }
+    for (parent, child) in [(4, 5), (3, 6), (3, 4), (2, 3), (7, 2), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    (frame_of(&batch, 2), frame_of(&batch, 4))
+}
+
+#[test]
+fn a_clamped_column_is_as_tall_as_its_wrapped_text() {
+    let max = [("maxWidth", StyleValue::Number(200.0))];
+    // `flex: 1` text beside 40pt: 400pt in 160pt is three lines.
+    let (column, text) = max_width_column(&max, true, 50);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    assert_eq!(
+        text.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 48.0))
+    );
+    // Text alone: 400pt in 200pt is two lines.
+    let (column, _) = max_width_column(&max, false, 50);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 32.0))
+    );
+    // With a minimum, and padding inside the limit: 400pt in 140pt.
+    let (column, _) = max_width_column(
+        &[
+            ("minWidth", StyleValue::Number(100.0)),
+            ("maxWidth", StyleValue::Number(200.0)),
+            ("padding", StyleValue::Number(10.0)),
+        ],
+        true,
+        50,
+    );
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 68.0))
+    );
+    // Out of flow, where nothing clamps the space it is measured in.
+    let (column, _) = max_width_column(
+        &[
+            ("position", StyleValue::Str("absolute")),
+            ("maxWidth", StyleValue::Number(200.0)),
+        ],
+        true,
+        50,
+    );
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    // A limit nothing reaches changes nothing.
+    let (column, _) = max_width_column(&max, false, 10);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((80.0, 16.0))
+    );
+}
+
 #[test]
 fn flex_text_in_a_row_shrinks_and_wraps() {
     // Yoga has no automatic minimum size: `flex: 1` text takes the space
@@ -2986,6 +3103,81 @@ fn input_values_from_js_and_native_edits() {
     })
     .unwrap();
     assert!(c.commit().is_none());
+}
+
+/// An input with `style`, in a row with `flex: 1` when `flex`, or alone, in a
+/// view its content sizes.
+fn hugged_input(style: &[(&str, StyleValue<'_>)], flex: bool) -> Core<FakeEngine> {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 7,
+            tag: Tag::View,
+        },
+        style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::View,
+        },
+        style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+        Op::Create {
+            id: 2,
+            tag: Tag::Input,
+        },
+        style_op(2, style),
+    ];
+    if flex {
+        ops.push(style_op(2, &[("flex", StyleValue::Number(1.0))]));
+    }
+    for (parent, child) in [(3, 2), (7, 3), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c
+}
+
+#[test]
+fn an_inputs_width_does_not_come_from_its_text() {
+    for flex in [false, true] {
+        let mut c = hugged_input(&[], flex);
+        // Twenty digits at 8pt, whatever it holds.
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(160.0));
+        c.input_changed(2, "x", 1);
+        // Typing does not move it, if its frame is sent at all.
+        let width = |batch: Option<MountBatch>| {
+            batch
+                .and_then(|b| frame_of(&b, 3))
+                .map_or(160.0, |f| f.size.width.0)
+        };
+        assert_eq!(width(c.commit()), 160.0);
+        c.input_changed(2, &"x".repeat(30), 2);
+        assert_eq!(width(c.commit()), 160.0);
+    }
+    // A multiline one wraps at that width: 30
+    // characters at 8pt in 160pt is two lines.
+    let mut c = hugged_input(&[], false);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    c.input_changed(2, &"x".repeat(30), 1);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 32.0))
+    );
+    // A width of its own stays.
+    let batch = hugged_input(&[("width", StyleValue::Number(90.0))], false)
+        .commit()
+        .unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(90.0));
 }
 
 #[test]
@@ -29345,4 +29537,400 @@ fn a_bad_page_shader_keeps_its_error() {
         "its error kept"
     );
     assert_eq!(c.shaders.len(), 1);
+}
+
+/// Words of eight points a character that wrap at spaces, each line taking
+/// all that fits.
+#[derive(Default)]
+struct WordsEngine {
+    greedy: bool,
+    measures: Cell<u32>,
+}
+
+impl TextEngine for WordsEngine {
+    type Prepared = String;
+
+    fn prepare(&self, text: &AttributedText) -> String {
+        text.text.clone()
+    }
+
+    fn measure(&self, text: &String, max_width: Option<Points>) -> Size<Points> {
+        self.measures.set(self.measures.get() + 1);
+        let max = max_width.map_or(f32::INFINITY, |m| m.0);
+        let (mut line, mut widest, mut lines) = (0.0f32, 0.0f32, 1.0);
+        for word in text.split(' ') {
+            let width = word.chars().count() as f32 * 8.0;
+            let wider = if line > 0.0 {
+                line + 8.0 + width
+            } else {
+                width
+            };
+            if line > 0.0 && wider > max {
+                widest = widest.max(line);
+                line = width;
+                lines += 1.0;
+            } else {
+                line = wider;
+            }
+        }
+        size_pt(widest.max(line), lines * 16.0)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        self.greedy
+    }
+
+    fn layout(&self, _: &String, _: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(()))
+    }
+}
+
+fn words_context(text: &str, max_lines: u32) -> TextContext<String> {
+    TextContext::new(Arc::new(AttributedText {
+        text: text.into(),
+        max_lines,
+        ..AttributedText::default()
+    }))
+}
+
+/// Narrowed or widened by any steps, a text measures what it measures on
+/// its own at each width, with or without typesetting.
+#[test]
+fn widths_with_the_same_line_breaks_measure_the_same() {
+    let text =
+        "the quick brown fox jumps over the lazy dog and keeps running through the long grass";
+    let engine = WordsEngine {
+        greedy: true,
+        ..WordsEngine::default()
+    };
+    let mut cache = MeasureCache::default();
+    let mut cx = words_context(text, 0);
+    let widths = (40..400)
+        .rev()
+        .step_by(3)
+        .chain((40..400).step_by(7))
+        .chain((40..400).rev().step_by(11));
+    for width in widths {
+        let width = width as f32;
+        let fresh = WordsEngine::default().measure(&text.to_owned(), Some(Points(width)));
+        let size = measure_text(&engine, &mut cache, &mut cx, Some(width));
+        assert_eq!(size, fresh, "at {width}");
+    }
+}
+
+/// A narrower width that still holds the widest line needs no typesetting,
+/// and neither does a wider one measured ahead of a growing width.
+#[test]
+fn a_text_is_typeset_only_when_its_line_breaks_may_change() {
+    let engine = WordsEngine {
+        greedy: true,
+        ..WordsEngine::default()
+    };
+    let mut cache = MeasureCache::default();
+    // Two lines at 100: "aaaaaaaaaa" (80) and "bbbbbbbbbb" (80).
+    let mut cx = words_context("aaaaaaaaaa bbbbbbbbbb", 0);
+    measure_text(&engine, &mut cache, &mut cx, Some(100.0));
+    assert_eq!(engine.measures.get(), 1);
+    measure_text(&engine, &mut cache, &mut cx, Some(90.0));
+    measure_text(&engine, &mut cache, &mut cx, Some(80.0));
+    assert_eq!(engine.measures.get(), 1, "the widest line still fits");
+    measure_text(&engine, &mut cache, &mut cx, Some(79.0));
+    assert_eq!(engine.measures.get(), 2, "the widest line does not fit");
+
+    // Growing: one measurement covers the next widths.
+    let mut cache = MeasureCache::default();
+    let mut cx = words_context("aaaaaaaaaa bbbbbbbbbb", 0);
+    measure_text(&engine, &mut cache, &mut cx, Some(100.0));
+    let before = engine.measures.get();
+    measure_text(&engine, &mut cache, &mut cx, Some(102.0));
+    assert_eq!(engine.measures.get(), before + 1);
+    measure_text(&engine, &mut cache, &mut cx, Some(104.0));
+    measure_text(&engine, &mut cache, &mut cx, Some(108.0));
+    assert_eq!(engine.measures.get(), before + 1, "measured ahead");
+}
+
+/// Another width of the same left-aligned lines keeps the layout; anything
+/// that moves or breaks a line does not.
+#[test]
+fn only_the_same_lines_at_the_left_keep_their_layout() {
+    let engine = WordsEngine {
+        greedy: true,
+        ..WordsEngine::default()
+    };
+    let check = |text: AttributedText, to: f32, height: f32| {
+        let mut cache = MeasureCache::default();
+        let mut cx = TextContext::<String>::new(Arc::new(text));
+        // Two lines of 80 at 100.
+        measure_text(&engine, &mut cache, &mut cx, Some(100.0));
+        let laid = LaidText {
+            content: rect(0.0, 0.0, 100.0, 32.0),
+            layout: TextLayout(Arc::new(())),
+            text: cx.text.clone(),
+        };
+        keeps_lines(&cx, &laid, size_pt(to, height))
+    };
+    let text = |align, writing_direction, text: &str| AttributedText {
+        text: text.into(),
+        align,
+        writing_direction,
+        ..AttributedText::default()
+    };
+    let plain = "aaaaaaaaaa bbbbbbbbbb";
+    assert!(check(text(TextAlign::Auto, None, plain), 80.0, 32.0));
+    assert!(check(text(TextAlign::Left, None, plain), 90.0, 32.0));
+    assert!(
+        !check(text(TextAlign::Auto, None, plain), 79.0, 32.0),
+        "breaks"
+    );
+    assert!(
+        !check(text(TextAlign::Auto, None, plain), 90.0, 40.0),
+        "taller"
+    );
+    assert!(!check(text(TextAlign::Center, None, plain), 90.0, 32.0));
+    assert!(!check(text(TextAlign::Right, None, plain), 90.0, 32.0));
+    assert!(!check(text(TextAlign::Justify, None, plain), 90.0, 32.0));
+    assert!(!check(text(TextAlign::Auto, Some(true), plain), 90.0, 32.0));
+    let arabic = "aaaaaaaa\u{0627} bbbbbbbbb";
+    assert!(!check(text(TextAlign::Auto, None, arabic), 90.0, 32.0));
+}
+
+/// During a burst of resizes, text far below the screen keeps its height and
+/// catches up when the burst ends; text near the screen follows every width.
+#[test]
+fn far_text_catches_up_when_a_resize_ends() {
+    let mut c = Core::new(
+        WordsEngine {
+            greedy: true,
+            ..WordsEngine::default()
+        },
+        size_pt(200.0, 100.0),
+    );
+    // Different words: the same ones would be measured once for both.
+    let text = |id, content, words: &str| {
+        vec![
+            Op::Create { id, tag: Tag::Text },
+            Op::CreateText {
+                id: content,
+                text: words.into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: content,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        Op::Insert {
+            parent: 1,
+            child: 2,
+            before: None,
+        },
+    ];
+    ops.extend(text(3, 4, "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd"));
+    ops.extend([
+        Op::Create {
+            id: 5,
+            tag: Tag::View,
+        },
+        style_op(5, &[("height", StyleValue::Number(2000.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 5,
+            before: None,
+        },
+    ]);
+    ops.extend(text(6, 7, "eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh"));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().size.height, Points(32.0));
+    assert_eq!(frame_of(&batch, 6).unwrap().size.height, Points(32.0));
+
+    c.set_resizing(true);
+    c.set_viewport(size_pt(90.0, 100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 3).unwrap().size.height,
+        Points(64.0),
+        "follows the width"
+    );
+    assert_eq!(
+        frame_of(&batch, 6).unwrap().size.height,
+        Points(32.0),
+        "waits"
+    );
+
+    c.set_resizing(false);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 6).unwrap().size.height,
+        Points(64.0),
+        "caught up"
+    );
+}
+
+/// Text above the viewport wrapping onto more lines moves what shows: the
+/// scroll view keeps it in place through the drag and the commit after it.
+#[test]
+fn a_scroll_view_keeps_what_it_shows_through_a_resize() {
+    let mut c = Core::new(
+        WordsEngine {
+            greedy: true,
+            ..WordsEngine::default()
+        },
+        size_pt(200.0, 100.0),
+    );
+    let text = |id, content, value: &str| {
+        vec![
+            Op::Create { id, tag: Tag::Text },
+            Op::CreateText {
+                id: content,
+                text: value.into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: content,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: 1,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Far above the viewport, near it and shown.
+    ops.extend(text(3, 4, "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd"));
+    ops.extend([
+        Op::Create {
+            id: 5,
+            tag: Tag::View,
+        },
+        style_op(5, &[("height", StyleValue::Number(2000.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 5,
+            before: None,
+        },
+    ]);
+    ops.extend(text(6, 7, "eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh"));
+    ops.extend([
+        Op::Create {
+            id: 8,
+            tag: Tag::View,
+        },
+        style_op(8, &[("height", StyleValue::Number(3000.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 8,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8).unwrap().origin.y, Points(2064.0));
+    c.set_scroll_offset(2, point(Points::ZERO, Points(2100.0)), 0);
+
+    let scrolled = |batch: &MountBatch| -> f32 {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ScrollBy { id: 2, dy, .. } => Some(dy.0),
+                _ => None,
+            })
+            .sum()
+    };
+    // The text just above wraps now, the far one waits.
+    c.set_resizing(true);
+    c.set_viewport(size_pt(90.0, 100.0));
+    let batch = c.commit().unwrap();
+    let moved = frame_of(&batch, 8).unwrap().origin.y.0 - 2064.0;
+    assert_eq!(moved, 32.0);
+    assert_eq!(scrolled(&batch), moved, "follows what it shows");
+
+    // The far text catches up all at once.
+    c.set_resizing(false);
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), 32.0, "no jump at the end");
+
+    // One resize, outside any burst: wider, the texts take fewer lines.
+    c.set_viewport(size_pt(200.0, 100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), -64.0, "a single resize too");
+
+    // At the start of the content nothing scrolls.
+    c.set_scroll_offset(2, point(Points::ZERO, Points::ZERO), 3);
+    c.set_viewport(size_pt(90.0, 100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), 0.0);
+}
+
+/// A text whose lines change just ahead of its width stops being measured
+/// ahead: it would be typeset twice per width.
+#[test]
+fn a_failed_measurement_ahead_is_not_repeated() {
+    let engine = WordsEngine {
+        greedy: true,
+        ..WordsEngine::default()
+    };
+    let mut cache = MeasureCache::default();
+    // A word joins the first line at 168: 8 past 160.
+    let mut cx = words_context("aaaaaaaaaa bbbbbbbbbb", 0);
+    measure_text(&engine, &mut cache, &mut cx, Some(100.0));
+    let before = engine.measures.get();
+    let size = measure_text(&engine, &mut cache, &mut cx, Some(165.0));
+    assert_eq!(size, size_pt(80.0, 32.0));
+    assert_eq!(
+        engine.measures.get(),
+        before + 2,
+        "ahead, then at the width"
+    );
+    let before = engine.measures.get();
+    let size = measure_text(&engine, &mut cache, &mut cx, Some(167.0));
+    assert_eq!(size, size_pt(80.0, 32.0));
+    assert_eq!(engine.measures.get(), before + 1, "at the width only");
+}
+
+/// Engines that do not say they break lines greedily, and limits on lines,
+/// are measured at every width.
+#[test]
+fn only_greedy_lines_without_a_limit_share_measurements() {
+    let plain = WordsEngine::default();
+    let mut cache = MeasureCache::default();
+    let mut cx = words_context("aaaaaaaaaa bbbbbbbbbb", 0);
+    measure_text(&plain, &mut cache, &mut cx, Some(100.0));
+    measure_text(&plain, &mut cache, &mut cx, Some(90.0));
+    assert_eq!(plain.measures.get(), 2);
+
+    let greedy = WordsEngine {
+        greedy: true,
+        ..WordsEngine::default()
+    };
+    let mut cache = MeasureCache::default();
+    let mut cx = words_context("aaaaaaaaaa bbbbbbbbbb", 1);
+    measure_text(&greedy, &mut cache, &mut cx, Some(100.0));
+    measure_text(&greedy, &mut cache, &mut cx, Some(90.0));
+    assert_eq!(greedy.measures.get(), 2);
 }

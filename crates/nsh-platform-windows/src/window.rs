@@ -581,6 +581,11 @@ fn handle(
 ) -> Option<LRESULT> {
     let scale = surface.scale();
     let point = |l: LPARAM| (lo(l.0) as f32 / scale, hi(l.0) as f32 / scale);
+    // Registered, so not a constant to match on.
+    if data.top_level && msg == crate::notifications::taskbar_button_created() {
+        crate::notifications::button_created(surface);
+        return None;
+    }
     match msg {
         WM_NSH_WAKE => surface.drain(),
         WM_NSH_TICK => surface.tick(),

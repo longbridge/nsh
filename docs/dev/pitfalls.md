@@ -138,6 +138,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **A constant newer than the deployment target (iOS 15) stops the app before `main`**: `objc2-ui-kit` exposes it as a
+  `pub static`, so naming it is a strong import that dyld binds at launch, used or not ("Symbol not found"). Classes and
+  methods are looked up at run time and are safe to guard by version; constants are not. `input.rs` looks the iOS 17
+  text content types up with `dlsym` and leaves `textContentType` unset without them. To check a binary, compare
+  `dyld_info -imports` with the exports of the oldest runtime.
 - **An input's `pointerEvents` is UIKit's, not `NshView`'s**: inputs are a plain container around a text view, with no
   `hitTest:` of NSH's, so `none` / `box-none` turn the container's user interaction off (`set_view_props`); it can still
   become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes

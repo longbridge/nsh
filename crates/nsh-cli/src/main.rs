@@ -24,6 +24,7 @@ mod test_host;
 mod test_ios;
 mod test_web;
 mod ui;
+mod updater;
 mod web;
 mod windows;
 
@@ -187,6 +188,12 @@ enum Command {
         /// the primary one when there is no other.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
+        /// With `--target macos`: lets the apps become the active app, as
+        /// they would run for a user. By default they run in the
+        /// background: their windows show but never take the keyboard from
+        /// the app in use, and the tests' input goes to them directly.
+        #[arg(long)]
+        foreground: bool,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -300,6 +307,32 @@ enum Command {
     Keygen {
         /// Path and name of the key files, e.g. `keys/root`.
         name: PathBuf,
+    },
+    /// Write an app's update manifest (`latest.json`, signed with `--key`)
+    /// from the archives `nsh package` made for each platform; publish them
+    /// together.
+    UpdateManifest {
+        /// The archives named `<name>-<version>-<os>-<arch>.<ext>`.
+        #[arg(required = true)]
+        archives: Vec<PathBuf>,
+        /// The app's directory or entry, whose `nsh.json` has the id and version.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
+        /// The secret key (`nsh keygen`'s `.secret`) of the app's `updater.publicKey`.
+        #[arg(long)]
+        key: Option<PathBuf>,
+        /// A text file with what changed.
+        #[arg(long)]
+        notes: Option<PathBuf>,
+        /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
+        #[arg(long = "link")]
+        links: Vec<String>,
+        /// Prefix of the archives' URLs (default: next to the manifest).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// The directory the manifest is written to.
+        #[arg(short, long, default_value = ".")]
+        out: PathBuf,
     },
     /// Certify a release key with a root key, for some app ids and a time
     /// window; packages carry the certificate.
@@ -477,6 +510,7 @@ impl Command {
             Command::Package(args) => Some(&mut args.entry),
             Command::Init { .. }
             | Command::Keygen { .. }
+            | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
             | Command::Symbolicate { .. }
@@ -705,6 +739,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser,
             web_host,
             display,
+            foreground,
         } => test::test(
             &path,
             &entry,
@@ -716,6 +751,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser.as_deref(),
             web_host,
             display.map(|n| n as usize),
+            foreground,
         ),
         Command::Dev {
             entry,
@@ -825,6 +861,23 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             )
         }
         Command::Keygen { name } => sign::keygen(&name),
+        Command::UpdateManifest {
+            archives,
+            entry,
+            key,
+            notes,
+            links,
+            base_url,
+            out,
+        } => updater::manifest(updater::ManifestOptions {
+            archives: &archives,
+            entry: &entry,
+            key: key.as_deref(),
+            notes: notes.as_deref(),
+            links: &links,
+            base_url: base_url.as_deref(),
+            out: &out,
+        }),
         Command::Certify {
             root,
             key,

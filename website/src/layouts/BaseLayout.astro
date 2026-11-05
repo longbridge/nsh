@@ -8,9 +8,10 @@ import { isLatestVersion, siteVersions, latestVersion, versionHref, versionPath 
 export interface Props {
   title?: string;
   description?: string;
-  lang?: Lang;
+  /** The page's language; may be a machine locale. */
+  lang?: string;
   /** Routes (without the base) of this page in each locale, for hreflang. */
-  alternates?: { en?: string; 'zh-CN'?: string };
+  alternates?: Record<string, string | undefined>;
   robots?: string;
 }
 
@@ -64,8 +65,7 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <link rel="icon" type="image/svg+xml" href={`${BASE}favicon.svg`} />
     <link rel="apple-touch-icon" href={`${BASE}apple-touch-icon.png`} />
     <link rel="canonical" href={canonical} />
-    {alternates?.en && <link rel="alternate" hreflang="en" href={abs(alternates.en)} />}
-    {alternates?.['zh-CN'] && <link rel="alternate" hreflang="zh-CN" href={abs(alternates['zh-CN'])} />}
+    {Object.entries(alternates ?? {}).map(([code, route]) => route && <link rel="alternate" hreflang={code} href={abs(route)} />)}
     {alternates?.en && <link rel="alternate" hreflang="x-default" href={abs(alternates.en)} />}
     <meta property="og:type" content="website" />
     <meta property="og:locale" content={lang === 'zh-CN' ? 'zh_CN' : 'en_US'} />
@@ -73,8 +73,12 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={abs('/icon-512.png')} />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={abs('/og-image.png')} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={`${SITE_TITLE}: Build once, native everywhere`} />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="alternate" type="text/plain" title="llms.txt" href={`${BASE}llms.txt`} />
 
   </head>

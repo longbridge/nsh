@@ -637,6 +637,71 @@ pub trait FetchTask: Send {
     fn cancel(self: Box<Self>);
 }
 
+/// `nsh/updater` on the engine's network and assets: the platform's HTTP stack
+/// (so its TLS and proxies), and the file `nsh package` left among the assets.
+struct UpdaterOverNetwork {
+    network: Arc<dyn Network>,
+    assets: Arc<dyn Assets>,
+}
+
+impl UpdaterOverNetwork {
+    /// `None` without both (nothing to update from).
+    #[cfg_attr(
+        not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
+        allow(dead_code)
+    )]
+    fn host(
+        network: Option<Arc<dyn Network>>,
+        assets: Option<Arc<dyn Assets>>,
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        Some(Arc::new(UpdaterOverNetwork {
+            network: network?,
+            assets: assets?,
+        }))
+    }
+}
+
+impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
+    fn config(&self) -> Option<Vec<u8>> {
+        // Only a package has it; a dev server answers nothing for it.
+        self.assets.read("asset:/nsh-updater.json").ok()
+    }
+
+    fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let events: FetchEvents = Box::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let task = self.network.fetch(HttpRequest::new("GET", url), events);
+        let mut total = None;
+        let result = loop {
+            match rx.recv() {
+                Ok(FetchEvent::Head(head)) => {
+                    if !(200..300).contains(&head.status) {
+                        break Err(format!("HTTP {}", head.status));
+                    }
+                    total = head
+                        .headers
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.parse().ok());
+                }
+                Ok(FetchEvent::Data(chunk)) => {
+                    if let Err(e) = sink(&chunk, total) {
+                        break Err(e);
+                    }
+                }
+                Ok(FetchEvent::End) => return Ok(()),
+                Ok(FetchEvent::Failed(e)) => break Err(e),
+                Ok(FetchEvent::BodyWanted) => {}
+                Err(_) => break Err("the network stack went away".to_owned()),
+            }
+        };
+        task.cancel();
+        result
+    }
+}
+
 /// The platform's HTTP stack, used by JS `fetch`.
 pub trait Network: Send + Sync + 'static {
     /// Starts `request`: its response head, then its body in chunks as they
@@ -1265,6 +1330,10 @@ fn raise_thread_priority() {
     }
 }
 
+/// A resize this soon after the last is one of a burst, a window being
+/// dragged; this long after the last the burst is over ([`Core::set_resizing`]).
+const RESIZE_BURST_GAP: Duration = Duration::from_millis(120);
+
 #[cfg(not(target_arch = "wasm32"))]
 fn run<M: TextEngine + 'static, S: MountSink>(
     config: EngineConfig,
@@ -1619,6 +1688,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             mouse_moved: None,
             sets_seen: FxHashMap::default(),
             resized: None,
+            resize_burst_ends: None,
             events_handled: 0,
             events_reported: 0,
             pinned: config.pinned,
@@ -1665,6 +1735,10 @@ impl<M: TextEngine + 'static> Driver<M> {
                         websocket: config.websocket.clone(),
                         refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
+                        updater: UpdaterOverNetwork::host(
+                            config.network.clone(),
+                            config.assets.clone(),
+                        ),
                         data_dir: config
                             .data_dir
                             .as_ref()
@@ -1774,6 +1848,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.resize_burst_ends,
         ]
         .into_iter()
         .flatten()
@@ -1932,6 +2007,13 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        if state
+            .resize_burst_ends
+            .is_some_and(|ends| ends <= nsh_core::time::now())
+        {
+            state.resize_burst_ends = None;
+            state.core.set_resizing(false);
+        }
         let turn_start = state.trace.then(Instant::now);
         state.dispatch_touch_move(script);
         if state
@@ -2072,6 +2154,9 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// A resize before this time continues a burst of them
+    /// ([`RESIZE_BURST_GAP`]).
+    resize_burst_ends: Option<Instant>,
     /// Events received ([`EngineControl::dispatch_event`]), and the count
     /// last reported ([`MountSink::handled`]).
     events_handled: u64,
@@ -2973,6 +3058,15 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Resize(size) => {
+            // The next within a burst's gap: a window being dragged. A manual
+            // clock wakes nothing to end one, and a test wants its layout whole.
+            if !nsh_core::time::manual() {
+                let now = nsh_core::time::now();
+                if state.resize_burst_ends.is_some_and(|ends| now < ends) {
+                    state.core.set_resizing(true);
+                }
+                state.resize_burst_ends = Some(now + RESIZE_BURST_GAP);
+            }
             state.core.set_viewport(size);
             state.resized = Some(size);
         }

@@ -6,7 +6,8 @@ name: Website
 # at /versions/main, earlier releases at /versions/<tag>
 # (`website/public/CNAME`). App Stories (/apps) come from the reviewed
 # catalog in longbridge/nsh-showcases, whose own workflow dispatches this one
-# after each merge and its weekly star refresh.
+# after each merge and its weekly star refresh. Languages other than English
+# and Chinese come from huacnlee/nsh-website-translates, also at publish time.
 
 on:
   push:
@@ -23,6 +24,9 @@ on:
   pull_request:
     paths:
       - "website/**"
+      - "skills/**"
+      - "examples/tasks/**"
+      - "examples/tasks-rs/**"
       - "crates/nsh-platform-web/**"
       - "examples/gallery/**"
       - ".github/workflows/website.yml"
@@ -158,6 +162,13 @@ jobs:
           path: website/.versions
           key: website-versions-${{ github.run_id }}
           restore-keys: website-versions-
+
+      # Machine translations, for the root only; none yet is fine.
+      - name: Take the machine translations
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          git clone --depth=1 https://github.com/huacnlee/nsh-website-translates website/translations
+          rm -rf website/translations/.git
 
       # The published site, after the tests of main's own build: main again
       # at /versions/main, the releases from their tags (whose pages are as

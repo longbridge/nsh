@@ -67,6 +67,8 @@ httpdate.workspace = true
 # The image loader's downloads (`image/loader.rs`, feature `loader`).
 ureq = { workspace = true, optional = true }
 crc32fast.workspace = true
+# `nsh/updater`.
+nsh-updater.workspace = true
 
 # `process`'s children on Windows: their jobs (`runtime/process.rs`); the
 # machine's memory for the image budget (`image/memory.rs`).

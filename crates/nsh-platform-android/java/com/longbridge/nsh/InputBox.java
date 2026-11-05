@@ -238,35 +238,8 @@ final class InputBox extends FrameLayout implements Node {
         });
         addView(edit, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         if (Build.VERSION.SDK_INT >= 31) {
-            // Pastes and keyboards' images (GIFs, stickers) come here; the
-            // types tell keyboards that images are welcome.
-            edit.setOnReceiveContentListener(new String[] {"image/*"}, this::receiveContent);
+            InputContent.install(edit, this);
         }
-    }
-
-    /**
-     * A paste or a keyboard's content (Android 12 on): reported (`onPaste`), and
-     * its text left to the EditText while `pasteBehavior` inserts it. Images and
-     * files are never inserted.
-     */
-    @android.annotation.TargetApi(31)
-    private android.view.ContentInfo receiveContent(View view, android.view.ContentInfo payload) {
-        int source = payload.getSource();
-        if (source != android.view.ContentInfo.SOURCE_CLIPBOARD
-                && source != android.view.ContentInfo.SOURCE_INPUT_METHOD) return payload;
-        // Without a listener a paste that inserts is the EditText's own.
-        if (!pasted(payload.getClip()) && pasteInserts) return payload;
-        if (!pasteInserts) return null;
-        // The text goes on to the EditText; what else there was is consumed.
-        android.content.ClipData clip = payload.getClip();
-        android.content.ClipData text = null;
-        for (int i = 0; i < clip.getItemCount(); i++) {
-            android.content.ClipData.Item item = clip.getItemAt(i);
-            if (item.getUri() != null) continue;
-            if (text == null) text = new android.content.ClipData(clip.getDescription(), item);
-            else text.addItem(item);
-        }
-        return text == null ? null : new android.view.ContentInfo.Builder(payload).setClip(text).build();
     }
 
     /**
@@ -274,7 +247,7 @@ final class InputBox extends FrameLayout implements Node {
      * its images' bytes (read from their content URIs as the user pastes) and local
      * files' URLs. True when it reported.
      */
-    private boolean pasted(android.content.ClipData clip) {
+    boolean pasted(android.content.ClipData clip) {
         if (!mounter.wants(id, Native.PASTE)) return false;
         StringBuilder text = new StringBuilder();
         java.util.ArrayList<byte[]> images = new java.util.ArrayList<>();

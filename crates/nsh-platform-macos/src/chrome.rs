@@ -564,7 +564,7 @@ fn target(surface: &Surface) -> Retained<MenuTarget> {
 
 /// The action of disabled items: nothing answers it, so AppKit disables
 /// them as it validates the menu.
-fn disabled() -> Sel {
+pub(crate) fn disabled() -> Sel {
     sel!(nshMenuItemDisabled:)
 }
 

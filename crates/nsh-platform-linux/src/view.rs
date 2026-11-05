@@ -391,6 +391,8 @@ mod imp {
             if opacity < 1.0 {
                 snapshot.push_opacity(opacity as f64);
             }
+            // Masked after the filters, as CSS does.
+            let masked = crate::decor::push_mask(snapshot, &state);
             let filters = crate::decor::push_filters(snapshot, &state);
             let (phase, changed) = self.damage.get();
             let phase = phase ^ changed;
@@ -399,10 +401,10 @@ mod imp {
             }
             state.draw_overhang(snapshot, phase);
             let soft = crate::decor::soft_shadows(obj.upcast_ref(), &state);
-            crate::decor::draw_background(snapshot, &state, soft);
+            crate::decor::draw_background(snapshot, &state, soft, obj.upcast_ref());
             let clip = state.clips();
             if clip {
-                snapshot.push_rounded_clip(&state.rounded_bounds());
+                crate::decor::push_clip(snapshot, &state);
             }
             // The view's own content stays inside it, as a UIKit view's
             // drawing stays in its backing store: a cell the core has not
@@ -445,6 +447,9 @@ mod imp {
                 crate::decor::draw_border(snapshot, &state);
             }
             for _ in 0..filters {
+                snapshot.pop();
+            }
+            if masked {
                 snapshot.pop();
             }
             if opacity < 1.0 {
