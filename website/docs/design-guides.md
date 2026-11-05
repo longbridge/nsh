@@ -141,6 +141,12 @@ first design how the object enters the user's mental model.
 
 ## Visual language
 
+Use Liquid Glass deliberately for floating surfaces over content. On supported Apple platforms, use the native material
+and provide an appropriate fallback elsewhere. Inspect it over light and dark moving content: an opaque fill can hide
+the effect, while too little tint can make controls unreadable. The material supplies its own edge, so add borders or
+shadows only when the result needs them. Ordinary settings lists may be clearer with solid grouped surfaces; follow the
+product's design and the user's preference rather than applying glass everywhere.
+
 ### Hierarchy
 
 Prefer a small number of clear levels:
@@ -697,6 +703,12 @@ Do not label a Button `Save` if it opens a configuration flow, or `Delete` if it
 Name the scope when context does not make it clear. Respond immediately to activation, prevent duplicate submission
 during longer work, and show the result near the object that changed. Add a success message only when the result
 itself is not visible.
+
+For a reversible setting, the selected checkmark or switch position is the immediate feedback: update it on the user's
+action while saving in the background. Do not add a persistent saving or success banner for each ordinary toggle when
+the control already shows the outcome. If saving fails, restore the confirmed value and explain the failure near the
+control or in a nonintrusive message. Reserve explicit progress or confirmation for actions whose outcome is not yet
+visible or whose consequences require it.
 
 Every interactive control should be designed for:
 

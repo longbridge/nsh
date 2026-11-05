@@ -795,6 +795,18 @@ Represent async operations with explicit states: a resource's `state()` is `unre
 again. Prevent duplicate destructive submissions and surface recoverable errors in the UI; do not rely on logs as user
 feedback.
 
+For ordinary, reversible settings (a radio choice, switch or stepper), update the locally owned value in the event
+handler before starting the save; bind the visible checked or selected state to that value. Submit asynchronously so
+network latency does not delay the control. Keep the last confirmed state and reconcile pending edits in order: an older
+load or response must not replace a newer choice, and a failed save must roll back only its own change without losing
+later edits. A server may acknowledge the requested configuration before its effective state catches up; distinguish
+those values and do not replace the accepted choice with a stale effective value. Show a useful error on failure.
+Use pessimistic confirmation instead when the action is consequential or the result cannot be safely predicted.
+
+Test the visible control state while a deliberately delayed request is still pending, then test failure, rapid changes
+and stale or reordered responses. A headless result alone does not establish touch-to-frame latency: inspect or measure
+the interaction on the requested native target when available.
+
 ```rust tabs
 let results = resource(
     move || {
