@@ -92,6 +92,7 @@ pub use crate::element::{
     Later,
     LayoutDirection,
     Length,
+    ListAlignment,
     ListLayout,
     ListViewport,
     Listener,
