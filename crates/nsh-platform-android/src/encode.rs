@@ -24,6 +24,7 @@ use nsh_core::{
     ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode,
     ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior,
     TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
+    audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
 
@@ -75,6 +76,8 @@ const NAV_SHADER: i32 = 38;
 /// An entry of the object table.
 pub(crate) enum Obj {
     Str(String),
+    /// A sound's bytes (`Audio.java`), a `byte[]` on the Java side.
+    Bytes(nsh_core::image::ImageData),
     Layout(GlobalRef),
 }
 
@@ -691,6 +694,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_) => e.int(-1),
+                    // `Audio.java`: the sub-opcode, then the command's
+                    // fields (see `audio_command`).
+                    Command::Audio(command) => {
+                        e.int(45);
+                        audio_command(&mut e, command);
+                    }
                     Command::Notification(command) => {
                         use nsh_core::notifications::NotificationCommand as N;
                         e.int(44);
@@ -750,6 +759,87 @@ const DIALOG_TOKENS: [&str; 5] = [
     "primary",
     "destructive",
 ];
+
+/// An audio command after its opcode (45), as `Audio.command` reads it:
+/// 0 load (id, bytes, hint, max duration in ms), 1 load from a URL (id),
+/// 2 play (id, volume, rate), 3 stop (id), 4 unload (id), 5 open (id, src,
+/// volume, rate, loop), 6 preload (id), 7 resume (id), 8 pause (id), 9 seek
+/// (id, ms), 10 set (id, volume, rate, loop), 11 close (id).
+fn audio_command(e: &mut Encoded, command: AudioCommand) {
+    let ms = |d: std::time::Duration| d.as_millis().min(i32::MAX as u128) as i32;
+    match command {
+        AudioCommand::Load {
+            id,
+            bytes,
+            hint,
+            max_duration,
+        } => {
+            e.int(0);
+            e.int(id as i32);
+            let index = e.objects.len() as i32;
+            e.objects.push(Obj::Bytes(bytes));
+            e.int(index);
+            e.string(hint);
+            e.int(ms(max_duration));
+        }
+        AudioCommand::LoadUrl { id, .. } => {
+            e.int(1);
+            e.int(id as i32);
+        }
+        AudioCommand::Play { id, volume, rate } => {
+            e.int(2);
+            e.int(id as i32);
+            e.float(volume);
+            e.float(rate);
+        }
+        AudioCommand::Stop { id } => {
+            e.int(3);
+            e.int(id as i32);
+        }
+        AudioCommand::Unload { id } => {
+            e.int(4);
+            e.int(id as i32);
+        }
+        AudioCommand::Open { id, src, settings } => {
+            e.int(5);
+            e.int(id as i32);
+            e.string(src);
+            e.float(settings.volume);
+            e.float(settings.rate);
+            e.bool(settings.looped);
+        }
+        AudioCommand::Preload { id } => {
+            e.int(6);
+            e.int(id as i32);
+        }
+        AudioCommand::Resume { id } => {
+            e.int(7);
+            e.int(id as i32);
+        }
+        AudioCommand::Pause { id } => {
+            e.int(8);
+            e.int(id as i32);
+        }
+        AudioCommand::Seek { id, position } => {
+            e.int(9);
+            e.int(id as i32);
+            e.int(ms(position));
+        }
+        AudioCommand::Set { id, settings } => {
+            e.int(10);
+            e.int(id as i32);
+            e.float(settings.volume);
+            e.float(settings.rate);
+            e.bool(settings.looped);
+        }
+        AudioCommand::Close { id } => {
+            e.int(11);
+            e.int(id as i32);
+        }
+        // A command a newer core adds: nothing to do here.
+        _ => e.int(-1),
+    }
+}
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).
