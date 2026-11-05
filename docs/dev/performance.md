@@ -361,6 +361,39 @@ first frames and commits are cold and not counted. Without a monitor nothing is 
 per frame). Other platforms need only call `record_work` / `vsync` / `record_latency` where the macOS surface does and
 draw a panel.
 
+- Stocks' pulse overlays (2026-11-05, macOS 26.6.2, M2 Max, release host, minified Gallery bytecode,
+  1200×800 points, 120 Hz; against `2fd62283`). The chart's pulse draws in a 28×28 canvas and each sparkline's in a
+  24×24 canvas, over the drawing updated by quotes (`demos/stocks/Chart.tsx`, `demos/Stocks.tsx`). Their geometry is
+  shared with the quote drawing; translation places the small canvas, clipping and pointer handling stay with the
+  plot. The 50 ms market tick and pulse animations are unchanged. This changes the demo's drawing organization,
+  using the existing renderer.
+
+  `examples/gallery/tools/stocks-perf.py --before BEFORE/bundle.nshc --after AFTER/bundle.nshc --out RESULTS`:
+  two ABBA blocks, four launches per version, each with a fresh data directory, 5 s warmup and 20 s measurement,
+  the same host with `--fps --trace`. Medians across runs, with their ranges:
+
+  | Metric | Before | After |
+  |---|---|---|
+  | CPU, percent of one core | 41.09% (40.38–41.41) | 29.06% (28.96–29.44) |
+  | Main-thread frame p50 | 2.16 ms (2.12–2.26) | 1.11 ms (1.06–1.12) |
+  | Main-thread frame p95 | 5.00 ms (3.96–8.14) | 4.05 ms (3.75–6.83) |
+  | Physical footprint | 147.7 MB (146.5–150.9) | 138.8 MB (137.9–139.6) |
+  | Monitor's frame rate | 119.25/s (118–120) | 120/s (120–120) |
+
+  CPU is the difference of `proc_pid_rusage` CPU counters over the measured interval (Mach ticks converted with
+  `mach_timebase_info`). Frame p50 / p95 are each run's median of the monitor's overlapping 120-frame windows;
+  the frame rate counts updates, not screen-captured presentations. Tail timings overlap: the share over a refresh
+  was 0.5% (0–4.5) before and 0.75% (0–1) after, so these runs establish lower typical frame cost and CPU, not a
+  consistent tail-latency improvement. Quotes retain their random seed per launch; engine commits stay near 20/s.
+
+  The extra layers have a core cost. Three paired headless `nsh test --trace` runs, opened at 1200×800 with
+  `clock: { time: 1700000000000 }`, waiting for `Composite`, then `clock.runFor(1000)` (including the driver's settling):
+  the first commit goes from 4412 ops / 3708 items / 1249 nodes to 4596 / 3939 / 1295. Across 180 update commits
+  per version, median core commit time goes from 214.5 to 231 µs, ops from 124 to 142 and items from 85 to 93.
+  Headless timings exclude native drawing. `tests/stocks.test.tsx` checks quote updates, pause / resume, periods,
+  resizing, selecting a stock and the crosshair's input through the overlay. Native snapshots with a fixed clock
+  check light / dark, daily candles and a narrower window.
+
 - macOS (release, Apple silicon, 1200×800 window, 120 Hz ProMotion screen; `nsh-macos-host --fps --trace` with
   scripted input (the then `--script` steps), two alternating runs of each; main-thread ms per shown frame as p50 / p95). The display link delivers
   120 Hz in every case (refresh gaps p50 8.33 ms). Before = the backend without the two drawing fixes below:

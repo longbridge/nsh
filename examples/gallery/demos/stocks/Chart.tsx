@@ -36,6 +36,8 @@ const averages = [
 const bodies: Record<Period, number> = { intraday: 1, "1m": 5, "5m": 7, "15m": 9, "1D": 5 };
 const pad = { left: 0, right: 54, top: 8, bottom: 18 };
 const HEIGHT = 216;
+/** The live ring plus an antialiasing pixel on each side. */
+const LIVE_RADIUS = 14;
 
 /** The candles of a period: minutes merged into 5 / 15, or the days with
  * today last. */
@@ -126,13 +128,43 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
     if (intraday()) return pad.left + (i / span()) * plotW;
     return pad.left + (i - view().first) * step() + step() / 2;
   };
-  let frame: Frame | null = null;
   // Redrawn on every tick: about a second to settle after the data narrows.
   const scale = calm(0.06);
   effect(() => {
     period();
     scale.reset();
   });
+
+  // Shared by the price drawing and its small animated overlay.
+  const frame = computed<Frame | null>(() => {
+    const w = width();
+    const height = props.height ?? HEIGHT;
+    const d = data();
+    const { first, count } = view();
+    const end = Math.min(d.length, first + count);
+    if (end <= first || w <= pad.left + pad.right) return null;
+    const plotW = w - pad.left - pad.right;
+    const volH = 40;
+    const mainH = height - pad.top - pad.bottom - volH - 12;
+    const volTop = pad.top + mainH + 12;
+    let lo = intraday() ? prevClose() : Infinity, hi = intraday() ? prevClose() : -Infinity;
+    for (let i = first; i < end; i++) {
+      lo = Math.min(lo, d[i].l);
+      hi = Math.max(hi, d[i].h);
+    }
+    const margin = (hi - lo) * 0.08 || hi * 0.01;
+    // Intraday the range is the day's, which only widens; candles
+    // scroll, so their range eases in rather than jumping.
+    const range = intraday() ? { lo: lo - margin, hi: hi + margin } : scale.fit(lo - margin, hi + margin);
+    const f: Frame = { first, count, lo: range.lo, hi: range.hi, mainH, volTop, volH, plotW };
+    return f;
+  });
+  const livePoint = () => {
+    const f = frame();
+    const d = data();
+    if (!f) return { x: 0, y: 0 };
+    return { x: X(d.length - 1), y: pad.top + ((f.hi - d[d.length - 1].c) / (f.hi - f.lo)) * f.mainH };
+  };
 
   // The crosshair: two hairlines and a dot placed by animated values.
   const centerX = createAnimatedValue(0);
@@ -152,7 +184,8 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
     if (cursor() === null) shown.timing(1, { duration: 140 });
     cursor.set(i);
     centerX.set(X(i));
-    if (frame) cy.set(pad.top + ((frame.hi - d[i].c) / (frame.hi - frame.lo)) * frame.mainH);
+    const f = frame();
+    if (f) cy.set(pad.top + ((f.hi - d[i].c) / (f.hi - f.lo)) * f.mainH);
   };
   const focus = () => {
     const d = data();
@@ -207,17 +240,6 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
       cx.fillStyle = alpha(c.c >= c.o ? colors.up : colors.down, 0.6);
       cx.fillRect(X(i) - vw / 2, f.volTop + f.volH - h, vw, h);
     }
-    // The live point, pulsing natively.
-    const ly = Y(last);
-    cx.fillStyle = tone;
-    cx.globalAlpha = ringAlpha;
-    cx.beginPath();
-    cx.arc(now, ly, ringRadius, 0, Math.PI * 2);
-    cx.fill();
-    cx.globalAlpha = 1;
-    cx.beginPath();
-    cx.arc(now, ly, 3, 0, Math.PI * 2);
-    cx.fill();
     // The open, the middle and the end of the span.
     cx.fillStyle = colors.faint;
     cx.textBaseline = "top";
@@ -303,26 +325,11 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
           onLayout={(e) => width.set(e.bounds.size.width)}
           {...scrub(pick)}
           accessibilityLabel={`${props.stock.code} ${period()} chart`}
-          draw={(cx, { width, height }) => {
+          draw={(cx, { width }) => {
             const d = data();
-            const { first, count } = view();
-            const end = Math.min(d.length, first + count);
-            if (end <= first) return;
-            const plotW = width - pad.left - pad.right;
-            const volH = 40;
-            const mainH = height - pad.top - pad.bottom - volH - 12;
-            const volTop = pad.top + mainH + 12;
-            let lo = intraday() ? prevClose() : Infinity, hi = intraday() ? prevClose() : -Infinity;
-            for (let i = first; i < end; i++) {
-              lo = Math.min(lo, d[i].l);
-              hi = Math.max(hi, d[i].h);
-            }
-            const margin = (hi - lo) * 0.08 || hi * 0.01;
-            // Intraday the range is the day's, which only widens; candles
-            // scroll, so their range eases in rather than jumping.
-            const range = intraday() ? { lo: lo - margin, hi: hi + margin } : scale.fit(lo - margin, hi + margin);
-            const f: Frame = { first, count, lo: range.lo, hi: range.hi, mainH, volTop, volH, plotW };
-            frame = f;
+            const f = frame();
+            if (!f) return;
+            const { plotW, mainH, volTop, volH } = f;
             const Y = (v: number) => pad.top + ((f.hi - v) / (f.hi - f.lo)) * mainH;
 
             // The grid and the price axis (percent from the close intraday).
@@ -367,6 +374,26 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
             cx.fillText(p(last), width - 4, ly);
           }}
         />
+        {/* Only this small layer repaints at the display rate. The price,
+            grid and volume canvas repaints when the market data changes. */}
+        <If when={intraday() && frame() !== null}>
+          <View style={{ pointerEvents: "none", position: "absolute", top: 0, bottom: 0, left: 0, right: 0, overflow: "hidden" }}>
+            <Canvas
+              style={{ position: "absolute", left: 0, top: 0, width: LIVE_RADIUS * 2, height: LIVE_RADIUS * 2, translate: [livePoint().x - LIVE_RADIUS, livePoint().y - LIVE_RADIUS] }}
+              draw={(cx) => {
+                cx.fillStyle = toneOf(data()[data().length - 1].c - prevClose());
+                cx.globalAlpha = ringAlpha;
+                cx.beginPath();
+                cx.arc(LIVE_RADIUS, LIVE_RADIUS, ringRadius, 0, Math.PI * 2);
+                cx.fill();
+                cx.globalAlpha = 1;
+                cx.beginPath();
+                cx.arc(LIVE_RADIUS, LIVE_RADIUS, 3, 0, Math.PI * 2);
+                cx.fill();
+              }}
+            />
+          </View>
+        </If>
         {/* The crosshair over the canvas, moved by animated values. */}
         <View style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: shown }}>
           <View

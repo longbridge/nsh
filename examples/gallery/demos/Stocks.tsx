@@ -187,105 +187,117 @@ function Sparkline(props: { stock: Stock }) {
     ring.set(0);
     ring.timing(1, { duration: 700, easing: Easing.out(Easing.cubic) });
   });
-  const ys: number[] = [];
+  // Geometry is shared by the quote drawing and the small pulsing layer.
+  // It is evaluated once per quote, including the eased y range.
+  const plot = computed(() => {
+    const minutes = props.stock.minutes();
+    const q = props.stock.quote();
+    // Each point: the mean close of the minutes before it; the newest
+    // point is the last trade.
+    const n = Math.min(SPARK_POINTS, minutes.length);
+    const ys = new Array<number>(n);
+    for (let k = 0; k < n; k++) {
+      const end = Math.round((k / Math.max(1, n - 1)) * (minutes.length - 1));
+      const start = Math.max(0, end - SPARK_SMOOTH + 1);
+      let sum = 0;
+      for (let i = start; i <= end; i++) sum += minutes[i].c;
+      ys[k] = sum / (end - start + 1);
+    }
+    ys[n - 1] = q.last;
+    let lo = q.prevClose, hi = q.prevClose;
+    for (const v of ys) {
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
+    const r = scale.fit(lo, hi);
+    const Y = (v: number) => RING + 2 + ((r.hi - v) / (r.hi - r.lo || 1)) * (SPARK_H - 4);
+    return { ys: ys.map(Y), previous: Y(q.prevClose), tone: toneOf(q.last - q.prevClose) };
+  });
+  // Includes the ring's stroke and antialiasing outside its radius.
+  const pointRadius = RING + 2;
   return (
-    <Canvas
-      style={{ pointerEvents: "none", width: SPARK_W + RING * 2, height: SPARK_H + RING * 2, margin: -RING }}
-      draw={(cx, { width, height }) => {
-        const minutes = props.stock.minutes();
-        const q = props.stock.quote();
-        // Each point: the mean close of the minutes before it; the newest
-        // point is the last trade.
-        const n = Math.min(SPARK_POINTS, minutes.length);
-        ys.length = n;
-        for (let k = 0; k < n; k++) {
-          const end = Math.round((k / Math.max(1, n - 1)) * (minutes.length - 1));
-          const start = Math.max(0, end - SPARK_SMOOTH + 1);
-          let sum = 0;
-          for (let i = start; i <= end; i++) sum += minutes[i].c;
-          ys[k] = sum / (end - start + 1);
-        }
-        ys[n - 1] = q.last;
-        let lo = q.prevClose, hi = q.prevClose;
-        for (const v of ys) {
-          lo = Math.min(lo, v);
-          hi = Math.max(hi, v);
-        }
-        const r = scale.fit(lo, hi);
-        const left = RING, right = width - RING, bottom = height - RING;
-        const Y = (v: number) => RING + 2 + ((r.hi - v) / (r.hi - r.lo || 1)) * (bottom - RING - 4);
-        const X = (k: number) => left + (k / Math.max(1, n - 1)) * (right - left);
-        const tone = toneOf(q.last - q.prevClose);
-        // A smooth curve: quadratic segments through the midpoints.
-        const curve = () => {
-          cx.moveTo(X(0), Y(ys[0]));
-          for (let k = 1; k < n - 1; k++) {
-            cx.quadraticCurveTo(X(k), Y(ys[k]), (X(k) + X(k + 1)) / 2, (Y(ys[k]) + Y(ys[k + 1])) / 2);
-          }
-          cx.lineTo(X(n - 1), Y(ys[n - 1]));
-        };
+    <View style={{ pointerEvents: "none", width: SPARK_W + RING * 2, height: SPARK_H + RING * 2, margin: -RING, overflow: "hidden" }}>
+      <Canvas
+        style={{ width: SPARK_W + RING * 2, height: SPARK_H + RING * 2 }}
+        draw={(cx, { width, height }) => {
+          const { ys, previous, tone } = plot();
+          const n = ys.length;
+          const left = RING, right = width - RING, bottom = height - RING;
+          const X = (k: number) => left + (k / Math.max(1, n - 1)) * (right - left);
+          // A smooth curve: quadratic segments through the midpoints.
+          const curve = () => {
+            cx.moveTo(X(0), ys[0]);
+            for (let k = 1; k < n - 1; k++) {
+              cx.quadraticCurveTo(X(k), ys[k], (X(k) + X(k + 1)) / 2, (ys[k] + ys[k + 1]) / 2);
+            }
+            cx.lineTo(X(n - 1), ys[n - 1]);
+          };
 
-        // The fill: down from the line's top, strictly under the curve...
-        let top = bottom;
-        for (const v of ys) top = Math.min(top, Y(v));
-        const fill = cx.createLinearGradient(0, top, 0, bottom);
-        fill.addColorStop(0, alpha(tone, 0.22));
-        fill.addColorStop(1, alpha(tone, 0));
-        cx.beginPath();
-        curve();
-        cx.lineTo(X(n - 1), bottom);
-        cx.lineTo(X(0), bottom);
-        cx.closePath();
-        cx.fillStyle = fill;
-        cx.fill();
-        // ...and faded in over the first fifth (erased, not overdrawn).
-        const fadeTo = left + (right - left) * 0.2;
-        const fade = cx.createLinearGradient(left, 0, fadeTo, 0);
-        fade.addColorStop(0, "rgba(0,0,0,1)");
-        fade.addColorStop(1, "rgba(0,0,0,0)");
-        cx.globalCompositeOperation = "destination-out";
-        cx.fillStyle = fade;
-        cx.fillRect(0, 0, fadeTo, height);
-        cx.globalCompositeOperation = "source-over";
+          // The fill: down from the line's top, strictly under the curve...
+          let top = bottom;
+          for (const v of ys) top = Math.min(top, v);
+          const fill = cx.createLinearGradient(0, top, 0, bottom);
+          fill.addColorStop(0, alpha(tone, 0.22));
+          fill.addColorStop(1, alpha(tone, 0));
+          cx.beginPath();
+          curve();
+          cx.lineTo(X(n - 1), bottom);
+          cx.lineTo(X(0), bottom);
+          cx.closePath();
+          cx.fillStyle = fill;
+          cx.fill();
+          // ...and faded in over the first fifth (erased, not overdrawn).
+          const fadeTo = left + (right - left) * 0.2;
+          const fade = cx.createLinearGradient(left, 0, fadeTo, 0);
+          fade.addColorStop(0, "rgba(0,0,0,1)");
+          fade.addColorStop(1, "rgba(0,0,0,0)");
+          cx.globalCompositeOperation = "destination-out";
+          cx.fillStyle = fade;
+          cx.fillRect(0, 0, fadeTo, height);
+          cx.globalCompositeOperation = "source-over";
 
-        // The previous close, dotted.
-        cx.strokeStyle = alpha(colors.muted, 0.4);
-        cx.lineWidth = 1;
-        cx.setLineDash([1, 3]);
-        cx.beginPath();
-        cx.moveTo(left, Y(q.prevClose));
-        cx.lineTo(right, Y(q.prevClose));
-        cx.stroke();
-        cx.setLineDash([]);
+          // The previous close, dotted.
+          cx.strokeStyle = alpha(colors.muted, 0.4);
+          cx.lineWidth = 1;
+          cx.setLineDash([1, 3]);
+          cx.beginPath();
+          cx.moveTo(left, previous);
+          cx.lineTo(right, previous);
+          cx.stroke();
+          cx.setLineDash([]);
 
-        cx.beginPath();
-        curve();
-        cx.strokeStyle = tone;
-        cx.lineWidth = 1.75;
-        cx.lineJoin = "round";
-        cx.lineCap = "round";
-        cx.stroke();
-
-        // The newest point and its pulse: a soft halo and a ring that grow
-        // and fade natively (the canvas has room for them on every side).
-        const x = X(n - 1), y = Y(ys[n - 1]);
-        cx.fillStyle = tone;
-        cx.strokeStyle = tone;
-        cx.globalAlpha = haloAlpha;
-        cx.beginPath();
-        cx.arc(x, y, ringRadius, 0, Math.PI * 2);
-        cx.fill();
-        cx.globalAlpha = strokeAlpha;
-        cx.lineWidth = 1.5;
-        cx.beginPath();
-        cx.arc(x, y, ringRadius, 0, Math.PI * 2);
-        cx.stroke();
-        cx.globalAlpha = 1;
-        cx.beginPath();
-        cx.arc(x, y, 3, 0, Math.PI * 2);
-        cx.fill();
-      }}
-    />
+          cx.beginPath();
+          curve();
+          cx.strokeStyle = tone;
+          cx.lineWidth = 1.75;
+          cx.lineJoin = "round";
+          cx.lineCap = "round";
+          cx.stroke();
+        }}
+      />
+      <Canvas
+        style={{ position: "absolute", left: 0, top: 0, width: pointRadius * 2, height: pointRadius * 2, translate: [SPARK_W + RING - pointRadius, plot().ys[plot().ys.length - 1] - pointRadius] }}
+        draw={(cx) => {
+          // Only the dot's layer paints on animation frames. The gradient,
+          // previous close and curve stay in the quote's drawing above.
+          cx.fillStyle = plot().tone;
+          cx.strokeStyle = plot().tone;
+          cx.globalAlpha = haloAlpha;
+          cx.beginPath();
+          cx.arc(pointRadius, pointRadius, ringRadius, 0, Math.PI * 2);
+          cx.fill();
+          cx.globalAlpha = strokeAlpha;
+          cx.lineWidth = 1.5;
+          cx.beginPath();
+          cx.arc(pointRadius, pointRadius, ringRadius, 0, Math.PI * 2);
+          cx.stroke();
+          cx.globalAlpha = 1;
+          cx.beginPath();
+          cx.arc(pointRadius, pointRadius, 3, 0, Math.PI * 2);
+          cx.fill();
+        }}
+      />
+    </View>
   );
 }
 
