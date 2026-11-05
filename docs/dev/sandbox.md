@@ -68,7 +68,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
   capability's key, `resource` what was asked for, `""` when the capability has none), which its promise rejects with.
   The modules check in the call, on the `System` the call gets, so the error is typed and nothing is queued:
-  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Speech.start` (`runtime/speech.rs`; it throws), `openUrl` (`runtime/device.rs`,
+  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Picker.pickFiles`, `Speech.start` (`runtime/speech.rs`; it throws), `openUrl` (`runtime/device.rs`,
   `open_url::not_granted`) and `Image.getSize` / `prefetch` (`runtime/image.rs`, `resource` the URL). `host.call` is
   refused by the core (the commit's `Command::HostCall`) and by the SDK channel (`nsh-js` `host_channel.rs`) with
   `nsh_core::host_channel::not_granted`. A refused `fetch` rejects as every failed fetch, with a `TypeError`, which

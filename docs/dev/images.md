@@ -167,6 +167,14 @@
   from the bytes (`PickedFile::fill_in`, `imagesize`), and `nsh-js` makes each a `File` over a `Blob` sharing those
   bytes, so `URL.createObjectURL(file)` shows it in an `Image` and `fetch` / `FormData` upload it without a copy in JS.
   An embedder's `PickerBackend` (`EngineConfig::picker`) answers in place of the platform: no command is sent.
+- **Picked files** (`Picker.pickFiles`, `nsh_core::picker::FilePickRequest`): `Command::PickFiles` with a limit and the
+  `file_dialog::FileFilter`s offered, gated by the same `picker` capability and answered by the same `Pick` event. The
+  desktops reuse the open dialog of `file_dialog` (`FilePickRequest::dialog`) and read the paths on a thread
+  (`read_picked_files`); iOS: `UIDocumentPickerViewController` `asCopy` (`UTType` by extension, `public.data` for any
+  file; UniformTypeIdentifiers loaded with `dlopen`); Android: `ACTION_OPEN_DOCUMENT` from the same headless fragment,
+  `EXTRA_MIME_TYPES` from `MimeTypeMap` unless an extension has no type; web: an `<input type=file>` without a canvas.
+  The bytes and the name stay as they are (`finish_files`: no `fill_in`, whose renames serve images); a file larger
+  than `MAX_PICKED_FILE_BYTES` (512 MiB) is left out and logged, since its bytes must all fit in memory.
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the
