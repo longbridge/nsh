@@ -1268,6 +1268,11 @@ impl ListState {
                 None if bottom => PIN_SLACK,
                 None => return 0.0,
             };
+            if bottom && !self.anchored_end.is_nan() && self.last_row_being_measured() {
+                // One scroll, to where the row really ends: scrolling by
+                // its estimate first would overshoot and be clamped back.
+                return 0.0;
+            }
             let was = std::mem::replace(&mut self.anchored_end, end);
             // A bottom-aligned list opens at its end, without a scroll
             // command to pin and follow while its rows are measured.
@@ -1287,6 +1292,15 @@ impl ListState {
         self.anchored_end = end;
         self.offset += delta;
         delta
+    }
+
+    /// The last row is not measured yet but will be: the window reaches it.
+    fn last_row_being_measured(&self) -> bool {
+        let Some(last) = self.count.checked_sub(1) else {
+            return false;
+        };
+        self.sizes[last as usize].is_nan()
+            && self.item_at(last) < self.natural_offset() + self.viewport * (1.0 + OVERSCAN)
     }
 
     /// The platform is about to scroll to `offset` (a command): the window
@@ -1848,11 +1862,13 @@ mod tests {
         let row = l.to_content(l.item_at(90), 50.0);
         l.splice(100, 0, 1);
         assert_eq!(l.take_splice_anchor(), 0.0);
-        assert_eq!(l.anchor_end(), 50.0);
+        assert_eq!(l.anchor_end(), 0.0, "waits for the row's real size");
+        assert_eq!(l.measured(100, 34.0), 0.0);
+        assert_eq!(l.anchor_end(), 34.0);
         assert_eq!(l.to_content(l.item_at(90), 50.0), row);
         // So does the last row growing (a reply streaming in).
         let anchor = l.measured(100, 80.0);
-        assert_eq!(anchor + l.anchor_end(), 30.0);
+        assert_eq!(anchor + l.anchor_end(), 46.0);
         assert_eq!(l.to_content(l.item_at(90), 50.0), row);
         // Older rows above the viewport leave what shows in place.
         let before = on_screen(&l, 95);
@@ -1868,10 +1884,18 @@ mod tests {
         l.splice(l.count, 0, 1);
         l.take_splice_anchor();
         assert_eq!(l.anchor_end(), 0.0);
+        l.measured(l.count - 1, 50.0);
+        l.anchor_end();
         l.reported(l.content_len() - 400.0, 0);
         l.splice(l.count, 0, 1);
         l.take_splice_anchor();
+        assert_eq!(l.anchor_end(), 0.0);
+        l.measured(l.count - 1, 50.0);
         assert_eq!(l.anchor_end(), 50.0);
+        // A page too long for the window to reach its last row follows by
+        // the estimate, or the row would never be measured.
+        l.splice(l.count, 0, 100);
+        assert_eq!(l.anchor_end(), 5000.0);
     }
 
     #[test]
