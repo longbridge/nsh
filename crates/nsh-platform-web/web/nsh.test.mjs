@@ -368,6 +368,42 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   assert.deepEqual(pressed, [button]);
 });
 
+test("a context menu the keys ask for names no pointer, though Chromium names the mouse", async () => {
+  const player = Object.create(Player.prototype);
+  const sent = [];
+  player.event = (id, name, payload) => sent.push(payload);
+  player.point = (e) => [e.clientX, e.clientY];
+  const trigger = { _id: 4, _events: new Set(["onContextMenu"]), getBoundingClientRect: () => ({ left: 10, top: 20, right: 90, bottom: 50 }) };
+  player.viewOf = () => trigger;
+  player.ancestors = () => [trigger];
+  globalThis.getComputedStyle = () => ({ direction: "ltr" });
+  const key = (key, shiftKey, up) => player.noteMenuKey({ key, shiftKey, ctrlKey: false, altKey: false, metaKey: false }, up);
+  // Chromium's event for the keys: the mouse's, at the focused element.
+  const menu = () => {
+    sent.length = 0;
+    player.contextMenu({ pointerType: "mouse", clientX: 30, clientY: 40, target: trigger, preventDefault() {} });
+    const { pointerType, position } = sent[0];
+    return [pointerType, position.x, position.y];
+  };
+  const tick = () => new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(menu(), ["mouse", 20, 20], "a right click");
+  // Shift+F10 as it is pressed: at the bottom-start corner, no pointer.
+  key("F10", true, false);
+  assert.deepEqual(menu(), [null, 0, 30]);
+  await tick();
+  assert.deepEqual(menu(), ["mouse", 20, 20], "the next task is the mouse's again");
+  // The Menu key pressed or released (Windows); F10 alone and released asks for nothing.
+  for (const up of [false, true]) {
+    key("ContextMenu", false, up);
+    assert.deepEqual(menu(), [null, 0, 30]);
+    await tick();
+  }
+  key("F10", false, false);
+  key("F10", true, true);
+  assert.deepEqual(menu(), ["mouse", 20, 20]);
+  delete globalThis.getComputedStyle;
+});
+
 /**
  * Runs `f` in a page with a window of 1280 × 720 whose system UI covers 44
  * points at the top and 34 at the bottom; `f` gets the `ResizeObserver`s

@@ -6535,9 +6535,11 @@ class Player {
    * menu); true when a view took it. The browser raises `contextmenu` for
    * right clicks, Control-clicks on macOS, the keyboard's Menu key and
    * Shift+F10 (on the focused element), and screen readers' "show menu"
-   * action. Those come with no pointer (the DOM's `pointerType` `""`): the
-   * event names none (`pointerType: null`) and is placed at the view's
-   * bottom-start corner, where a menu opened below it starts.
+   * action. Those come with no pointer (the DOM's `pointerType` `""`; the
+   * keys' in Chromium name the mouse, known by the key noted in the same
+   * task, `noteMenuKey`): the event names none (`pointerType: null`) and
+   * is placed at the view's bottom-start corner, where a menu opened below
+   * it starts.
    */
   contextMenu(e) {
     const view = this.viewOf(e.target);
@@ -6547,7 +6549,7 @@ class Player {
         e.preventDefault();
         const r = el.getBoundingClientRect();
         // A `MouseEvent` (no `pointerType`) is a browser's older mouse one.
-        const pointerType = e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        const pointerType = this.menuKey ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
         let at = e;
         if (pointerType === null) {
           const rtl = getComputedStyle(el).direction === "rtl";
@@ -6647,7 +6649,25 @@ class Player {
     return this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
   }
 
+  /**
+   * Notes the keys the browser answers with a `contextmenu` on the focused
+   * element, as Chromium checks them: Shift+F10 as it is pressed, the Menu
+   * key with no modifier as it is pressed or (Windows) released. Chromium's
+   * event for them names the mouse as its pointer (`pointerType`
+   * `"mouse"`), so `contextMenu` takes one that comes in the same task as
+   * the keyboard's. The note lasts until the next task.
+   */
+  noteMenuKey(e, up) {
+    const alone = !e.ctrlKey && !e.altKey && !e.metaKey;
+    const menu = e.key === "ContextMenu" && alone && !e.shiftKey;
+    const shiftF10 = !up && e.key === "F10" && alone && e.shiftKey;
+    if (!menu && !shiftF10) return;
+    this.menuKey = true;
+    setTimeout(() => (this.menuKey = false));
+  }
+
   keyDown(e) {
+    this.noteMenuKey(e, false);
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
     const focus = document.activeElement;
@@ -6705,6 +6725,7 @@ class Player {
   }
 
   keyUp(e) {
+    this.noteMenuKey(e, true);
     if (this.wasm) this.modifiersChanged(e);
     if (e.key === " " && this.keyPress) this.keyPressEnd(true);
   }
