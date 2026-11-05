@@ -427,6 +427,11 @@ impl Mounter {
                     crate::scroll::command(surface, view, command);
                 }
             }
+            // A window of the app's own (`Window.open`) hosts dialog root
+            // `id`.
+            Command::Desktop(desktop) if id != ROOT_ID => {
+                crate::window::command(surface, id, view, desktop)
+            }
             // Here, with the view at hand: `Surface::view` would borrow the
             // mounter again while a batch is applied.
             Command::AccessibilityFocus => {

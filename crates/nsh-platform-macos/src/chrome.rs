@@ -358,6 +358,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 window.makeKeyAndOrderFront(None);
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => {
             // Close after the batch, as Windows posts WM_CLOSE and GTK
             // waits for idle: performClose runs windowWillClose: at once,
