@@ -41,11 +41,11 @@
 use slab::Slab;
 use taffy::{
     AvailableSpace, BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Display,
-    Layout, LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer,
-    LayoutGridContainer, LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RunMode, Size,
-    Style, TraversePartialTree, TraverseTree, compute_block_layout, compute_cached_layout,
-    compute_flexbox_layout, compute_grid_layout, compute_hidden_layout, compute_oof_layout,
-    compute_root_layout,
+    FlexDirection, FlexWrap, Layout, LayoutBlockContainer, LayoutContainingBlock,
+    LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput, LayoutPartialTree,
+    NodeId, RequestedAxis, RunMode, Size, Style, TraversePartialTree, TraverseTree,
+    compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
+    compute_hidden_layout, compute_oof_layout, compute_root_layout,
 };
 
 use super::terminal_layout::{self, Grid, Role};
@@ -570,6 +570,57 @@ impl<C> LayoutTree<C> {
     }
 }
 
+/// Taffy's flexbox, with a row's width as CSS's shrink-to-fit has it. In
+/// definite space Taffy adds up the items' flex bases, so an item with
+/// `flex: 1` counts for nothing, however much text it holds: a view around
+/// the row, sized by it, ends up narrower than the width its items' heights
+/// were measured at. The row's width is its max-content width, up to that
+/// space.
+fn compute_flex_layout<C, M>(
+    view: &mut View<'_, C, M>,
+    node: NodeId,
+    mut inputs: LayoutInput,
+) -> LayoutOutput
+where
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+{
+    let n = view.node(node);
+    if let (None, AvailableSpace::Definite(space)) =
+        (inputs.known_dimensions.width, inputs.available_space.width)
+        && matches!(
+            n.style.flex_direction,
+            FlexDirection::Row | FlexDirection::RowReverse
+        )
+        && n.style.flex_wrap == FlexWrap::NoWrap
+        && n.children
+            .iter()
+            .any(|&child| view.node(child).style.flex_grow > 0.0)
+    {
+        let measuring = LayoutInput {
+            run_mode: RunMode::ComputeSize,
+            axis: RequestedAxis::Horizontal,
+            ..inputs
+        };
+        let bases = compute_flexbox_layout(view, node, measuring).size.width;
+        let content = compute_flexbox_layout(
+            view,
+            node,
+            LayoutInput {
+                available_space: Size {
+                    width: AvailableSpace::MaxContent,
+                    ..inputs.available_space
+                },
+                ..measuring
+            },
+        )
+        .size
+        .width;
+        inputs.known_dimensions.width = Some(bases.max(content.min(space)));
+        inputs.known_dimensions_are_definite.width = true;
+    }
+    compute_flexbox_layout(view, node, inputs)
+}
+
 /// Whether `style` is a view's that nothing styles: React Native's
 /// defaults ([`crate::style::unstyled_layout`]), in either direction.
 fn unstyled(style: &Style) -> bool {
@@ -643,7 +694,7 @@ where
                 (Display::None, _) => compute_hidden_layout(view, node),
                 (Display::Block, true) => compute_block_layout(view, node, inputs, block),
                 (Display::FlowRoot, true) => compute_block_layout(view, node, inputs, None),
-                (Display::Flex, true) => compute_flexbox_layout(view, node, inputs),
+                (Display::Flex, true) => compute_flex_layout(view, node, inputs),
                 (Display::Grid, true) => compute_grid_layout(view, node, inputs),
                 (_, false) => view.measure_leaf(node, inputs, false),
             };
