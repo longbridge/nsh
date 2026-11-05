@@ -627,24 +627,6 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         },
         _ => None,
     };
-    let _terminal_logs = match &command {
-        Command::Run {
-            entry,
-            target: run::Target::Tui,
-            ..
-        }
-        | Command::Dev {
-            entry,
-            target: run::Target::Tui,
-            server_only: false,
-            ..
-        } => {
-            let work = entry.parent().context("app directory")?.join(".nsh");
-            std::fs::create_dir_all(&work)?;
-            Some(ui::LogFile::open(&work.join("tui.log"))?)
-        }
-        _ => None,
-    };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
     // tested, run and packaged.
     let rust_command = matches!(
