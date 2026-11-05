@@ -47,6 +47,7 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
+mod notifications;
 mod panel;
 mod picker;
 mod render;

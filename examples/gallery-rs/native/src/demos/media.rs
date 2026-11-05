@@ -1,4 +1,4 @@
-//! Web and video: WKWebView / WebView, AVPlayer / MediaPlayer (as the TSX
+//! WebView and Video: WKWebView / WebView, AVPlayer / MediaPlayer (as the TSX
 //! gallery's `demos/Media.tsx`): an inline page in the gallery's colors
 //! with messages both ways, a web site with its navigation state, back and
 //! forward, and a video with controls of the demo's own or the system's.
@@ -7,7 +7,7 @@ use nsh_core::prelude::*;
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, RoundButton,
-    Segment, Tone, caption, colors, icon, press, radius, segmented,
+    Segment, Tone, caption, colors, icon, press, radius, segmented, terminal,
 };
 
 /// The web site of the second web view.
@@ -250,7 +250,8 @@ fn Player() -> impl IntoElement {
                 .muted(true)
                 .repeat(true)
                 .controls(system_controls)
-                .h(px(200.0))
+                .w_full()
+                .aspect_ratio(16.0 / 9.0)
                 .bg(rgb(0x000000))
                 .on_load(move |e: &VideoInfo| duration.set(e.duration))
                 .on_buffer(move |b: &bool| buffering.set(*b))
@@ -299,8 +300,15 @@ fn nav_button(
                 .border_color(colors::BORDER)
                 .items_center()
                 .justify_center()
-                .when(flip, |v| v.rotate(deg(180.0)))
-                .child(icon().name(IconName::Chevron).size(18.0).tint(colors::TEXT)),
+                // A terminal shows the label, unturned.
+                .when(flip && !terminal(), |v| v.rotate(deg(180.0)))
+                .child(
+                    icon()
+                        .name(IconName::Chevron)
+                        .size(18.0)
+                        .tint(colors::TEXT)
+                        .label(Some(SharedString::from(label))),
+                ),
         )
 }
 
@@ -353,9 +361,15 @@ fn messaging() -> impl IntoElement {
         }))
 }
 
-/// The demo's page: an inline page, a web site and a video, with what they
+/// The WebView demo's page: an inline page and a web site, with what they
 /// tell the app.
 #[component]
-pub(crate) fn Media() -> impl IntoElement {
-    DemoPage::new().card(messaging).card(site).card(player)
+pub(crate) fn WebViewPage() -> impl IntoElement {
+    DemoPage::new().card(messaging).card(site)
+}
+
+/// The Video demo's page: a player and what it tells the app.
+#[component]
+pub(crate) fn VideoPage() -> impl IntoElement {
+    DemoPage::new().columns(1).card(player)
 }

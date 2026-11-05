@@ -300,12 +300,22 @@ pub fn os_version() -> (u16, u16) {
         .with_untracked(|e| e.os_version)
 }
 
-/// The kind of device (TS: `platform.idiom`): [`Idiom::Desktop`] exactly
-/// where [`is_desktop`] holds ([`Idiom::reported_on`]).
+/// The kind of device (TS: `platform.idiom`): [`Idiom::Terminal`] in a
+/// terminal, else [`Idiom::Desktop`] exactly where [`is_desktop`] holds
+/// ([`Idiom::reported_on`]).
 pub fn idiom() -> Idiom {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| e.idiom.reported_on(e.os))
+}
+
+/// The size of one Cell of a grid surface (a terminal), in points, as
+/// the core lays out on it ([`Environment::cell`]); `None` on every other
+/// surface. Components that size themselves in whole Cells read it.
+pub fn cell_size() -> Option<Size<Points>> {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.cell)
 }
 
 /// Whether the app runs under Mac Catalyst, in every idiom (TS:
@@ -316,8 +326,9 @@ pub fn is_catalyst() -> bool {
 }
 
 /// Whether desktop behavior applies, NSH's one definition of desktop: a
-/// desktop OS (macOS, Windows, Linux), or a browser in the desktop idiom
-/// (TS: `platform.desktop`, [`Idiom::desktop_on`]); it does not change.
+/// desktop OS (macOS, Windows, Linux), a browser in the desktop idiom or
+/// a terminal (TS: `platform.desktop`, [`Idiom::desktop_on`]); it does not
+/// change.
 pub fn is_desktop() -> bool {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
@@ -634,6 +645,70 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
 pub fn speech_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::Speech(super::SpeechAction::Available(slot)));
+    answer
+}
+
+/// Whether the app may show notifications (TS: `Notifications.permission`),
+/// without asking the user. To await in a task.
+pub fn notification_permission() -> Answer<crate::notifications::NotificationPermission> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(
+        super::NotificationAction::Permission {
+            ask: false,
+            answer: slot,
+        },
+    ));
+    answer
+}
+
+/// Asks the user to let the app show notifications, once (TS:
+/// `Notifications.requestPermission`), and answers with the permission. To
+/// await in a task.
+pub fn request_notification_permission() -> Answer<crate::notifications::NotificationPermission> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(
+        super::NotificationAction::Permission {
+            ask: true,
+            answer: slot,
+        },
+    ));
+    answer
+}
+
+/// Shows `notification` (TS: `Notifications.show`), answering whether the
+/// system took it: not without the permission. To await in a task.
+pub fn show_notification(notification: crate::notifications::Notification) -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(super::NotificationAction::Show {
+        notification,
+        answer: slot,
+    }));
+    answer
+}
+
+/// Removes the notification called `id`, shown or waiting to show (TS:
+/// `Notifications.close`).
+pub fn close_notification(id: impl Into<String>) {
+    act(Action::Notification(super::NotificationAction::Close(
+        id.into(),
+    )));
+}
+
+/// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
+pub fn set_badge(count: u32) {
+    act(Action::Notification(super::NotificationAction::SetBadge(
+        count,
+    )));
+}
+
+/// The id of the next notification the user presses (TS:
+/// `Notifications.on("press", ...)`), those that started the app first. To
+/// await in a task.
+pub fn next_notification_press() -> Answer<String> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(super::NotificationAction::NextPress(
+        slot,
+    )));
     answer
 }
 
@@ -1064,6 +1139,11 @@ pub struct KeyOptions {
     /// Fires again on the auto-repeats of a held key (default: once until
     /// the key is released).
     pub repeat: bool,
+    /// Lets the key go on after the handler runs, as if nothing were bound
+    /// (default: the platform consumes it). Tab still moves the focus: a
+    /// component closes its popup on Tab and the focus moves on as it
+    /// would ([`crate::keymap::KeyMatch::Notify`]).
+    pub pass_through: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1115,7 +1195,10 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
-        |id| crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat),
+        |id| {
+            crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
+                .passing_through(options.pass_through)
+        },
         keystroke.into(),
         handler,
     );
@@ -1280,10 +1363,25 @@ fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::Scro
 /// On a keystroke that is not one.
 #[track_caller]
 pub fn key_label(keystroke: &str) -> String {
-    let apple = apple_keys();
-    crate::keymap::Keystroke::parse_with(keystroke, apple)
-        .unwrap_or_else(|e| panic!("key_label: {e}"))
-        .label(os(), apple)
+    let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
+        .unwrap_or_else(|e| panic!("key_label: {e}"));
+    keystroke_label(parsed)
+}
+
+/// A parsed keystroke as menus and hints show it here ([`key_label`]):
+/// the keys to press, Ctrl for Command where Ctrl stands in for it
+/// ([`crate::platform::Environment::ctrl_for_command`]).
+pub fn keystroke_label(keystroke: crate::keymap::Keystroke) -> String {
+    let (os, apple, ctrl) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| {
+            (
+                e.os,
+                crate::keymap::apple_keys(e.os, e.apple_keyboard),
+                e.ctrl_for_command,
+            )
+        });
+    keystroke.pressed(ctrl).label(os, apple)
 }
 
 /// Listens to the Android back button while the current owner lives (TS:

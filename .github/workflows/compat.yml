@@ -59,6 +59,7 @@ jobs:
               - "crates/nsh-js/**"
               - "crates/nsh-macros/**"
               - "crates/nsh-package/**"
+              - "crates/nsh-updater/**"
               - "crates/nsh-testing/**"
               - "tests/compat/**"
               - "examples/counter/**"
@@ -85,6 +86,10 @@ jobs:
         if: steps.run.outputs.check == 'true'
         with:
           repository: longbridge/nsh-compat
+          # longbridge/nsh-compat#31: its runner needs this checkout's terminal
+          # idiom and `KeyMatch::Notify`, so it cannot land on its main first.
+          # Back to its default branch once it has merged.
+          ref: runner-terminal-idiom
           path: nsh-compat
 
       # QuickJS is C (bindgen needs libclang).
@@ -109,10 +114,11 @@ jobs:
         working-directory: nsh
         run: cargo build -p nsh-cli
 
-      # The checkout's versions, so the cache serves both.
+      # The checkout's versions, so the cache serves both. The cases compile
+      # shaders, which nsh-core leaves out without its `shader` feature.
       - name: Check
         if: steps.run.outputs.check == 'true'
         working-directory: nsh-compat
         run: |
           cp ../nsh/Cargo.lock .
-          cargo test --target-dir ../nsh/target
+          cargo test --target-dir ../nsh/target --features nsh-core/shader

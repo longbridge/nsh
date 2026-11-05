@@ -12,6 +12,7 @@ mod formula;
 #[cfg(feature = "math")]
 mod math;
 mod parts;
+mod tex_text;
 mod view;
 
 pub use self::{

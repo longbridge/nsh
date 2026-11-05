@@ -44,6 +44,7 @@ mod mount;
 mod native;
 mod navigation;
 mod net;
+mod notifications;
 mod panel;
 mod picker;
 mod screen_color;

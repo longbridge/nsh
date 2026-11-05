@@ -29,7 +29,7 @@ use super::{
     table::{TableGesture, TablePreview},
 };
 use crate::{
-    editor::layout::{self, AutoScroll},
+    autoscroll::{self, AutoScroll},
     rich_editor::{
         commands::base_keymap,
         extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
@@ -336,6 +336,7 @@ impl Rv {
                     KeyOptions {
                         when: When::Always,
                         repeat: spec.repeat,
+                        ..Default::default()
                     },
                     move |_| rv.key(&event),
                 );
@@ -759,6 +760,22 @@ impl Rv {
         }
         if editable && self.delete_by_key(event) {
             self.after_key(event);
+            return;
+        }
+        // Escape no plugin, node view or keymap took collapses a selection
+        // to its head. With nothing to collapse, a terminal's focus leaves
+        // the editor, so it is no trap there (Tab then goes on after it);
+        // the other platforms keep Escape as it was. It stays bound for the
+        // plugins' own Escape (a suggestion's).
+        if plain && event.key == "Escape" {
+            let sel = state.selection();
+            if sel.empty() {
+                if crate::terminal::is_terminal() {
+                    self.blur();
+                }
+            } else if let Ok(p) = state.doc().resolve(sel.head()) {
+                self.set_selection(Selection::near(&p, 1), false);
+            }
             return;
         }
         if let Some(m) = keys::movement(event) {
@@ -1931,7 +1948,7 @@ impl Rv {
         let scroll_y = self.scroll_y.get_untracked();
         let y = page.y + drag.shift.y + (scroll_y - drag.scroll) - scroll_y;
         let viewport = self.viewport.get_untracked();
-        let dy = layout::edge_speed(y, viewport.height, layout::AUTOSCROLL_INNER_ZONE);
+        let dy = autoscroll::edge_speed(y, viewport.height, autoscroll::AUTOSCROLL_INNER_ZONE);
         let mut auto = self.autoscroll.borrow_mut();
         auto.page = page;
         if dy.0 == 0.0 {
@@ -1941,7 +1958,7 @@ impl Rv {
         auto.speed = Point::new(px(0.0), dy);
         if auto.task.is_none() {
             let rv = self.clone();
-            let period = Duration::from_millis(layout::AUTOSCROLL_PERIOD_MS);
+            let period = Duration::from_millis(autoscroll::AUTOSCROLL_PERIOD_MS);
             auto.task = Some(set_interval(period, move || rv.autoscroll_tick()));
         }
     }

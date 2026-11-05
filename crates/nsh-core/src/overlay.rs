@@ -62,6 +62,17 @@ pub enum OverlayAnchor {
     },
 }
 
+/// The resolved anchor and side delivered to native renderers for grid projection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacedAnchor {
+    /// The anchor's frame in its root view's point coordinates.
+    pub bounds: Bounds<Points>,
+    /// The anchored view, when the anchor is its whole frame.
+    pub node: Option<NodeId>,
+    /// The final side, including a placement flipped to fit the viewport.
+    pub placement: Placement,
+}
+
 /// The side of the anchor an overlay goes on (`placement`), as
 /// `gpui-base`'s `Placement`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, nsh_macros::PropEnum)]

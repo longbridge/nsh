@@ -624,6 +624,26 @@ struct VideoHost {
     props: Option<VideoProps>,
     /// Reports `onProgress`.
     progress: Option<glib::SourceId>,
+    /// The stream's signal handlers, disconnected when it closes.
+    handlers: Vec<glib::SignalHandlerId>,
+}
+
+/// Whether freeing a stream that has made its video sink would end GTK's own
+/// EGL display, after which the window never draws again: on Wayland, the sink
+/// of GTK before 4.24.2 leaves the display GStreamer wraps marked as
+/// GStreamer's, so GStreamer terminates it with the sink (GTK issue 8456).
+fn closing_ends_gtk_egl() -> bool {
+    !gtk_marks_egl_foreign((
+        gtk::major_version(),
+        gtk::minor_version(),
+        gtk::micro_version(),
+    )) && gtk::gdk::Display::default()
+        .is_some_and(|display| display.type_().name() == "GdkWaylandDisplay")
+}
+
+/// Whether this GTK's video sink leaves GTK's EGL display alone when it goes.
+fn gtk_marks_egl_foreign(version: (u32, u32, u32)) -> bool {
+    version >= (4, 24, 2)
 }
 
 impl VideoHost {
@@ -639,6 +659,7 @@ impl VideoHost {
             status: Rc::default(),
             props: None,
             progress: None,
+            handlers: Vec::new(),
         }
     }
 
@@ -707,42 +728,56 @@ impl VideoHost {
         self.emitter
             .emit(EventKind::LoadStart, || EventPayload::None);
         let (emitter, status) = (self.emitter.clone(), self.status.clone());
-        stream.connect_prepared_notify(move |stream| loaded(stream, &emitter, &status));
+        self.handlers
+            .push(stream.connect_prepared_notify(move |stream| loaded(stream, &emitter, &status)));
         // The picture's size is known with the first frame, which may come
         // after `prepared`.
         let (emitter, status) = (self.emitter.clone(), self.status.clone());
-        stream.connect_invalidate_size(move |stream| {
-            if let Some(stream) = stream.downcast_ref::<gtk::MediaFile>() {
-                loaded(stream, &emitter, &status);
-            }
-        });
+        self.handlers
+            .push(stream.connect_invalidate_size(move |stream| {
+                if let Some(stream) = stream.downcast_ref::<gtk::MediaFile>() {
+                    loaded(stream, &emitter, &status);
+                }
+            }));
         let emitter = self.emitter.clone();
-        stream.connect_ended_notify(move |stream| {
-            if stream.is_ended() {
-                emitter.emit(EventKind::End, || EventPayload::None);
-            }
-        });
+        self.handlers
+            .push(stream.connect_ended_notify(move |stream| {
+                if stream.is_ended() {
+                    emitter.emit(EventKind::End, || EventPayload::None);
+                }
+            }));
         let (emitter, status) = (self.emitter.clone(), self.status.clone());
         let name = source.to_owned();
-        stream.connect_error_notify(move |stream| {
-            let Some(err) = stream.error() else { return };
-            if status.failed.replace(true) {
-                return;
-            }
-            // Nothing plays: no progress, and the app hears it stopped.
-            stream.set_playing(false);
-            let message = media_error(err.message());
-            log::warn!(target: "js", "video {name}: {message}");
-            status.set_buffering(&emitter, false);
-            emitter.emit(EventKind::Error, || error(message));
-        });
+        self.handlers
+            .push(stream.connect_error_notify(move |stream| {
+                let Some(err) = stream.error() else { return };
+                if status.failed.replace(true) {
+                    return;
+                }
+                // Nothing plays: no progress, and the app hears it stopped.
+                stream.set_playing(false);
+                let message = media_error(err.message());
+                log::warn!(target: "js", "video {name}: {message}");
+                status.set_buffering(&emitter, false);
+                emitter.emit(EventKind::Error, || error(message));
+            }));
         self.stream = Some(stream);
     }
 
-    /// Stops and drops the stream.
+    /// Stops and drops the stream, or keeps it paused where dropping it would
+    /// stop the window drawing.
     fn close(&mut self) {
-        if let Some(stream) = self.stream.take() {
-            stream.set_playing(false);
+        let handlers = std::mem::take(&mut self.handlers);
+        let Some(stream) = self.stream.take() else {
+            return;
+        };
+        stream.set_playing(false);
+        for handler in handlers {
+            stream.disconnect(handler);
+        }
+        if closing_ends_gtk_egl() {
+            std::mem::forget(stream);
+        } else {
             stream.clear();
         }
     }
@@ -883,6 +918,15 @@ fn error(message: String) -> EventPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gtk_marks_its_egl_display_foreign_from_4_24_2() {
+        assert!(!gtk_marks_egl_foreign((4, 14, 5)));
+        assert!(!gtk_marks_egl_foreign((4, 24, 1)));
+        assert!(gtk_marks_egl_foreign((4, 24, 2)));
+        assert!(gtk_marks_egl_foreign((4, 25, 0)));
+        assert!(gtk_marks_egl_foreign((5, 0, 0)));
+    }
 
     #[test]
     fn locates_sources() {

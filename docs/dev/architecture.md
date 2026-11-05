@@ -34,6 +34,12 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   loop starts; `Panel` is not `Send`, and `Panel::open` anywhere else is `PanelError::WrongThread`. It runs an
   `AppView` and an engine of its own: the same commit pipeline, one main-queue hop per commit, no thread of a third
   kind (macOS and Linux use the main thread, Windows the `nsh-ui` thread `run_app` spawns).
+- Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
+  order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
+  nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.
+- Anchored overlays include their resolved anchor bounds, optional anchor node and final placement side in
+  `ViewProps::overlay_anchor`. The terminal uses this to keep a popup outside the anchor's occupied Cells;
+  other native backends continue using the core's point frames.
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is encoded once and handed to
   `Mounter.java` on the UI thread (`crates/nsh-platform-android/src/encode.rs`).
   Display-density changes update the shared text density and remount the existing views. Sticky ranges are replayed

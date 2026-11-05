@@ -574,6 +574,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::Notification(command) => surface.control(|c| {
+            let root = surface.root.upcast_ref::<gtk::Widget>();
+            crate::notifications::command(c, root, command);
+        }),
         Command::Back => crate::navigation::default_back(surface),
         Command::Tokens(tokens) => set_menu_tokens(tokens),
         Command::ExitApp => {

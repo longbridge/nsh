@@ -402,7 +402,7 @@ container at least 600 wide (headless Chromium reports no pointer and measures a
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
 `phone`; the player's `idiom` option overrides it, and so does a test's setup (`TestEnvironment::idiom`: `open`'s
 desktop `platform` starts the app in the desktop idiom at any width). `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
+(desktop OS, the web in the desktop idiom, or the terminal idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
 `platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
 gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
@@ -665,8 +665,9 @@ browsers' touches into what phones report:
   another is part of the outer one (`areaOf`). `textAt` takes the area's texts and `areaGap` its other places outside
   views that take presses, so `mousedown` is not prevented there and a drag may start between texts, as between a
   web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins
-  the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline and
-  leaves out attachments (U+FFFC), as `SelectionModel::text` does.
+  the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline, joins
+  a text whose props have `continuesText` (`ViewProps::continues_text`: a wrapped line's later part) to the one
+  before it with nothing, and leaves out attachments (U+FFFC), as `SelectionModel::text` does.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.

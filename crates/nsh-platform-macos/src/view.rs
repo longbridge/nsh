@@ -48,7 +48,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect};
-use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D};
+use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLeft};
 
 use crate::surface::{Surface, quiet};
 
@@ -328,6 +328,8 @@ pub(crate) struct Ivars {
     /// Its content changed while it could not be seen
     /// ([`crate::mount::Mounter::draw_when_shown`]).
     stale: Cell<bool>,
+    /// Its frame waits to be placed ([`crate::mount::Mounter`]'s `unplaced`).
+    unplaced: Cell<bool>,
 }
 
 define_class!(
@@ -486,6 +488,24 @@ define_class!(
             // SAFETY: NSView's own layout.
             unsafe { msg_send![super(self), layout] }
             NshView(self.retain()).set_layer_geometry();
+        }
+
+        #[unsafe(method(viewWillStartLiveResize))]
+        fn view_will_start_live_resize(&self) {
+            // SAFETY: NSView's own notification.
+            unsafe { msg_send![super(self), viewWillStartLiveResize] }
+            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+                surface.live_resize(true);
+            }
+        }
+
+        #[unsafe(method(viewDidEndLiveResize))]
+        fn view_did_end_live_resize(&self) {
+            // SAFETY: NSView's own notification.
+            unsafe { msg_send![super(self), viewDidEndLiveResize] }
+            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+                surface.live_resize(false);
+            }
         }
 
         #[unsafe(method(viewWillDraw))]
@@ -1060,6 +1080,7 @@ impl NshView {
             tracking: Cell::new(false),
             content: RefCell::new(None),
             stale: Cell::new(false),
+            unplaced: Cell::new(false),
         });
         // SAFETY: NSView's designated initializer.
         let obj: Retained<ViewObj> = unsafe { msg_send![super(obj), initWithFrame: NSRect::ZERO] };
@@ -1242,6 +1263,11 @@ impl NshView {
         self.ivars().stale.get()
     }
 
+    /// Marks whether its frame waits to be placed; true if that changed.
+    pub(crate) fn set_unplaced(&self, unplaced: bool) -> bool {
+        self.ivars().unplaced.replace(unplaced) != unplaced
+    }
+
     /// Draws its content (text, canvas) again, if it draws any.
     pub(crate) fn redraw(&self) {
         // A view that stopped drawing clears what it drew.
@@ -1268,13 +1294,17 @@ impl NshView {
         let layer = CALayer::new();
         layer.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*drawer)));
         layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
-        layer.setNeedsDisplayOnBoundsChange(true);
         // Drawn at once: text is cheap to draw, which measured faster than
         // asynchronously, and a canvas moves to Core Animation's threads
         // once it paints often (`canvas.rs`; paths and gradients are
         // costly: on the Stocks demo main-thread time per frame went from
         // 3.5 to 1.8 ms).
         layer.setDrawsAsynchronously(false);
+        // A text keeps its picture through another width of the same lines:
+        // never stretched. The rest draw again at their new size.
+        if self.state().text.is_some() {
+            layer.setContentsGravity(unsafe { kCAGravityTopLeft });
+        }
         layer.setContentsScale(self.backing_scale());
         // Above the decoration behind it (fills, gradients, inset
         // shadows), below the children and the borders in front.
@@ -1284,6 +1314,29 @@ impl NshView {
         host.addSublayer(&layer);
         *self.ivars().content.borrow_mut() = Some((layer.clone(), drawer));
         Some(layer)
+    }
+
+    /// Its content layer got a new size: drawn again when it can be seen.
+    /// A window's resize gives a new size to every text of a long page, and
+    /// Core Animation draws each layer marked (`needsDisplayOnBoundsChange`
+    /// did) wherever it is, seen or not.
+    fn content_resized(&self) {
+        if self.is_stale() {
+            return;
+        }
+        let mut top = self.clone();
+        while let Some(parent) = top.parent_view() {
+            top = parent;
+        }
+        match top.ivars().surface.borrow().upgrade() {
+            Some(surface) => {
+                self.set_stale(true);
+                surface.draw_when_shown(self.clone());
+            }
+            // Out of the tree: Core Animation draws a marked layer once it
+            // is in one.
+            None => self.redraw(),
+        }
     }
 
     /// The scale of its window's backing (2 before it has one).
@@ -1353,9 +1406,8 @@ impl NshView {
         crate::shader::ui_changed(self);
     }
 
-    /// Places the view at its frame (with its parent's mirroring and its
-    /// shift) and sets its layer's transform, opacity and visibility.
-    pub(crate) fn place(&self) {
+    /// Where its frame puts it, with its parent's mirroring and its shift.
+    fn placed_rect(&self) -> NSRect {
         let mirror = self.parent_view().and_then(|p| {
             let s = p.state();
             s.scroll
@@ -1363,18 +1415,23 @@ impl NshView {
                 .is_some_and(|sc| sc.mirrored)
                 .then_some(s.frame.size.width.0)
         });
-        let (rect, root) = {
+        let s = self.state();
+        let f = s.frame;
+        let mut x = f.origin.x.0 + s.shift.0;
+        if let Some(w) = mirror {
+            x = w - x - f.size.width.0;
+        }
+        let y = f.origin.y.0 + s.shift.1;
+        ns_rect(x, y, f.size.width.0, f.size.height.0)
+    }
+
+    /// Places the view at its frame (with its parent's mirroring and its
+    /// shift) and sets its layer's transform, opacity and visibility.
+    pub(crate) fn place(&self) {
+        let rect = self.placed_rect();
+        let root = {
             let s = self.state();
-            let f = s.frame;
-            let mut x = f.origin.x.0 + s.shift.0;
-            if let Some(w) = mirror {
-                x = w - x - f.size.width.0;
-            }
-            let y = f.origin.y.0 + s.shift.1;
-            (
-                ns_rect(x, y, f.size.width.0, f.size.height.0),
-                s.id == ROOT_ID && self.ivars().surface.borrow().strong_count() > 0,
-            )
+            s.id == ROOT_ID && self.ivars().surface.borrow().strong_count() > 0
         };
         if !root && self.ns().frame() != rect {
             self.ns().setFrame(rect);
@@ -1384,9 +1441,21 @@ impl NshView {
             self.size_container();
             crate::native::resized(self);
             self.place_natives();
-            if let Some((layer, _)) = &*self.ivars().content.borrow() {
-                // A new size draws it again (`needsDisplayOnBoundsChange`).
-                layer.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
+            let resized = self
+                .ivars()
+                .content
+                .borrow()
+                .as_ref()
+                .is_some_and(|(layer, _)| {
+                    let resized = layer.bounds().size != rect.size;
+                    layer.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
+                    resized
+                });
+            // A text's box changes with its own `MountItem::Text`, which
+            // says whether it draws again, unless its picture was cut.
+            let keeps = self.state().text.as_ref().is_some_and(|t| !t.cut.get());
+            if resized && !keeps {
+                self.content_resized();
             }
         }
         self.set_layer_geometry();
@@ -1578,6 +1647,42 @@ impl crate::sight::Tree for Views {
             s.clips() || s.id == ROOT_ID
         };
         (crate::scroll::bounds_origin(node), clips)
+    }
+}
+
+/// [`Views`] with the frames the layout gave, placed or not: what can be
+/// seen once the views waiting to be placed are ([`crate::mount::Mounter`]).
+pub(crate) struct Planned;
+
+impl crate::sight::Tree for Planned {
+    type Node = NshView;
+
+    fn key(&self, node: &NshView) -> usize {
+        Views.key(node)
+    }
+
+    fn parent(&self, node: &NshView) -> Option<NshView> {
+        Views.parent(node)
+    }
+
+    fn hidden(&self, node: &NshView) -> bool {
+        Views.hidden(node)
+    }
+
+    fn top_shown(&self, node: &NshView) -> bool {
+        Views.top_shown(node)
+    }
+
+    fn frame(&self, node: &NshView) -> crate::sight::Span {
+        // A running layout animation shows its in-between frame.
+        if node.state().live.is_some() || node.state().id == ROOT_ID {
+            return Views.frame(node);
+        }
+        crate::sight::placed(node.placed_rect())
+    }
+
+    fn content(&self, node: &NshView) -> ((f32, f32), bool) {
+        Views.content(node)
     }
 }
 

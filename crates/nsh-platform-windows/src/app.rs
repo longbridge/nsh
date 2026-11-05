@@ -388,6 +388,7 @@ fn initial_environment() -> Environment {
         os: Os::Windows,
         idiom: Idiom::Desktop,
         file_requests: true,
+        notifications: true,
         ..Environment::default()
     }
 }
@@ -482,6 +483,7 @@ fn run_on_this_thread(
         let _ = OleInitialize(None);
     }
     crate::system::set_app_id(&options.app_id);
+    crate::notifications::start(&options.app_id, &options.title);
     APP_THREAD.with(|app| app.set(true));
     let view = match AppView::new(None, options.clone()) {
         Ok(view) => view,

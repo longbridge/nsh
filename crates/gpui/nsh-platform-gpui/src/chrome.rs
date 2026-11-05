@@ -210,6 +210,8 @@ pub(crate) struct Chrome {
     asked_size: Cell<Option<AskedSize>>,
     /// The menu open (drawn), if any.
     open: RefCell<Option<menus::Open>>,
+    /// The icons of its rows.
+    icons: RefCell<menus::Icons>,
     /// The menu bar's items, in window coordinates (from the last frame).
     bar_items: RefCell<Vec<Bounds<Pixels>>>,
     /// When the menu bar shows (`Window.setMenuBar`).
@@ -918,7 +920,12 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                         title_double_click(window);
                     }
                     MouseButton::Left => surface.chrome.drag.set(Some((x, y))),
-                    MouseButton::Right if PLATFORM == Platform::Linux => {
+                    // (a view of the app's own with a context menu there
+                    // hears the click instead)
+                    MouseButton::Right
+                        if PLATFORM == Platform::Linux
+                            && !crate::input::hears_context_menu(&surface.root, x - ox, y - oy) =>
+                    {
                         window.show_window_menu(e.position);
                     }
                     _ => return,
@@ -1263,12 +1270,14 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             checked: None,
             role: Some(role),
             when: nsh_core::keymap::When::Always,
+            icon: None,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {
         label: label.to_owned(),
         enabled: true,
         items,
+        icon: None,
     };
     vec![
         submenu(
@@ -1342,6 +1351,8 @@ fn gpui_keystroke(s: &Shortcut) -> String {
     out
 }
 
+/// `items` as GPUI's native menus (macOS): GPUI's `MenuItem` has no image,
+/// so these show no icons, unlike the rows [`menus`] draws.
 fn native_items(
     surface: u64,
     items: &[MenuItem],
@@ -1373,6 +1384,7 @@ fn native_items(
                 label,
                 enabled,
                 items,
+                ..
             } => gpui::MenuItem::submenu(gpui::Menu {
                 name: label.clone().into(),
                 items: native_items(surface, items, entries, bindings),
@@ -1415,6 +1427,7 @@ fn set_native_menus(surface: &Surface, cx: &mut App) {
                 label,
                 enabled,
                 items,
+                ..
             } => Some(gpui::Menu {
                 name: label.clone().into(),
                 items: native_items(surface.key(), items, &mut entries, &mut bindings),

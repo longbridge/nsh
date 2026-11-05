@@ -176,6 +176,43 @@ pub struct OverlayPosition {
     pub available: Size<Points>,
 }
 
+/// Why a hint asks to show or hide (`Overlay::on_hint_show` /
+/// `on_hint_hide`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HintReason {
+    /// The pointer rested on its anchor, or left or pressed it.
+    #[default]
+    Pointer,
+    /// The keyboard focus came to its anchor, or left it.
+    Focus,
+    /// Escape was pressed while it was shown.
+    Escape,
+    /// It left the view.
+    View,
+}
+
+impl HintReason {
+    /// Its name in an event's payload.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pointer => "pointer",
+            Self::Focus => "focus",
+            Self::Escape => "escape",
+            Self::View => "view",
+        }
+    }
+}
+
+pub(crate) fn hint_reason(p: &EventPayload) -> Option<Cow<'_, HintReason>> {
+    Some(Cow::Owned(match string(p, "reason") {
+        Some("focus") => HintReason::Focus,
+        Some("escape") => HintReason::Escape,
+        Some("view") => HintReason::View,
+        _ => HintReason::Pointer,
+    }))
+}
+
 /// A field of a map payload.
 fn field<'a>(payload: &'a EventPayload, key: &str) -> Option<&'a PayloadValue> {
     match payload {

@@ -41,7 +41,9 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   in `VerifiedPackage::ignored` and logged by `Bundle::from_package`. Incompatible changes bump the format version.
   Certificates and revocation lists still refuse unknown fields.
 - **Verification** (`TrustStore::verify`): the certificate's root signature, the release key not revoked, the package
-  signature, the app id and the signing time against the certificate, the minimum runtime, the file table tiling the
+  signature, the app id as one path segment (`check_app_id`: no `/`, `\`, `:` or NUL, not `.` or `..`, since it names
+  directories under the assets root and the data directory; `build` and `resign` refuse it too) and with the signing time
+  against the certificate, the minimum runtime, the file table tiling the
   data exactly, each file's hash, the package hash not revoked, and the build not older than the highest accepted for
   that app (`accept` records it; rollback protection). Revocation lists (`nsh revoke`, signed by a root) only replace
   an older list (sequence numbers), so an old list cannot be replayed. The state (newest list, accepted builds)

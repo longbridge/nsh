@@ -188,7 +188,7 @@ The header, footer and empty slots take an element (in TSX also a component: `he
 
 ## Columns and grids
 
-`numColumns` (`.columns(n)`) lays items out in rows of that many columns; content padding goes around the content, with gaps between rows and columns. Rows of a grid may have different heights: each row is as tall as its tallest item.
+`numColumns` (`.columns(n)`) lays items out in rows of that many columns; content padding goes around the content, with gaps between rows and columns. Rows of a grid may have different heights: each row is as tall as its tallest item. `numColumns` may change while the list shows (more columns as a window widens): the first visible item stays at the top, and so it does when `estimatedItemSize` changes.
 
 ```rust tabs
 let count = photos.len();

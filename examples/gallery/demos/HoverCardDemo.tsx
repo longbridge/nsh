@@ -1,7 +1,7 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { HoverCard, type OpenChangeReason } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
-import { alpha, Badge, Button, Caption, colors, Card, DemoPage, focusRing, hint, mono, PopIn, type PopupSide, popupSurface, Segmented, Stat, Toggle, toneColor } from "../ui";
+import { alpha, Badge, Button, Caption, colors, Card, DemoPage, focusRing, hint, mono, PopIn, type PopupSide, popupSurface, Segmented, Stat, terminal, Toggle, toneColor } from "../ui";
 import { Avatar, createEvents } from "./OverlayUi";
 
 // A trigger is a view with the link role and its own `onPress`: the card's
@@ -315,8 +315,16 @@ export function HoverCardDemo() {
               {change().toFixed(2)} ({((change() / q.open) * 100).toFixed(2)}%)
             </Text>
           </View>
-          {/* The day's closes as bars, the latest at the right. */}
-          <View style={{ height: 44, flexDirection: "row", alignItems: "flex-end", gap: 2 }}>
+          {/* The day's closes as bars, the latest at the right; a terminal's
+              are a row of block glyphs, eighths of a Cell, as a sparkline is. */}
+          <If when={terminal}>
+            <Text style={{ color: toneColor(tone()) }}>
+              {closes()
+                .map((c) => "▁▂▃▄▅▆▇█"[Math.min(7, Math.floor(((c - lo()) / Math.max(0.01, hi() - lo())) * 8))])
+                .join("")}
+            </Text>
+          </If>
+          <View style={{ height: 44, flexDirection: "row", alignItems: "flex-end", gap: 2, display: terminal ? "none" : "flex" }}>
             <Each of={closes()}>
               {(c, i) => (
                 <View
@@ -413,7 +421,9 @@ export function HoverCardDemo() {
             offset={8}
             margin={8}
             trigger={
-              <View focusable focusStyle={focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent" }}>
+              // A terminal shows the focus itself: no edge kept for a ring,
+              // which would take a row above and below.
+              <View focusable focusStyle={terminal ? undefined : focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 8, borderWidth: terminal ? 0 : 1, borderColor: "transparent" }}>
                 <Avatar name="Ravi Patel" size={pointer ? 28 : 34} />
                 <Text style={{ fontSize: body, color: colors.text }}>Build #4182</Text>
               </View>
@@ -431,6 +441,9 @@ export function HoverCardDemo() {
             </PopIn>
           </HoverCard>
           <View style={{ flex: 1 }} />
+          {/* The switch's name in sight, as the gallery's other switches have
+              theirs: alone, a terminal's `[ ]` would say nothing. */}
+          <Text style={{ fontSize: small, color: colors.muted }}>Pin open</Text>
           <Toggle label="Pin open" value={pinned()} onChange={(v) => pinned.set(v)} />
         </View>
         <Caption label={pinned() ? "Pinned: onOpenChange still reports, the app keeps it open" : "Pin it, then move away"} />

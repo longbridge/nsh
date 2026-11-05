@@ -109,6 +109,19 @@ pub(crate) struct AppConfig {
     /// What the web's packages add to the page (`web.rs`).
     #[serde(default)]
     pub(crate) web: WebConfig,
+    /// Where the app finds its updates (`update.rs`).
+    pub(crate) updater: Option<crate::updater::UpdaterConfig>,
+    /// Terminal layout options.
+    #[serde(default)]
+    pub(crate) tui: TuiConfig,
+}
+
+/// `nsh.json` `"tui"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TuiConfig {
+    /// Width and height of one Cell in points (`8x16` by default).
+    pub(crate) points_per_cell: Option<String>,
 }
 
 impl AppConfig {
@@ -119,6 +132,17 @@ impl AppConfig {
             None => true,
             Some(capabilities) => {
                 capabilities.get("speech") == Some(&serde_json::Value::Bool(true))
+            }
+        }
+    }
+
+    /// Whether the app may show notifications: it declares no capabilities
+    /// (it gets them all) or grants `notifications`.
+    pub(crate) fn notifications(&self) -> bool {
+        match &self.capabilities {
+            None => true,
+            Some(capabilities) => {
+                capabilities.get("notifications") == Some(&serde_json::Value::Bool(true))
             }
         }
     }
@@ -196,6 +220,9 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     };
     let mut config: AppConfig =
         serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+    if let Some(value) = &config.tui.points_per_cell {
+        crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
+    }
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
@@ -299,7 +326,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // Web apps load what `import()` brings in when it is used; native
     // packages are one bundle. A Rust app has none: its runner mounts its
     // root (`rust_app::RustApp::runtime`).
-    let built = if crate::rust_app::is_root(&entry) {
+    let mut built = if crate::rust_app::is_root(&entry) {
         crate::build::rust_root()
     } else {
         let compile = match options.target {
@@ -310,6 +337,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
         built
     };
+    if options.target != PackageTarget::Web {
+        crate::updater::add_config(config, &id, options.out, &mut built)?;
+    }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
@@ -543,6 +573,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            notifications: config.notifications(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
@@ -652,6 +683,7 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    crate::updater::copy_archive(config, name, &archive, options.out)?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -743,6 +775,7 @@ fn package_macos(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    crate::updater::archive_macos_app(config, name, &app, options.out)?;
     step.done(format!("packaged {}", ui::path(&app)));
     if options.run {
         let status = Command::new("open")

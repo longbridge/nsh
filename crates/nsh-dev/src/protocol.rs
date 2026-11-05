@@ -117,6 +117,8 @@ pub enum HostPlatform {
     Web,
     /// The GPUI host (macOS, Windows, Linux).
     Gpui,
+    /// The terminal host (macOS, Windows, Linux).
+    Tui,
     /// A platform this version does not know.
     #[serde(other)]
     Other,
@@ -581,8 +583,8 @@ pub enum TestStep {
         /// The button's text (`None`: close it without one).
         button: Option<String>,
     },
-    /// A picture of the app's window: a PNG, base64-encoded (the test's
-    /// side saves it: the host may run on another machine).
+    /// A picture of the app, base64-encoded: PNG on graphical targets, UTF-8
+    /// Cell JSON on the terminal target. The test's side saves these bytes.
     Screenshot,
     /// Makes the window `width` × `height` points (`app.setViewport`).
     SetViewport {

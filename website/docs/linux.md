@@ -186,8 +186,8 @@ Not supported:
 
 - **Video `rate`**: GTK plays at normal speed only. `onEnd` only comes for videos that do not loop.
 - **Zooming scroll views** (`zoomTo`, the zoom props).
-- **`mixBlendMode` and `backdropFilter`** (the background color still draws); `borderCurve: "continuous"` draws
-  circular corners.
+- **`mixBlendMode` and `backdropFilter`** (the background color still draws). Backdrop blur is not implemented;
+  experiments using GTK 4.22's copy and paste nodes are not part of the renderer.
 - **Input accessory views** and the **status bar** (no desktop equivalent).
 - **Accessibility**: `accessible` grouping, custom `accessibilityActions`; live regions are announced instead.
 
