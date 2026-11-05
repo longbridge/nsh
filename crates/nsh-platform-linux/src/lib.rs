@@ -33,6 +33,7 @@ mod global_shortcut;
 mod gtk_test;
 mod image;
 mod input;
+mod key_focus;
 mod keymap;
 mod menu_style;
 mod mount;
@@ -51,6 +52,7 @@ mod text_input;
 mod transition;
 mod tray;
 mod view;
+mod window;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};

@@ -70,7 +70,7 @@ nsh run --target ios             # catalyst, ios, android, macos, linux, windows
 nsh dev --server-only            # TSX and mixed: serve hosts you start yourself
 ```
 
-- **Port:** default `8790`. A new session replaces the previous NSH session on that port, waiting up to ten seconds for cleanup. Another program on it is an error naming the port. `--port 0` asks the OS. Use distinct ports to run apps side by side.
+- **Port:** by default the app's last port, replacing its previous session (waiting up to ten seconds for cleanup), else the first free one from `8790`, so apps run side by side; `--server-only` defaults to `8790`. `--port` picks one and replaces the NSH session on it; another program on it is an error naming the port. `--port 0` asks the OS. `nsh run` listens on this machine only, with `--target ios`, `android` or `web` and in `nsh dev` on the network too.
 - **Stopping:** Ctrl-C, `kill`, or closing the window stops the host too.
 - **Rust edits:** rebuild and restart; state starts afresh. Build errors print in the terminal, and the next save that compiles runs.
 - **TSX edits:** a patch of changed modules, about 120 ms. Edited components render again; the others keep their state. Top-level `signal(..)` and `createNavStack(..)` keep their values while the initializer is unchanged.

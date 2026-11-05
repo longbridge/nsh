@@ -161,12 +161,15 @@ fn register_classes() {
 }
 
 /// Makes the window of `surface`: a top-level window of `size` points
-/// titled `title`, or a child of `parent` filling it.
+/// titled `title`, or a child of `parent` filling it. A `transparent`
+/// top-level window has no frame and no redirection bitmap: it shows only
+/// what its composition draws ([`crate::compose`]).
 pub(crate) fn create(
     surface: &Rc<Surface>,
     title: &str,
     size: (i32, i32),
     parent: Option<HWND>,
+    transparent: bool,
 ) -> windows::core::Result<HWND> {
     register_classes();
     let data = Box::new(WindowData {
@@ -182,6 +185,12 @@ pub(crate) fn create(
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
+        // Borderless: a system frame around see-through content would
+        // draw a box nothing is in. The taskbar's menu still minimizes it.
+        None if transparent => (
+            WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+            WS_EX_NOREDIRECTIONBITMAP,
+        ),
         None => (WS_OVERLAPPEDWINDOW, WINDOW_EX_STYLE(0)),
         Some(_) => (WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, WINDOW_EX_STYLE(0)),
     };

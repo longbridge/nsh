@@ -41,7 +41,7 @@
 //! a scroll view's offsets, the live region it is in, and the actions it
 //! takes: `Click` (its `activate` action, else a press), `Focus`,
 //! `Increment` / `Decrement`, `Expand` / `Collapse`, `ShowContextMenu`
-//! (`longpress`), `SetValue`, custom actions (the other
+//! (`onContextMenu` with no pointer, else `longpress`), `SetValue`, custom actions (the other
 //! `accessibilityActions`, by their labels), scrolling and
 //! `ScrollIntoView`. The listeners are registered as the surface paints
 //! ([`paint`]); each sends the action to the view's node by id, so a
@@ -573,7 +573,10 @@ fn describe(
         if state.expanded.is_some() && (pressable || declares(s, "collapse")) {
             actions.push(Action::Collapse);
         }
-        if declares(s, "longpress") || s.events.contains(EventKind::LongPress) {
+        if declares(s, "longpress")
+            || s.events.contains(EventKind::LongPress)
+            || s.events.contains(EventKind::ContextMenu)
+        {
             actions.push(Action::ShowContextMenu);
         }
         let stepped = range.is_some() && (declares(s, "increment") || declares(s, "decrement"));
@@ -1157,7 +1160,11 @@ fn perform(
             }
         }
         Action::ShowContextMenu => {
-            if !action_or_press(surface, view, "longpress", false) {
+            // Its context menu (`onContextMenu`, no pointer), else its long
+            // press, as the mobile platforms map the action.
+            if crate::input::hears_show_menu(view) {
+                crate::input::show_context_menu(surface, view);
+            } else if !action_or_press(surface, view, "longpress", false) {
                 surface.event(
                     view.id(),
                     EventKind::LongPress,

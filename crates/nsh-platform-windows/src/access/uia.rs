@@ -549,6 +549,7 @@ impl IRawElementProviderFragmentRoot_Impl for Root_Impl {
 /// One exposed view.
 #[implement(
     IRawElementProviderSimple,
+    IRawElementProviderSimple2,
     IRawElementProviderFragment,
     IInvokeProvider,
     IValueProvider,
@@ -865,6 +866,18 @@ impl IRawElementProviderFragment_Impl for Element_Impl {
     fn FragmentRoot(&self) -> Result<IRawElementProviderFragmentRoot> {
         surface_of(self.key)?;
         Ok(Root { key: self.key }.into())
+    }
+}
+
+// `ShowContextMenu`: what screen readers and other clients open an
+// element's context menu with.
+impl IRawElementProviderSimple2_Impl for Element_Impl {
+    fn ShowContextMenu(&self) -> Result<()> {
+        let t = self.enabled()?;
+        if !crate::input::show_context_menu(&t.surface, &t.view) {
+            return Err(not_supported());
+        }
+        Ok(())
     }
 }
 

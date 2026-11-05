@@ -1335,6 +1335,9 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
 
 /// `ModalConfig`.
 pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &ModalConfig) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
@@ -1362,6 +1365,9 @@ pub(crate) fn deleted(surface: &Surface, id: NodeId) {
 
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     let m = nav.modals.entry(id).or_default();
@@ -1394,8 +1400,31 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     nav.presenting.push(id);
 }
 
+/// Modal `id` is shown in a window of its own (`Window.open`) instead:
+/// it leaves the surface's modals at once, without events, and the focus
+/// it took goes back.
+pub(crate) fn release(surface: &Rc<Surface>, id: NodeId) {
+    let mut nav = surface.nav.borrow_mut();
+    nav.order.retain(|&m| m != id);
+    nav.presenting.retain(|&m| m != id);
+    let restore = nav
+        .modals
+        .remove(&id)
+        .and_then(|m| m.restore)
+        .and_then(|w| w.upgrade());
+    nav.scope_focus(surface);
+    if let Some(widget) = restore
+        && widget.is_ancestor(&surface.root)
+    {
+        widget.grab_focus();
+    }
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::removed(surface, view) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     match nav.modals.get_mut(&id) {

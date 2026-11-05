@@ -60,7 +60,8 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
             if kind == EventKind::ContextMenu || value.get("pagePosition").is_some() =>
         {
             // `{ position, pagePosition, modifiers }` (presses: and
-            // `clicks`), as handlers get it.
+            // `clicks`; a context menu: and `pointerType`), as handlers get
+            // it.
             let (position, page_position, modifiers) = pointer_at(&value);
             if kind != EventKind::ContextMenu {
                 EventPayload::Press(nsh_core::PressEvent {
@@ -70,11 +71,16 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
                     clicks: (num("clicks") as u32).max(1),
                 })
             } else {
-                EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                EventPayload::ContextMenu(nsh_core::ContextMenuEvent::new(
                     position,
                     page_position,
                     modifiers,
-                })
+                    // `null`: the keyboard or an assistive technology.
+                    value
+                        .get("pointerType")
+                        .and_then(|v| v.as_str())
+                        .and_then(nsh_core::PointerType::from_name),
+                ))
             }
         }
         EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
