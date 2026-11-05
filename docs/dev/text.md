@@ -30,8 +30,8 @@
   During a burst of resizes (`Core::set_resizing`, the engine's `RESIZE_BURST_GAP`), text more than a screen away from
   the screen (`Core::mark_near_screen`, from the last commit's frames) is neither measured nor laid out at new widths:
   it keeps its height, and catches up as it comes near or in the commit after the burst ends. Content below the
-  viewport's height therefore settles when the drag ends, and a page scrolled past text that grows moves then too: the
-  scroll offset stays, as it does without a burst.
+  viewport's height therefore settles when the drag ends; a page scrolled past text that grows keeps what it shows
+  (`core/resize_anchor.rs`).
   A text out of the layout (`display: none` on it or on a view around it, `hidden`) is sent with an empty layout (its
   text unchanged, for tests and screen readers): its box is zero, and the web, which does not clip text to its box,
   would still draw the glyphs laid out in it.
