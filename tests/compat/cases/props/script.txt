@@ -101,6 +101,9 @@ prop scroll:text:"Feed 9" contentOffset y=240
 # Fully visible items only count as viewable: 0 and 1 of the 100 points,
 # not 2, half shown.
 expect Viewable: 0,1
+# A bottom-aligned list opens at its end: 10 items of 40 in 100.
+prop scroll:text:"Tail 9" contentOffset y=300
+covers [props] alignment
 covers [props] maintainVisibleContentPosition
 covers [props] viewabilityConfig
 covers [events] List.onViewableItemsChange

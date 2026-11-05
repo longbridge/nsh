@@ -1329,7 +1329,8 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         *swap = None;
     }
     if swap.is_none() {
-        match gfx::SwapChain::new(&gfx, hwnd, size) {
+        let base = surface.base.borrow().clone();
+        match gfx::SwapChain::new(&gfx, hwnd, size, base.as_deref()) {
             Ok(s) => *swap = Some(s),
             Err(err) => {
                 log::error!("cannot create the swap chain: {err}");

@@ -1,11 +1,11 @@
 ---
-title: 终端
+title: TUI
 description: "在终端里运行 Rust 和 TSX 编写的 NSH 应用：Cell 布局、键盘与鼠标输入、终端的颜色、组件和弹出层在字符网格上的样子、在应用代码中识别终端、测试，以及在 ratatui 应用中嵌入 AppView。"
-order: 15.7
+order: 16.5
 group: platforms
 ---
 
-# 终端
+# TUI
 
 NSH 应用也能在终端里运行。终端后端用 [ratatui](https://ratatui.rs) 把应用绘制在终端的字符 Cell 网格上，使用终端自己的
 字体和颜色，并从键盘和鼠标接收输入。核心、响应式图、渲染器、组件和原生模块与其他平台完全相同，因此在窗口里运行的应用
@@ -27,7 +27,7 @@ nsh run --target tui                # Rust 应用，在它的目录里
 应用占满启动它的终端，保存时热更新；Rust 应用的根组件运行在用它的 crate 构建的终端开发宿主中，Rust 代码改动后会重新构建
 并重启。在源码仓库中，`nsh run` 会先构建开发宿主（`nsh-tui-host`）。
 
-终端只显示应用本身。诊断信息（CLI 的输出、宿主的日志、`console.log`）写入应用的 `.nsh/tui.log`，按 `C-h e`（先按
+启动时，CLI 显示构建进度，构建开发宿主时还显示正在编译的 crate；`-v` 实时显示工具的输出。应用打开后，终端只显示应用本身。诊断信息（CLI 的输出、宿主的日志、`console.log`）写入应用的 `.nsh/tui.log`，按 `C-h e`（先按
 Ctrl+H，再按 E）会在应用上方的面板里打开它们：方向键和 Page Up / Page Down 滚动，`r` 重新加载最新的构建，Escape、`C-g`
 或 `q` 关闭面板。应用出错时面板会自动打开，下一次更新时关闭。Ctrl+C 复制选中的文本，没有选中内容时退出；终端会恢复原样。
 

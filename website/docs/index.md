@@ -206,6 +206,7 @@ NSH is designed for software written with AI, whole apps as much as generated sc
 | [Windows](./windows.md) | Windows 10 1809+ | Win32, Direct2D | `AppView` |
 | [Linux](./linux.md) | GTK 4.14+ | GTK 4 | `AppView` |
 | [Web](./web.md) | Modern browsers | HTML | `createPlayer`, iframe |
+| [TUI](./tui.md) | Terminals on macOS, Windows and Linux | ratatui | `AppView` (ratatui area) |
 | [GPUI](./gpui.md) | Desktops | GPUI | `AppView` (GPUI, GPUI Kit apps) |
 | Mac Catalyst | macOS | UIKit | For development (`--target catalyst`) |
 

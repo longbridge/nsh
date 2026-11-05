@@ -347,6 +347,43 @@ Headless Chromium over CDP, a published package (`nsh package --target web`), 20
   ~0.65 ms, and of ~1.6 ms with the screen effect, whose size the canvas took and gave back on every frame; the page
   without the screen effect ~0.3 ms of `shaderFrame` a frame instead of ~2 ms.
 
+## Linux startup memory budget
+
+The startup target is 50 MB (50,000,000 bytes) **RSS**. Report PSS and USS alongside it; neither replaces the RSS
+criterion. On `e4cc287dd`, GTK 4.24.1, NVIDIA 615.78.08, Wayland at 1.6×, 480×640-point windows, two launches each,
+8 s after resizing: minimal TSX with the full GL runner 162 MiB RSS / 65–66 MiB USS; the TSX template 164 MiB RSS;
+gallery's phone-layout index 257 MiB RSS. A js-only Cairo runner gets minimal TSX to 97 MiB RSS / 31 MiB USS.
+The measured configurations do not satisfy the budget. Bare GTK with Cairo is already 82 MiB RSS on this host.
+The run is a resident snapshot, not a startup peak, and keeps page/driver caches between launches.
+
+What NSH itself adds is measured as private dirty memory over a bare GTK window, the same host, one batch
+(`docs/benchmarks/linux-memory-baseline-2026-11-05.json`): with GL the GTK window holds 36.7 MiB (129 MiB RSS), the
+Rust template 41.6 (150), the TSX template 45.4 (163); with Cairo 15.2, 19.1 and 24.3 (82, 101, 115). NSH adds 4–5 MiB
+for Rust and about 9 MiB for TSX; the 50 MB RSS target lies below the bare GTK window's own RSS with either renderer.
+GL launches vary by about 60 MiB of private dirty memory in the bare GTK window as well: the driver's, not NSH's.
+
+Reproduction and tradeoffs: `website/docs/performance-report.md`, Linux memory investigation.
+Samples: `docs/benchmarks/linux-memory-2026-11-05.json`. Tools: `examples/gallery/tools/memory.py` and its
+`memory-gtk.c` control. The sampler rejects logged startup errors; failed split bundles are excluded from results.
+
+Priorities for further implementation, with before/after measurements on the same page and renderer:
+
+1. Native gallery chunk delivery: `nsh build --split` shrinks the entry from ~1.3 MiB bytecode to 77 KiB, but the
+   Linux release runner does not provide its static/dynamic chunks. Wire trusted bundle chunks and async loading
+   through `Bundle` / `MountSink::load_chunk`, then verify loading/navigation/disposal before measuring savings.
+2. Source-map lifetime: `Bundle::read_trusted` loads a ~4 MiB gallery map immediately. Profile retained copies and
+   symbolication (`nsh-engine/src/symbolicate.rs`) before implementing lazy maps; exploratory map-removal runs
+   changed gallery state and establish no controlled saving.
+3. Attribute startup allocations: separate QuickJS context/module evaluation, UI registry construction, the
+   reactive/core trees, text/font caches and GPU initialization. A TSX-versus-Rust delta alone does not identify
+   QuickJS heap usage. Shader GPU creation is already lazy (`surface.rs::shader_renderer`); test first use separately.
+4. A low-memory GTK path needs renderer/driver residency evaluated as well as the Rust heap. Cairo and lean
+   features have measured benefits, but global renderer changes require animation, scrolling and feature checks.
+   `GDK_DISABLE=gl,vulkan,dmabuf` did not materially improve the minimal Cairo result here.
+
+Track first-frame and settled RSS, PSS, USS, process-tree memory where appropriate, image-cache costs and page
+identity. Keep fresh storage and equal dimensions across comparisons; retain launch ranges and rendering failures.
+
 ## The performance monitor (`nsh_engine::perf`)
 
 `PerfMonitor` collects one surface's timings for an on-screen monitor (`--fps`; the macOS backend's `fps.rs` draws it)
@@ -570,3 +607,40 @@ shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and
 The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
 Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f. Repeat the same command
 before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
+
+## TUI development startup
+
+Measure development compilation separately from host rendering:
+
+```sh
+cargo test -p nsh-cli bench_dev_startup -- --ignored --nocapture
+```
+
+The ignored benchmark runs the unchanged counter and gallery three times, splitting hot bundling,
+script/source-map assembly and QuickJS bytecode compilation. It checks that compilation produces bytecode;
+it reports timings rather than imposing a machine-dependent startup threshold.
+
+Linux x86_64, debug, revision `889872685`, three runs after building the CLI and TUI host:
+
+| App | Hot bundle | Script / source map | Bytecode |
+| --- | --- | --- | --- |
+| Counter | 8.6–14.5 ms | 0.12–0.13 ms | 0.54–0.94 ms |
+| Gallery | 1,014–1,059 ms | 82.8–83.3 ms | 70.9–72.3 ms |
+
+Gallery produces 2,330,102 source bytes and 11,103,922 bytecode bytes. Hot development includes the demo
+modules in the initial script even though the gallery executes their factories when first shown.
+
+Separately, `target/debug/nsh run examples/<app> --target tui --trace --port 18973` on a private
+200 × 60 PTY (three fresh processes, existing builds, terminal queries unanswered) reached visible
+Counter content in 629–635 ms and Gallery content in 1,864–1,899 ms. The TUI host's Cargo freshness
+check took about 288 ms. Gallery's engine first frame was about 77 ms: 3,172 operations,
+2,202 mount items, 997 nodes. These are local development measurements, including CLI preparation,
+not release-host startup numbers. Initial compilation and terminal query handling are separate costs;
+repeat on the reported command and machine before attributing a longer startup to rendering.
+
+Startup feedback: the CLI previously redirected output before app preparation, suppressing Cargo's spinner
+and crate status throughout a cold build. It now keeps preparation visible and opens the diagnostic log
+immediately before launching the TUI host. A private-PTY Gallery run with the change showed build progress
+at 52 ms, build completion before alternate-screen entry, and Gallery content at 5.436 s (including host
+recompilation). This verifies feedback during a build, not a startup speedup. The CLI integration test
+checks startup output and host-diagnostic isolation in ordinary and verbose modes.

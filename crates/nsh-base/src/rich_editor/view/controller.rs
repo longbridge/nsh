@@ -600,7 +600,14 @@ impl Rv {
         let (deleted, inserted, composed) = {
             let mut sink = self.sink.borrow_mut();
             let base = match sink.emptied.take() {
-                Some(old) if text.starts_with(old.as_str()) => old,
+                // The platform dropped the empty value: the text still extends
+                // what it held. A text equal to what it held was typed again
+                // into the emptied sink: platforms report each edit, so an
+                // edit to the text the platform kept would show. Linux reports
+                // the edits made before it is idle as one: there, the text
+                // deleted and typed again before the empty value arrives reads
+                // the same, and is inserted a second time.
+                Some(old) if text != old && text.starts_with(old.as_str()) => old,
                 Some(_) => String::new(),
                 None => std::mem::take(&mut sink.text),
             };

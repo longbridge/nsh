@@ -184,7 +184,8 @@
   the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
   every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any
   thread), and the core resolves the pick with them (cut to the limit, sizes, types and extensions filled in from the
-  bytes), sending no `Command::PickImages`. The capability check comes first, so a pick the app is not granted never
+  bytes), sending no `Command::PickImages`. `PickerBackend::pick_files` answers `Picker.pickFiles` the same way (a
+  backend that does not implement it cancels those picks; the platform's picker is still not shown). The capability check comes first, so a pick the app is not granted never
   reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
   needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
   the view's activity).

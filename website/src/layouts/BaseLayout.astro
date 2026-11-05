@@ -1,7 +1,6 @@
 ---
 import '../styles/global.css';
 import 'virtual:nsh-gallery-ui.css';
-import exampleTheme from '../../../examples/nsh-gallery-ui/theme.json';
 import { BASE, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, type Lang } from '../lib/site';
 import { isLatestVersion, siteVersions, latestVersion, versionHref, versionPath } from '../lib/versions';
 
@@ -10,12 +9,14 @@ export interface Props {
   description?: string;
   /** The page's language; may be a machine locale. */
   lang?: string;
+  /** The page's direction: `rtl` for a language written right to left. */
+  dir?: 'ltr' | 'rtl';
   /** Routes (without the base) of this page in each locale, for hreflang. */
   alternates?: Record<string, string | undefined>;
   robots?: string;
 }
 
-const { title, description = SITE_DESCRIPTION, lang = 'en', alternates, robots: robotsProp } = Astro.props;
+const { title, description = SITE_DESCRIPTION, lang = 'en', dir = 'ltr', alternates, robots: robotsProp } = Astro.props;
 // Other versions are not indexed: their canonical is the same page of the latest.
 const robots = robotsProp ?? (isLatestVersion ? undefined : 'noindex');
 
@@ -31,7 +32,7 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
 ---
 
 <!doctype html>
-<html lang={lang} class="dark" data-theme-pref="system">
+<html lang={lang} dir={dir === 'rtl' ? 'rtl' : undefined} class="dark" data-theme-pref="system">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -39,8 +40,9 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta name="description" content={description} />
     {robots && <meta name="robots" content={robots} />}
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content={exampleTheme.cssVars.dark.background} media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content={exampleTheme.cssVars.light.background} media="(prefers-color-scheme: light)" />
+    <!-- The site's ground, `--background` in global.css. -->
+    <meta name="theme-color" content="#0e1016" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <!-- Before first paint: `theme` in localStorage is "light" or "dark";
          absent follows the system. <html> gets `dark` or `light`. -->
     <script is:inline>
