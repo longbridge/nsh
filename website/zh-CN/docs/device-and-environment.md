@@ -265,7 +265,7 @@ import { timeZone } from "nsh";
 <Text>{`Times in ${timeZone()}`}</Text>
 ```
 
-`Date` 的本地时间一如既往地跟随系统时区：`time_zone()` 给出它的名称。`Intl` 给出的名称与它相同：`Intl.DateTimeFormat().resolvedOptions().timeZone` 就是 `timeZone()`，`{ timeZone: timeZone() }` 按本地时间格式化。测试中，`open` 的 `timeZone` 同时设置这两处的名称（否则是 `UTC`），`app.setTimeZone("Asia/Tokyo")` 把设备移到另一个时区（[测试](./testing-and-trace.md#操作步骤)）；`Date` 的本地时间仍是这台机器的。
+`Date` 的本地时间一如既往地跟随系统时区：`time_zone()` 给出它的名称。`Intl` 也按这个时区格式化本地时间，给出的名称与它相同：`Intl.DateTimeFormat().resolvedOptions().timeZone` 就是 `timeZone()`，`{ timeZone: timeZone() }` 按本地时间格式化。测试中，`open` 的 `timeZone` 设置 `timeZone()` 给出的名称（否则是 `UTC`），`app.setTimeZone("Asia/Tokyo")` 把设备移到另一个时区（[测试](./testing-and-trace.md#操作步骤)）；`Date` 和 `Intl` 的本地时间仍是这台机器的，`Intl` 给出的也是这台机器的时区。
 
 ## 在嵌入它的应用中
 

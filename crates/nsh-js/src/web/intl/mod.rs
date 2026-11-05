@@ -12,10 +12,15 @@
 //! locale would add megabytes to every app, these tables add a few
 //! kilobytes. A locale without data resolves to the next requested one,
 //! then the device's (`Environment::locale`), then `en-US`. Local time is
-//! named as the device's zone (`Environment::time_zone`, `timeZone()`):
-//! `resolvedOptions().timeZone` gives it and a `timeZone` naming it is
-//! local time. TypeScript declares all of it in its ECMAScript library
-//! (`lib.es2023`), so `globals.d.ts` does not.
+//! `Date`'s, and is named as the zone it is computed in: as the C library
+//! computing it reads that zone (`TZ`, `/etc/localtime`; the browser's on
+//! the web), or where that is out of its sight (Windows, Android) as the
+//! platform reports it (`Environment::time_zone`, `timeZone()`), so on a
+//! device `timeZone()` names it too. `resolvedOptions().timeZone` gives the
+//! name and a `timeZone` naming it is local time. A test's zone
+//! (`open({ timeZone })`) names the device's zone without moving local
+//! time, so `Intl` keeps naming the machine's. TypeScript declares all of
+//! it in its ECMAScript library (`lib.es2023`), so `globals.d.ts` does not.
 //!
 //! Not there: `Collator`, `PluralRules`, `RelativeTimeFormat`,
 //! `ListFormat`, `DisplayNames`, `Segmenter`, `Intl.Locale`; time zones
@@ -551,52 +556,77 @@ enum Defaults {
     All,
 }
 
-/// The local time zone's name: the device's, as the platform reports it
-/// (`Environment::time_zone`, what `timeZone()` returns), so that
-/// `resolvedOptions().timeZone` and `timeZone()` agree and
-/// `{ timeZone: timeZone() }` formats in local time; before the platform
-/// reports one (a VM of its own), the system's ([`system_zone_name`]).
-fn local_zone_name(cx: Ctx) -> Option<String> {
-    match crate::env::time_zone(cx) {
-        Some(zone) => Some(zone.as_str().to_owned()),
-        None => system_zone_name(),
+/// The local time zone's name: the zone local times are computed in
+/// (`Date`'s, and so these formats'), so that a `timeZone` naming it
+/// formats as local time does. The system's as the C library computing
+/// them reads it ([`system_zone`]); where that is out of its sight
+/// (Windows, Android), the platform's report of the same setting
+/// ([`reported_zone_name`]); `None` for a zone without a name.
+fn local_zone_name(cx: Ctx) -> R<Option<String>> {
+    match system_zone() {
+        SystemZone::Named(name) => Ok(Some(name)),
+        SystemZone::Unnamed => Ok(None),
+        SystemZone::Unknown => reported_zone_name(cx),
     }
 }
 
+/// What the system tells of the zone local times are computed in.
+#[derive(Debug, PartialEq)]
+enum SystemZone {
+    /// The zone's name (`Europe/Berlin`, `GMT`).
+    Named(String),
+    /// A zone without a name: the C library follows `TZ`'s POSIX rule
+    /// (`JST-9`).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Unnamed,
+    /// Nothing: the C library reads the system's setting itself (Windows,
+    /// Android).
+    Unknown,
+}
+
 /// The system's time zone: the zone `TZ` names, as the C library that
-/// computes `Date`'s local times reads it (`GMT`, `Europe/Berlin`; a POSIX
-/// rule such as `JST-9` names none), else the zone `/etc/localtime` links
-/// to (`/var/db/timezone/zoneinfo/Europe/Berlin`); `None` where neither
-/// tells (Android).
+/// computes `Date`'s local times reads it, else the zone `/etc/localtime`
+/// links to (`/var/db/timezone/zoneinfo/Europe/Berlin`).
 #[cfg(not(target_arch = "wasm32"))]
-fn system_zone_name() -> Option<String> {
-    zone_name(std::env::var("TZ").ok().as_deref(), || {
+fn system_zone() -> SystemZone {
+    system_zone_of(std::env::var("TZ").ok().as_deref(), || {
         std::fs::read_link("/etc/localtime")
             .ok()
             .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
     })
 }
 
-/// The zone `TZ` (`tz`, `None` when unset) names, else the system's
-/// (`system`), read as the Linux and GPUI backends read them for
-/// `timeZone()` ([`TimeZone::posix`]); `None` where `TZ` names none and
-/// the system tells none, which [`TimeZone::posix`] would take for UTC.
+/// The zone `TZ` (`tz`, `None` when unset) names, read as the Linux and
+/// GPUI backends read it for `timeZone()` ([`TimeZone::posix`]), else the
+/// system's (`system`, asked only then). A `TZ` naming no zone but the
+/// system's own file (`:/etc/localtime`) is local time without a name: a
+/// POSIX rule (`JST-9`), which the C library follows, or what it cannot
+/// read, which it takes for UTC.
 #[cfg(not(target_arch = "wasm32"))]
-fn zone_name(tz: Option<&str>, system: impl FnOnce() -> Option<TimeZone>) -> Option<String> {
+fn system_zone_of(tz: Option<&str>, system: impl FnOnce() -> Option<TimeZone>) -> SystemZone {
+    let mut asked = false;
     let mut known = true;
     let zone = TimeZone::posix(tz, || {
+        asked = true;
         let zone = system();
         known = zone.is_some();
         zone
     });
-    known.then(|| zone.as_str().to_owned())
+    let systems = tz.map(|tz| tz.trim().trim_start_matches(':')) == Some("/etc/localtime");
+    if asked && tz.is_some() && !systems {
+        SystemZone::Unnamed
+    } else if known {
+        SystemZone::Named(zone.as_str().to_owned())
+    } else {
+        SystemZone::Unknown
+    }
 }
 
 /// The system's time zone: the browser's
 /// (`Intl.DateTimeFormat().resolvedOptions().timeZone`, the web runtime's
 /// `nsh.time_zone` import).
 #[cfg(target_arch = "wasm32")]
-fn system_zone_name() -> Option<String> {
+fn system_zone() -> SystemZone {
     #[link(wasm_import_module = "nsh")]
     unsafe extern "C" {
         /// Writes the name's UTF-8 into `buf` if it fits in `cap` bytes;
@@ -606,8 +636,56 @@ fn system_zone_name() -> Option<String> {
     let mut buf = [0u8; 64];
     // SAFETY: JS writes at most `buf.len()` bytes into it.
     let len = unsafe { time_zone(buf.as_mut_ptr(), buf.len()) };
-    let name = std::str::from_utf8(buf.get(..len)?).ok()?;
-    (!name.is_empty()).then(|| name.to_owned())
+    match buf
+        .get(..len)
+        .and_then(|name| std::str::from_utf8(name).ok())
+    {
+        Some(name) if !name.is_empty() => SystemZone::Named(name.to_owned()),
+        _ => SystemZone::Unknown,
+    }
+}
+
+/// The device's zone as the platform reports it (`Environment::time_zone`,
+/// `timeZone()`), where it can be local time's ([`may_be_local`]): a
+/// test's zone (`open({ timeZone })`) names the device's zone without
+/// moving local time. `None` before the platform reports one.
+fn reported_zone_name(cx: Ctx) -> R<Option<String>> {
+    const HALF_A_YEAR_MS: f64 = 182.0 * 86_400_000.0;
+    let Some(zone) = crate::env::time_zone(cx) else {
+        return Ok(None);
+    };
+    let now = time_value(cx, js::UNDEFINED)?;
+    let offsets = [
+        local_offset(cx, now)?,
+        local_offset(cx, now + HALF_A_YEAR_MS)?,
+    ];
+    Ok(may_be_local(zone.as_str(), offsets).then(|| zone.as_str().to_owned()))
+}
+
+/// Whether the zone `name` can be the one local times are in, whose
+/// offsets half a year apart are `offsets`: a zone of one offset (`UTC`,
+/// `+08:00`: [`fixed_zone`]) where both are that offset, any other zone
+/// (`Europe/Berlin`) always, its offsets being a zone database's.
+fn may_be_local(name: &str, offsets: [i32; 2]) -> bool {
+    let minutes = match fixed_zone(name) {
+        Some(date::Zone::Offset(minutes)) => minutes,
+        Some(_) => 0,
+        None => return true,
+    };
+    offsets.iter().all(|offset| *offset == minutes)
+}
+
+/// The zone of one offset a `timeZone` names: UTC by one of its names, or
+/// an offset (`+08:00`); `None` for any other zone's name.
+fn fixed_zone(name: &str) -> Option<date::Zone> {
+    let upper = name.to_ascii_uppercase();
+    if matches!(
+        upper.as_str(),
+        "UTC" | "ETC/UTC" | "GMT" | "ETC/GMT" | "Z" | "ETC/UCT" | "UCT"
+    ) {
+        return Some(date::Zone::Utc);
+    }
+    parse_offset(name).map(date::Zone::Offset)
 }
 
 /// An offset time zone (`+08:00`, `-0530`, `+08`) in minutes east.
@@ -635,17 +713,10 @@ fn zone_option(cx: Ctx, o: &Option<V>) -> R<date::Zone> {
         return Ok(date::Zone::Local);
     }
     let name = js::to_string(cx, v.raw())?;
-    let upper = name.to_ascii_uppercase();
-    if matches!(
-        upper.as_str(),
-        "UTC" | "ETC/UTC" | "GMT" | "ETC/GMT" | "Z" | "ETC/UCT" | "UCT"
-    ) {
-        return Ok(date::Zone::Utc);
+    if let Some(zone) = fixed_zone(&name) {
+        return Ok(zone);
     }
-    if let Some(minutes) = parse_offset(&name) {
-        return Ok(date::Zone::Offset(minutes));
-    }
-    if local_zone_name(cx).is_some_and(|local| local.eq_ignore_ascii_case(&name)) {
+    if local_zone_name(cx)?.is_some_and(|local| local.eq_ignore_ascii_case(&name)) {
         return Ok(date::Zone::Local);
     }
     Err(js::range_error(
@@ -929,7 +1000,7 @@ native!(
         let zone = match zone {
             Zone::Utc => "UTC".to_owned(),
             Zone::Offset(m) => format!("{}{:02}:{:02}", if m < 0 { '-' } else { '+' }, m.abs() / 60, m.abs() % 60),
-            Zone::Local => match local_zone_name(cx) {
+            Zone::Local => match local_zone_name(cx)? {
                 Some(name) => name,
                 None => {
                     let m = local_offset(cx, time_value(cx, js::UNDEFINED)?)?;
@@ -1163,28 +1234,56 @@ mod tests {
 
     #[test]
     fn the_systems_zone_is_the_one_tz_names() {
+        use SystemZone::{Named, Unknown, Unnamed};
+        let named = |name: &str| Named(name.to_owned());
         // A system zone other than UTC, so that falling back on it shows.
         let singapore = || TimeZone::parse("Asia/Singapore");
-        let zone = |tz: Option<&str>| zone_name(tz, singapore);
+        let zone = |tz: Option<&str>| system_zone_of(tz, singapore);
         // `TZ=GMT` is the zone `Date`'s local times follow, eight hours
         // from the system's, and the system is not asked.
-        assert_eq!(zone(Some("GMT")).as_deref(), Some("GMT"));
+        assert_eq!(zone(Some("GMT")), named("GMT"));
         assert_eq!(
-            zone_name(Some("GMT"), || unreachable!("TZ names the zone")).as_deref(),
-            Some("GMT")
+            system_zone_of(Some("GMT"), || unreachable!("TZ names the zone")),
+            named("GMT")
         );
         for name in ["UTC", "EST", "Japan", "Etc/GMT+5", "Europe/Berlin"] {
-            assert_eq!(zone(Some(name)).as_deref(), Some(name));
-            assert_eq!(zone(Some(&format!(":{name}"))).as_deref(), Some(name));
+            assert_eq!(zone(Some(name)), named(name));
+            assert_eq!(zone(Some(&format!(":{name}"))), named(name));
         }
-        assert_eq!(zone(Some("")).as_deref(), Some("UTC"));
-        // A POSIX rule names no zone: the system's stands.
-        assert_eq!(zone(Some("JST-9")).as_deref(), Some("Asia/Singapore"));
-        assert_eq!(zone(None).as_deref(), Some("Asia/Singapore"));
-        // Where nothing tells (Android), no name: `resolvedOptions` writes
-        // the offset instead of claiming UTC.
-        assert_eq!(zone_name(None, || None), None);
-        assert_eq!(zone_name(Some("JST-9"), || None), None);
-        assert_eq!(zone_name(Some("GMT"), || None).as_deref(), Some("GMT"));
+        assert_eq!(zone(Some("")), named("UTC"));
+        assert_eq!(
+            zone(Some("/usr/share/zoneinfo/Asia/Tokyo")),
+            named("Asia/Tokyo")
+        );
+        // Unset, or the system's own file: the system's zone.
+        assert_eq!(zone(None), named("Asia/Singapore"));
+        assert_eq!(zone(Some(":/etc/localtime")), named("Asia/Singapore"));
+        // A POSIX rule is local time without a name, not the system's zone
+        // (nine hours from Singapore's).
+        assert_eq!(zone(Some("JST-9")), Unnamed);
+        assert_eq!(zone(Some("CET-1CEST,M3.5.0,M10.5.0/3")), Unnamed);
+        // Where nothing tells (Windows, Android), nothing known: the
+        // platform's report is asked instead.
+        assert_eq!(system_zone_of(None, || None), Unknown);
+        assert_eq!(system_zone_of(Some("GMT"), || None), named("GMT"));
+    }
+
+    #[test]
+    fn a_zone_of_one_offset_is_local_time_only_with_its_offset() {
+        // Singapore (+08:00), London in winter and summer.
+        for (name, offsets, local) in [
+            ("UTC", [480, 480], false),
+            ("UTC", [0, 60], false),
+            ("UTC", [0, 0], true),
+            ("Etc/UTC", [0, 0], true),
+            ("+08:00", [480, 480], true),
+            ("+08:00", [450, 480], false),
+            // A zone's name: its offsets are the database's.
+            ("Asia/Singapore", [480, 480], true),
+            ("Europe/London", [0, 60], true),
+            ("GMT+01:00", [60, 60], true),
+        ] {
+            assert_eq!(may_be_local(name, offsets), local, "{name} at {offsets:?}");
+        }
     }
 }

@@ -265,7 +265,7 @@ import { timeZone } from "nsh";
 <Text>{`Times in ${timeZone()}`}</Text>
 ```
 
-`Date`'s local times follow the system's zone, as they always have: `time_zone()` names it. `Intl` names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `timeZone()`, and `{ timeZone: timeZone() }` formats in local time. In tests, `open`'s `timeZone` sets the name for both (`UTC` otherwise) and `app.setTimeZone("Asia/Tokyo")` moves the device to another zone ([Testing](./testing-and-trace.md#steps)); `Date`'s local times stay the machine's.
+`Date`'s local times follow the system's zone, as they always have: `time_zone()` names it. `Intl` formats local time in that zone and names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `timeZone()`, and `{ timeZone: timeZone() }` formats in local time. In tests, `open`'s `timeZone` sets what `timeZone()` reports (`UTC` otherwise) and `app.setTimeZone("Asia/Tokyo")` moves the device to another zone ([Testing](./testing-and-trace.md#steps)); local times, `Date`'s and `Intl`'s, stay the machine's, and `Intl` names the machine's zone.
 
 ## In an embedding app
 

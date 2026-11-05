@@ -65,8 +65,9 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   otherwise), as in browsers so libraries such as axios work (`fetch.rs` lists where they differ). `Intl`
   (`NumberFormat`, `DateTimeFormat`) and the `toLocaleString`s of numbers, BigInts and dates, which QuickJS lacks, are
   there too (`web/intl/`): formatted in Rust for the common languages (limits in its module doc), in `Environment::locale` by
-  default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`), local time named as
-  `Environment::time_zone` (`timeZone()`).
+  default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`), local time `Date`'s,
+  named as the zone the C library computes it in (`TZ`, `/etc/localtime`; on Windows and Android as the platform
+  reports it, `Environment::time_zone`, `timeZone()`).
 - **Time**: an engine runs on a `nsh_core::time::Clock` (`EngineConfig::clock`), its thread's while it runs
   (`Clock::enter`): JS's timers, Rust tasks' timers, throttled scroll events, mouse moves and the frames' time read it
   through `nsh_core::time::now()`, `Intl` and `Date` through `unix_ms()`. The system's clock is the default. A manual

@@ -2242,45 +2242,37 @@ const report = (v) => text(String(v));
         assert_eq!(style.view.opacity, 0.5);
     }
 
-    /// `Intl`'s local time is named as the device's zone, the one
-    /// `timeZone()` gives, and follows it when the device moves.
+    /// `Intl` names local time by the zone it formats it in, whichever the
+    /// environment reports (a test's, which moves no local time): the
+    /// zone `resolvedOptions()` gives formats as local time does, at any
+    /// instant. On a machine outside UTC the reported `UTC` is not local
+    /// time; on one in UTC, `+08:00` is not.
     #[test]
-    fn intl_names_local_time_as_the_devices_zone() {
+    fn intl_names_the_zone_it_formats_local_time_in() {
         let host = Host::new().unwrap();
-        let mut env = Environment {
-            time_zone: nsh_core::platform::TimeZone::parse("Asia/Singapore").unwrap(),
-            ..Default::default()
-        };
-        host.set_environment(&env);
         let script = format!(
             r#"{REPORT}
-            const local = new Intl.DateTimeFormat("en");
-            report(local.resolvedOptions().timeZone);
-            report(new Intl.DateTimeFormat("en", {{ timeZone: "asia/singapore" }}).resolvedOptions().timeZone);
-            try {{ new Intl.DateTimeFormat("en", {{ timeZone: "Asia/Tokyo" }}); }} catch (e) {{ report(e.name); }}
-            globalThis.local = local;
+            const options = {{
+              year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+            }};
+            const local = new Intl.DateTimeFormat("en-US", options);
+            const zone = local.resolvedOptions().timeZone;
+            const named = new Intl.DateTimeFormat("en-US", {{ ...options, timeZone: zone }});
+            // 1970 (Singapore at +07:30), a northern summer and winter.
+            const instants = [0, 1720000000000, 1736000000000];
+            const differ = instants.filter((t) => named.format(t) !== local.format(t));
+            report(differ.length === 0 ? "agrees" : `${{zone}}: ${{differ.map((t) => named.format(t) + " vs " + local.format(t))}}`);
             "#
         );
-        host.eval_source(&script).unwrap();
-        env.time_zone = nsh_core::platform::TimeZone::parse("Asia/Tokyo").unwrap();
-        host.set_environment(&env);
-        host.eval_source(&format!(
-            r#"{REPORT}
-            report(new Intl.DateTimeFormat().resolvedOptions().timeZone);
-            report(globalThis.local.resolvedOptions().timeZone);
-            "#
-        ))
-        .unwrap();
-        assert_eq!(
-            reported(&host),
-            [
-                "Asia/Singapore",
-                "Asia/Singapore",
-                "RangeError",
-                "Asia/Tokyo",
-                "Asia/Tokyo"
-            ]
-        );
+        for zone in ["UTC", "+08:00", "Asia/Tokyo"] {
+            host.set_environment(&Environment {
+                time_zone: nsh_core::platform::TimeZone::parse(zone).unwrap(),
+                ..Default::default()
+            });
+            host.eval_source(&script).unwrap();
+        }
+        assert_eq!(reported(&host), ["agrees", "agrees", "agrees"]);
     }
 
     /// `Intl` and the `toLocaleString`s format natively, in the device's

@@ -2,10 +2,15 @@ import { mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { colorScheme, lifecycle, locale, platform, timeZone, windowSize } from "nsh";
 
-// `Intl`'s default zone, read again when the device's changes.
-const intlZone = () => {
+// Whether `Intl`'s local time is in the zone it names, read again when the
+// device's zone changes (a test's, which moves no local time): formatting in
+// that zone writes what local time does, in 1970, a summer and a winter.
+const intlAgrees = () => {
   timeZone();
-  return new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const options = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } as const;
+  const local = new Intl.DateTimeFormat("en-US", options);
+  const named = new Intl.DateTimeFormat("en-US", { ...options, timeZone: local.resolvedOptions().timeZone });
+  return [0, 1720000000000, 1736000000000].every((t) => named.format(t) === local.format(t));
 };
 
 function App() {
@@ -32,7 +37,7 @@ function App() {
       <Text>{`Size: ${windowSize().width}x${windowSize().height}`}</Text>
       <Text>{`App: ${lifecycle()}`}</Text>
       <Text>{`Zone: ${timeZone()}`}</Text>
-      <Text>{`Intl zone: ${intlZone()}`}</Text>
+      <Text>{`Intl agrees: ${intlAgrees()}`}</Text>
       {button("Echo", "echo")}
       {button("Item", "items/7")}
       {button("Down", "down")}
