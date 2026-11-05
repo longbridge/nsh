@@ -585,6 +585,7 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        mounter.cancelAnimations();
         endShaders();
     }
 
@@ -597,6 +598,7 @@ public class NshView extends FrameLayout {
     void appStopped() {
         main.post(() -> {
             mounter.destroyComponents();
+            mounter.cancelAnimations();
             endShaders();
         });
     }
