@@ -8,7 +8,7 @@ demo: guide-lists
 
 # Lists
 
-A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data on a native scroll view while only creating the rows near the screen. Which rows exist, where they go, the columns, sticky headers and which items are visible are all computed natively; your code only fills cells with content when the native side asks for one. A list of a million items costs about as much as a list of thirty.
+For collections that can grow, including chat timelines, feeds and history, prefer a virtualized list from the start. Use a scroll view with ordinary children for small, bounded content. A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data on a native scroll view while only creating the rows near the screen. Which rows exist, where they go, the columns, sticky headers and which items are visible are all computed natively; your code only fills cells with content when the native side asks for one. A list of a million items costs about as much as a list of thirty.
 
 ```rust tabs
 use std::rc::Rc;
