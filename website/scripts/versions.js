@@ -90,6 +90,18 @@ if (!catalog && process.env.NSH_REQUIRE_SHOWCASES) {
 // The release notes: an edited note has to reach the root's page too.
 const notes = releasesDigest(await fetchReleases());
 
+// Machine translations are the root's alone (`src/lib/locales.ts`).
+const machine = JSON.parse(readFileSync(join(website, 'locales.json'), 'utf8')).machine.map((l) => l.code).filter((code) => existsSync(join(website, code)));
+const translations = (() => {
+  const hash = createHash('sha256');
+  for (const code of machine) {
+    for (const file of readdirSync(join(website, code), { recursive: true, withFileTypes: true })) {
+      if (file.isFile()) hash.update(readFileSync(join(file.parentPath, file.name)));
+    }
+  }
+  return hash.digest('hex').slice(0, 16);
+})();
+
 // On the file system of `dist` (Astro moves its output there, which fails
 // across file systems) and outside `website/`, which each version copies.
 mkdirSync(join(root, '.nsh'), { recursive: true });
@@ -180,13 +192,14 @@ const order = [latest, ...versions.map((v) => v.id).filter((id) => id !== latest
 for (const version of order) {
   if (only && !only.includes(version)) continue;
   const out = version === latest ? dist : join(dist, 'versions', version);
-  const cached = join(cache, version, version === latest ? `${siteDigest}-${catalog}-${notes}` : siteDigest);
+  const cached = join(cache, version, version === latest ? `${siteDigest}-${catalog}-${notes}-${translations}` : siteDigest);
   if (version !== 'main' && existsSync(join(cached, 'index.html'))) {
     console.log(`[versions] reusing ${version}`);
     cpSync(cached, out, { recursive: true });
     continue;
   }
   const copy = siteCopy(version);
+  if (version !== latest) for (const code of machine) rmSync(join(copy, code), { recursive: true, force: true });
   if (version === 'main') {
     const play = join(website, 'public', 'play');
     if (existsSync(play)) cpSync(play, join(copy, 'public', 'play'), { recursive: true });

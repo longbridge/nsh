@@ -1,0 +1,66 @@
+name: Docs translations
+
+# Machine translations of the latest release's documentation, kept on the
+# `docs-i18n` branch and taken by the Website build ("Other languages" in
+# website/README.md). Only changed pages are translated.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: docs-i18n
+
+jobs:
+  translate:
+    if: (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && vars.TRANSLATE_MODEL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install website dependencies
+        working-directory: website
+        run: bun install
+
+      - name: Check out the translations
+        run: |
+          if git fetch origin docs-i18n; then
+            git worktree add .docs-i18n FETCH_HEAD
+          else
+            git worktree add --detach .docs-i18n && git -C .docs-i18n checkout --orphan docs-i18n && git -C .docs-i18n rm -rfq .
+          fi
+
+      - name: Translate the latest release
+        working-directory: website
+        env:
+          TRANSLATE_API_KEY: ${{ secrets.TRANSLATE_API_KEY }}
+          TRANSLATE_API_URL: ${{ vars.TRANSLATE_API_URL }}
+          TRANSLATE_MODEL: ${{ vars.TRANSLATE_MODEL }}
+        run: |
+          tag=$(git tag --list 'v*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          source=$(mktemp -d)
+          git archive "$tag" website/docs website/elements website/modules | tar -x --strip-components=1 -C "$source"
+          bun scripts/translate.js --source "$source" --out ../.docs-i18n
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd .docs-i18n
+          git add -A
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -qm 'docs: Update machine translations'
+          git push origin HEAD:refs/heads/docs-i18n
+          gh workflow run website.yml --ref main

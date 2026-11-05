@@ -1281,3 +1281,9 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
 }
+
+.doc-machine-notice {
+  margin: 0 0 1.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem;
+  color: var(--muted-foreground); font-size: 0.8125rem;
+}
+.doc-machine-notice a { color: var(--foreground); text-decoration: underline; }

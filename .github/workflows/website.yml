@@ -159,6 +159,14 @@ jobs:
           key: website-versions-${{ github.run_id }}
           restore-keys: website-versions-
 
+      # Machine translations (`docs-i18n.yml`), for the root only; none yet is fine.
+      - name: Take the machine translations
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          if git fetch --depth=1 origin docs-i18n; then
+            git archive FETCH_HEAD | tar -x -C website
+          fi
+
       # The published site, after the tests of main's own build: main again
       # at /versions/main, the releases from their tags (whose pages are as
       # they were released, links included).
