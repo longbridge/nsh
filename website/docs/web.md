@@ -219,7 +219,8 @@ like the others: it runs each build of the app, shows build errors and runtime e
 logs to the terminal. A change to a Rust app's crate builds its runtime again and the open page loads it by itself;
 TSX edits are applied in place (hot updates). Phones on the same network open the
 address `nsh run` prints under it (`on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
-web runtime is there (in the distribution, always).
+web runtime is there (in the distribution, always). The page opens at the paths of an app that keeps its page in the
+path (`http://127.0.0.1:8790/detail/7`), so reloading it keeps the app where it was. There the page loads with its base at the root (`<base href="/">`), so the app's relative URLs (`fetch("data.json")`) resolve from `/`, as they do at the page's own address. A published site is served as [Publish an app](#publish-an-app) describes.
 
 ## Build the website's player
 

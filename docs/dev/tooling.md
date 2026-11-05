@@ -145,6 +145,15 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`, `/nsh.version`, and for a runtime whose crates call JS through wasm-bindgen its glue, `/nsh-bindgen.js`,
   with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
+  A page load of a path that is no file (a `GET` or `HEAD` accepting `text/html` whose last segment has no extension,
+  `/detail/7`) gets the page with `<base href="/">`, as a server that falls back to `index.html` for an app routing by
+  the path (history API) would, so its `./nsh.js` and the rest still load from the root; other misses stay 404. A
+  last segment with a dot (`/user/john.doe`) reads as a file and stays 404. The base also
+  moves the app's own relative URLs to the root there (`document.baseURI`, `nsh_set_base_url`): on such a path
+  `fetch("data.json")` asks for `/data.json`, and a fragment link (`href="#x"`) leads to `/#x`. `SiteServer` (`nsh
+  package --run`) does not fall back: it serves as a CDN would. The packaged page has no base and names its files
+  relatively, so it runs from whatever directory it is deployed to. Served at a deeper path (a server rewriting to
+  it), its files do not resolve (`docs/dev/web.md`).
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the

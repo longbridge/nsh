@@ -14,7 +14,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -477,13 +477,36 @@ async fn asset(
 }
 
 /// The web host's page and runtime ([`DevServer::serve_web`]); never
-/// cached, as they change with the runtime.
-async fn web_file(State(shared): State<Arc<Shared>>, uri: axum::http::Uri) -> Response {
+/// cached, as they change with the runtime. A page load of a path that is
+/// no file ([`opens_page`]) gets the page, as a server that falls back to
+/// `index.html` for an app routing by the path (`/detail/7`, history API)
+/// would: with `<base href="/">` ([`page_at_root`]), so its `./nsh.js`
+/// and the rest still load from the root.
+async fn web_file(
+    State(shared): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path == "index.html" { "" } else { path };
-    let bytes = shared.web.lock().expect("web lock").get(path).cloned();
+    let bytes = {
+        let web = shared.web.lock().expect("web lock");
+        match web.get(path) {
+            Some(bytes) => Some((path, bytes.clone())),
+            None => {
+                let accept = headers
+                    .get(header::ACCEPT)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                web.get("")
+                    .filter(|_| opens_page(&method, accept, path))
+                    .map(|page| ("", page_at_root(page).into()))
+            }
+        }
+    };
     match bytes {
-        Some(bytes) => {
+        Some((path, bytes)) => {
             let content_type = match path {
                 "" => "text/html; charset=utf-8",
                 path => content_type(std::path::Path::new(path)),
@@ -918,8 +941,98 @@ async fn send_event(
     }
 }
 
+/// Whether a request for `path` (no file the server has) is a browser
+/// opening a page: a `GET` (or its `HEAD`) that accepts HTML, of a path whose last
+/// segment has no extension (`detail/7`, not `missing.js`), as the
+/// history-API fallbacks of web dev servers tell them apart.
+fn opens_page(method: &Method, accept: &str, path: &str) -> bool {
+    let last = path.rsplit('/').next().unwrap_or(path);
+    matches!(*method, Method::GET | Method::HEAD)
+        && accept.contains("text/html")
+        && !last.contains('.')
+}
+
+/// The page with `<base href="/">` first in its head: served at another
+/// path ([`opens_page`]), its relative URLs (`./nsh.js`) resolve from the
+/// root, where the server has them.
+fn page_at_root(page: &[u8]) -> Vec<u8> {
+    let page = String::from_utf8_lossy(page);
+    // Byte offsets in `lower` are `page`'s: only ASCII letters change.
+    let lower = page.to_ascii_lowercase();
+    let end_of_tag = |start: usize| lower[start..].find('>').map(|end| start + end + 1);
+    let head = lower.match_indices("<head").map(|(at, _)| at).find(|&at| {
+        lower
+            .as_bytes()
+            .get(at + "<head".len())
+            .is_some_and(|&c| c == b'>' || c.is_ascii_whitespace())
+    });
+    // A page without a head start tag gets the base after its doctype, never
+    // before it: a doctype that is not first puts the page in quirks mode.
+    let at = head
+        .or_else(|| lower.find("<!doctype"))
+        .and_then(end_of_tag)
+        .unwrap_or(0);
+    format!("{}<base href=\"/\">{}", &page[..at], &page[at..]).into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
+    use axum::http::Method;
+
+    #[test]
+    fn a_page_load_of_an_app_path_gets_the_page() {
+        let html = "text/html,application/xhtml+xml,*/*;q=0.8";
+        assert!(super::opens_page(&Method::GET, html, "detail/7"));
+        assert!(super::opens_page(&Method::GET, html, "reward/invitations"));
+        assert!(
+            !super::opens_page(&Method::GET, html, "missing.js"),
+            "files stay 404"
+        );
+        assert!(!super::opens_page(
+            &Method::GET,
+            html,
+            "browser/missing.mjs"
+        ));
+        assert!(
+            !super::opens_page(&Method::GET, html, "user/john.doe"),
+            "a last segment with a dot reads as a file"
+        );
+        assert!(
+            !super::opens_page(&Method::GET, "*/*", "detail/7"),
+            "a fetch is no page load"
+        );
+        assert!(super::opens_page(&Method::HEAD, html, "detail/7"));
+        assert!(!super::opens_page(&Method::POST, html, "detail/7"));
+    }
+
+    #[test]
+    fn the_page_served_elsewhere_loads_its_files_from_the_root() {
+        let page = super::page_at_root(
+            b"<!doctype html>\n<html><head><meta charset=\"utf-8\"></head></html>",
+        );
+        assert_eq!(
+            String::from_utf8(page).unwrap(),
+            "<!doctype html>\n<html><head><base href=\"/\"><meta charset=\"utf-8\"></head></html>"
+        );
+        assert_eq!(
+            String::from_utf8(super::page_at_root(
+                b"<!DOCTYPE html><HTML><HEAD lang=\"en\"><title>x</title><header></header>",
+            ))
+            .unwrap(),
+            "<!DOCTYPE html><HTML><HEAD lang=\"en\"><base href=\"/\"><title>x</title><header></header>",
+            "a head start tag in any case, with attributes"
+        );
+        assert_eq!(
+            String::from_utf8(super::page_at_root(b"<!doctype html>\n<header>x</header>")).unwrap(),
+            "<!doctype html><base href=\"/\">\n<header>x</header>",
+            "without a head, after the doctype: it stays first"
+        );
+        assert_eq!(
+            super::page_at_root(b"<p>x</p>"),
+            b"<base href=\"/\"><p>x</p>".to_vec()
+        );
+    }
+
     #[test]
     fn a_host_that_cannot_run_the_app_is_told_why() {
         let message = super::cannot_run_message(

@@ -1,6 +1,11 @@
 //! Server and client talking over a real socket.
 
-use std::{sync::mpsc, time::Duration};
+use std::{
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    sync::mpsc,
+    time::Duration,
+};
 
 use nsh_dev::{
     AppInfo, ClientEvent, DevClient, DevEvent, DevServer, HostInfo,
@@ -458,5 +463,78 @@ fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
     assert_eq!(
         traces.try_recv().expect("the batch, before the step's end"),
         ["Create { id: 2, kind: View }"]
+    );
+}
+
+/// The status line and body of a `GET` of `path` with `accept`.
+fn get(addr: SocketAddr, path: &str, accept: &str) -> (String, String) {
+    request(addr, "GET", path, accept)
+}
+
+/// The status line and body of a request of `path` with `accept`.
+fn request(addr: SocketAddr, method: &str, path: &str, accept: &str) -> (String, String) {
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: {accept}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (head.lines().next().unwrap().to_owned(), body.to_owned())
+}
+
+#[test]
+fn a_page_load_of_an_app_path_gets_the_page_with_its_files_at_the_root() {
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.serve_web(
+        "<html><head><script src=\"./nsh.js\"></script></head></html>".into(),
+        [("nsh.js".to_owned(), b"export {}".to_vec())],
+    );
+    let addr = server.local_addr();
+    let html = "text/html,application/xhtml+xml,*/*;q=0.8";
+
+    let (status, body) = get(addr, "/", html);
+    assert!(status.contains("200"), "{status}");
+    assert!(
+        !body.contains("<base"),
+        "the page at the root is as served: {body}"
+    );
+
+    let (status, body) = get(addr, "/reward/detail/7", html);
+    assert!(status.contains("200"), "{status}");
+    assert!(body.contains("<head><base href=\"/\"><script"), "{body}");
+
+    let (status, body) = get(addr, "/reward/detail/7?from=share", html);
+    assert!(
+        status.contains("200") && body.contains("<base href=\"/\">"),
+        "a query string keeps the page: {status}"
+    );
+    let (status, body) = request(addr, "HEAD", "/reward/detail/7", html);
+    assert!(
+        status.contains("200") && body.is_empty(),
+        "a HEAD answers as its GET, without the body: {status} {body}"
+    );
+
+    let (status, _) = get(addr, "/missing.js", html);
+    assert!(
+        status.contains("404"),
+        "a file the server has not stays missing: {status}"
+    );
+    let (status, _) = get(addr, "/user/john.doe", html);
+    assert!(
+        status.contains("404"),
+        "a last segment with a dot reads as a file: {status}"
+    );
+    let (status, _) = get(addr, "/reward/detail/7", "*/*");
+    assert!(status.contains("404"), "a fetch is no page load: {status}");
+    let (status, body) = get(addr, "/nsh.js", "*/*");
+    assert!(
+        status.contains("200") && body == "export {}",
+        "{status} {body}"
     );
 }

@@ -138,14 +138,19 @@ build to the same file) and takes `nsh.js` from the crate.
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
-  (`document.baseURI`, `nsh_set_base_url`). The app ships as minified ES modules
+  (`document.baseURI`, `nsh_set_base_url`). The page has no `<base>` and names its runtime and host module relatively
+  (`./nsh.<digest>.js`), so a site runs from any directory, a subpath included; served at a path below its directory
+  (a server rewriting `/detail/7` to `index.html`), it finds none of its files. A fixed `<base>` would tie the site to
+  one directory, so path routing in a published site is left to a decision; the development host serves such paths
+  with a base at the root (below). The app ships as minified ES modules
   (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening
   bytecode ships in a browser package. An app with a Rust crate of
   its own gets a runtime of its own ("Apps with Rust components"). `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
   prints its address.
-- **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, `nsh.js`, its
+- **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, and at any path
+  a page load asks for that is no file, with `<base href="/">`, for apps routing by the path; `nsh.js`, its
   `browser/` modules and `nsh.wasm` next to it, with a wasm-bindgen glue and its snippets when the runtime has one,
   all `no-cache`), from
   `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
