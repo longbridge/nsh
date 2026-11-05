@@ -1210,14 +1210,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
         }
-        EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-            position,
-            page_position,
-            modifiers,
-        }) => {
-            obj.set("position", point_object(cx, *position)?)?;
-            obj.set("pagePosition", point_object(cx, *page_position)?)?;
-            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
+        EventPayload::ContextMenu(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+            // `null` when no pointer asked, as declared.
+            match e.pointer_type {
+                Some(pointer) => obj.set("pointerType", pointer.name())?,
+                None => obj.set("pointerType", Value::new_null(cx.clone()))?,
+            }
         }
         EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
@@ -2105,14 +2106,15 @@ const report = (v) => text(String(v));
     #[test]
     fn context_menu_payload_has_both_positions() {
         let host = Host::new().unwrap();
-        let event = nsh_core::ContextMenuEvent {
-            position: point(px(1.0), px(2.0)),
-            page_position: point(px(11.0), px(22.0)),
-            modifiers: nsh_core::keymap::Modifiers {
+        let event = nsh_core::ContextMenuEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(11.0), px(22.0)),
+            nsh_core::keymap::Modifiers {
                 ctrl: true,
                 ..Default::default()
             },
-        };
+            Some(nsh_core::PointerType::Mouse),
+        );
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::ContextMenu(event)).unwrap();
             let obj = value.as_object().unwrap();
@@ -2132,6 +2134,16 @@ const report = (v) => text(String(v));
             let m: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(m.get::<_, bool>("control").unwrap());
             assert!(!m.get::<_, bool>("platform").unwrap());
+            assert_eq!(obj.get::<_, String>("pointerType").unwrap(), "mouse");
+            let keyboard = nsh_core::ContextMenuEvent::new(
+                event.position,
+                event.page_position,
+                event.modifiers,
+                None,
+            );
+            let value = payload_object(&cx, &EventPayload::ContextMenu(keyboard)).unwrap();
+            let pointer: Value = value.as_object().unwrap().get("pointerType").unwrap();
+            assert!(pointer.is_null());
         });
     }
 

@@ -1606,7 +1606,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // let the user pick several (false: one)
+  limit?: number; // at most this many when multiple (up to 100)
+  filters?: { name: string; extensions: string[] }[]; // the types offered (none: any file)
+}
+
+interface PickedFile {
+  file: File; // name, type, size in bytes and the bytes, as they are
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // let the user pick several (false: one)
@@ -1631,6 +1642,8 @@ interface PickedImage {
 | `format` | `request.format = PickFormat::Current` |
 | `image.file.name`, `.type`, `.size` | `file.name`, `file.mime`, `file.data.len()` |
 | `image.size` | `file.size` (`Size<DevicePixels>`) |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
+| `filters` | `FilePickRequest::new(multiple, limit).filter(FileFilter::new("Documents", ["pdf"]))` |
 
 ### Picker.pickImages
 
@@ -1734,13 +1747,50 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+Shows the system's picker for files of any type and resolves with what the user picked, or `[]` when the user cancels.
+It rejects as `pickImages` does: a `RangeError` for options out of range (`limit: 0`, a filter without extensions) and
+`ERR_ACCESS_DENIED` without the `picker` capability. Rust: `pick_files(request)`.
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "Documents", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| Platform | Picker | Filters |
+|---|---|---|
+| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
+| Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
+| iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
+| Android | `ACTION_OPEN_DOCUMENT` | By media type; an extension Android knows no type of offers any file |
+| Web | `<input type=file>` | All the extensions at once |
+| GPUI | GPUI's open dialog, which offers any file | Files that do not pass are left out afterwards |
+
+None needs a permission. Files come as they are: nothing is converted, and each keeps its name. A file's whole bytes are
+read into memory, so a file larger than 512 MiB is left out of the answer and logged. A filter is what the picker
+offers, not a promise: check what you get.
+
 ### Embedding apps
 
 An app that embeds NSH and has a picker of its own (one with the app's own albums, say) answers the picks itself: in
 Rust, a `PickerBackend` (`nsh_core::picker`) given to the engine (`EngineConfig::picker`, or `AppView::set_picker` in
 GPUI and GPUI Kit apps) receives every pick's `PickRequest` and returns the files, and the system's picker is not
 shown. The files it returns are completed as the platform's are: cut to the request's limit, their sizes, types and
-extensions read from their bytes.
+extensions read from their bytes. `pick_files` answers `pickFiles` the same way; a backend that does not implement it
+cancels those picks, and the system's picker is still not shown.
 
 ### Tests
 
@@ -1749,8 +1799,8 @@ and without a handler a pick is cancelled. See [Testing](../docs/testing-and-tra
 
 > [!NOTE]
 > When your app declares `capabilities` in `nsh.json`, the picker must be granted with `"picker": true`. Without it
-> `pickImages` shows nothing and rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
-> `"picker"` and `resource` `""`. In Rust, `pick_images` answers no files and the refusal is logged. See
+> `pickImages` and `pickFiles` show nothing and reject with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
+> `"picker"` and `resource` `""`. In Rust, `pick_images` and `pick_files` answer no files and the refusal is logged. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ## Notifications

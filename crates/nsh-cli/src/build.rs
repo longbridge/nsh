@@ -382,6 +382,36 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
 mod tests {
     use std::path::{Path, PathBuf};
 
+    /// Separates development bundling, hot-script assembly and QuickJS compilation.
+    /// Run with `cargo test -p nsh-cli bench_dev_startup -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "startup measurement on the counter and gallery"]
+    fn bench_dev_startup() {
+        use std::time::Instant;
+
+        let sets = crate::ui_sets();
+        for app in ["counter", "gallery"] {
+            let entry = PathBuf::from(format!("../../examples/{app}/App.tsx"));
+            for run in 0..3 {
+                let start = Instant::now();
+                let hot = nsh_bundler::bundle_hot(&entry, &sets).unwrap();
+                let bundled = start.elapsed();
+                let start = Instant::now();
+                let (code, _) = hot.script();
+                let assembled = start.elapsed();
+                let start = Instant::now();
+                let bytecode = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
+                let compiled = start.elapsed();
+                assert!(!bytecode.is_empty());
+                eprintln!(
+                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes",
+                    code.len(),
+                    bytecode.len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn hosts_must_serve_the_ui_sets_an_app_imports() {
         let natives = ["nsh", "nsh/mobile", "nsh/base"].map(String::from);

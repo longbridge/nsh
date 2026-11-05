@@ -143,6 +143,43 @@ in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the 
 while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
 (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
+### Several windows sharing data
+
+A Rust host opens as many windows as it likes, an `AppView` in each, and shares its data between them as any Rust
+program does: one process, an `Arc` the roots' props carry. There is nothing to send between the windows; each root
+reads the shared value and listens for its changes the way it listens to any other source (a channel, a watch, a
+callback the store calls):
+
+```rust
+use std::sync::{Arc, Mutex};
+use nsh_platform_linux::{gtk4 as gtk, AppOptions, AppView, Root};
+use gtk::prelude::*;
+
+#[derive(Default)]
+struct Store { count: Mutex<u32> }
+
+fn open(app: &gtk::Application, title: &str, root: Root) {
+    let window = gtk::ApplicationWindow::builder().application(app).title(title).build();
+    let view = AppView::new(AppOptions::default());
+    view.load(root.into());
+    window.set_child(Some(&view.widget()));
+    let keep = std::cell::RefCell::new(Some(view));
+    window.connect_destroy(move |_| if let Some(view) = keep.take() { view.stop() });
+    window.present();
+}
+
+app.connect_activate(|app| {
+    let store = Arc::new(Store::default());
+    let main = Arc::clone(&store);
+    open(app, "Main", Root::new::<my_app::Main>(move || my_app::MainProps { store: Arc::clone(&main) }));
+    let chat = Arc::clone(&store);
+    open(app, "Chat", Root::new::<my_app::Chat>(move || my_app::ChatProps { store: Arc::clone(&chat) }));
+});
+```
+
+A TSX app opens its windows with [`Window.open`](../modules/nsh-desktop.md#windowopen): they run in the app's one JS
+runtime, so they share its signals and modules directly.
+
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
 (`my_app::registry()`, which `#[native_module]` makes), so the TSX a view loads imports your Rust components and

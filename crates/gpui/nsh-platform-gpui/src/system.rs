@@ -1144,6 +1144,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             });
         }
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
@@ -1211,6 +1212,43 @@ fn pick_images(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::PickRe
                 .collect();
             std::thread::spawn(move || {
                 let files = nsh_core::picker::read_files(&paths, &request);
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id, files },
+                );
+            });
+        })
+        .detach();
+    });
+}
+
+/// `Picker.pickFiles`: GPUI's open dialog. It filters nothing, so the files
+/// whose extension the request does not take are left out; they are read on
+/// a thread of their own.
+fn pick_files(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::FilePickRequest) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    crate::rt::on_app(move |cx| {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: request.multiple(),
+            prompt: None,
+        });
+        cx.spawn(async move |_| {
+            let paths: Vec<_> = paths
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| nsh_core::file_dialog::passes(&request.filters, p))
+                .collect();
+            std::thread::spawn(move || {
+                let files = nsh_core::picker::read_picked_files(&paths, &request);
                 control.dispatch_event(
                     ROOT_ID,
                     EventKind::Pick,

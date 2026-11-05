@@ -2156,6 +2156,18 @@ final class Mounter {
                 Picker.show(context, request);
                 break;
             }
+            case 45: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                String extensions = (String) objects[b.getInt()];
+                request.extensions = extensions.isEmpty() ? new String[0] : extensions.split(",");
+                request.maxBytes = b.getInt();
+                request.files = true;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
                 break;

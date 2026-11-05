@@ -190,7 +190,9 @@ pub(crate) fn dark(surface: &Surface) -> bool {
 
 /// The color behind the app's views (the default theme's background).
 pub(crate) fn window_background(surface: &Surface) -> Color {
-    if dark(surface) {
+    if surface.transparent() {
+        Color::TRANSPARENT
+    } else if dark(surface) {
         Color(0x0a0a_0aff)
     } else {
         Color(0xffff_ffff)
@@ -625,6 +627,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             clipboard::files_answer(*id, &clipboard_files()),
         ),
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }

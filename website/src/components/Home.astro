@@ -70,7 +70,7 @@ const copy = zh
         ['scale', '开源 · Apache-2.0'],
         ['building', '由长桥（Longbridge）构建'],
       ],
-      runsOn: '一套应用，手机、桌面和 Web 都能运行',
+      runsOn: '一套应用，手机、桌面、Web 和终端都能运行',
       snippetLang: 'CLI',
       demo: {
         title: 'Chat.tsx',
@@ -88,6 +88,9 @@ const copy = zh
         { n: '02', title: '平台的交互方式', body: '同一个组件在每种设备上都按用户的习惯工作。Menu 在有指针的设备上是贴着触发点弹出的菜单，在手机上是从底部升起的面板；ContextMenu 用右键打开，在触屏上长按打开。应用只写一次菜单。' },
       ],
       platHead: '每个平台的后端',
+      tuiTitle: '同一个应用，也能在终端运行',
+      tuiBody: '用 Rust 或 TSX 编写的 NSH 应用，通过 ratatui 绘制成终端的字符界面（TUI）。布局适配字符网格，颜色跟随终端主题，支持键盘导航、文本编辑、鼠标和热更新。已有的 ratatui 应用也能通过 AppView 嵌入 NSH 界面。',
+      tuiCta: '了解 TUI',
       crossKicker: '真正的跨平台',
       crossTitle: '从手机到桌面，再到 Web',
       crossLead: '跨平台在这里的意思是：每种设备都得到它该有的应用。布局随窗口重组，输入方式随设备变化，业务逻辑保持一份。一个工程师可以写一次应用，并在每个目标上验证它。',
@@ -126,7 +129,7 @@ const copy = zh
         ['scale', 'Open source · Apache-2.0'],
         ['building', 'Built at Longbridge'],
       ],
-      runsOn: 'One app, on phones, desktops and the web',
+      runsOn: 'One app, on phones, desktops, the web and terminals',
       snippetLang: 'CLI',
       demo: {
         title: 'Chat.tsx',
@@ -144,6 +147,9 @@ const copy = zh
         { n: '02', title: 'The platform’s interaction', body: 'One component behaves as each device’s users expect. A Menu opens as a popup at its trigger with a pointer and as a sheet from the bottom on a phone; a ContextMenu opens on a right click, or when a finger holds the trigger. The app writes the menu once.' },
       ],
       platHead: 'A backend per platform',
+      tuiTitle: 'The same app, in your terminal.',
+      tuiBody: 'NSH apps written in Rust or TSX render as terminal user interfaces (TUIs) with ratatui. Layout fits the character grid, colors follow the terminal’s theme, and keyboard navigation, text editing, mouse input and hot updates work together. Existing ratatui apps can also embed NSH UI with AppView.',
+      tuiCta: 'Explore TUI',
       crossKicker: 'Truly cross-platform',
       crossTitle: 'From phone to desktop to web.',
       crossLead: 'Cross-platform here means each device gets the app it expects: the layout reshapes with the window, the input follows the device, the logic stays one. One engineer can write the app once and check it on every target.',
@@ -227,6 +233,7 @@ const platforms = zh
       { name: 'Windows', detail: 'Win32 · Direct2D · DirectWrite · 10 1809+', cmd: '--target windows' },
       { name: 'Linux', detail: 'GTK 4 · Pango · GTK 4.14+', cmd: '--target linux' },
       { name: 'Web', detail: 'HTML · CSS · 现代浏览器', cmd: '--target web' },
+      { name: 'TUI', detail: 'ratatui · 终端字符界面 · 键盘与鼠标 · macOS / Windows / Linux', cmd: '--target tui' },
       { name: 'GPUI', detail: 'GPUI · 嵌入 GPUI 与 GPUI Kit 应用（macOS / Windows / Linux）', cmd: '--target gpui' },
     ]
   : [
@@ -236,6 +243,7 @@ const platforms = zh
       { name: 'Windows', detail: 'Win32 · Direct2D · DirectWrite · 10 1809+', cmd: '--target windows' },
       { name: 'Linux', detail: 'GTK 4 · Pango · GTK 4.14+', cmd: '--target linux' },
       { name: 'Web', detail: 'HTML · CSS · modern browsers', cmd: '--target web' },
+      { name: 'TUI', detail: 'ratatui · terminal UI · keyboard and mouse · macOS / Windows / Linux', cmd: '--target tui' },
       { name: 'GPUI', detail: 'GPUI · embedded in GPUI and GPUI Kit apps (macOS / Windows / Linux)', cmd: '--target gpui' },
     ];
 
@@ -426,6 +434,12 @@ const icon = (name: string, size = 16) =>
           </li>
         ))}
       </ul>
+      <div class="tui-intro">
+        <h3>{copy.tuiTitle}</h3>
+        <p>{copy.tuiBody}</p>
+        <code>nsh run --target tui</code>
+        <Button variant="link" href={link('docs/tui')}>{copy.tuiCta} →</Button>
+      </div>
     </div>
   </section>
 
@@ -866,6 +880,10 @@ const icon = (name: string, size = 16) =>
   .layer__n { color: var(--citrus); font: 600 0.75rem/1 var(--font-mono); letter-spacing: 0.08em; }
   .layer h3 { margin: 0.9rem 0 0; font-size: 1.2rem; font-weight: 650; letter-spacing: -0.015em; }
   .layer p { margin: 0.6rem 0 0; color: var(--muted-foreground); font-size: 0.92rem; line-height: 1.65; }
+  .tui-intro { margin-top: 2rem; max-width: 75ch; }
+  .tui-intro h3 { margin: 0 0 0.75rem; font-size: 1.2rem; }
+  .tui-intro p { color: var(--muted-foreground); line-height: 1.75; }
+  .tui-intro > code { display: inline-block; margin-right: 1rem; font-size: 0.85rem; }
   .platforms-head { margin: 2.5rem 0 1rem; color: var(--muted-foreground); font: 600 0.72rem/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
   .caps--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .caps-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.75rem; margin: 0 0 1rem; color: var(--citrus); font: 600 0.72rem/1.4 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }

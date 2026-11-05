@@ -367,6 +367,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.
@@ -379,6 +381,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();

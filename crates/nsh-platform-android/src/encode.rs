@@ -669,6 +669,16 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.float(request.quality.map_or(-1.0, |q| q.0));
                         e.bool(request.format == nsh_core::picker::PickFormat::Current);
                     }
+                    // `Picker.java`: the request, the limit, the extensions
+                    // offered (comma-separated; empty: any file) and the
+                    // largest file read.
+                    Command::PickFiles { id, request } => {
+                        e.int(45);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
+                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                    }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)

@@ -45,9 +45,21 @@ function declared(source, list) {
 test("the environment serves every export of nsh/device and nsh/accessibility", async () => {
   const source = await readFile(new URL("../../../nsh-js/src/env.rs", import.meta.url), "utf8");
   const { env } = environment();
-  const names = [...declared(source, "DEVICE_EXPORTS"), ...declared(source, "ACCESSIBILITY_EXPORTS")];
-  assert.ok(names.includes("lifecycle") && names.includes("reduceMotion"), names.join());
-  for (const name of names) assert.ok(name in env.api, `the browser runtime has no \`${name}\``);
+  const modules = { "nsh/device": declared(source, "DEVICE_EXPORTS"), "nsh/accessibility": declared(source, "ACCESSIBILITY_EXPORTS") };
+  assert.ok(modules["nsh/device"].includes("lifecycle") && modules["nsh/accessibility"].includes("reduceMotion"), JSON.stringify(modules));
+  // `runtime.js` serves `env.api` as `nsh`'s and `env.modules` as the
+  // namespaces of those names: each has exactly what `env.rs` declares,
+  // the same values as `nsh`'s.
+  assert.deepEqual(Object.keys(env.modules ?? {}).sort(), Object.keys(modules).sort());
+  for (const [specifier, names] of Object.entries(modules)) {
+    const namespace = env.modules[specifier];
+    assert.deepEqual(Object.keys(namespace).sort(), [...names].sort(), `the browser runtime's \`${specifier}\``);
+    for (const name of names) {
+      assert.ok(name in env.api, `the browser runtime's \`nsh\` has no \`${name}\``);
+      assert.notEqual(namespace[name], undefined, `${specifier}'s \`${name}\``);
+      assert.equal(namespace[name], env.api[name], `${specifier}'s \`${name}\` is nsh's`);
+    }
+  }
 });
 
 test("the lifecycle is the engine's", () => {
