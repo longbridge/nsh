@@ -12,6 +12,8 @@ const asset = (name: string) => url(`brand/${name}`);
 const t = isZh
   ? {
       title: '品牌',
+      usage: '使用 Logo',
+      usageLead: '采用 NSH 开发的应用，都可以自由使用 NSH 的品牌 Logo 进行宣传，以标识应用采用了 NSH。',
       logo: 'Logo',
       logoLead: '外壳是一根发光的青柠色圆管，里面的圆珠是它运行的模块。深色背景和浅色背景各有一个版本。',
       onDark: '深色背景',
@@ -43,6 +45,8 @@ const t = isZh
     }
   : {
       title: 'Brand',
+      usage: 'Using the logo',
+      usageLead: 'Any app built with NSH is free to use the NSH logo in its promotion, to show that it is built with NSH.',
       logo: 'Logo',
       logoLead: 'The shell is a lit citrus tube, and the bead inside it is the module it runs. There is a version for dark backgrounds and one for light.',
       onDark: 'On dark',
@@ -95,6 +99,11 @@ const swatches = [
   <header class="brand__hero">
     <h1>{t.title}</h1>
   </header>
+
+  <section>
+    <h2>{t.usage}</h2>
+    <p>{t.usageLead}</p>
+  </section>
 
   <section>
     <h2>{t.logo}</h2>
