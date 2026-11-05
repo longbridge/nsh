@@ -27,7 +27,7 @@ WORKFLOWS = {
     "core.yml": {
         "packages": [
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
-            "nsh-bundler", "nsh-package", "nsh-base", "nsh-testing",
+            "nsh-bundler", "nsh-package", "nsh-updater", "nsh-base", "nsh-testing",
         ],
         # The fonts nsh-core's, nsh-macros' and nsh-bundler's tests read.
         "files": [
@@ -61,11 +61,11 @@ WORKFLOWS = {
         "files": ["examples/counter/**", "examples/gallery/**"],
     },
     "rust-app.yml": {
-        "packages": ["gallery-native", "rust-exports-native", "nsh-cli", "nsh-platform-web"],
+        "packages": ["gallery-native", "rust-exports-native", "tasks-rs", "nsh-cli", "nsh-platform-web"],
         # `nsh test` runs the examples' tests.
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/gallery-rs/**",
-            "examples/rust-exports/**",
+            "examples/rust-exports/**", "examples/tasks-rs/**",
         ],
     },
 }

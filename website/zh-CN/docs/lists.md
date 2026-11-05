@@ -188,7 +188,7 @@ const toggle = (id: number) =>
 
 ## 多列与网格
 
-`numColumns`（`.columns(n)`）把条目排成每行若干列；内容内边距添加在内容四周，并设置行间距和列间距。网格中各行的高度可以不同：每行与其中最高的条目一样高。
+`numColumns`（`.columns(n)`）把条目排成每行若干列；内容内边距添加在内容四周，并设置行间距和列间距。网格中各行的高度可以不同：每行与其中最高的条目一样高。列表显示期间 `numColumns` 可以改变（窗口变宽时列数增加）：第一个可见条目保持在顶部；`estimatedItemSize` 改变时也是如此。
 
 ```rust tabs
 let count = photos.len();

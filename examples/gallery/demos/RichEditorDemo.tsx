@@ -12,7 +12,7 @@ import {
   undo,
 } from "nsh/base";
 import { colors, mono, Segmented } from "../ui";
-import { IconButton, type LucideIconName, ToggleGroup, type ToggleItem, ToolbarSeparator } from "./RichEditorUi";
+import { IconButton, type LucideIconName, TOOL_GAP, ToggleGroup, type ToggleItem, ToolbarSeparator } from "./RichEditorUi";
 import { createLinkMenu, LinkBubble, type LinkMenu } from "./RichEditorLink";
 
 // `nsh/base`'s `RichEditor` renders a session the app makes with
@@ -66,24 +66,24 @@ type Wrap = "bullet" | "ordered" | "task" | "quote";
 
 const BLOCKS: ToggleItem<Block>[] = [
   { value: "paragraph", icon: "pilcrow", label: "Text" },
-  { value: "h1", icon: "heading-1", label: "Heading 1" },
-  { value: "h2", icon: "heading-2", label: "Heading 2" },
-  { value: "h3", icon: "heading-3", label: "Heading 3" },
-  { value: "code", icon: "square-code", label: "Code block" },
+  { value: "h1", icon: "heading-1", label: "Heading 1", short: "H1" },
+  { value: "h2", icon: "heading-2", label: "Heading 2", short: "H2" },
+  { value: "h3", icon: "heading-3", label: "Heading 3", short: "H3" },
+  { value: "code", icon: "square-code", label: "Code block", short: "Code" },
 ];
 
 const MARKS: ToggleItem<Mark>[] = [
   { value: "bold", icon: "bold", label: "Bold" },
   { value: "italic", icon: "italic", label: "Italic" },
-  { value: "strike", icon: "strikethrough", label: "Strikethrough" },
-  { value: "code", icon: "code", label: "Inline code" },
+  { value: "strike", icon: "strikethrough", label: "Strikethrough", short: "Strike" },
+  { value: "code", icon: "code", label: "Inline code", short: "Inline" },
   { value: "link", icon: "link", label: "Link" },
 ];
 
 const WRAPS: ToggleItem<Wrap>[] = [
-  { value: "bullet", icon: "list", label: "Bulleted list" },
-  { value: "ordered", icon: "list-ordered", label: "Numbered list" },
-  { value: "task", icon: "list-todo", label: "Task list" },
+  { value: "bullet", icon: "list", label: "Bulleted list", short: "Bullets" },
+  { value: "ordered", icon: "list-ordered", label: "Numbered list", short: "Numbers" },
+  { value: "task", icon: "list-todo", label: "Task list", short: "Tasks" },
   { value: "quote", icon: "text-quote", label: "Quote" },
 ];
 
@@ -165,7 +165,7 @@ function Toolbar(props: { editor: RichEditorSession; revision: number; link: Lin
   const indent = command("sinkListItem", { name: "listItem" });
   const outdent = command("liftListItem", { name: "listItem" });
   return (
-    <View testID="toolbar" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", rowGap: 6, columnGap: 4 }}>
+    <View testID="toolbar" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", rowGap: 6, columnGap: Math.max(TOOL_GAP, 4) }}>
       <IconButton icon="undo-2" label="Undo" disabled={!can(undo())} onPress={() => run(undo())} />
       <IconButton icon="redo-2" label="Redo" disabled={!can(redo())} onPress={() => run(redo())} />
       <ToolbarSeparator />
@@ -193,7 +193,7 @@ function Toolbar(props: { editor: RichEditorSession; revision: number; link: Lin
       <IconButton icon="list-indent-increase" label="Indent" disabled={!can(indent)} onPress={() => run(indent)} />
       <IconButton icon="minus" label="Divider" disabled={!can(command("setHorizontalRule"))} onPress={() => run(command("setHorizontalRule"))} />
       <ToolbarSeparator />
-      <IconButton icon="table" label="Insert table" disabled={!can(INSERT_TABLE)} onPress={() => run(INSERT_TABLE)} />
+      <IconButton icon="table" label="Insert table" short="Table" disabled={!can(INSERT_TABLE)} onPress={() => run(INSERT_TABLE)} />
       <If when={on("table")}>
         <Each of={TABLE_ACTIONS}>
           {(action) => (

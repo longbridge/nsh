@@ -14,6 +14,9 @@ demo: el-menu
 
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，或在触摸屏上由手指按住触发元素打开。
 
+在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目。
+在桌面和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。
+
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;

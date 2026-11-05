@@ -284,8 +284,8 @@ const at = signal<number | null>(null);
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it. Phones
-and tablets show none. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
+every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|

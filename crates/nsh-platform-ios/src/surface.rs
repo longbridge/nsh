@@ -383,6 +383,8 @@ impl RootView {
             screen_color: false,
             // The Speech framework fed by the microphone.
             speech: true,
+            // The notification center.
+            notifications: true,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()

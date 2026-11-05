@@ -202,6 +202,7 @@ fn windows(cx: &mut TestAppContext) {
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
     set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
+    a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -1556,4 +1557,54 @@ fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppC
     // platforms that do not).
     cx.simulate_keystrokes(&format!("shift-{primary}-b"));
     wait_until_window(cx, "the window at 600x400", |cx| size(cx) == (600.0, 400.0));
+}
+
+/// A bar 100 × 40 at (10, 10) that drags the window and has a context
+/// menu, over a focused field that shows where the menu was asked for.
+const DRAG_AREA_MENU: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+
+function App() {
+  const asked = signal("-");
+  return (
+    <View style={{ flex: 1 }}>
+      <View
+        desktop={{ windowDrag: true }}
+        onContextMenu={(e) => asked.set(`menu ${Math.round(e.position.x)} ${Math.round(e.position.y)}`)}
+        style={{ marginLeft: 10, marginTop: 10, width: 100, height: 40 }}
+      />
+      <Input autoFocus value={asked()} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", DRAG_AREA_MENU, &[]).unwrap();
+    let (view, cx) = owned_view(cx, code, |_| {});
+    wait_for(&view, cx, "-");
+    // Not the window menu (Linux): the view's own menu. The surface starts
+    // below the platform's title bar (macOS, Windows).
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
+    let (position, button, modifiers) = (
+        gpui::point(gpui::px(x + 30.0), gpui::px(y + 25.0)),
+        gpui::MouseButton::Right,
+        gpui::Modifiers::default(),
+    );
+    cx.simulate_event(gpui::MouseDownEvent {
+        position,
+        button,
+        modifiers,
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position,
+        button,
+        modifiers,
+        click_count: 1,
+    });
+    wait_for(&view, cx, "menu 20 15");
 }

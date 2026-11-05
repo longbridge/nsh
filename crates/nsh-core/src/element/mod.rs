@@ -137,8 +137,9 @@ pub use self::{
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        CaretEvent, Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent,
-        OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDropEvent, GestureEvent, HintReason, ImageProgress,
+        NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress,
+        WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -187,7 +188,10 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer, SpeechAction},
+    task::{
+        Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer, NotificationAction,
+        SpeechAction,
+    },
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{

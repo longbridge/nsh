@@ -613,6 +613,45 @@ fn a_compact_drawer_is_dismissed_on_a_manual_clock() {
     app.wait_for("Docks Left- Left+ Left-").unwrap();
 }
 
+#[test]
+fn a_terminals_compact_sheet_gives_its_panel_the_sheets_rows() {
+    // A terminal sizes a box that holds content by its content: the
+    // bottom dock's sheet keeps its own height there, so the panel in it
+    // fills the rows under its tab bar, not none.
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
+            layout: with_two_docks(),
+            width: None,
+            height: None,
+            compact: Some(true),
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Terminal;
+    config.environment.cell = Some(Size::new(px(8.0), px(21.0)));
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("Tab a").unwrap();
+    app.press("id:toggle-bottom").unwrap();
+    app.wait_for("Panel terminal").unwrap();
+    app.wait(std::time::Duration::from_millis(500)).unwrap();
+    let sizes = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find(|t| t.starts_with("Sizes "))
+        .map(str::to_owned)
+        .unwrap();
+    let height: f32 = sizes
+        .split(' ')
+        .find_map(|part| part.strip_prefix("terminal="))
+        .and_then(|size| size.split('x').nth(1))
+        .and_then(|h| h.parse().ok())
+        .unwrap_or_else(|| panic!("no terminal panel: {sizes}"));
+    // The sheet is the dock's 200pt, its tab bar one row of it.
+    assert!(height >= 6.0 * 21.0, "{sizes}");
+}
+
 /// The workspace of `layout` on a phone-width browser page (the web in the
 /// phone idiom), driven by a mouse or a finger.
 fn start_web_phone(layout: DockAreaLayout) -> Headless {

@@ -25,9 +25,22 @@ on reload; changes to the Rust runtime need a restart.
 
 Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
+## Other languages
+
+This repository holds English and Chinese only, and a change updates only those.
+Every other language is machine translated in
+[huacnlee/nsh-website-translates](https://github.com/huacnlee/nsh-website-translates),
+which also lists the languages and runs the translation. The published root clones
+it to `translations/` (git-ignored); older versions, pull requests and local builds
+do without. Each translated page says it is a machine translation and links to the
+English; a page with no translation shows the English, not indexed.
+
+Translation pull requests are not accepted: a fix goes to the English page.
+
 ## Writing documentation
 
-Content is Markdown in three sections, each in English and Chinese:
+Content is Markdown in three sections, each in English and Chinese; other
+languages are machine translated ("Other languages" below):
 
 | Directory | URL | Nav label |
 | --- | --- | --- |
@@ -146,9 +159,9 @@ checkout's site (layouts, components, styles); a release takes from its tag
 only its pages (`docs`, `elements`, `modules`, `zh-CN`) and its demos, which
 run on the player its own `cargo xtask web` builds, so a page and its demo
 always match. Releases' builds are kept in `.versions/` (cached in CI) and
-rebuilt only when the site's own files change. Versions other than the latest
-are not indexed (their canonical link is the latest's page) and link to the
-latest's App Stories. The Release workflow's completion deploys the site, so
+rebuilt only when the site's own files change or, for the latest, the catalog's
+commit. Versions other than the latest are not indexed (their canonical link is
+the latest's page) and link to the latest's App Stories. The Release workflow's completion deploys the site, so
 a new release moves to the root. `NSH_SITE_VERSIONS=main,v0.3.0` limits a
 local run to those versions.
 

@@ -4,11 +4,11 @@
 // gpui-component's notifications are on gpui-base's: a `ToastManager` keeps
 // the toasts and their lifecycle, a `ToastStack` lays them out, a `Toast`
 // is each one's root.
-import { computed, createMotion, Overlay, signal, Text, View } from "nsh";
+import { cleanup, computed, createMotion, Overlay, signal, Text, View } from "nsh";
 import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
 import { safeArea } from "nsh";
 import { LucideIcon, type LucideIconName } from "./icons";
-import { alpha, colors, desktop, finish, hovered, radius } from "./ui";
+import { alpha, colors, desktop, finish, hovered, radius, TERMINAL_COLUMN, terminal } from "./ui";
 
 /** What a toast is about: the icon and the tone it shows. */
 export type ToastKind = "success" | "error" | "warning" | "info" | "loading";
@@ -36,7 +36,8 @@ const LIMIT = 3;
 /** How often the lifecycle advances while a toast is mounted. */
 const TICK = 50;
 
-const manager = new ToastManager();
+// A terminal's toast goes in one frame: no exit to wait for.
+const manager = new ToastManager(terminal ? { exitDuration: 0 } : undefined);
 const shown = signal<ToastEntry[]>([]);
 const expanded = signal(false);
 /** What each toast shows now: `updateToast` changes it in place. */
@@ -89,6 +90,9 @@ function run() {
 /** Shows a toast; resolves once it is gone, with its action if that closed it. */
 export function toast(content: ToastContent): Promise<string | null> {
   const id = content.id ?? `toast-${++count}`;
+  // A terminal shows one toast, on its bottom row: a new one replaces the
+  // others.
+  if (terminal) for (const e of shown()) if (e.id !== id) manager.dismiss(e.id);
   answers.get(id)?.(null);
   lingering.delete(id);
   contents.set({ ...contents(), [id]: content });
@@ -143,6 +147,56 @@ function KindIcon(props: { kind: ToastKind }) {
     <View style={{ width: 18, height: 18, ...m.style }}>
       <LucideIcon name={kinds[props.kind].icon} size={18} tint={kinds[props.kind].tint()} />
     </View>
+  );
+}
+
+/** A terminal's mark of each kind, in its tone. */
+const marks: Record<Exclude<ToastKind, "loading">, string> = { success: "✓", error: "✗", warning: "!", info: "i" };
+/** The frames of a terminal's loading mark. */
+const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/** A terminal's mark of a kind: a loading one spins, a frame at a time. */
+function KindMark(props: { kind: ToastKind }) {
+  if (props.kind !== "loading") {
+    return <Text style={{ fontWeight: "600", color: kinds[props.kind].tint() }}>{marks[props.kind]}</Text>;
+  }
+  const frame = signal(0);
+  const timer = setInterval(() => frame.set((frame() + 1) % SPINNER.length), 80);
+  cleanup(() => clearInterval(timer));
+  return <Text style={{ color: colors.muted }}>{SPINNER[frame()]}</Text>;
+}
+
+/**
+ * One toast in a terminal: a row of the bottom line, its mark, its title
+ * and its muted description, then its action and its cross at the end.
+ */
+function TerminalItem(props: { entry: ToastEntry }) {
+  const content = () => contents()[props.entry.id] ?? { title: "" };
+  const kind = computed(() => content().kind);
+  return (
+    <Toast
+      transitionStatus={props.entry.status}
+      accessibilityLabel={[content().title, content().description].filter(Boolean).join(". ")}
+      onDismissRequest={() => dismissToast(props.entry.id)}
+      swipeDirection={null}
+      style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}
+    >
+      {() => (kind() ? <KindMark kind={kind()!} /> : null)}
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", gap: TERMINAL_COLUMN }}>
+        <Text style={{ numberOfLines: 1, fontWeight: "600", color: colors.text }}>{content().title}</Text>
+        <If when={content().description}>
+          <Text style={{ flex: 1, minWidth: 0, numberOfLines: 1, color: colors.muted }}>{content().description}</Text>
+        </If>
+      </View>
+      <If when={content().action}>
+        <View role="button" onPress={() => choose(props.entry.id, content().action!)}>
+          <Text style={{ fontWeight: "600", color: colors.info }}>{content().action}</Text>
+        </View>
+      </If>
+      <View role="button" accessibilityLabel={content().close ?? "Close"} onPress={() => dismissToast(props.entry.id)}>
+        <Text style={{ color: colors.muted }}>×</Text>
+      </View>
+    </Toast>
   );
 }
 
@@ -223,8 +277,22 @@ function Item(props: { entry: ToastEntry }) {
   );
 }
 
-/** Where the toasts show: at the bottom, inside the safe area. */
+/** Where the toasts show: at the bottom, inside the safe area; a terminal's on its bottom row. */
 export function Toaster() {
+  if (terminal) {
+    return (
+      <ToastStack
+        onCancel={() => {
+          const newest = shown().filter((e) => e.status !== "ending").at(-1);
+          if (newest) dismissToast(newest.id);
+        }}
+      >
+        <Each of={shown()} key={(e: ToastEntry) => e.id}>
+          {(entry) => <TerminalItem entry={entry()} />}
+        </Each>
+      </ToastStack>
+    );
+  }
   return (
     <Overlay
       style={{ pointerEvents: "box-none", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: safeArea().bottom + 16, alignItems: desktop() ? "flex-end" : "center" }}

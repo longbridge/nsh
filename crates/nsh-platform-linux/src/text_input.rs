@@ -232,6 +232,8 @@ pub(crate) struct InputState {
     /// The input method's composition (its preedit text) while one is in
     /// progress: GTK shows it in the editor, outside the text.
     composition: RefCell<Option<String>>,
+    /// A multiline editor's lines of the configured height.
+    lines: RefCell<LineBoxes>,
     /// JS's value set during a composition, with its count: setting the
     /// text then would reset the input method, so it is applied when the
     /// composition ends.
@@ -470,6 +472,7 @@ impl Ctx {
         let Some(input) = self.input.upgrade() else {
             return;
         };
+        input.composed_line(text);
         if text.is_empty() {
             self.composition_ended();
             return;
@@ -593,6 +596,32 @@ impl Drop for InputState {
 }
 
 impl InputState {
+    /// Gives the paragraphs an edit touched their line boxes.
+    fn edited_lines(&self) {
+        let Editor::Area { view, .. } = &*self.editor.borrow() else {
+            return;
+        };
+        let buffer = view.buffer();
+        let composition = self.composition.borrow();
+        let preedit = composition.as_deref().unwrap_or_default();
+        let mut lines = self.lines.borrow_mut();
+        if let Some((start, end)) = lines.edited.take() {
+            let first = buffer.iter_at_offset(start).line();
+            let last = buffer.iter_at_offset(end).line();
+            lines.apply(view, first, last, preedit);
+        }
+    }
+
+    /// Gives the caret's paragraph its line box with the input method's
+    /// composition in it, which is no part of the buffer's text.
+    fn composed_line(&self, preedit: &str) {
+        if let Editor::Area { view, .. } = &*self.editor.borrow() {
+            let buffer = view.buffer();
+            let line = buffer.iter_at_mark(&buffer.get_insert()).line();
+            self.lines.borrow_mut().apply(view, line, line, preedit);
+        }
+    }
+
     /// The placeholder shows while there is no text, nor an input
     /// method's composition (GTK draws its preedit text outside the text).
     fn update_placeholder(&self) {
@@ -673,6 +702,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         selection: Cell::new((0, 0)),
         caret: Cell::new(Bounds::default()),
         composition: RefCell::new(None),
+        lines: RefCell::default(),
         held: RefCell::new(None),
         cx: std::cell::OnceCell::new(),
         window: RefCell::new(None),
@@ -765,6 +795,11 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
             let buffer = view.buffer();
             let c = cx.clone();
             buffer.connect_insert_text(move |b, iter, text| {
+                if let Some(input) = c.input.upgrade() {
+                    let start = iter.offset();
+                    let end = start + text.chars().count() as i32;
+                    input.lines.borrow_mut().edit(start, end);
+                }
                 let Some(input) = c.user_edit() else { return };
                 let fit = c.allowed(
                     || b.text(&b.start_iter(), &b.end_iter(), false).into(),
@@ -785,6 +820,10 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
             });
             let c = cx.clone();
             buffer.connect_delete_range(move |_, start, end| {
+                if let Some(input) = c.input.upgrade() {
+                    let at = start.offset().min(end.offset());
+                    input.lines.borrow_mut().edit(at, at);
+                }
                 if start != end
                     && let Some(input) = c.user_edit()
                 {
@@ -798,7 +837,12 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
                 }
             });
             let c = cx.clone();
-            buffer.connect_changed(move |_| c.changed());
+            buffer.connect_changed(move |_| {
+                if let Some(input) = c.input.upgrade() {
+                    input.edited_lines();
+                }
+                c.changed();
+            });
             let c = cx.clone();
             view.connect_preedit_changed(move |_, text| c.preedit_changed(text));
             let c = cx.clone();
@@ -959,7 +1003,7 @@ pub(crate) fn config(_surface: &Rc<Surface>, view: &NshView, config: &InputConfi
         }
     }
     if let Editor::Area { view, .. } = &editor {
-        set_line_box(view, &config.style);
+        input.lines.borrow_mut().configure(view, &config.style);
     }
     let label = &input.placeholder;
     label.set_label(&config.placeholder);
@@ -1143,19 +1187,162 @@ fn place(view: &NshView, input: &InputState) {
     }
 }
 
-/// Gives a text view's lines the configured height: it ignores CSS's
-/// `line-height`. The extra space goes around the text rather than in the
-/// line, as the caret is as tall as the text between these pixels: half
-/// above and below a line, all of it between a line's wrapped parts.
-fn set_line_box(view: &gtk::TextView, style: &ResolvedTextStyle) {
-    let layout = view.create_pango_layout(Some("Ag"));
-    layout.set_font_description(Some(&crate::text::main_font_description(style)));
-    // Rounded as the text view rounds its lines (`pixel_size` rounds up).
-    let font = (layout.size().1 as f32 / gtk::pango::SCALE as f32).round() as i32;
-    let (above, below) = line_box(style.line_height.0, font);
-    view.set_pixels_above_lines(above);
-    view.set_pixels_below_lines(below);
-    view.set_pixels_inside_wrap(above + below);
+/// Gives a text view's lines the configured height, on one baseline.
+///
+/// A text view ignores CSS's `line-height`, so the extra space goes around
+/// the text rather than in the line (the caret is as tall as the text
+/// between these pixels): above and below a paragraph, all of it between
+/// its wrapped parts. A fallback font (CJK in a Latin font) makes a line
+/// taller and puts its baseline lower than the main font's, so with the same
+/// pixels the first such character typed would move the text down, and past
+/// a box of one line's height, which then scrolls to the caret. Such a
+/// paragraph has a tag of its own (a paragraph takes the pixels of its first
+/// character): a line height factor shrinks its runs around their centers
+/// until the baseline is the main font's, and pixels make up the height. A
+/// wrapped part of it without the fallback font shrinks too, and stands a
+/// little closer to its neighbours.
+#[derive(Default)]
+struct LineBoxes {
+    /// The text view and what the boxes were measured for.
+    measured: Option<(gtk::TextView, gtk::pango::FontDescription, i32)>,
+    /// The main font's ascent and height.
+    main: (f32, f32),
+    /// The tags of the paragraphs that do not have the main font's box.
+    tags: Vec<(ParagraphBox, gtk::TextTag)>,
+    /// The character range edited, until the buffer says it has changed.
+    edited: Option<(i32, i32)>,
+}
+
+impl LineBoxes {
+    /// Measures the boxes for `style`, unless they are measured already.
+    fn configure(&mut self, view: &gtk::TextView, style: &ResolvedTextStyle) {
+        let font = crate::text::main_font_description(style);
+        let height = style.line_height.0.round() as i32;
+        let measured = (view.clone(), font, height);
+        if self.measured.as_ref() == Some(&measured) {
+            return;
+        }
+        for (_, tag) in self.tags.drain(..) {
+            view.buffer().tag_table().remove(&tag);
+        }
+        self.main = font_line(view, &measured.1, "Ag");
+        let main = paragraph_box(height, self.main, self.main);
+        view.set_pixels_above_lines(main.above);
+        view.set_pixels_below_lines(main.below);
+        view.set_pixels_inside_wrap(main.above + main.below);
+        self.measured = Some(measured);
+        self.apply(view, 0, view.buffer().line_count() - 1, "");
+    }
+
+    /// Notes an edit of the characters from `start` to `end`.
+    fn edit(&mut self, start: i32, end: i32) {
+        let (start, end) = match self.edited {
+            Some((s, e)) => (s.min(start), e.max(end)),
+            None => (start, end),
+        };
+        self.edited = Some((start, end));
+    }
+
+    /// Gives the paragraphs `first` to `last` their boxes. `preedit` is the
+    /// input method's composition, shown in the caret's paragraph.
+    fn apply(&mut self, view: &gtk::TextView, first: i32, last: i32, preedit: &str) {
+        let Some((_, font, height)) = self.measured.clone() else {
+            return;
+        };
+        let buffer = view.buffer();
+        let caret = buffer.iter_at_mark(&buffer.get_insert()).line();
+        let main = paragraph_box(height, self.main, self.main);
+        for line in first..=last {
+            let Some(start) = buffer.iter_at_line(line) else {
+                break;
+            };
+            let mut end = start;
+            if !end.ends_line() {
+                end.forward_to_line_end();
+            }
+            let mut text = buffer.text(&start, &end, true).to_string();
+            if line == caret {
+                text.push_str(preedit);
+            }
+            let metrics = if text.is_ascii() {
+                self.main
+            } else {
+                font_line(view, &font, &text)
+            };
+            let paragraph = paragraph_box(height, self.main, metrics);
+            let mut next = start;
+            next.forward_line();
+            for (_, tag) in &self.tags {
+                buffer.remove_tag(tag, &start, &next);
+            }
+            if paragraph != main {
+                buffer.apply_tag(&self.tag(&buffer, paragraph), &start, &next);
+            }
+        }
+    }
+
+    /// The tag of `paragraph`.
+    fn tag(&mut self, buffer: &gtk::TextBuffer, paragraph: ParagraphBox) -> gtk::TextTag {
+        if let Some((_, tag)) = self.tags.iter().find(|(p, _)| *p == paragraph) {
+            return tag.clone();
+        }
+        let tag = gtk::TextTag::builder()
+            .pixels_above_lines(paragraph.above)
+            .pixels_below_lines(paragraph.below)
+            .pixels_inside_wrap(paragraph.above + paragraph.below)
+            .build();
+        if paragraph.shrink != 1.0 {
+            tag.set_property("line-height", paragraph.shrink);
+        }
+        buffer.tag_table().add(&tag);
+        self.tags.push((paragraph, tag.clone()));
+        tag
+    }
+}
+
+/// The ascent and height of a line of `text` in `font`, with its fallback
+/// fonts.
+fn font_line(view: &gtk::TextView, font: &gtk::pango::FontDescription, text: &str) -> (f32, f32) {
+    let layout = view.create_pango_layout(Some(text));
+    layout.set_font_description(Some(font));
+    let pixels = |units: i32| units as f32 / gtk::pango::SCALE as f32;
+    (pixels(layout.baseline()), pixels(layout.size().1))
+}
+
+/// What puts a paragraph's lines on the main font's baseline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ParagraphBox {
+    /// Pixels above and below its lines.
+    above: i32,
+    below: i32,
+    /// The factor of its runs' heights.
+    shrink: f32,
+}
+
+/// The box of a paragraph whose line has `metrics` (ascent, height) among
+/// lines `height` high of the `main` font: that font stands centered, with
+/// no pixels if it is taller. Pixels are whole,
+/// rounded as the text view rounds its lines (`pixel_size` rounds up); the
+/// shrinking is not, for the baselines to meet exactly.
+fn paragraph_box(height: i32, main: (f32, f32), metrics: (f32, f32)) -> ParagraphBox {
+    // Without a line height every line keeps the height of its fonts.
+    if height <= 0 {
+        return ParagraphBox {
+            above: 0,
+            below: 0,
+            shrink: 1.0,
+        };
+    }
+    let baseline = ((height - main.1.round() as i32).max(0) / 2) as f32 + main.0;
+    // A run shrinks around its center, half of it off its ascent.
+    let excess = (metrics.0 - baseline).max(0.0);
+    let shrunk = (metrics.1 - 2.0 * excess).max(1.0);
+    let above = (baseline - metrics.0).max(0.0).round() as i32;
+    ParagraphBox {
+        above,
+        below: (height - above - shrunk.round() as i32).max(0),
+        shrink: shrunk / metrics.1.max(1.0),
+    }
 }
 
 /// How far to move a multiline placeholder for its first line to stand on
@@ -1187,13 +1374,6 @@ fn placeholder_lift(
         layout.set_attributes(Some(&attrs));
     }
     (typed + text.pixels_above_lines() as f32 - baseline(layout)).round() as i32
-}
-
-/// The whole pixels above and below a line of a font `font` high to make it
-/// `line_height` high: none without a line height or if the font is taller.
-fn line_box(line_height: f32, font: i32) -> (i32, i32) {
-    let extra = (line_height.round() as i32 - font).max(0);
-    (extra / 2, extra - extra / 2)
 }
 
 /// The horizontal alignment of the text (0: left, 1: right).
@@ -1501,10 +1681,28 @@ mod tests {
 
     #[test]
     fn line_boxes() {
-        assert_eq!(line_box(24.0, 18), (3, 3));
-        assert_eq!(line_box(25.0, 18), (3, 4));
-        assert_eq!(line_box(0.0, 18), (0, 0));
-        assert_eq!(line_box(12.0, 18), (0, 0));
+        let plain = |above, below| ParagraphBox {
+            above,
+            below,
+            shrink: 1.0,
+        };
+        let main = (14.0, 18.0);
+        assert_eq!(paragraph_box(24, main, main), plain(3, 3));
+        assert_eq!(paragraph_box(25, main, main), plain(3, 4));
+        assert_eq!(paragraph_box(0, main, main), plain(0, 0));
+        assert_eq!(paragraph_box(12, main, main), plain(0, 0));
+        // No line height: nothing shrinks, whatever the font.
+        assert_eq!(paragraph_box(0, (16.0, 21.0), (20.0, 25.0)), plain(0, 0));
+        // A fallback font's taller line, shrunk onto the main font's baseline
+        // (17) and height: 25 high, its ascent 20, loses 3 on either side.
+        let tall = paragraph_box(24, (16.0, 21.0), (20.0, 25.0));
+        assert_eq!((tall.above, tall.below), (0, 5));
+        assert_eq!(tall.shrink, 19.0 / 25.0);
+        // One that leaves the baseline alone keeps its height.
+        assert_eq!(paragraph_box(30, (16.0, 21.0), (20.0, 25.0)), plain(0, 5));
+        // Fractions of a pixel count: the baselines meet exactly.
+        let tall = paragraph_box(24, (16.25, 21.0), (20.5, 25.0));
+        assert_eq!(tall.shrink, 18.5 / 25.0);
     }
 
     /// The caret is the font's height, centered in a line of the configured
@@ -1524,7 +1722,8 @@ mod tests {
             let provider = gtk::CssProvider::new();
             provider.load_from_string("textview { font-size: 15px; }");
             add_provider(&view, &provider);
-            set_line_box(&view, &style);
+            let mut lines = LineBoxes::default();
+            lines.configure(&view, &style);
             let window = gtk::Window::new();
             window.set_child(Some(&view));
             window.present();
@@ -1536,6 +1735,87 @@ mod tests {
             assert_eq!(second.y() - first.y(), 24);
             assert!(first.height() < 24, "caret {}", first.height());
             assert_eq!(first.y(), (24 - first.height()) / 2);
+        });
+    }
+
+    /// A fallback font in a line (CJK here) leaves the line's height and
+    /// baseline as they are, typed or composed.
+    #[test]
+    fn a_fallback_font_keeps_the_lines_baseline() {
+        crate::gtk_test::run(|| {
+            for font_size in [15.5, 16.0, 17.0] {
+                let view = gtk::TextView::new();
+                let style = ResolvedTextStyle {
+                    font_size: Points(font_size),
+                    line_height: Points(24.0),
+                    ..Default::default()
+                };
+                let provider = gtk::CssProvider::new();
+                provider.load_from_string(&format!("textview {{ font-size: {font_size}px; }}"));
+                add_provider(&view, &provider);
+                let window = gtk::Window::new();
+                window.set_child(Some(&view));
+                window.present();
+                crate::gtk_test::wait_until(|| view.height() > 0);
+                let mut lines = LineBoxes::default();
+                lines.configure(&view, &style);
+                let font = crate::text::main_font_description(&style);
+                let buffer = view.buffer();
+                let mut set = |text: &str| {
+                    buffer.set_text(text);
+                    lines.apply(&view, 0, buffer.line_count() - 1, "");
+                };
+                // Where a line of `text` has its baseline with `shrink`.
+                let baseline = |text: &str, shrink: f32| {
+                    let layout = view.create_pango_layout(Some(text));
+                    layout.set_font_description(Some(&font));
+                    let attrs = gtk::pango::AttrList::new();
+                    attrs.insert(gtk::pango::AttrFloat::new_line_height(f64::from(shrink)));
+                    layout.set_attributes(Some(&attrs));
+                    layout.baseline() as f32 / gtk::pango::SCALE as f32
+                };
+                let height = || view.line_yrange(&buffer.start_iter()).1;
+                set("NSH");
+                assert!(crate::gtk_test::wait_until(|| height() == 24));
+                let main = font_line(&view, &font, "Ag");
+                let centered = ((24 - main.1.round() as i32) / 2) as f32 + main.0;
+                // Without a CJK font on the machine no fallback font lowers the
+                // baseline, so there is nothing to keep still.
+                let fallback = font_line(&view, &font, "\u{7684}");
+                if paragraph_box(24, main, fallback).shrink == 1.0 {
+                    window.destroy();
+                    continue;
+                }
+                for text in ["NSH\u{7684}", "\u{7684}\u{7684}"] {
+                    set(text);
+                    assert!(
+                        crate::gtk_test::wait_until(|| height() == 24),
+                        "{text} at {font_size}: {}",
+                        height()
+                    );
+                    let metrics = font_line(&view, &font, text);
+                    let shrink = paragraph_box(24, main, metrics).shrink;
+                    assert!(
+                        (baseline(text, shrink) - centered).abs() < 0.1,
+                        "{text} at {font_size}"
+                    );
+                }
+                // Only a paragraph with the fallback font takes its box.
+                set("NSH\n\u{7684}");
+                assert!(buffer.start_iter().tags().is_empty());
+                let second = buffer.iter_at_line(1).expect("a second line");
+                assert!(!second.tags().is_empty());
+                assert_eq!(view.line_yrange(&second).0, 24);
+                // Taking the character out takes its box back.
+                set("NSH");
+                assert!(buffer.start_iter().tags().is_empty());
+                // A composition in the fallback font counts, and ends.
+                lines.apply(&view, 0, 0, "\u{7684}");
+                assert!(!buffer.start_iter().tags().is_empty());
+                lines.apply(&view, 0, 0, "");
+                assert!(buffer.start_iter().tags().is_empty());
+                window.destroy();
+            }
         });
     }
 

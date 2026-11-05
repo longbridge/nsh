@@ -226,6 +226,20 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 Without an icon, the system shows its default.
 
+## Camera, Bluetooth and other hardware
+
+NSH has no API for the camera, video recording, Bluetooth or location, and `nsh package` cannot make an app that uses
+them: NSH writes the app's `Info.plist` and Android manifest, `nsh.json` has no key that adds to them, and a packaged
+Android app cannot add Java code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
+protected hardware without a usage description in `Info.plist`, and the Android manifest of a packaged app declares
+only `INTERNET`.
+
+An app that needs them embeds NSH in its own Xcode or Gradle project ([iOS](./ios.md#embedding-in-an-ios-app),
+[Android](./android.md#embedding-in-an-android-app)). That project owns `Info.plist` and `AndroidManifest.xml`, so it
+declares what it uses there and writes the platform code itself: a camera preview is a
+[native component](./native-components.md), and the app reaches everything else through
+[`host.call`](./ios.md#talking-to-the-app) ([on Android](./android.md#talking-to-the-app)).
+
 ## What is inside
 
 A Rust app's package is its runner, built with your crate and its root mounted, and the assets its crates register
@@ -258,3 +272,4 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 - [CLI](./cli.md): every command
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
+- [Native components](./native-components.md): views of the host app inside an NSH app

@@ -460,7 +460,11 @@ fn is_emoji_presentation(c: &str) -> bool {
 pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 
 /// A nested `<text>` span with press listeners: presses on its characters
-/// go to it rather than to the block.
+/// go to it rather than to the block. It is a stop of the keyboard focus
+/// of its own ([`Self::focus_stop`]): Tab reaches it after its text view,
+/// in text order, the platform reports `FOCUSED` (`focus:`) and `Focus` /
+/// `Blur` for the span's node and presses it on Return, as a view that
+/// takes presses.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextLink {
     /// Start offset (UTF-16 units, inclusive).
@@ -471,6 +475,9 @@ pub struct TextLink {
     pub node: NodeId,
     /// Its listeners.
     pub events: EventMask,
+    /// A stop of Tab (`ViewProps::focus_stop` of the span: unless
+    /// `focusable={false}` or disabled).
+    pub focus_stop: bool,
 }
 
 /// A nested `<Text>` span with a `testID` ([`AttributedText::test_ids`]).
@@ -718,6 +725,15 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// Whether each line takes all that fits and [`TextEngine::measure`]'s
+    /// width is the widest line's: a maximum width between that width and
+    /// the one measured then breaks the lines at the same places, so the
+    /// core knows the size without typesetting. A window's resize changes
+    /// the width of every text of a page on every size.
+    fn breaks_lines_greedily(&self) -> bool {
+        false
+    }
+
     /// The final layout in a box of exactly `size`, for drawing.
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
@@ -796,6 +812,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
         (**self).prepare_aligned(text, alignments)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        (**self).breaks_lines_greedily()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
@@ -988,7 +1008,8 @@ mod estimate {
 
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
 /// tests: every character is `0.55 × font size` wide and lines are
-/// `1.2 × font size` tall, their baseline at the bottom (the font's ascent
+/// `1.2 × font size` tall; a text with line breaks measures as wide as its
+/// widest line and as tall as its lines (each wrapped on its own), their baseline at the bottom (the font's ascent
 /// is the line, its descent 0, its x height `0.5 × font size`), where
 /// attachments are placed by [`TextAttachment::ascent`] on the first line.
 #[derive(Debug, Default, Clone, Copy)]
@@ -996,8 +1017,16 @@ pub struct ApproxTextEngine;
 
 impl TextEngine for ApproxTextEngine {
     /// `(character count, font size, max lines, attachments, the indices of
-    /// the characters two UTF-16 units long)`.
-    type Prepared = (usize, Points, u32, Vec<TextAttachment>, Vec<u32>);
+    /// the characters two UTF-16 units long, each line's character count
+    /// when the text has line breaks)`.
+    type Prepared = (
+        usize,
+        Points,
+        u32,
+        Vec<TextAttachment>,
+        Vec<u32>,
+        Vec<usize>,
+    );
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
         self.prepare_aligned(text, &AttachmentAlignments::default())
@@ -1017,6 +1046,11 @@ impl TextEngine for ApproxTextEngine {
             .filter(|(_, c)| c.len_utf16() == 2)
             .filter_map(|(i, _)| u32::try_from(i).ok())
             .collect();
+        // Empty (no allocation) for a text of one line.
+        let lines = match text.text.contains('\n') {
+            true => text.text.split('\n').map(|l| l.chars().count()).collect(),
+            false => Vec::new(),
+        };
         (
             text.text.chars().count(),
             size,
@@ -1032,20 +1066,30 @@ impl TextEngine for ApproxTextEngine {
                 })
                 .collect(),
             astral,
+            lines,
         )
     }
 
     fn measure(
         &self,
-        &(chars, font, max_lines, ..): &Self::Prepared,
+        &(chars, font, max_lines, _, _, ref breaks): &Self::Prepared,
         max_width: Option<Points>,
     ) -> Size<Points> {
         // The order of the products is kept: it decides the last bit.
-        let width = Points(chars as f32 * font.0 * 0.55);
+        let wrap = |chars: usize| {
+            let width = Points(chars as f32 * font.0 * 0.55);
+            match max_width {
+                Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
+                _ => (width, 1.0),
+            }
+        };
         let line = font * 1.2;
-        let (width, mut lines) = match max_width {
-            Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
-            _ => (width, 1.0),
+        let (width, mut lines) = match breaks.is_empty() {
+            true => wrap(chars),
+            false => breaks.iter().fold((Points::ZERO, 0.0), |(w, n), &c| {
+                let (lw, ln) = wrap(c);
+                (w.max(lw), n + ln)
+            }),
         };
         if max_lines > 0 {
             lines = lines.min(max_lines as f32);
@@ -1055,7 +1099,7 @@ impl TextEngine for ApproxTextEngine {
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         // On one line, each character as wide as the others.
-        let (chars, font, _, attachments, astral) = prepared;
+        let (chars, font, _, attachments, astral, _) = prepared;
         let line = *font * 1.2;
         let advance = *font * 0.55;
         let attachments = attachments
@@ -1191,11 +1235,17 @@ impl ApproxLayout {
 ///
 /// It also holds the surface's pixel ratio: measurements are rounded up to
 /// its device pixels ([`MeasureCache::pixel_ratio`]), so they are only
-/// valid for one ratio and go when it changes.
+/// valid for one ratio and go when it changes. On a grid surface (a
+/// terminal) they are rounded up to its whole Cells instead
+/// ([`MeasureCache::set_cell`]).
 pub(crate) struct MeasureCache {
     current: FxHashMap<(u64, u32), Size<Points>>,
     previous: FxHashMap<(u64, u32), Size<Points>>,
     pixel_ratio: f32,
+    cell: Option<Size<Points>>,
+    /// The commit of a burst of resizes under way (`Core::set_resizing`):
+    /// text it did not find near the screen is not measured.
+    pub(crate) resizing: Option<u32>,
 }
 
 impl Default for MeasureCache {
@@ -1204,6 +1254,8 @@ impl Default for MeasureCache {
             current: FxHashMap::default(),
             previous: FxHashMap::default(),
             pixel_ratio: 1.0,
+            cell: None,
+            resizing: None,
         }
     }
 }
@@ -1230,6 +1282,30 @@ impl MeasureCache {
         self.pixel_ratio = ratio;
         self.clear();
         true
+    }
+
+    /// Measures on a grid of `cell` (a terminal's Cells) from now on, or to
+    /// device pixels with `None`; returns whether it changed (the
+    /// measurements cached before are dropped).
+    pub(crate) fn set_cell(&mut self, cell: Option<Size<Points>>) -> bool {
+        if cell == self.cell {
+            return false;
+        }
+        self.cell = cell;
+        self.clear();
+        true
+    }
+
+    /// `size` rounded up to whole Cells on a grid surface: a text is never
+    /// shorter or narrower than the Cells it takes, so the frames rounded
+    /// to Cells never cut its last line or glyph. `None` off a grid.
+    pub(crate) fn on_cells(&self, size: Size<Points>) -> Option<Size<Points>> {
+        let cell = self.cell?;
+        let up = |v: Points, c: Points| Points(((v.0 / c.0) - 1.0e-3).ceil().max(0.0) * c.0);
+        Some(Size::new(
+            up(size.width, cell.width),
+            up(size.height, cell.height),
+        ))
     }
 
     /// Drops every measurement (the fonts changed), keeping the ratio.

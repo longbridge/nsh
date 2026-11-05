@@ -783,6 +783,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(e) = a.state.expanded {
         let _ = write!(s, ",\"expanded\":{e}");
     }
+    if a.state.has_popup {
+        s.push_str(",\"hasPopup\":true");
+    }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
     }
@@ -822,6 +825,10 @@ fn props_json(p: &ViewProps) -> String {
     }
     if p.selectable_view {
         s.push_str(",\"selectableView\":true");
+    }
+    // A wrapped line's later part: a copy joins it to the part before.
+    if p.continues_text {
+        s.push_str(",\"continuesText\":true");
     }
     s.push('}');
     s
@@ -1017,6 +1024,13 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
             };
+            // `borderCurve: "continuous"`: `nsh.js`'s `placeCorners` draws
+            // them, by the frame too.
+            if style.continuous_corners {
+                let radii = style.corner_radius.to_array();
+                let [a, b, c, d] = radii.map(|r| r.unwrap_or(style.border_radius).0);
+                out.num(a).num(b).num(c).num(d);
+            }
             out.end();
         }
         MountItem::Text {
@@ -1360,6 +1374,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ComponentProps { .. }
         | MountItem::ComponentPropSlots { .. }
         | MountItem::Keymap(_)
+        | MountItem::TreeOrder(_)
+        | MountItem::ProjectStates { .. }
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }
         | MountItem::Animation(_) => {}
@@ -1448,6 +1464,40 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::Notification(command) => {
+            use nsh_core::notifications::NotificationCommand as N;
+            match command {
+                N::Permission { id: request, ask } => out
+                    .item("cmd")
+                    .num(id)
+                    .str("notificationPermission")
+                    .num(*request)
+                    .bool(*ask)
+                    .end(),
+                N::Show {
+                    id: request,
+                    notification,
+                } => out
+                    .item("cmd")
+                    .num(id)
+                    .str("showNotification")
+                    .num(*request)
+                    .str(&notification.id)
+                    .str(&notification.title)
+                    .str(&notification.body)
+                    .end(),
+                N::Close(name) => out
+                    .item("cmd")
+                    .num(id)
+                    .str("closeNotification")
+                    .str(name)
+                    .end(),
+                N::SetBadge(count) => out.item("cmd").num(id).str("setBadge").num(*count).end(),
+                // Presses are reported as they come: a browser starts no
+                // page from one.
+                _ => {}
+            }
+        }
         Command::OpenUrl { id: request, url } => out
             .item("cmd")
             .num(id)

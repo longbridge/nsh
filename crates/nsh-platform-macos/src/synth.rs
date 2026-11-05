@@ -6,7 +6,9 @@
 use std::rc::Rc;
 
 use objc2::{MainThreadMarker, rc::Retained};
-use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+use objc2_app_kit::{
+    NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSWindow,
+};
 use objc2_core_foundation::CGFloat;
 use objc2_foundation::{NSPoint, NSString};
 
@@ -193,6 +195,10 @@ pub(crate) fn key(surface: &Rc<Surface>, window: &NSWindow, name: &str) {
             && let Some(n) = f[1..].parse::<u16>().ok().filter(|n| (1..=12).contains(n)) =>
         {
             const CODES: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];
+            // With the Function flag, as a keyboard's function keys have it:
+            // without it AppKit does not match one to a menu item's key
+            // equivalent.
+            flags |= NSEventModifierFlags::Function;
             let c = char::from_u32(0xf703 + u32::from(n)).unwrap_or('\0');
             (c.to_string(), CODES[usize::from(n - 1)])
         }
@@ -244,19 +250,119 @@ pub(crate) fn key_event(
             code,
         );
         let Some(event) = event else { continue };
+        let app = NSApplication::sharedApplication(MainThreadMarker::from(window));
         // Key equivalents (menus) and key monitors (`nsh/keymap`) are the
         // application's, which hands the key to its key window.
-        if window.isKeyWindow() || flags.contains(NSEventModifierFlags::Command) {
-            objc2_app_kit::NSApplication::sharedApplication(MainThreadMarker::from(window))
-                .sendEvent(&event);
+        if window.isKeyWindow() {
+            app.sendEvent(&event);
         } else if kind == NSEventType::KeyDown && crate::keymap::fires(surface, &event) {
             // The app's key monitor never sees a window's own events: it
             // gets the key first, as it would in the key window (the test
             // window often is not one, its app left in the background).
+        } else if kind == NSEventType::KeyDown && key_equivalent(window, &app, &event) {
+            // A key equivalent of the window's views (Command keys) or of
+            // the main menu, sent where the application would send it to
+            // its key window: this one is not (an app run in the
+            // background has none).
+        } else if flags.contains(NSEventModifierFlags::Command) {
+            app.sendEvent(&event);
         } else {
             window.sendEvent(&event);
         }
     }
+}
+
+/// Whether a key equivalent took the key-down `event`: a Command key's, of
+/// `window`'s views, else the main menu's item for it (any modifiers, as in
+/// the key window), in the order the application tries them. A menu's
+/// action goes to its item's target, else down `window`'s responder chain
+/// from its first responder: AppKit's own search for a target starts at
+/// the key window, which an app in the background has none of.
+fn key_equivalent(window: &NSWindow, app: &NSApplication, event: &NSEvent) -> bool {
+    if event
+        .modifierFlags()
+        .contains(NSEventModifierFlags::Command)
+        && window.performKeyEquivalent(event)
+    {
+        return true;
+    }
+    let Some(item) = app.mainMenu().and_then(|menu| menu_item(&menu, event)) else {
+        return false;
+    };
+    let Some(action) = item.action() else {
+        return false;
+    };
+    // SAFETY: `action` is the item's own, and the item is its sender, as
+    // when the menu sends it.
+    unsafe {
+        match item.target() {
+            Some(target) => app.sendAction_to_from(action, Some(&target), Some(&item)),
+            None => window
+                .firstResponder()
+                .is_some_and(|responder| responder.tryToPerform_with(action, Some(&item))),
+        }
+    }
+}
+
+/// The item of `menu` (or of its submenus) whose key equivalent key-down
+/// `event` is. Not whether it is enabled: AppKit validates that against
+/// the key window's responders, and with none every item looks disabled
+/// once the menu has been validated; an item nothing answers does nothing
+/// when sent, and one the app disabled has an action nothing answers.
+fn menu_item(menu: &NSMenu, event: &NSEvent) -> Option<Retained<NSMenuItem>> {
+    let flags = event.modifierFlags() & key_equivalent_modifiers();
+    let key = event
+        .charactersIgnoringModifiers()?
+        .to_string()
+        .to_lowercase();
+    find_item(menu, flags, &key)
+}
+
+/// The modifiers a menu item's key equivalent can name.
+fn key_equivalent_modifiers() -> NSEventModifierFlags {
+    NSEventModifierFlags::Command
+        | NSEventModifierFlags::Shift
+        | NSEventModifierFlags::Option
+        | NSEventModifierFlags::Control
+}
+
+/// [`menu_item`]'s search, for the event's `flags` (of those modifiers)
+/// and lower-case `key`.
+fn find_item(
+    menu: &NSMenu,
+    flags: NSEventModifierFlags,
+    key: &str,
+) -> Option<Retained<NSMenuItem>> {
+    for item in menu.itemArray() {
+        if let Some(submenu) = item.submenu() {
+            if item.action() == Some(crate::chrome::disabled()) {
+                continue;
+            }
+            if let Some(found) = find_item(&submenu, flags, key) {
+                return Some(found);
+            }
+            continue;
+        }
+        let equivalent = item.keyEquivalent().to_string();
+        if equivalent.is_empty() {
+            continue;
+        }
+        // An upper-case equivalent means Shift with its lower case.
+        let mut wanted = item.keyEquivalentModifierMask() & key_equivalent_modifiers();
+        if equivalent.chars().any(char::is_uppercase) {
+            wanted |= NSEventModifierFlags::Shift;
+        }
+        if wanted == flags
+            && if equivalent.is_ascii() {
+                equivalent.eq_ignore_ascii_case(key)
+            } else {
+                equivalent.to_lowercase() == key
+            }
+        {
+            return Some(item);
+        }
+    }
+    None
 }
 
 /// Renders the window's content into a PNG (in process: no Screen

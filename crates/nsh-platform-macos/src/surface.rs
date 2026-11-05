@@ -237,6 +237,8 @@ pub(crate) struct Surface {
     /// The move count ([`crate::sight::moves`]) the last revisit started
     /// at: frames revisit only when it moved ([`Surface::tick`]).
     revisited: Cell<u64>,
+    /// Views resized since the last pass ([`Surface::draw_when_shown`]).
+    resized: RefCell<Vec<NshView>>,
     /// The background set under the root ([`crate::system`]).
     pub(crate) background: Cell<Option<nsh_core::Color>>,
     on_error: RefCell<Option<ErrorHandler>>,
@@ -297,6 +299,7 @@ impl Surface {
             fallback: Cell::new(false),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
+            resized: RefCell::default(),
             background: Cell::new(None),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
@@ -906,12 +909,33 @@ impl Surface {
         applied
     }
 
+    /// `view`, already marked stale, is drawn at the next pass if it can be
+    /// seen. It may be placed while a batch holds the mounter, which is why
+    /// it waits here.
+    pub(crate) fn draw_when_shown(&self, view: NshView) {
+        self.resized.borrow_mut().push(view);
+    }
+
+    /// The window's live resize starts or ends.
+    pub(crate) fn live_resize(&self, on: bool) {
+        if let Ok(mut mounter) = self.mounter.try_borrow_mut() {
+            mounter.set_live_resize(on);
+        }
+        if !on {
+            self.revisit();
+        }
+    }
+
     /// Draws views whose drawing changed out of sight and that show now
     /// ([`Mounter::draw_when_shown`]); after anything that moves views.
     pub(crate) fn revisit(&self) {
         // Taken before the pass: a move during it is revisited next frame.
         let moves = crate::sight::moves();
+        if let Ok(mounter) = self.mounter.try_borrow() {
+            mounter.place_shown();
+        }
         if let Ok(mounter) = self.mounter.try_borrow()
+            && mounter.adopt_stale(&mut self.resized.borrow_mut())
             && mounter.revisit()
         {
             self.revisited.set(moves);

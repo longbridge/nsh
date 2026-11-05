@@ -71,6 +71,8 @@ core::Core::scroll_listener ->                                   # time and a zo
 core::Core::set_font_scale(scale)                                # a font scale factor
 core::Core::set_zoom(scale)                                      # a zoom scale factor
 css::Color::with_alpha(factor)                                   # an opacity factor
+desktop::menu_icon::fade(opacity)                                # an opacity factor
+desktop::menu_icon::want(scale)                                  # device pixels per point, a ratio
 effects::Filter::Brightness.0                                    # a filter amount (1 leaves the image as it is)
 effects::Filter::Contrast.0                                      # a filter amount (1 leaves the image as it is)
 effects::Filter::Grayscale.0                                     # a filter amount (1 leaves the image as it is)
@@ -146,6 +148,7 @@ ops::EventPayload::PanCancelled.velocity_y                       # points per se
 ops::IMAGE_SCALES                                                # pixel densities (device pixels per point)
 ops::ImageProp::FadeDuration.0                                   # time
 ops::ImageScales::iter ->                                        # pixel densities (device pixels per point)
+ops::ImageSource::at_pixel_ratio(pixel_ratio)                    # device pixels per point, a ratio
 ops::NativeProp::ProgressInterval.0                              # time
 ops::NativeProp::Rate.0                                          # a playback rate multiplier
 ops::NativeProp::Volume.0                                        # audio volume, 0..1
