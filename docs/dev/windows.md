@@ -100,7 +100,8 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   78% → 53% and the UI thread's frames 1.4 ms shorter at p95; scrolling text, 52% → 40%; playing a video, 17% → 9%;
   44 → 25 threads; frame rates unchanged. With a device per thread on several UI threads the contention grows
   with each: 4 such windows missed 300–500 frames a minute each and recovered fully without the threads, on NVIDIA,
-  Intel UHD and AMD Radeon alike.
+  Intel UHD and AMD Radeon alike. On WARP, which then rasterizes on the calling thread too, 1 and 4 windows improved
+  and 8 windows missed about 0.3% more of their frames.
 - **The standalone app** (`run_app`, `app.rs`) runs the window and its message loop on a thread of its own
   (`nsh-ui`, 8 MiB of stack for deep trees) and joins it: the devices, font faces and bitmaps cached in that thread's
   thread-locals are released at a plain thread exit. Released by the main thread's thread-local destructors instead,
