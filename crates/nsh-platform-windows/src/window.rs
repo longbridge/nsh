@@ -639,6 +639,7 @@ fn handle(
                 )
             };
             sync_size(surface, hwnd);
+            crate::chrome::dpi_changed(surface);
         }
         WM_GETMINMAXINFO => {
             // SAFETY: `lparam` is the window's MINMAXINFO.

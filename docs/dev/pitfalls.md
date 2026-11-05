@@ -457,6 +457,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
+  shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
+  `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
+  binding and older systems no property.
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.

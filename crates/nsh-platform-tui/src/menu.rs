@@ -310,6 +310,7 @@ fn kept(items: &[MenuItem]) -> Vec<MenuItem> {
                 label,
                 enabled,
                 items,
+                ..
             } => {
                 let items = kept(items);
                 if !items.is_empty() {
@@ -317,6 +318,8 @@ fn kept(items: &[MenuItem]) -> Vec<MenuItem> {
                         label: label.clone(),
                         enabled: *enabled,
                         items,
+                        // A terminal draws no images.
+                        icon: None,
                     });
                 }
             }
@@ -1043,6 +1046,7 @@ mod tests {
             checked: None,
             role: None,
             when: Default::default(),
+            icon: None,
         })
     }
 
@@ -1055,6 +1059,7 @@ mod tests {
                 label: "Share".into(),
                 enabled: true,
                 items: vec![action(3, "Mail", true)],
+                icon: None,
             },
         ]
     }
@@ -1158,6 +1163,7 @@ mod tests {
                 checked: Some(checked),
                 role: None,
                 when: Default::default(),
+                icon: None,
             })
         };
         let items = vec![
@@ -1169,6 +1175,7 @@ mod tests {
                 label: "More".into(),
                 enabled: true,
                 items: vec![action(5, "Mail", true)],
+                icon: None,
             },
         ];
         let mut menus = Menus {
