@@ -154,6 +154,14 @@ pub(crate) fn pick_images(
     (answer, Action::PickImages(request, slot))
 }
 
+/// The files the user picks in the system's picker (none when cancelled).
+pub(crate) fn pick_files(
+    request: crate::picker::FilePickRequest,
+) -> (Answer<Vec<crate::picker::PickedFile>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::PickFiles(request, slot))
+}
+
 /// Calls function `name` of the embedding app with `args` (`nsh/host`).
 pub(crate) fn host_call(
     name: String,

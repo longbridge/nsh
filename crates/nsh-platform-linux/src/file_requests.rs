@@ -109,6 +109,32 @@ fn dialog(
     dialog
 }
 
+/// `Picker.pickFiles`: GTK's file dialog for `request`; the files picked are
+/// read on a thread of their own and answer pick `id` as a root `Pick` event.
+pub(crate) fn pick_files(
+    surface: &Rc<Surface>,
+    id: u32,
+    request: &nsh_core::picker::FilePickRequest,
+) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    let window = surface.root.root().and_downcast::<gtk::Window>();
+    let request = request.clone();
+    glib::spawn_future_local(async move {
+        let paths = pick_paths(&request.dialog(), window)
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("the file dialog failed: {e}");
+                Vec::new()
+            });
+        std::thread::spawn(move || {
+            let files = nsh_core::picker::read_picked_files(&paths, &request);
+            control.dispatch_event(ROOT_ID, EventKind::Pick, EventPayload::Picked { id, files });
+        });
+    });
+}
+
 /// The paths picked (none when the dialog was dismissed), or why it
 /// failed. GTK's dialog picks files or folders, not both: files and
 /// folders pick files.

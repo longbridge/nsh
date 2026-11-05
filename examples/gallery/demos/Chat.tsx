@@ -582,7 +582,7 @@ export function Chat() {
                 each={messages()}
                 keyExtractor={(m) => m.id}
                 estimatedItemSize={140}
-                initialScrollIndex={Math.max(0, messages().length - 1)}
+                alignment="bottom"
                 style={{ flex: 1 }}
                 contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
                 keyboardDismissMode="interactive"

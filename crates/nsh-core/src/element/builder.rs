@@ -427,6 +427,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) alignment: Option<crate::ListAlignment>,
     pub(crate) viewport: Option<crate::ListViewport>,
 }
 
@@ -457,6 +458,9 @@ impl ListConfig {
         }
         if self.follow_end != old.follow_end {
             out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        }
+        if self.alignment != old.alignment {
+            out.push(Prop::ListAlignment(self.alignment.unwrap_or_default()));
         }
         if self.viewport != old.viewport {
             out.push(Prop::ListViewport(self.viewport.unwrap_or_default()));

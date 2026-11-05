@@ -4150,6 +4150,14 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::ListAlignment(alignment) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.set_alignment(alignment);
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
+                }
+            }
             Prop::StickyIndices(indices) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_sticky(indices);

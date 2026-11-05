@@ -224,7 +224,7 @@ if (host.available()) {
 | 远程图片、视频源、web view 源或 `html` | 不显示任何内容，元素的 `onError` 以 `code` `"ERR_ACCESS_DENIED"` 报告。web view 跳到未授权主机的导航会被取消，并以同样方式报告。 |
 | 状态栏修改、画布图片 | 不修改也不绘制任何东西；拒绝会记录在日志中。 |
 | 剪贴板 | `Clipboard` 的每个函数都以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"clipboard"`，`resource` 为 `""`；不会访问系统剪贴板。 |
-| 选择器 | `pickImages` 不显示任何内容，以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"picker"`，`resource` 为 `""`。 |
+| 选择器 | `pickImages` 和 `pickFiles` 不显示任何内容，以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"picker"`，`resource` 为 `""`。 |
 | 语音 | `Speech.start` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"speech"`，`resource` 为 `""`；麦克风不会打开。 |
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |
 | `openUrl` | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"openUrl"`，`resource` 为该 URL；不会打开任何东西。 |
