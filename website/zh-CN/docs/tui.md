@@ -1,7 +1,7 @@
 ---
 title: 终端
 description: "在终端里运行 Rust 和 TSX 编写的 NSH 应用：Cell 布局、键盘与鼠标输入、终端的颜色、组件和弹出层在字符网格上的样子、在应用代码中识别终端、测试，以及在 ratatui 应用中嵌入 AppView。"
-order: 15.7
+order: 16.5
 group: platforms
 ---
 

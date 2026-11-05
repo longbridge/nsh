@@ -206,6 +206,7 @@ NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是
 | [Windows](./windows.md) | Windows 10 1809+ | Win32、Direct2D | `AppView` |
 | [Linux](./linux.md) | GTK 4.14+ | GTK 4 | `AppView` |
 | [Web](./web.md) | 现代浏览器 | HTML | `createPlayer`、iframe |
+| [终端（TUI）](./tui.md) | macOS、Windows、Linux 上的终端 | ratatui | `AppView`（ratatui 区域） |
 | [GPUI](./gpui.md) | 桌面平台 | GPUI | `AppView`（GPUI、GPUI Kit 应用） |
 | Mac Catalyst | macOS | UIKit | 开发用（`--target catalyst`） |
 

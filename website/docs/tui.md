@@ -1,7 +1,7 @@
 ---
 title: Terminal
 description: "Run Rust and TSX NSH apps in a terminal: the Cell layout, keyboard and mouse input, the terminal's colors, how components and popups look on the grid, detecting the terminal in app code, testing, and embedding AppView in a ratatui app."
-order: 15.7
+order: 16.5
 group: platforms
 ---
 

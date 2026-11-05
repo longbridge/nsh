@@ -21,8 +21,8 @@ NSH 运行在手机、桌面、终端和网页上：iOS、Android、macOS、Wind
 | [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录和一个 `.zip` |
 | [Linux](./linux.md) | GTK 4 控件；Pango | GTK 4.14+ | `nsh run`（Linux 上的默认目标） | 一个目录和一个 `.tar.gz` |
 | [GPUI](./gpui.md) | GPUI；GPUI 的文字系统 | macOS、Windows、Linux（Vulkan） | 在你的 GPUI 应用里；TSX 也可用 `nsh run --target gpui` | 随嵌入它的 GPUI 应用发布 |
-| [终端](./tui.md) | 在终端 Cell 网格上用 ratatui 绘制；终端的字体 | macOS、Windows 和 Linux 上的终端 | `nsh run --target tui` | 随嵌入它的终端应用发布 |
 | [Web](./web.md) | HTML 与 CSS；浏览器的字体 | 现代浏览器，桌面和手机 | `nsh run --target web` | 一个静态网站 |
+| [终端](./tui.md) | 在终端 Cell 网格上用 ratatui 绘制；终端的字体 | macOS、Windows 和 Linux 上的终端 | `nsh run --target tui` | 随嵌入它的终端应用发布 |
 
 - **[GPUI](./gpui.md)** 用姊妹项目 GPUI Kit 所基于的 [GPUI](https://gpui-kit.com) 绘制应用，在 macOS、Windows 和 Linux 上表现一致：它是嵌入 GPUI 和 GPUI Kit 应用的后端，这些应用把 `AppView` 放进自己的元素树。独立的桌面应用用各操作系统自己的后端（AppKit、Win32、GTK 4）运行和打包。
 - **[终端](./tui.md)** 把应用绘制在终端的字符 Cell 网格上，使用终端自己的颜色，以键盘为主，也支持鼠标：`nsh run --target tui` 在当前终端中运行应用，ratatui 应用用 `AppView` 嵌入应用。
@@ -58,8 +58,8 @@ nsh package App.tsx --target macos
 | iOS | `AppView`（一个 `UIView`） | Rust 根组件、TSX bundle | `nsh-platform-ios` crate | Rust |
 | iOS | `NshAppView`（一个 `UIView`） | TSX bundle、签名包 | `NativeShell.xcframework` | Swift |
 | Android | `NshView`（一个 `FrameLayout`） | TSX bundle、签名包 | `nsh.aar` | Java 或 Kotlin |
-| 终端 | `AppView`（ratatui frame 中的一块区域） | Rust 根组件、TSX bundle | `nsh-platform-tui` crate | Rust |
 | Web | `createPlayer`（一个页面元素）或 iframe | TSX bundle；Rust 应用以发布的网站嵌入 | `nsh package --target web` 生成的运行时文件 | JavaScript 或 HTML |
+| 终端 | `AppView`（ratatui frame 中的一块区域） | Rust 根组件、TSX bundle | `nsh-platform-tui` crate | Rust |
 
 Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::of::<App>()`），并用 `set_ui_sets` 把应用的 UI 集合交给它的引擎，这样它加载的 TSX 就能导入应用自己的组件和模块。每个视图都是一个引擎，一个应用可以同时显示多个。在每个平台上，宿主都可以注册自己的原生视图给应用使用（[原生组件](./native-components.md)）。
 
