@@ -5,8 +5,9 @@
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
-    CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp,
-    Prop, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
+    CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop,
+    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, ScrollProp,
+    StatusBarSetting, StatusBarStyle, Viewability,
     element::TsTypes,
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
@@ -101,6 +102,41 @@ impl HostValue for ListContentStyle {
              paddingBottom?: number;\n  paddingLeft?: number;\n  gap?: number;\n  rowGap?: number;\n  \
              columnGap?: number;\n}"
                 .into()
+        })
+    }
+}
+
+/// `macos={{ backdrop }}`: `{ material, blending, state }`, each field
+/// falling back to its default when left out or unknown.
+impl HostValue for MacOsBackdrop {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let name = |key| input.field(key).and_then(|v| v.as_string());
+        Some(MacOsBackdrop {
+            material: name("material")
+                .and_then(|s| MacOsBackdropMaterial::parse(&s))
+                .unwrap_or_default(),
+            blending: name("blending")
+                .and_then(|s| MacOsBackdropBlending::parse(&s))
+                .unwrap_or_default(),
+            state: name("state")
+                .and_then(|s| MacOsBackdropState::parse(&s))
+                .unwrap_or_default(),
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let material = <MacOsBackdropMaterial as HostValue>::ts_type(types);
+        let blending = <MacOsBackdropBlending as HostValue>::ts_type(types);
+        let state = <MacOsBackdropState as HostValue>::ts_type(types);
+        types.declare("MacOsBackdrop", |_| {
+            format!(
+                "/** The material a view draws with on macOS (`macos={{{{ backdrop }}}}`). */\n\
+                 export interface MacOsBackdrop {{\n  material?: {material};\n  \
+                 blending?: {blending};\n  state?: {state};\n}}"
+            )
         })
     }
 }

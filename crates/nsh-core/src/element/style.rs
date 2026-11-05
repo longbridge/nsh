@@ -2925,6 +2925,15 @@ pub trait Styled: Sized {
         self
     }
 
+    /// The tint of the glass material (`glassTintColor`): the color the
+    /// native glass takes on. Has no effect without `glassEffect`.
+    fn glass_tint_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::GlassTintColor], color);
+        });
+        self
+    }
+
     /// The pointer's look over the element (`cursor`; desktops, and iPad
     /// and Android with a mouse).
     fn cursor(mut self, cursor: Cursor) -> Self {

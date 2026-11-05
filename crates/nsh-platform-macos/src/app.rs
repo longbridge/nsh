@@ -19,7 +19,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSColor, NSEvent, NSEventModifierFlags,
     NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
     NSWindowStyleMask,
 };
@@ -197,6 +197,17 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// A see-through window: [`run_app`] opens its window nonopaque with a
+    /// clear background, and the surface draws no background under the app's
+    /// root, so what the app leaves unpainted shows what is behind the
+    /// window (desktop widgets, panels with rounded or irregular outlines,
+    /// a `macos={{ backdrop }}` material blending behind the window). False
+    /// by default.
+    ///
+    /// An embedded [`AppView`] draws no background over its host's content
+    /// too, but never changes the host's window: the embedding app makes its
+    /// window nonopaque and clear itself where it wants that.
+    pub transparent: bool,
 }
 
 impl Default for AppOptions {
@@ -221,6 +232,7 @@ impl Default for AppOptions {
             storage: None,
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            transparent: false,
         }
     }
 }
@@ -279,6 +291,7 @@ impl AppView {
     pub fn new(mtm: MainThreadMarker, options: AppOptions) -> Rc<AppView> {
         let surface = Surface::new(mtm, initial_environment());
         surface.appearance.set(options.appearance);
+        surface.transparent.set(options.transparent);
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(options.size.0 as f64, options.size.1 as f64),
@@ -836,6 +849,12 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     // SAFETY: the window is kept in `RUNNING` until it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&options.title));
+    if options.transparent {
+        // A see-through window: AppKit draws none of its own background,
+        // and what the app leaves unpainted shows what is behind it.
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+    }
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());

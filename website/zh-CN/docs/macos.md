@@ -160,6 +160,9 @@ view.load(Bundle::source(code).into());
 `nsh_core::element::desktop::restart()`（TS：`Application.restart()`）以同样的方式退出，进程结束后由 `run_app`
 以相同的参数重新启动应用：`.app` 包里的应用通过 Launch Services（`open -n`）打开，与用户打开它时相同。
 
+`AppOptions { transparent: true, ..Default::default() }` 让 `run_app` 的窗口不透明标志关闭（nonopaque）且背景透明，应用没有绘制的部分会显示窗口后面的内容（HUD 面板、使用 `behind-window` 的 [`macos={{ backdrop }}`](./styling.md#滤镜与混合)）。默认值为 `false`。
+嵌入的 `AppView` 不会改动它所在的窗口：需要同样效果时，请把自己的 `NSWindow` 设为 nonopaque，并给它透明的 `backgroundColor`。
+
 ## macOS 上的差异
 
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
@@ -203,7 +206,11 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 不支持或有所不同：
 
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
-- **`mixBlendMode`**，以及大于 1 的 `brightness()`。
+- **`brightness()`** 大于 1 不绘制。**`mixBlendMode`** 和**背景材质**由 Core Animation 绘制：
+  `mixBlendMode` 是视图图层的合成滤镜，`macos={{ backdrop: { material, blending, state } }}` 是视图下方的
+  `NSVisualEffectView`（任意 AppKit 材质和状态，无论是否设置了 `backdropFilter`），`glassTintColor` 是 macOS 26 上
+  `glassEffect` 的着色；macOS 26 之前由模糊代替玻璃。这些是合成器效果，`app.screenshot()` 不会显示它们；
+  只有窗口本身透明（`AppOptions::transparent`）时，`behind-window` 材质才能显示窗口后面的桌面。
 - **输入框**：内容类型与自动填充、键盘类型、自动大写、字间距；输入辅助视图从不显示（没有软键盘），`keyboardShouldPersistTaps` 被忽略。
 - **`WebView` 的 `scrollable={false}`** 让鼠标滚轮和触控板不再滚动页面，而是像 iOS 上一样滚动它外面的应用滚动视图。
   页面仍可用键盘（空格、方向键）和它自己的脚本滚动，触控板在页面之间的轻扫（`allowsBackForwardNavigationGestures`）也会停用。

@@ -591,6 +591,193 @@ impl BackdropMaterial {
     }
 }
 
+/// `macos={{ backdrop }}`: the `NSVisualEffectView` material a view draws with
+/// on macOS.
+///
+/// Unlike iOS's [`BackdropMaterial`], which always blurs a `backdropFilter`,
+/// this is a material of its own: an explicit backdrop draws its native
+/// view whether or not the style has a blur, and it wins over
+/// [`GlassEffect`] and `backdropFilter` on macOS. Its fields default to
+/// `popover`, `within-window` and `active`, the blur macOS has always drawn.
+///
+/// There is no CSS for this -- `backdrop-filter` only describes filters --
+/// so the names follow AppKit's `NSVisualEffectMaterial`,
+/// `NSVisualEffectBlendingMode` and `NSVisualEffectState` in kebab case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MacOsBackdrop {
+    /// The material: what is blurred and how it is tinted.
+    pub material: MacOsBackdropMaterial,
+    /// What it blurs: the view's window, or what is behind the window.
+    pub blending: MacOsBackdropBlending,
+    /// Whether it follows the window's active state, or is always active
+    /// or inactive.
+    pub state: MacOsBackdropState,
+}
+
+/// `NSVisualEffectMaterial`: the material of a [`MacOsBackdrop`].
+///
+/// The roles AppKit still documents: the newer content and under-window
+/// roles, and the older named roles apps still use (which AppKit marks
+/// deprecated in favor of the newer ones).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+pub enum MacOsBackdropMaterial {
+    /// The title bar's material.
+    #[prop(rename = "titlebar")]
+    Titlebar,
+    /// The selected content's material.
+    #[prop(rename = "selection")]
+    Selection,
+    /// A menu's material.
+    #[prop(rename = "menu")]
+    Menu,
+    /// A popover's material.
+    #[prop(rename = "popover")]
+    #[default]
+    Popover,
+    /// A source list's (sidebar's) material.
+    #[prop(rename = "sidebar")]
+    Sidebar,
+    /// A table header's material.
+    #[prop(rename = "header-view")]
+    HeaderView,
+    /// A sheet's material.
+    #[prop(rename = "sheet")]
+    Sheet,
+    /// The window's background material.
+    #[prop(rename = "window-background")]
+    WindowBackground,
+    /// A heads-up display's material.
+    #[prop(rename = "hud-window")]
+    HudWindow,
+    /// A full-screen UI's material.
+    #[prop(rename = "full-screen-ui")]
+    FullScreenUI,
+    /// A tooltip's material.
+    #[prop(rename = "tool-tip")]
+    ToolTip,
+    /// The content's background material.
+    #[prop(rename = "content-background")]
+    ContentBackground,
+    /// The material under the window's background.
+    #[prop(rename = "under-window-background")]
+    UnderWindowBackground,
+    /// The material under a page's background.
+    #[prop(rename = "under-page-background")]
+    UnderPageBackground,
+}
+
+impl MacOsBackdropMaterial {
+    /// The prop name ([`MacOsBackdropMaterial::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            MacOsBackdropMaterial::Titlebar => "titlebar",
+            MacOsBackdropMaterial::Selection => "selection",
+            MacOsBackdropMaterial::Menu => "menu",
+            MacOsBackdropMaterial::Popover => "popover",
+            MacOsBackdropMaterial::Sidebar => "sidebar",
+            MacOsBackdropMaterial::HeaderView => "header-view",
+            MacOsBackdropMaterial::Sheet => "sheet",
+            MacOsBackdropMaterial::WindowBackground => "window-background",
+            MacOsBackdropMaterial::HudWindow => "hud-window",
+            MacOsBackdropMaterial::FullScreenUI => "full-screen-ui",
+            MacOsBackdropMaterial::ToolTip => "tool-tip",
+            MacOsBackdropMaterial::ContentBackground => "content-background",
+            MacOsBackdropMaterial::UnderWindowBackground => "under-window-background",
+            MacOsBackdropMaterial::UnderPageBackground => "under-page-background",
+        }
+    }
+
+    /// Parses a material name.
+    pub fn parse(s: &str) -> Option<MacOsBackdropMaterial> {
+        Some(match s {
+            "titlebar" => MacOsBackdropMaterial::Titlebar,
+            "selection" => MacOsBackdropMaterial::Selection,
+            "menu" => MacOsBackdropMaterial::Menu,
+            "popover" => MacOsBackdropMaterial::Popover,
+            "sidebar" => MacOsBackdropMaterial::Sidebar,
+            "header-view" => MacOsBackdropMaterial::HeaderView,
+            "sheet" => MacOsBackdropMaterial::Sheet,
+            "window-background" => MacOsBackdropMaterial::WindowBackground,
+            "hud-window" => MacOsBackdropMaterial::HudWindow,
+            "full-screen-ui" => MacOsBackdropMaterial::FullScreenUI,
+            "tool-tip" => MacOsBackdropMaterial::ToolTip,
+            "content-background" => MacOsBackdropMaterial::ContentBackground,
+            "under-window-background" => MacOsBackdropMaterial::UnderWindowBackground,
+            "under-page-background" => MacOsBackdropMaterial::UnderPageBackground,
+            _ => return None,
+        })
+    }
+}
+
+/// `NSVisualEffectBlendingMode`: what a [`MacOsBackdrop`] blurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+pub enum MacOsBackdropBlending {
+    /// What is in the view's window behind it.
+    #[prop(rename = "within-window")]
+    #[default]
+    WithinWindow,
+    /// What is behind the window, so the window must be transparent for
+    /// it to show.
+    #[prop(rename = "behind-window")]
+    BehindWindow,
+}
+
+impl MacOsBackdropBlending {
+    /// The prop name ([`MacOsBackdropBlending::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            MacOsBackdropBlending::WithinWindow => "within-window",
+            MacOsBackdropBlending::BehindWindow => "behind-window",
+        }
+    }
+
+    /// Parses a blending mode name.
+    pub fn parse(s: &str) -> Option<MacOsBackdropBlending> {
+        Some(match s {
+            "within-window" => MacOsBackdropBlending::WithinWindow,
+            "behind-window" => MacOsBackdropBlending::BehindWindow,
+            _ => return None,
+        })
+    }
+}
+
+/// `NSVisualEffectState`: whether a [`MacOsBackdrop`] follows the window's
+/// active state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+pub enum MacOsBackdropState {
+    /// Active while the window is, inactive otherwise.
+    #[prop(rename = "follows-window-active-state")]
+    FollowsWindowActiveState,
+    /// Always active.
+    #[prop(rename = "active")]
+    #[default]
+    Active,
+    /// Always inactive.
+    #[prop(rename = "inactive")]
+    Inactive,
+}
+
+impl MacOsBackdropState {
+    /// The prop name ([`MacOsBackdropState::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            MacOsBackdropState::FollowsWindowActiveState => "follows-window-active-state",
+            MacOsBackdropState::Active => "active",
+            MacOsBackdropState::Inactive => "inactive",
+        }
+    }
+
+    /// Parses a state name.
+    pub fn parse(s: &str) -> Option<MacOsBackdropState> {
+        Some(match s {
+            "follows-window-active-state" => MacOsBackdropState::FollowsWindowActiveState,
+            "active" => MacOsBackdropState::Active,
+            "inactive" => MacOsBackdropState::Inactive,
+            _ => return None,
+        })
+    }
+}
+
 /// `glassEffect`: a glass material drawn behind the view's content.
 ///
 /// Apple's "Liquid Glass", new in iOS 26. No CSS property describes it --
@@ -983,6 +1170,55 @@ pub(crate) fn shared(effects: Effects) -> Option<Arc<Effects>> {
 mod tests {
     use super::*;
     use crate::geometry::{percentage, px, size};
+
+    #[test]
+    fn macos_backdrop_names_round_trip() {
+        for material in [
+            MacOsBackdropMaterial::Titlebar,
+            MacOsBackdropMaterial::Selection,
+            MacOsBackdropMaterial::Menu,
+            MacOsBackdropMaterial::Popover,
+            MacOsBackdropMaterial::Sidebar,
+            MacOsBackdropMaterial::HeaderView,
+            MacOsBackdropMaterial::Sheet,
+            MacOsBackdropMaterial::WindowBackground,
+            MacOsBackdropMaterial::HudWindow,
+            MacOsBackdropMaterial::FullScreenUI,
+            MacOsBackdropMaterial::ToolTip,
+            MacOsBackdropMaterial::ContentBackground,
+            MacOsBackdropMaterial::UnderWindowBackground,
+            MacOsBackdropMaterial::UnderPageBackground,
+        ] {
+            assert_eq!(
+                MacOsBackdropMaterial::parse(material.name()),
+                Some(material)
+            );
+        }
+        for blending in [
+            MacOsBackdropBlending::WithinWindow,
+            MacOsBackdropBlending::BehindWindow,
+        ] {
+            assert_eq!(
+                MacOsBackdropBlending::parse(blending.name()),
+                Some(blending)
+            );
+        }
+        for state in [
+            MacOsBackdropState::FollowsWindowActiveState,
+            MacOsBackdropState::Active,
+            MacOsBackdropState::Inactive,
+        ] {
+            assert_eq!(MacOsBackdropState::parse(state.name()), Some(state));
+        }
+        assert_eq!(
+            MacOsBackdrop::default(),
+            MacOsBackdrop {
+                material: MacOsBackdropMaterial::Popover,
+                blending: MacOsBackdropBlending::WithinWindow,
+                state: MacOsBackdropState::Active,
+            }
+        );
+    }
 
     #[test]
     fn stops_spread_evenly() {

@@ -137,6 +137,7 @@ mod tests {
             ("transform", "string | TransformStep[]"),
             ("rotate", "string | number | AnimatedNode"),
             ("tintColor", "ColorValue"),
+            ("glassTintColor", "ColorValue"),
             (
                 "display",
                 "\"flex\" | \"grid\" | \"block\" | \"flow-root\" | \"none\"",
@@ -158,6 +159,14 @@ mod tests {
         assert!(style[text..].contains("  textDecorationStyle?:"));
         // Each host prop and event in the interface of the elements it is for.
         let elements = super::host::declarations();
+        assert!(
+            elements.contains("export interface MacOsBackdrop {\n  material?: MacOsBackdropMaterial;\n  blending?: MacOsBackdropBlending;\n  state?: MacOsBackdropState;\n}")
+        );
+        assert!(elements.contains("export type MacOsBackdropMaterial = \"titlebar\" | \"selection\" | \"menu\" | \"popover\" | \"sidebar\" | \"header-view\" | \"sheet\" | \"window-background\" | \"hud-window\" | \"full-screen-ui\" | \"tool-tip\" | \"content-background\" | \"under-window-background\" | \"under-page-background\";"));
+        assert!(elements.contains(
+            "export type MacOsBackdropBlending = \"within-window\" | \"behind-window\";"
+        ));
+        assert!(elements.contains("export type MacOsBackdropState = \"follows-window-active-state\" | \"active\" | \"inactive\";"));
         for (interface, prop) in [
             ("HostProps", "  onPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),
@@ -166,6 +175,7 @@ mod tests {
             ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
+            ("MacOSHostProps", "  backdrop?: MacOsBackdrop;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             (
                 "InputHostProps",

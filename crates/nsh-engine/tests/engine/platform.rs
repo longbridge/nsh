@@ -1,7 +1,7 @@
 //! The OS the platform reports decides `platform` and which platform-only
-//! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
-//! apply; on the web, the idiom decides between mobile and desktop, and
-//! the terminal idiom behaves as a desktop. `platform.desktop`, the
+//! props (`ios={{…}}`, `android={{…}}`, `macos={{…}}`, `desktop={{…}}`,
+//! `web={{…}}`) apply; on the web, the idiom decides between mobile and
+//! desktop, and the terminal idiom behaves as a desktop. `platform.desktop`, the
 //! `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow the
 //! one definition of desktop (`Environment::desktop`), whatever idiom the
 //! platform set.
@@ -30,16 +30,16 @@ mount(
 );
 "#;
 
-/// The first frame's texts and accessibility labels and hints on `os`.
-fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
+/// The first frame of `app` on `os`.
+fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> {
     let dir = std::env::temp_dir().join(format!(
-        "nsh-platform-{}-{}-{idiom:?}",
+        "nsh-platform-{}-{tag}-{}-{idiom:?}",
         std::process::id(),
         os.name()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
-    std::fs::write(&entry, APP).unwrap();
+    std::fs::write(&entry, app).unwrap();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
@@ -80,12 +80,16 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         windows: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    let batch = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("first frame");
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("first frame")
+        .items
+}
+
+/// The first frame's texts and accessibility labels and hints on `os`.
+fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
     let mut texts = Vec::new();
     let mut labels = Vec::new();
-    for item in &batch.items {
+    for item in first_frame_of(APP, "platform", os, idiom) {
         match item {
             MountItem::Text { text, .. } => texts.push(text.text.clone()),
             MountItem::ViewProps { props, .. } => {
@@ -604,5 +608,53 @@ fn js_popovers_in_a_window_are_placed_in_it() {
     assert!(
         inserted.iter().filter(|(p, _)| *p == window).count() >= 2,
         "{inserted:?}"
+    );
+}
+
+const MATERIAL_APP: &str = r##"import { mount, View } from "nsh";
+
+mount(
+  () => (
+    <View
+      macos={{ backdrop: { material: "sidebar", blending: "behind-window", state: "inactive" } }}
+      style={{ backdropFilter: "blur(20px)", glassEffect: "regular", glassTintColor: "#ff0000" }}
+    />
+  ),
+);
+"##;
+
+#[test]
+fn macos_props_apply_on_macos_through_the_mount() {
+    use nsh_core::{
+        Color, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState,
+    };
+    let styles = |os| {
+        first_frame_of(MATERIAL_APP, "macos-props", os, Idiom::Desktop)
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::ViewStyle { style, .. } => Some(*style),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let macos = styles(Os::MacOs);
+    assert_eq!(
+        macos.iter().find_map(|style| style.macos_backdrop),
+        Some(MacOsBackdrop {
+            material: MacOsBackdropMaterial::Sidebar,
+            blending: MacOsBackdropBlending::BehindWindow,
+            state: MacOsBackdropState::Inactive,
+        })
+    );
+    assert_eq!(
+        macos.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
+    );
+    // Another platform ignores `macos={{…}}`; the style itself is the same.
+    let linux = styles(Os::Linux);
+    assert!(linux.iter().all(|style| style.macos_backdrop.is_none()));
+    assert_eq!(
+        linux.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
     );
 }

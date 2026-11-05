@@ -51,6 +51,10 @@
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform
   crate itself: `nsh_platform_linux::AppView` (a GTK widget), `nsh_platform_macos::AppView` (an `NSView`) or
   `nsh_platform_windows::AppView` (a child window of the app's `HWND`, run by the app's message loop; `windows.md`).
+  An embedded macOS view draws no window background of its own: to show what is behind the window (a
+  `macos={{ backdrop }}` with `behind-window`, a translucent panel), the embedding app makes its `NSWindow`
+  nonopaque with a clear `backgroundColor` itself. `AppOptions::transparent` asks `run_app`'s own window for
+  that; an `AppView` never changes the window it is put in.
   GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): `let view = cx.new(|cx|
   AppView::new(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
   any element tree (in a GPUI Kit window, as a child of its `Root`); it fills the space its parent gives it and takes

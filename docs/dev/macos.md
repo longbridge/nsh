@@ -71,11 +71,13 @@ belong to the app, which owns retention and its storage budget.
   were not, and `renderInContext:` leaves pages and videos out (leaving pages and dialogs take the live views
   along; the test agent's screenshots show pages, which WebKit draws for `cacheDisplayInRect:`, but not videos). `NSAlert` sheets are windows of their own, above everything.
 - **Drawing**: Core Animation draws backgrounds, borders, corners, shadows, gradients and images (`decor.rs`,
-  `visual.rs`, `image.rs`, the iOS backend's design). Text and canvas views draw into a **content layer** of their own
+  `visual.rs`, `image.rs`, the iOS backend's design), and a view's `mixBlendMode` as its layer's `compositingFilter`.
+  Text and canvas views draw into a **content layer** of their own
   (`NshView::redraw`: a plain `CALayer` sublayer whose delegate draws in `drawLayer:inContext:`, above the decoration
   behind the view and below its children); no view uses `drawRect:`, every view uses `updateLayer` and gets no backing
   store. Implicit animations are off for every change NSH makes (`surface::quiet`; the content layer's delegate
-  answers no action).
+  answers no action). A backdrop (a material from `macos={{ backdrop }}`, glass or a blur) is the view's first
+  subview, below its fill layer and effects; see "Not implemented, or different".
 - **Why not `drawRect:`**: `drawRect:` views are redrawn by AppKit's display pass whenever a scroll moves their
   container; plain content layers are not, and are drawn again only when their content or size changes. A canvas
   that paints often draws asynchronously (`canvas.rs` `Cadence`), one with a long static part keeps it as a
@@ -158,14 +160,17 @@ belong to the app, which owns retention and its storage budget.
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
-  `nsh_base::registry()` and its sets).
+  `nsh_base::registry()` and its sets). With `AppOptions::transparent` (false by default) the window is nonopaque with
+  a clear background and the surface paints none of its own background under the root, so what the app leaves
+  unpainted shows what is behind the window; an embedded `AppView` paints no surface background either, but never
+  changes its host's window — the embedding app makes that window nonopaque itself.
 
 ## How each area maps to AppKit
 
 | Area | Module | AppKit |
 |---|---|---|
 | Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn into the view's content layer (`drawLayer:inContext:`); decorations CoreText lacks drawn by hand (iOS); selectable text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selectable views (`selectable_view.rs`, `ViewProps::selectable_view`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame; `fontFamily` lists (`nsh_core::font_families`): the first family CoreText has is the font, the others it has its cascade list (`kCTFontCascadeListAttribute`), iOS's engine too |
-| Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`); backdrop blur as an `NSVisualEffectView` subview, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
+| Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`), `mixBlendMode` as the layer's compositing filter; a backdrop as a subview: an `NSVisualEffectView` with `macos={{ backdrop }}`'s material, blending and state or the blur's popover material, or glass with `glassTintColor`, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): ImageIO thumbnails at the view's size bucket, in the process's image budget, downloaded with `NSURLSession` (the core loader's transport hook, so the system's proxies, authentication and ATS apply), leased by the views showing them; blur and color filters baked into variants in the same budget; `asset:/`, http(s), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
 | Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
@@ -334,12 +339,21 @@ password required right after sleep) to run tests that way.
 ## Not implemented, or different
 
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
-- **`mixBlendMode`**, `brightness()` above 1. **`backdropFilter: blur()`** is an `NSVisualEffectView` (within-window
-  blending, the popover material) below the view's background: AppKit picks the blur radius and adds the material's
-  light tint; the test agent's screenshots show it, its in-process fallback cannot. `glassEffect` puts an `NSGlassEffectView` there instead on macOS 26
-  and later (looked up at run time, `setStyle:` regular / clear, `setCornerRadius:` the shared radius); before, the
-  blur stands in, and glass alone draws nothing. Not yet seen on macOS 26: written and checked on macOS 15, where the
-  class is missing.
+- **`brightness()` above 1** is not drawn. **Blend modes** are the layer's `compositingFilter`
+  (`multiplyBlendMode` … `plusD` / `plusL`), set on the view's own layer — its content, fill and clipped-child layers
+  are its sublayers — and cleared for `normal`; a change never moves it between layers (`visual.rs`).
+- **Backdrops.** `macos={{ backdrop: { material, blending, state } }}` puts an `NSVisualEffectView` below the view with
+  that AppKit material, blending and state (AppKit's own roles: titlebar … under-page-background; defaults popover,
+  within-window, active), whether or not a `backdropFilter` blur is set. Without it, `glassEffect` puts an
+  `NSGlassEffectView` there on macOS 26 and later (looked up at run time, `setStyle:` regular / clear,
+  `setCornerRadius:` the shared radius, `glassTintColor` as its `tintColor` where the class has the setter); before,
+  the `backdropFilter: blur()` blur stands in (an `NSVisualEffectView` with the popover material and within-window
+  blending, whose radius AppKit picks, or a radius-exact `PlainBlur` under a mask), and glass alone draws
+  nothing. The effect views are the view's first subview and refuse `hitTest:`, so they never take input. A material
+  blending `behind-window` shows what is behind the window only where the window is nonopaque:
+  `AppOptions::transparent`, or an embedding app's own nonopaque window. In-process screenshots cannot show backdrop
+  effects or blend modes (`renderInContext:` and `cacheDisplayInRect:` leave compositor effects out); check them on
+  screen.
 - **Inputs**: content types / autofill, keyboard types, autocapitalization, letter spacing; input accessory views are
   never shown (there is no software keyboard); `keyboardShouldPersistTaps` is ignored.
 - **Accessibility**: `accessibilityActions`.
