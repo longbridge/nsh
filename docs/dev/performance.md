@@ -279,6 +279,15 @@ Headless Chromium over CDP, a published package (`nsh package --target web`), 20
   and draws only those that changed, and draws a canvas again when its size changes, not when it moves. The wheel,
   300 steps of 30pt: main thread ~3.8s instead of ~4.5s, median frame ~9.2ms instead of ~12.2ms; its scroll bar
   dragged 150 steps: script ~4.3ms per batch instead of ~5.6ms.
+- Shader views (`nsh.js`, `docs/dev/shaders.md` "The web"), the gallery's Shaders page in a Chrome window over CDP
+  (1200 × 713 points at 2×, 120 Hz, Apple M5 through ANGLE's Metal renderer, the development host), 2026-11-04:
+  two `nsh.time` shaders in sight, then the `ScreenEffect` (Duotone) turned on below them. With the screen effect,
+  each frame asked for two `shaderFrame` callbacks, so the frames doubled until one display frame took 9 to 24 s;
+  now it holds 120 fps (p50 8.3 ms, p95 9.5 ms), ~3.3 ms of `shaderFrame` a frame, ~3 ms of it the surface's picture
+  (`paintInputs`). Each view drawing into the corner of a shared canvas that fits the largest and copying it out,
+  instead of resizing the canvas to each view and transferring it whole: ~0.1 ms a view (`drawShader`) instead of
+  ~0.65 ms, and of ~1.6 ms with the screen effect, whose size the canvas took and gave back on every frame; the page
+  without the screen effect ~0.3 ms of `shaderFrame` a frame instead of ~2 ms.
 
 ## The performance monitor (`nsh_engine::perf`)
 
