@@ -48,8 +48,9 @@
 //!   showing a surface is the active one, inactive otherwise;
 //! - the time zone (`timeZone()`), as the native backends name it: on
 //!   Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its
-//!   IANA name from the ICU Windows ships; elsewhere `TZ` when it names a
-//!   zone, else the zone `/etc/localtime` links to (else `/etc/timezone`).
+//!   IANA name from the ICU Windows ships; elsewhere the zone `TZ` names
+//!   (`GMT`, `Europe/Berlin`, as the C library reads it), else the zone
+//!   `/etc/localtime` links to (else `/etc/timezone`).
 //!   GPUI reports no change of it: it is read again whenever a window
 //!   becomes the active one, as the user comes back from changing it.
 //!
@@ -404,30 +405,22 @@ fn update(surface: &Surface) {
     surface.set_environment(env);
 }
 
-/// The time zone on POSIX systems: `TZ` when it names a zone (the process's
-/// local times follow it; not a POSIX rule such as `CET-1CEST`), else the
-/// zone `/etc/localtime` links to, else `/etc/timezone`'s; `UTC` when none
-/// says.
+/// The time zone on POSIX systems: the zone `TZ` names (`GMT`,
+/// `Europe/Berlin`: the process's local times follow it; a POSIX rule such
+/// as `CET-1CEST` names none), else the zone `/etc/localtime` links to, else
+/// `/etc/timezone`'s; `UTC` when none says ([`TimeZone::posix`]).
 #[cfg_attr(windows, allow(dead_code))]
 fn posix_time_zone() -> TimeZone {
-    std::env::var("TZ")
-        .ok()
-        .filter(|tz| {
-            let tz = tz.trim_start_matches(':');
-            tz.contains('/') || tz == "UTC"
-        })
-        .and_then(|tz| TimeZone::parse(&tz))
-        .or_else(|| {
-            std::fs::read_link("/etc/localtime")
-                .ok()
-                .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
-        })
-        .or_else(|| {
-            std::fs::read_to_string("/etc/timezone")
-                .ok()
-                .and_then(|name| TimeZone::parse(name.trim()))
-        })
-        .unwrap_or_default()
+    TimeZone::posix(std::env::var("TZ").ok().as_deref(), || {
+        std::fs::read_link("/etc/localtime")
+            .ok()
+            .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
+            .or_else(|| {
+                std::fs::read_to_string("/etc/timezone")
+                    .ok()
+                    .and_then(|name| TimeZone::parse(name.trim()))
+            })
+    })
 }
 
 /// The user's locale on POSIX systems: the first locale variable set that
