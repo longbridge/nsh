@@ -1,7 +1,6 @@
 ---
 import '../styles/global.css';
 import 'virtual:nsh-gallery-ui.css';
-import exampleTheme from '../../../examples/nsh-gallery-ui/theme.json';
 import { BASE, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, type Lang } from '../lib/site';
 import { isLatestVersion, siteVersions, latestVersion, versionHref, versionPath } from '../lib/versions';
 
@@ -41,8 +40,9 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta name="description" content={description} />
     {robots && <meta name="robots" content={robots} />}
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content={exampleTheme.cssVars.dark.background} media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content={exampleTheme.cssVars.light.background} media="(prefers-color-scheme: light)" />
+    <!-- The site's ground, `--background` in global.css. -->
+    <meta name="theme-color" content="#0e1016" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <!-- Before first paint: `theme` in localStorage is "light" or "dark";
          absent follows the system. <html> gets `dark` or `light`. -->
     <script is:inline>

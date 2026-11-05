@@ -213,8 +213,9 @@ after its first paragraph, and a section with a demo of its own shows it where
 its `<!-- demo: <name> -->` line is (on the English and the Chinese page alike): a frame with the app running in an iframe of
 `play/index.html?idiom=…#<name>`, beside its source (wide pages, Mobile) or
 behind a Preview / Source switch (narrow ones), and two icon buttons: edit in
-the playground, open in a new tab. The home page runs `demos/counter.tsx` the
-same way (`src/components/DemoFrame.astro`, `variant="phone"`).
+the playground, open in a new tab. The home
+page runs `demos/home-chat.tsx` in two frames of its own, at the desktop and the
+phone idioms.
 
 The panel switches the demo between two layouts (`LAYOUTS` in
 `src/lib/demo.js`, `demo-client.ts`), and the app runs again with the idiom
