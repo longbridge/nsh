@@ -273,6 +273,54 @@ main thread, so the work is held by counts the backend's tests check on Xvfb, no
   an upload and a shader frame. Each reader is listed once, however often its layer is sent (every uniform update
   sends it). Before, any change on the UI thread took every reader's backdrop again and gave it to its shader.
 
+## Continuous corners on Linux
+
+Measured on 2026-11-05 using the actual `NshView` snapshot implementation:
+GTK 4.24.1, Intel Arrow Lake-S GPU, Vulkan renderer, Wayland, 1200 × 800
+points at 2×, 60 Hz. The debug test moves and redraws 100 identical
+110 × 70 point cards (radius 20) every tick, warms up for 30 ticks and
+samples 180 frame-clock intervals. No screenshots or texture downloads
+occur during measurement. CPU is process CPU time / wall time, where
+100% means one core; it includes warm-up.
+
+```sh
+cargo test -p nsh-platform-linux --lib continuous_corner_frame_cost -- --ignored --nocapture
+```
+
+Before path reuse (`237dfd88` plus the background benchmark), continuous
+backgrounds averaged 33.33 ms / 30 updates per second; circular backgrounds
+averaged 16.67 ms / 60. Reusing paths alone restored backgrounds and clipped
+borders to about 60, but 100 blurred continuous shadows still averaged
+39.73 ms / 25.2 updates per second. Retaining their vector render nodes alone
+was insufficient (32.36 ms / 30.9).
+
+The final implementation retains equal paths and renders unchanged continuous
+shadows to GPU textures once, without readback. Shadows include all shape,
+color, offset, spread, blur and inset inputs in their cache key, together with
+device scale. Scaling, rotation and perspective transforms use the original
+vector drawing to preserve quality. Path retention is limited to 128 entries;
+shadow retention to 64 entries and 16 million pixels, with a 4 million pixel
+limit per shadow. Larger shadows use vector drawing.
+
+| Scene | Corners | Mean interval | p95 | p99 | Updates/s | CPU | Intervals >25 ms |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Background | Circular | 16.67 ms | 18.03 ms | 18.10 ms | 60.0 | 27.0% | 0 |
+| Background | Continuous | 16.67 ms | 18.30 ms | 18.46 ms | 60.0 | 31.8% | 0 |
+| Clipped child + 2 pt border | Circular | 16.66 ms | 18.23 ms | 18.52 ms | 60.0 | 37.5% | 0 |
+| Clipped child + 2 pt border | Continuous | 16.67 ms | 18.51 ms | 18.67 ms | 60.0 | 35.7% | 0 |
+| 8 pt blurred outer shadow | Circular | 16.66 ms | 18.30 ms | 18.47 ms | 60.0 | 33.7% | 0 |
+| 8 pt blurred outer shadow | Continuous | 16.67 ms | 18.41 ms | 18.66 ms | 60.0 | 33.7% | 0 |
+
+These are update intervals, not GPU execution times or confirmed presentation
+timestamps. GPU utilization, cold-cache cost, heterogeneous-card cache pressure,
+animated shape/blur changes, transformed shadows and 120 Hz were not measured.
+The test is explicit/ignored and does not impose timing assertions in CI.
+Pixel tests compare cached inset/outset shadows with vector rendering and check
+that changed radius, blur and color do not reuse stale images.
+
+The separate five-layer backdrop-blur probe (~15 FPS including full texture
+readback) is not this implementation. Linux `backdropFilter` remains unsupported.
+
 ## The browser engine (published web apps)
 
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
