@@ -455,9 +455,11 @@ pub struct TimeZone {
 }
 
 impl TimeZone {
-    /// Room for the longest IANA name
-    /// (`America/Argentina/ComodRivadavia`, 32 bytes) and then some.
-    const CAPACITY: usize = 39;
+    /// Room for any name the tz database's rules allow: parts of at most 14
+    /// characters, four of them with their slashes in 59 bytes (its longest
+    /// name, `America/Argentina/ComodRivadavia`, has three in 32), and for
+    /// the systems' offset zones (`GMT+05:30`). 64 bytes with the length.
+    const CAPACITY: usize = 63;
 
     /// `UTC`, the default when a platform reports none (and headless).
     pub const UTC: TimeZone = {
@@ -829,7 +831,9 @@ mod tests {
         assert_eq!(zone("Europe//Berlin"), None);
         assert_eq!(zone("../etc/passwd"), None);
         assert_eq!(zone("Central European Standard Time"), None);
-        assert_eq!(zone(&"A".repeat(40)), None);
+        let parts = ["Abcdefghijklmn"; 4].join("/");
+        assert_eq!(zone(&parts).as_deref(), Some(parts.as_str()));
+        assert_eq!(zone(&"A".repeat(64)), None);
         assert_eq!(TimeZone::default().as_str(), "UTC");
         assert_eq!(Environment::default().time_zone, TimeZone::UTC);
     }
