@@ -1005,7 +1005,10 @@ enum Message {
     Resize(Size<Points>),
     /// A component's task was woken: it runs in the loop.
     Wake,
-    Environment(Environment),
+    /// Boxed: with the languages and the time zone held inline, an
+    /// environment is several times the size of every other message, and
+    /// it changes rarely.
+    Environment(Box<Environment>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
@@ -1145,7 +1148,7 @@ impl EngineControl {
     /// Reports a change of the surface's environment (safe area, keyboard,
     /// appearance...).
     pub fn set_environment(&self, environment: Environment) {
-        let _ = self.tx.send(Message::Environment(environment));
+        let _ = self.tx.send(Message::Environment(Box::new(environment)));
     }
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
