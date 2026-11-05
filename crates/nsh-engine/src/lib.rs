@@ -1330,6 +1330,10 @@ fn raise_thread_priority() {
     }
 }
 
+/// A resize this soon after the last is one of a burst, a window being
+/// dragged; this long after the last the burst is over ([`Core::set_resizing`]).
+const RESIZE_BURST_GAP: Duration = Duration::from_millis(120);
+
 #[cfg(not(target_arch = "wasm32"))]
 fn run<M: TextEngine + 'static, S: MountSink>(
     config: EngineConfig,
@@ -1684,6 +1688,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             mouse_moved: None,
             sets_seen: FxHashMap::default(),
             resized: None,
+            resize_burst_ends: None,
             events_handled: 0,
             events_reported: 0,
             pinned: config.pinned,
@@ -1843,6 +1848,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.resize_burst_ends,
         ]
         .into_iter()
         .flatten()
@@ -2001,6 +2007,13 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        if state
+            .resize_burst_ends
+            .is_some_and(|ends| ends <= nsh_core::time::now())
+        {
+            state.resize_burst_ends = None;
+            state.core.set_resizing(false);
+        }
         let turn_start = state.trace.then(Instant::now);
         state.dispatch_touch_move(script);
         if state
@@ -2141,6 +2154,9 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// A resize before this time continues a burst of them
+    /// ([`RESIZE_BURST_GAP`]).
+    resize_burst_ends: Option<Instant>,
     /// Events received ([`EngineControl::dispatch_event`]), and the count
     /// last reported ([`MountSink::handled`]).
     events_handled: u64,
@@ -3042,6 +3058,15 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Resize(size) => {
+            // The next within a burst's gap: a window being dragged. A manual
+            // clock wakes nothing to end one, and a test wants its layout whole.
+            if !nsh_core::time::manual() {
+                let now = nsh_core::time::now();
+                if state.resize_burst_ends.is_some_and(|ends| now < ends) {
+                    state.core.set_resizing(true);
+                }
+                state.resize_burst_ends = Some(now + RESIZE_BURST_GAP);
+            }
             state.core.set_viewport(size);
             state.resized = Some(size);
         }
