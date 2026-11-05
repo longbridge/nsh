@@ -54,7 +54,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 |---|---|---|---|---|
 | `src` | `web_view(url)` | `string` | | 要显示的页面的 URL。 |
 | `html` | `web_view_html(html, base_url)`、`.html(html, base_url)` | `string` | | 内联 HTML，代替 `src` 显示。 |
-| `baseUrl` | `web_view_html` / `.html` 的 `base_url` | `string` | | `html` 中相对链接的解析基准。 |
+| `baseUrl` | `web_view_html` / `.html` 的 `base_url` | `string` | | `html` 中相对链接的解析基准。它需要与该地址的页面相同的授权（`webview.hosts`）；未授权时 HTML 不带基准 URL 加载，`onError` 报告 `ERR_ACCESS_DENIED`。 |
 | `injectedJavaScript` | `.injected_java_script(..)` | `string` | | 每个页面加载完成后执行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | 在每个页面自身的脚本之前执行。 |
 | `userAgent` | `.user_agent(..)` | `string` | | 浏览器的 user agent 字符串。 |
@@ -76,7 +76,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | 页面开始加载。 |
 | `onLoad` | `.on_load` | `WebViewNavigation` | 页面加载完成。 |
-| `onError` | `.on_error` | `{ message, code? }`（`&str`，即消息） | 加载失败；页面或 `html` 不在应用的能力范围内时 `code` 为 `"ERR_ACCESS_DENIED"`。 |
+| `onError` | `.on_error` | `{ message, code? }`（`&str`，即消息） | 加载失败；页面、`html` 或 `baseUrl` 不在应用的能力范围内时 `code` 为 `"ERR_ACCESS_DENIED"`。 |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `.on_message` | `{ data: string }`（`&str`） | 页面调用了 `window.nsh.postMessage(data)`。 |
 | `onDownload` | | `WebViewDownload` | 下载开始、完成或失败（macOS）。 |
@@ -156,7 +156,7 @@ function Bridge() {
 
 ## 能力声明
 
-应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `src`，或未声明 `webview` 的应用中的 `html`，显示为空视图；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。每种情况都会触发 `onError`，其 `code` 为 `"ERR_ACCESS_DENIED"`。
+应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `src`，或未声明 `webview` 的应用中的 `html`，显示为空视图；指向其他主机的 `baseUrl` 会被丢弃，HTML 不带它加载；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。每种情况都会触发 `onError`，其 `code` 为 `"ERR_ACCESS_DENIED"`。
 
 ```json
 {

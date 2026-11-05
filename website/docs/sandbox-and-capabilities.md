@@ -176,7 +176,8 @@ paths.
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
 `about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
-allows them without allowing any remote page.
+allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
+web views, so the base URL needs the grant a page there would: its host in `hosts`.
 
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts

@@ -7504,6 +7504,141 @@ fn refused_web_view_html_fails() {
     );
 }
 
+/// The source a web view's mount items last gave.
+fn web_source(batch: &MountBatch, view: NodeId) -> Option<crate::WebSource> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id,
+            props: crate::NativeProps::WebView(p),
+        } if *id == view => Some(p.source.clone()),
+        _ => None,
+    })
+}
+
+/// Inline HTML loaded with a base URL runs at the base URL's origin
+/// (WebKit, Android, Windows), so the base URL takes the grant a page there
+/// would.
+#[test]
+fn web_view_base_urls_need_the_hosts_grant() {
+    let run_with = |capabilities: serde_json::Value, props: Vec<Prop>| {
+        let mut c = core();
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+            granted: None,
+        }));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::Error,
+                enabled: true,
+            },
+        ];
+        ops.extend(props.into_iter().map(|prop| Op::SetProp { id: 2, prop }));
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        // The messages of the access errors reported.
+        let denied: Vec<String> = js_events(&mut c)
+            .into_iter()
+            .filter_map(|e| match e {
+                (2, EventKind::Error, EventPayload::Map(fields))
+                    if fields.iter().any(|(k, v)| {
+                        *k == "code" && *v == crate::PayloadValue::Str("ERR_ACCESS_DENIED".into())
+                    }) =>
+                {
+                    fields.into_iter().find_map(|(k, v)| match (k, v) {
+                        ("message", crate::PayloadValue::Str(m)) => Some(m.to_string()),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        (web_source(&batch, 2), denied)
+    };
+    let run = |props| {
+        run_with(
+            serde_json::json!({ "webview": { "hosts": ["docs.example.com"] } }),
+            props,
+        )
+    };
+    let html = |base: Option<&str>| crate::WebSource::Html {
+        html: "<b>hi</b>".into(),
+        base_url: base.map(Into::into),
+    };
+    let base_refused = |denied: &[String]| matches!(denied, [m] if m.contains("the base URL"));
+    for base in ["https://docs.example.com/a/", "about:blank", ""] {
+        // Granted: kept.
+        let (source, denied) = run(vec![
+            Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ]);
+        assert_eq!(source, Some(html(Some(base))), "{base}");
+        assert!(denied.is_empty(), "{base}: {denied:?}");
+    }
+    for base in [
+        "https://bank.example/",
+        "file:///etc/",
+        "not a url",
+        // WHATWG reads bank.example: the backslash ends the host.
+        "https://bank.example\\@docs.example.com/",
+    ] {
+        // `html` with `baseUrl`, either order, and Rust's
+        // `.html(html, Some(base))`: the page loads without the base URL.
+        for props in [
+            vec![
+                Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+                Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+            ],
+            vec![
+                Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+                Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+            ],
+            vec![Prop::Native(NativeProp::Source(html(Some(base))))],
+        ] {
+            let (source, denied) = run(props);
+            assert_eq!(source, Some(html(None)), "{base}");
+            assert!(base_refused(&denied), "{base}: {denied:?}");
+        }
+    }
+    // A subdomain grant: WHATWG reads bank.example here too.
+    let (source, denied) = run_with(
+        serde_json::json!({ "webview": { "hosts": ["*.docs.example.com"] } }),
+        vec![
+            Prop::Native(NativeProp::BaseUrl(Some(
+                "https://bank.example\\.docs.example.com/".into(),
+            ))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ],
+    );
+    assert_eq!(source, Some(html(None)));
+    assert!(base_refused(&denied), "{denied:?}");
+    // Without web views at all, the HTML itself is refused, once.
+    let (source, denied) = run_with(
+        serde_json::json!({}),
+        vec![
+            Prop::Native(NativeProp::BaseUrl(Some("https://bank.example/".into()))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ],
+    );
+    assert!(
+        !matches!(source, Some(crate::WebSource::Html { .. })),
+        "{source:?}"
+    );
+    assert!(
+        matches!(&denied[..], [m] if m.contains("web views are not granted")),
+        "{denied:?}"
+    );
+}
+
 #[test]
 fn web_view_incognito_is_read_when_it_is_made() {
     let mut c = core();
