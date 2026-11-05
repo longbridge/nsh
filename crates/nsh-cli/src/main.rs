@@ -217,9 +217,11 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (replaces the previous NSH development session).
-        #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
-        port: u16,
+        /// Dev server port (replaces the previous NSH development session on
+        /// it). Default: the port this app had last, else the first free one
+        /// from 8790; with --server-only, 8790.
+        #[arg(long)]
+        port: Option<u16>,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -253,9 +255,11 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (replaces the previous NSH development session).
-        #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
-        port: u16,
+        /// Dev server port (replaces the previous NSH development session on
+        /// it). Default: the port this app had last, else the first free one
+        /// from 8790; with --server-only, 8790.
+        #[arg(long)]
+        port: Option<u16>,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -602,8 +606,25 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     }
     // Own the port across builds and restarts, until every host and forwarding
     // rule from this command has been cleaned up.
-    let _port = match &command {
-        Command::Run { port, .. } | Command::Dev { port, .. } => dev_port::Session::acquire(*port)?,
+    let _port = match &mut command {
+        Command::Dev {
+            entry,
+            port,
+            server_only: true,
+            ..
+        } => {
+            // Apps embedding the SDK keep a server's address in their code.
+            let port = port.get_or_insert(nsh_dev::protocol::DEFAULT_PORT);
+            dev_port::Session::acquire(*port, entry)?
+        }
+        Command::Run { entry, port, .. } | Command::Dev { entry, port, .. } => match port {
+            Some(port) => dev_port::Session::acquire(*port, entry)?,
+            None => {
+                let (session, free) = dev_port::Session::acquire_free(entry)?;
+                *port = Some(free);
+                session
+            }
+        },
         _ => None,
     };
     let _terminal_logs = match &command {
@@ -763,14 +784,19 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             server_only,
         } => {
             no_limits_for_rust(&entry, limits)?;
+            // `nsh dev` serves hosts on other machines.
+            let listen = dev::Listen {
+                port: port.unwrap_or_default(),
+                network: true,
+            };
             if server_only {
-                let session = dev::DevSession::start(&entry, port, release, limits)?;
+                let session = dev::DevSession::start(&entry, listen, release, limits)?;
                 session.print_urls();
                 session.watch(|| Ok(false))
             } else {
                 run::run(
                     &entry,
-                    port,
+                    listen,
                     release,
                     run::HostFlags {
                         limits,
@@ -843,7 +869,15 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             no_limits_for_rust(&entry, limits)?;
             run::run(
                 &entry,
-                port,
+                dev::Listen {
+                    port: port.unwrap_or_default(),
+                    // Phones open the web page; a device's host may be on
+                    // the network. A window here needs only this machine.
+                    network: matches!(
+                        target,
+                        run::Target::Ios | run::Target::Android | run::Target::Web
+                    ),
+                },
                 release,
                 run::HostFlags {
                     limits,
