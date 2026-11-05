@@ -1,0 +1,48 @@
+import { expect, test } from 'bun:test';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+// The skills in skills/ are installed on their own (`npx skills add longbridge/nsh`), so they
+// carry copies. These keep the copies equal to what they copy, and the skills' own links alive.
+
+const REPO = join(import.meta.dir, '../..');
+const read = (path: string) => readFileSync(join(REPO, path), 'utf8');
+
+test('the skills carry the guides verbatim', () => {
+  // After changing a guide: cp website/docs/coding-guides.md skills/nsh/references/ (and the design guide).
+  expect(read('skills/nsh/references/coding-guides.md')).toBe(read('website/docs/coding-guides.md'));
+  expect(read('skills/nsh-design-guides/references/design-guides.md')).toBe(read('website/docs/design-guides.md'));
+});
+
+test('the recipe shows examples/tasks as it is', () => {
+  const recipe = read('skills/nsh/references/recipes.md');
+  const walk = (dir: string): string[] =>
+    readdirSync(join(REPO, dir)).flatMap((name) => {
+      const path = `${dir}/${name}`;
+      if (name === '.nsh' || name === 'tsconfig.json') return [];
+      return statSync(join(REPO, path)).isDirectory() ? walk(path) : [path];
+    });
+  for (const file of walk('examples/tasks')) {
+    const name = file.slice('examples/tasks/'.length);
+    expect(recipe).toContain(`## \`${name}\``);
+    expect(recipe).toContain(read(file).trimEnd());
+  }
+});
+
+test("the skills' relative links resolve, and their guide tables name real sections", () => {
+  for (const skill of readdirSync(join(REPO, 'skills'))) {
+    const text = read(`skills/${skill}/SKILL.md`);
+    for (const [, target] of text.matchAll(/\]\((references\/[^)#]+)/g)) {
+      expect(existsSync(join(REPO, 'skills', skill, target))).toBe(true);
+    }
+  }
+  const sections = (path: string) => [...read(path).matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+  for (const [skill, guide] of [['nsh', 'coding-guides'], ['nsh-design-guides', 'design-guides']]) {
+    const dir = `skills/${skill}`;
+    const skillText = read(`${dir}/SKILL.md`);
+    for (const section of sections(`${dir}/references/${guide}.md`)) {
+      if (section === 'Make the common path inexpensive') continue;
+      expect(skillText).toContain(`| ${section} `);
+    }
+  }
+});

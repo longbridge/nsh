@@ -23,6 +23,8 @@ on:
   pull_request:
     paths:
       - "website/**"
+      - "skills/**"
+      - "examples/tasks/**"
       - "crates/nsh-platform-web/**"
       - "examples/gallery/**"
       - ".github/workflows/website.yml"
