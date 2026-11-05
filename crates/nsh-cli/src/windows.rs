@@ -2,9 +2,14 @@
 //! renamed after the app, its icon embedded as the executable's icon
 //! resource, and the bundle next to it; and the same as a `.zip`. Needs no
 //! tools: the icon is written into the copied executable with Windows'
-//! resource update API.
+//! resource update API. The icon also goes next to the bundle as
+//! `nsh\icon.ico`, which the runner shows on its windows when the
+//! executable has none (packaged off Windows) and registers for its
+//! notifications; the development host gets one made the same way
+//! ([`host_args`]).
 
 use std::{
+    ffi::OsString,
     fs,
     io::Write as _,
     path::Path,
@@ -74,6 +79,7 @@ pub(crate) fn package(
     fs::write(resources.join("app.json"), info.to_string())?;
     if let Some(icon) = &config.icon {
         let images = icon_images(icon)?;
+        fs::write(resources.join("icon.ico"), icon_file(&images))?;
         set_icon(&exe, &images)
             .with_context(|| format!("embed {} in {}", icon.display(), exe.display()))?;
     }
@@ -115,10 +121,41 @@ fn file_stem(name: &str) -> String {
     }
 }
 
+/// The development host's arguments for the app `entry`: its name
+/// (`--name`) and its icon (`--icon`), `nsh.json` `"icon"` made an `.ico`
+/// in `work` (`.nsh`), made again when the image is newer. A broken icon
+/// warns and leaves the host's.
+pub(crate) fn host_args(entry: &Path, work: &Path) -> Vec<OsString> {
+    let config = crate::package::read_config(entry).unwrap_or_default();
+    let (name, _) = crate::package::name_and_id(entry, &config);
+    let mut args = vec!["--name".into(), name.into()];
+    if let Some(icon) = &config.icon {
+        let ico = work.join("windows").join("icon.ico");
+        match host_icon(icon, &ico) {
+            Ok(()) => args.extend(["--icon".into(), ico.into_os_string()]),
+            Err(err) => ui::warn(format!("the app's icon: {err:#}")),
+        }
+    }
+    args
+}
+
+/// Writes `icon` as the `.ico` file `ico`, unless it is newer than `icon`.
+fn host_icon(icon: &Path, ico: &Path) -> anyhow::Result<()> {
+    let modified = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let (Some(made), Some(source)) = (modified(ico), modified(icon))
+        && made >= source
+    {
+        return Ok(());
+    }
+    let images = icon_images(icon)?;
+    if let Some(dir) = ico.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(ico, icon_file(&images)).with_context(|| format!("write {}", ico.display()))
+}
+
 /// One image of an icon: its size and its data as an `RT_ICON` resource
-/// holds it (a DIB, or a PNG for 256 pixels). Only written on Windows:
-/// elsewhere the images are made and dropped.
-#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+/// and an `.ico` file hold it (a DIB, or a PNG for 256 pixels).
 struct IconImage {
     size: u32,
     data: Vec<u8>,
@@ -173,6 +210,37 @@ fn dib(rgba: &image::RgbaImage) -> Vec<u8> {
     }
     data.resize(data.len() + (mask_row * height) as usize, 0);
     data
+}
+
+/// An `.ico` file of `images`: an `ICONDIR`, an `ICONDIRENTRY` per image
+/// (the group resource's entries, with the image's offset in the file in
+/// place of its resource id), then the images.
+fn icon_file(images: &[IconImage]) -> Vec<u8> {
+    let header = 6 + 16 * images.len();
+    let size = header + images.iter().map(|i| i.data.len()).sum::<usize>();
+    let mut file = Vec::with_capacity(size);
+    file.extend_from_slice(&0u16.to_le_bytes());
+    file.extend_from_slice(&1u16.to_le_bytes()); // icons
+    file.extend_from_slice(&(images.len() as u16).to_le_bytes());
+    let mut offset = header;
+    for image in images {
+        // 0 stands for 256.
+        let side = if image.size >= 256 {
+            0
+        } else {
+            image.size as u8
+        };
+        file.extend_from_slice(&[side, side, 0, 0]);
+        file.extend_from_slice(&1u16.to_le_bytes()); // planes
+        file.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+        file.extend_from_slice(&(image.data.len() as u32).to_le_bytes());
+        file.extend_from_slice(&(offset as u32).to_le_bytes());
+        offset += image.data.len();
+    }
+    for image in images {
+        file.extend_from_slice(&image.data);
+    }
+    file
 }
 
 /// The `RT_GROUP_ICON` resource of `images`, whose `RT_ICON` resources
@@ -256,12 +324,12 @@ fn set_icon(exe: &Path, images: &[IconImage]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Off Windows there is no API to write the resources: the app keeps the
-/// runner's icon.
+/// Off Windows there is no API to write the resources: Explorer shows the
+/// executable with the default icon, and its windows show `nsh\icon.ico`.
 #[cfg(not(windows))]
 fn set_icon(exe: &Path, _images: &[IconImage]) -> anyhow::Result<()> {
     ui::warn(format!(
-        "{} keeps the default icon: icons are embedded when packaging on Windows",
+        "{} has the default icon in Explorer: icons are embedded when packaging on Windows (its windows and notifications show the app's)",
         ui::path(exe)
     ));
     Ok(())
@@ -328,6 +396,32 @@ mod tests {
         assert_eq!(&group[20..24], &[0, 0, 0, 0]);
         assert_eq!(&group[28..32], &300u32.to_le_bytes());
         assert_eq!(&group[32..34], &2u16.to_le_bytes());
+    }
+
+    #[test]
+    fn icon_files_point_at_their_images() {
+        let images = [
+            IconImage {
+                size: 16,
+                data: vec![1; 10],
+            },
+            IconImage {
+                size: 256,
+                data: vec![2; 300],
+            },
+        ];
+        let file = icon_file(&images);
+        let header = 6 + 16 * 2;
+        assert_eq!(file.len(), header + 10 + 300);
+        assert_eq!(&file[..6], &[0, 0, 1, 0, 2, 0]);
+        assert_eq!(&file[6..10], &[16, 16, 0, 0]);
+        assert_eq!(&file[14..18], &10u32.to_le_bytes());
+        assert_eq!(&file[18..22], &(header as u32).to_le_bytes());
+        // 256 is written as 0.
+        assert_eq!(&file[22..26], &[0, 0, 0, 0]);
+        assert_eq!(&file[34..38], &((header + 10) as u32).to_le_bytes());
+        assert_eq!(file[header], 1);
+        assert_eq!(file[header + 10], 2);
     }
 
     #[test]
