@@ -1,11 +1,11 @@
 ---
-title: Terminal
+title: TUI
 description: "Run Rust and TSX NSH apps in a terminal: the Cell layout, keyboard and mouse input, the terminal's colors, how components and popups look on the grid, detecting the terminal in app code, testing, and embedding AppView in a ratatui app."
 order: 16.5
 group: platforms
 ---
 
-# Terminal
+# TUI
 
 NSH apps also run in a terminal. The terminal backend draws an app on the terminal's grid of character Cells with
 [ratatui](https://ratatui.rs), in the terminal's own font and colors, and takes its input from the keyboard and the
