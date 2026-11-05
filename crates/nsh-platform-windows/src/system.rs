@@ -792,7 +792,7 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     };
     let from = kind.opacity().get();
     let mut start = None;
-    surface.on_frame(move |surface, now| {
+    surface.on_draw_frame(move |surface, now| {
         let Some((_, kind)) = find(serial) else {
             return false;
         };
