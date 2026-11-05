@@ -166,6 +166,13 @@ pub struct Screen {
     next_canvas_node: NodeId,
 }
 
+/// Whether a pointer skips `view` and everything in it: it is hidden or
+/// takes no pointer (`pointer-events: none`). The hit walk
+/// ([`Screen::hit`]) and [`Screen::is_interactive`] share it.
+fn skips_pointer(view: &View) -> bool {
+    view.hidden || view.pointer_events == PointerEvents::None
+}
+
 #[derive(Debug, Default)]
 struct View {
     kind: Option<ViewKind>,
@@ -1336,7 +1343,7 @@ impl Screen {
     fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
         let view = self.nodes.get(&id);
         let receives = view.map_or(PointerEvents::Auto, |v| v.pointer_events);
-        if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
+        if view.is_some_and(skips_pointer) {
             return None;
         }
         let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
@@ -1642,10 +1649,11 @@ impl Screen {
     }
 
     /// Whether `id` takes pointer input: it or its nearest pressable
-    /// ancestor hears presses, and neither it nor a view on the way is
-    /// disabled or hidden.
+    /// ancestor hears presses, no view on the way is disabled, and neither
+    /// it nor any view around it is one the hit walk skips with all it
+    /// holds (hidden, or `pointer-events: none`).
     pub fn is_interactive(&self, id: NodeId) -> bool {
-        if self.nodes.get(&id).is_none_or(|v| v.hidden) {
+        if !self.nodes.contains_key(&id) || self.up_to(id, skips_pointer).is_some() {
             return false;
         }
         let Some(target) = self.up_to(id, |v| v.events.contains(EventKind::Press)) else {
@@ -2314,5 +2322,30 @@ mod tests {
             .set(EventKind::Press, false);
         assert_eq!(screen.hit(Point::new(Points(60.0), Points(30.0))), Some(4));
         assert!(!screen.is_interactive(4));
+    }
+
+    #[test]
+    fn hidden_ancestors_are_not_interactive() {
+        // A press target under a hidden parent: the hit walk skips the
+        // parent with all it holds, so the target is not interactive either.
+        let mut screen = walk_screen(false, (100.0, 40.0));
+        let center = Point::new(Points(60.0), Points(30.0));
+        assert_eq!(screen.hit(center), Some(4));
+        screen.apply(&batch(vec![style(2, |s| s.hidden = true)]));
+        assert!(!screen.is_interactive(4));
+        assert_ne!(screen.hit(center), Some(4));
+
+        // A child of a hidden press target (its label) is not either.
+        let mut screen = walk_screen(false, (100.0, 40.0));
+        screen.apply(&batch(vec![
+            create(8, ViewKind::View),
+            frame(8, 0.0, 0.0, 100.0, 40.0),
+            insert(4, 8),
+        ]));
+        assert!(screen.is_interactive(8));
+        screen.apply(&batch(vec![style(4, |s| s.hidden = true)]));
+        assert!(!screen.is_interactive(8));
+        // The press falls through to the parent, past the button and label.
+        assert_eq!(screen.hit(center), Some(2));
     }
 }
