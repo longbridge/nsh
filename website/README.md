@@ -27,18 +27,15 @@ Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
 ## Other languages
 
-The repository holds English and Chinese only, and a change updates only those.
-Every other language is translated by machine: at each release `docs-i18n.yml`
-runs `scripts/translate.js` over the release's English pages, retranslates the
-pages whose source changed, and commits to the `docs-i18n` branch, from which the
-published root takes `website/<code>/`. Each page says it is a machine translation
-and links to the English; a page with no translation shows the English, not
-indexed. To add a language, add it to `locales.json`.
+This repository holds English and Chinese only, and a change updates only those.
+Every other language is machine translated in
+[huacnlee/nsh-website-translates](https://github.com/huacnlee/nsh-website-translates),
+which also lists the languages and runs the translation. The published root clones
+it to `translations/` (git-ignored); older versions, pull requests and local builds
+do without. Each translated page says it is a machine translation and links to the
+English; a page with no translation shows the English, not indexed.
 
-Translation pull requests are not accepted: a fix goes to the English page. The
-workflow needs the `TRANSLATE_API_KEY` secret and the `TRANSLATE_API_URL` and
-`TRANSLATE_MODEL` variables (any OpenAI-compatible endpoint); without them it does
-nothing.
+Translation pull requests are not accepted: a fix goes to the English page.
 
 ## Writing documentation
 

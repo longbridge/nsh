@@ -1,19 +1,21 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import registry from '../../locales.json';
 import type { Lang } from './site';
 
 /**
- * Languages beyond English and Chinese are translated by machine
- * (`scripts/translate.js`) and never kept in this repository: a build takes
- * them from the `docs-i18n` branch, copied to `website/<code>/`. A language
- * with no such directory (pull requests, older versions) is simply absent.
+ * Languages beyond English and Chinese are translated by machine and kept in
+ * huacnlee/nsh-website-translates: a published root's build clones it to
+ * `website/translations/`. Without that directory (pull requests, older
+ * versions, local builds) they are simply absent.
  */
 export interface MachineLocale { code: string; name: string }
 
-const ROOT = process.cwd();
+const ROOT = join(process.cwd(), 'translations');
+const REGISTRY = join(ROOT, 'locales.json');
 
-export const machineLocales: MachineLocale[] = registry.machine.filter((l) => existsSync(join(ROOT, l.code, 'ui.json')));
+export const machineLocales: MachineLocale[] = existsSync(REGISTRY)
+  ? (JSON.parse(readFileSync(REGISTRY, 'utf8')) as MachineLocale[]).filter((l) => existsSync(join(ROOT, l.code, 'ui.json')))
+  : [];
 
 export function isMachine(locale: string): boolean {
   return locale !== 'en' && locale !== 'zh-CN';

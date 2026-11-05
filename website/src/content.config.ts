@@ -33,6 +33,6 @@ export const collections = {
   'zh-modules': section('./zh-CN/modules'),
   // Machine translations, when the build has them (`src/lib/locales.ts`).
   ...Object.fromEntries(
-    machineLocales.flatMap(({ code }) => ['docs', 'elements', 'modules'].map((s) => [`${code}-${s}`, section(`./${code}/${s}`)])),
+    machineLocales.flatMap(({ code }) => ['docs', 'elements', 'modules'].map((s) => [`${code}-${s}`, section(`./translations/${code}/${s}`)])),
   ),
 };

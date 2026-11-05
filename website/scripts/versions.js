@@ -91,12 +91,13 @@ if (!catalog && process.env.NSH_REQUIRE_SHOWCASES) {
 const notes = releasesDigest(await fetchReleases());
 
 // Machine translations are the root's alone (`src/lib/locales.ts`).
-const machine = JSON.parse(readFileSync(join(website, 'locales.json'), 'utf8')).machine.map((l) => l.code).filter((code) => existsSync(join(website, code)));
 const translations = (() => {
+  const dir = join(website, 'translations');
   const hash = createHash('sha256');
-  for (const code of machine) {
-    for (const file of readdirSync(join(website, code), { recursive: true, withFileTypes: true })) {
-      if (file.isFile()) hash.update(readFileSync(join(file.parentPath, file.name)));
+  if (existsSync(dir)) {
+    const files = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((file) => file.isFile());
+    for (const path of files.map((file) => join(file.parentPath, file.name)).sort()) {
+      hash.update(path.slice(dir.length)).update(readFileSync(path));
     }
   }
   return hash.digest('hex').slice(0, 16);
@@ -199,7 +200,7 @@ for (const version of order) {
     continue;
   }
   const copy = siteCopy(version);
-  if (version !== latest) for (const code of machine) rmSync(join(copy, code), { recursive: true, force: true });
+  if (version !== latest) rmSync(join(copy, 'translations'), { recursive: true, force: true });
   if (version === 'main') {
     const play = join(website, 'public', 'play');
     if (existsSync(play)) cpSync(play, join(copy, 'public', 'play'), { recursive: true });
