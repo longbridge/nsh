@@ -36,6 +36,7 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+mod audio;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -43,6 +44,8 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+
+pub use audio::AudioCall;
 mod stub;
 
 use std::{
@@ -283,6 +286,9 @@ pub struct Headless {
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
+    /// The speaker the app plays to; `None` when the config gave its own
+    /// (`EngineConfig::audio`).
+    audio: Option<audio::FakeAudio>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -314,6 +320,10 @@ impl Headless {
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
         }
+        let audio = config.audio.is_none().then(audio::FakeAudio::default);
+        if let Some(audio) = &audio {
+            config.audio = Some(Arc::new(audio.clone()));
+        }
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -341,6 +351,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             speech,
+            audio,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -670,6 +681,27 @@ impl Headless {
         error: Option<nsh_core::speech::SpeechError>,
     ) -> Result<(), String> {
         self.fake_speech()?.end(error)?;
+        self.done()
+    }
+
+    /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
+    /// in order. Headless apps play sound: sounds decode as WAV, players
+    /// play a minute of their source at once and end when the test says
+    /// ([`Headless::end_audio`]).
+    pub fn audio_calls(&self) -> Vec<AudioCall> {
+        self.audio
+            .as_ref()
+            .map(audio::FakeAudio::calls)
+            .unwrap_or_default()
+    }
+
+    /// The players playing reach their end (`end`; those that loop start
+    /// again), then waits until the app is quiet. Fails when none plays.
+    pub fn end_audio(&mut self) -> Result<(), String> {
+        self.audio
+            .clone()
+            .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
+            .end()?;
         self.done()
     }
 

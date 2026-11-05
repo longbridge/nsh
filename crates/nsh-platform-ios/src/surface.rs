@@ -385,6 +385,7 @@ impl RootView {
             speech: true,
             // The notification center.
             notifications: true,
+            audio: false,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
@@ -708,6 +709,7 @@ impl RootView {
             host: self.ivars().options.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

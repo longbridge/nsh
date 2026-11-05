@@ -51,6 +51,7 @@
     },
     "picker": true,
     "speech": true,
-    "notifications": true
+    "notifications": true,
+    "audio": true
   }
 }

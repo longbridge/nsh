@@ -1,8 +1,14 @@
 # Audio playback: design
 
-Status: draft for review. Covers `Sound` (short sound effects) and `AudioPlayer`
-(long audio) of `nsh`, their Rust faces, the platforms' engines and what
-`nsh.json` grants.
+Status: approved and implemented. Run: the core, `nsh test`'s fake speaker,
+macOS (`nsh test --target macos`), Windows (`--target windows` on a test
+machine) and the web (`--target web`, headless Chrome). Built, not run: iOS
+(shares the macOS file; Catalyst clippy) and Android (Rust for three ABIs and
+the Java runtime; no device). Written, not compiled: Linux (no Linux machine
+at hand). The GPUI backend reports `Environment::audio` off: sounds and
+players fail there with `unavailable`. Covers `Sound` (short sound
+effects) and `AudioPlayer` (long audio) of `nsh`, their Rust faces, the
+platforms' engines and what `nsh.json` grants.
 
 ## Intent
 
@@ -206,16 +212,17 @@ player.dispose();
 - `AudioPlayer.available(): Promise<boolean>` as `Sound.available`.
 
 Errors' `code`s name the Web's `MediaError` and the Speech module's words:
-`not-allowed`, `network`, `decode`, `not-supported`, `unavailable`, `failed`.
+`not-allowed`, `network`, `decode`, `not-supported`, `quota-exceeded`,
+`unavailable`, `failed`.
 
 ### Rust components
 
-`nsh_core::prelude` gets `sound(src) -> impl Future<Output = Result<Sound, AudioError>>`
-and `AudioPlayer::new(src)`, the same objects without the JS wrapping, through
-`element::ambient` as `recognize_speech` is. Their listeners are GPUI-style
-`on_progress(..)` methods (`api-naming.md`: Rust keeps `on_<event>`). A Rust
-handle releases its sound or player on `Drop`, and `element::ambient` ties it
-to the scope that made it (the component's cleanup), as a speech session is;
+`nsh_core::prelude` gets `load_sound(src).await -> Result<Sound, AudioFailure>`,
+`audio_player(src, settings) -> AudioPlayer` and `audio_available()`
+(`nsh_core::element::audio`), the same objects without the JS wrapping. A
+player's events come from `player.next().await`, as a speech recognition's
+do. A Rust handle releases its sound (with the last `Sound` over its source)
+or player on `Drop`;
 the JS classes queue `Command::Audio` from their methods as `SpeechSession`'s
 do, and `play`'s range checks throw synchronously before anything is queued.
 The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
@@ -224,19 +231,19 @@ The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
 
 ### The core (`nsh_core::audio`)
 
-- `AudioCommand`: `Load { id, bytes: Arc<[u8]>, hint: Option<String>, max_seconds }`
-  (a sound; `hint` the file name or MIME for decoders that need it,
-  `max_seconds` how much the platform decodes at most),
-  `Play { id, playback: u32, volume, rate }`, `StopSound { id }`,
-  `Unload { id }`; `Open { player, src, loop_, volume, rate }`, `PlayPlayer`,
-  `Pause`, `Seek`, `SetVolume`, `SetRate`, `SetLoop`, `Close` for players.
+- `AudioCommand`: `Load { id, bytes, hint, max_duration }` (a sound; `hint`
+  the file name, URL or `data:` URI for decoders that go by the extension,
+  `max_duration` how much the platform decodes at most), `Play { id, volume,
+  rate }`, `Stop { id }`, `Unload { id }`; `Open { id, src, settings }`,
+  `Preload`, `Resume`, `Pause`, `Seek { id, position }`, `Set { id, settings }`,
+  `Close` for players (`PlayerSettings`: `volume`, `rate`, `looped`).
 - `AudioEvent`: `Loaded { duration, bytes, truncated }` (`bytes` the decoded
-  PCM's size, for the budget) / `LoadFailed { error }` for sounds;
-  `Load { duration }`, `Playing`, `Paused`, `Progress { current, duration }`,
-  `Buffer { buffering }`, `Ended`, `Error { code, message }` for players.
-- Ids: sounds and players are numbered per engine by the core (`u32`), as
-  speech sessions are; a playback of a sound has its own number for `stop`
-  of one playback later (not exposed now).
+  audio's size, for the budget) for sounds; `Load { duration }`, `Playing`,
+  `Paused`, `Progress { position, duration }`, `Buffer { buffering }`,
+  `Ended` for players; `Failed { error, message }` for both.
+- Ids: sounds and players are numbered by the core from one counter of the
+  process (`u32`), so a late event of a closed object never reaches
+  another.
 - `AudioBackend` trait: `load`, `play`, `stop`, `unload`, and the player
   methods, each answered through a `Sink` of events; given with
   `Core::set_audio` / `EngineConfig::audio`. When set, no command reaches the
@@ -262,7 +269,7 @@ The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
   limit applies (64 MiB); on top of it a sound's encoded bytes are capped at
   **8 MiB**, whatever the source (`data:` and bundled assets too), checked in
   the core before `Load`. Its decoded length is capped at **5 s**: `Load`
-  carries `max_seconds`, the platform decodes no more than that and reports
+  carries `max_duration`, the platform decodes no more than that and reports
   `truncated` in `Loaded`, and a truncated sound is sent `Unload` and
   rejected with `ERR_NSH_QUOTA_EXCEEDED` (the platform's decoder is trusted
   native code, as the image decoders are; the core checks what it reports).
@@ -293,8 +300,9 @@ The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
 | iOS, macOS | `AVAudioEngine` with one `AVAudioPlayerNode` per playback over a shared mixer; `AVAudioFile` / `AVAudioPCMBuffer` decoded once at `Load` | `AVPlayer`, the class `Video` uses in `native.rs`, with no layer | one `AVAudioEngine` per NSH engine (`AppView` / `NshAppView`), started lazily, stopped with it; `AVAudioSession` `.ambient` (mixes with others, honours the silent switch) set once on iOS when the first sound or player starts; a player pauses on `UIApplication.didEnterBackground` |
 | Android | `SoundPool` (one per NSH engine, max 32 streams), `load` from a temp file or an `AssetFileDescriptor`; the duration read from the container with `MediaExtractor` before `load` (`SoundPool` reports none) — under the 5 s cap its own decoded-size limit (about 1.5 MiB) is never hit | `MediaPlayer`, the class `VideoBox.java` uses, with its `AudioFocusRequest` handling repeated | `Audio.java` next to `VideoBox.java`; events through the same JNI event map (`Native.java`'s key list updated) |
 | Windows | `XAudio2` (one engine per NSH engine; `IXAudio2SourceVoice` per playback over a mastering voice), Media Foundation's `IMFSourceReader` decodes to PCM at `Load` | `IMFMediaEngine`, the class `native/video.rs` uses, audio-only (no video output) | |
-| Linux, GPUI | GStreamer: an `appsrc` → `audioconvert` → `autoaudiosink` per playback with the PCM decoded once by `decodebin` at `Load`; or `playbin3` per playback from a memory URI if simpler, as long as `play` opens nothing | `playbin3` as `native.rs`'s video, with `video-sink` `fakesink` | the GPUI backend shares the Linux implementation and keeps its features (`video`) |
-| Web | `AudioContext` (one per NSH engine) + `decodeAudioData` at `Load`, an `AudioBufferSourceNode` per playback | an `HTMLAudioElement` as the `<video>` path in `nsh.js` | the `AudioContext` is created and resumed on the page's first user gesture the engine observes; `play` before it is `not-allowed` |
+| Linux | `gtk::MediaFile` (GStreamer underneath, as the video's) per play over a temporary file of the bytes written at `Load`, probed once for its duration; GTK media streams have no rate, so `rate` is ignored there | `gtk::MediaFile`, as `native.rs`'s video | no new dependency; GTK has no buffering signal, so `buffer` is reported only while a play waits for its load |
+| GPUI | not yet: `Environment::audio` off | not yet | |
+| Web | the core sends `AudioCommand::LoadUrl` (the browser fetches; the image loader has no threads there), checking the source first; `AudioContext` (one per NSH engine) + `decodeAudioData` at `Load`, an `AudioBufferSourceNode` per playback | an `HTMLAudioElement` as the `<video>` path in `nsh.js` | the `AudioContext` is created and resumed on the page's first user gesture the engine observes; `play` before it is `not-allowed` |
 
 The platform's audio objects (`AVAudioEngine`, `SoundPool`, the XAudio2 engine,
 the `AudioContext`) are **per NSH engine**, never process-wide (`AGENTS.md`:
@@ -383,7 +391,7 @@ My calls (change them if wrong):
    Android's `SoundPool` keeps about 1.5 MiB of decoded PCM per sound (about
    8 s of 16-bit stereo at 44.1 kHz) and the limit must be the same on every
    platform (goal 3); anything longer is `AudioPlayer`'s job. The decoded
-   cap travels to the platform (`max_seconds`) so a small file that expands
+   cap travels to the platform (`max_duration`) so a small file that expands
    to minutes never fills memory before it is refused.
 4. **`AudioPlayer` is a class, `Sound` a module with instances** (`load`
    returns one). `new AudioPlayer(src)` reads as `new Audio(src)` does;
@@ -412,7 +420,7 @@ My calls (change them if wrong):
     brotli budget (`browser-js-size.md`: 4.1 MB for the whole package) has
     no room for a codec set, and WAV, MP3 and AAC-LC decode on every
     platform already. The decoded cap travels to the platform instead
-    (`max_seconds`), and `Loaded` reports what to count. The trigger to
+    (`max_duration`), and `Loaded` reports what to count. The trigger to
     revisit: apps needing Opus or Vorbis sounds on iOS and Windows, where
     the system decoders are not guaranteed.
 12. **The platform mixes; no cpal, no mixer of NSH's own.** A wait-free

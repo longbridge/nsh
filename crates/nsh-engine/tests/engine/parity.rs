@@ -129,6 +129,7 @@ mount(() => <Text>{{shown()}}</Text>);
             host: Default::default(),
             picker: None,
             speech: None,
+            audio: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         Self {

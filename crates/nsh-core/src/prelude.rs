@@ -224,6 +224,10 @@ pub use crate::element::{
     web_view_html,
     white,
 };
+/// Sound ([`crate::audio`]).
+pub use crate::element::{
+    AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+};
 pub use crate::element::{
     Delay, Each, If, IntoElements, IntoReactive, KeyOptions, Memo, Owner, Prop, Reactive,
     ReadSignal, Resource, ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Spawned,

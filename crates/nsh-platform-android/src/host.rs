@@ -200,6 +200,7 @@ impl Host {
             host: self.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone());
