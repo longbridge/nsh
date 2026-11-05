@@ -1464,6 +1464,40 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::Notification(command) => {
+            use nsh_core::notifications::NotificationCommand as N;
+            match command {
+                N::Permission { id: request, ask } => out
+                    .item("cmd")
+                    .num(id)
+                    .str("notificationPermission")
+                    .num(*request)
+                    .bool(*ask)
+                    .end(),
+                N::Show {
+                    id: request,
+                    notification,
+                } => out
+                    .item("cmd")
+                    .num(id)
+                    .str("showNotification")
+                    .num(*request)
+                    .str(&notification.id)
+                    .str(&notification.title)
+                    .str(&notification.body)
+                    .end(),
+                N::Close(name) => out
+                    .item("cmd")
+                    .num(id)
+                    .str("closeNotification")
+                    .str(name)
+                    .end(),
+                N::SetBadge(count) => out.item("cmd").num(id).str("setBadge").num(*count).end(),
+                // Presses are reported as they come: a browser starts no
+                // page from one.
+                _ => {}
+            }
+        }
         Command::OpenUrl { id: request, url } => out
             .item("cmd")
             .num(id)

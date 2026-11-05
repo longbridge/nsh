@@ -531,6 +531,17 @@ public class NshView extends FrameLayout {
         Native.setOpenUrlHandler(handle, handler != null);
     }
 
+    /**
+     * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
+     * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
+     * the app's launcher activity.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleNotificationIntent(android.content.Intent intent) {
+        Notifications.handleIntent(intent);
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {

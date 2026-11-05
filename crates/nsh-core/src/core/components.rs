@@ -474,6 +474,23 @@ struct PendingFetch {
     answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
 }
 
+/// What notifications wait for ([`crate::notifications`]).
+#[derive(Default)]
+struct Notifications {
+    /// The next request's id.
+    next: u32,
+    /// Permission requests waiting for the platform's answer.
+    permissions: FxHashMap<u32, AnswerSlot<crate::notifications::NotificationPermission>>,
+    /// Notifications waiting for the platform's answer.
+    shows: FxHashMap<u32, AnswerSlot<bool>>,
+    /// The platform was told to report presses.
+    listening: bool,
+    /// Presses no listener took yet.
+    presses: std::collections::VecDeque<String>,
+    /// The listener waiting for a press.
+    next_press: Option<AnswerSlot<String>>,
+}
+
 /// The speech recognition session running ([`crate::speech`]).
 struct SpeechSession {
     id: u32,
@@ -558,6 +575,8 @@ pub(super) struct Components {
     next_pick: u32,
     /// The speech recognition session running, if any.
     speech: Option<SpeechSession>,
+    /// What notifications wait for ([`crate::notifications`]).
+    notifications: Notifications,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -678,6 +697,7 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             speech: None,
+            notifications: Notifications::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -4834,7 +4854,112 @@ impl<M: TextEngine> Core<M> {
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
     }
 
-    /// What a component or a task asked of the platform.
+    /// Applies what the app asks about notifications: granted and where
+    /// the platform shows them, the platform answers with
+    /// [`EventKind::Notification`]; otherwise the answer is given here.
+    fn notification_action(&mut self, action: crate::element::NotificationAction) {
+        use crate::{
+            element::NotificationAction,
+            notifications::{NotificationCommand, NotificationPermission},
+        };
+        let allowed = self.access.allows_notifications();
+        let available = allowed && self.components.environment.notifications;
+        let command = match action {
+            NotificationAction::Permission { ask, answer } => {
+                if !available {
+                    answer
+                        .borrow_mut()
+                        .deliver(NotificationPermission::Unavailable);
+                    return;
+                }
+                let state = &mut self.components.notifications;
+                let id = state.next;
+                state.next = id.wrapping_add(1);
+                state.permissions.insert(id, answer);
+                NotificationCommand::Permission { id, ask }
+            }
+            NotificationAction::Show {
+                notification,
+                answer,
+            } => {
+                if !available {
+                    answer.borrow_mut().deliver(false);
+                    return;
+                }
+                let state = &mut self.components.notifications;
+                let id = state.next;
+                state.next = id.wrapping_add(1);
+                state.shows.insert(id, answer);
+                NotificationCommand::Show { id, notification }
+            }
+            NotificationAction::Close(id) => {
+                if !available {
+                    return;
+                }
+                NotificationCommand::Close(id)
+            }
+            NotificationAction::SetBadge(count) => {
+                if !allowed {
+                    return;
+                }
+                NotificationCommand::SetBadge(count)
+            }
+            NotificationAction::NextPress(answer) => {
+                let state = &mut self.components.notifications;
+                if let Some(pressed) = state.presses.pop_front() {
+                    answer.borrow_mut().deliver(pressed);
+                    return;
+                }
+                state.next_press = Some(answer);
+                if !available || state.listening {
+                    return;
+                }
+                state.listening = true;
+                NotificationCommand::Listen
+            }
+        };
+        let _ = self.apply_op(Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Notification(command),
+        });
+    }
+
+    /// Answers what waits for the platform's [`EventKind::Notification`].
+    fn notification_event(&mut self, payload: &EventPayload) {
+        use crate::notifications::{NotificationEvent as Field, NotificationPermission};
+        let EventPayload::Map(entries) = payload else {
+            return;
+        };
+        let state = &mut self.components.notifications;
+        let id = entries.iter().find_map(|(k, v)| match v {
+            crate::PayloadValue::Number(n) if *k == Field::ID => Some(*n as u32),
+            _ => None,
+        });
+        for (key, value) in entries {
+            match (*key, value) {
+                (Field::PERMISSION, crate::PayloadValue::Str(name)) => {
+                    if let Some(answer) = id.and_then(|id| state.permissions.remove(&id)) {
+                        let permission = NotificationPermission::from_name(name)
+                            .unwrap_or(NotificationPermission::Unavailable);
+                        answer.borrow_mut().deliver(permission);
+                    }
+                }
+                (Field::SHOWN, crate::PayloadValue::Bool(shown)) => {
+                    if let Some(answer) = id.and_then(|id| state.shows.remove(&id)) {
+                        answer.borrow_mut().deliver(*shown);
+                    }
+                }
+                (Field::PRESSED, crate::PayloadValue::Str(pressed)) => {
+                    match state.next_press.take() {
+                        Some(answer) => answer.borrow_mut().deliver(pressed.clone()),
+                        None => state.presses.push_back(pressed.clone()),
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Applies a speech recognition session's request: through the
     /// embedding app's recognizer when it gave one, else as commands on the
     /// root the platform answers with [`EventKind::Speech`].
@@ -5100,6 +5225,7 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::Speech(action) => self.speech_action(action),
+            Action::Notification(action) => self.notification_action(action),
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5450,6 +5576,10 @@ impl<M: TextEngine> Core<M> {
                     let files = crate::picker::finish(&asked, files.clone());
                     answer.borrow_mut().deliver(files);
                 }
+                true
+            }
+            EventKind::Notification if id == crate::ROOT_ID => {
+                self.notification_event(payload);
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

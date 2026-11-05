@@ -233,6 +233,7 @@ impl AppView {
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);
+        crate::notifications::set_app(&options.app_id, &options.title);
         let view = Rc::new(AppView {
             surface,
             overlay,
@@ -397,6 +398,7 @@ fn initial_environment() -> Environment {
         os: Os::Linux,
         idiom: Idiom::Desktop,
         file_requests: true,
+        notifications: true,
         ..Environment::default()
     }
 }

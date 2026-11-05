@@ -588,6 +588,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::Announce(text) => crate::access::announce(surface, text),
+        Command::Notification(command) => crate::notifications::command(surface, command),
         Command::Desktop(command) => crate::chrome::command(surface, command),
         // The status bar is a phone's; layout animations arrive as mount
         // items.

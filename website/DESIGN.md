@@ -99,14 +99,22 @@ The values below are the dark theme's.
   in docs they scroll inside `.diagram-scroll` rather than shrink below
   640px.
 - Radii: cards 16px, insets 12px, controls 10px.
-- The logo is the app icon's mark (`public/logo.svg`, inline in
-  `Logo.astro`): a citrus arch holding a light dot (on the light theme a
-  deeper citrus arch and a dark dot, `--logo-*`). The favicon
-  (`favicon.svg`) is the mark itself on a transparent background, its
-  colours switching with `prefers-color-scheme` inside the SVG;
-  `apple-touch-icon.png` and `icon-512.png` (og:image) are the light mark on
-  a plain `#f3f3ef` square. The graphite app icon is the gallery's, not
-  the site's.
+- The logo (`public/logo.svg`, inline in `Logo.astro`) is the banners' mark:
+  the shell as a lit citrus tube holding a bead, drawn in SVG layers that
+  hold at favicon size, its colours the theme's `--logo-*` (a deeper citrus
+  and a dark bead on the light theme). The favicon (`favicon.svg`) is the
+  mark on a transparent background, its colours switching with
+  `prefers-color-scheme` inside the SVG; `apple-touch-icon.png` and
+  `icon-512.png` are the light mark on a plain `#f3f3ef` square. The gallery's
+  app icon is `public/brand/nsh-app-icon-dark.png`: the mark on a top-lit
+  graphite ground.
+- The brand page (`/brand`, linked from the footer): the logo, solid logos,
+  app icons, README banners, social previews and link preview, downloadable
+  from `public/brand/`.
+- The link preview (`public/og-image.png`, 1200×630, `og:image` and the
+  large Twitter card on every page) is the mark as a lit citrus tube inside
+  seven glass arches, rendered with NSH's own `<Shader>` on a soft grey-green
+  wash, with the name, slogan and platforms in Figtree.
 
 ## Controls
 

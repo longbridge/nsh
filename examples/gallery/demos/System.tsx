@@ -5,7 +5,7 @@ import { AlertDialog, type AlertDialogAction, Dialog, type StatusBarForeground }
 import { keyboardFrame, safeArea } from "nsh";
 import { Menu } from "nsh/desktop";
 import { keymap, platform } from "nsh";
-import { Icon, type IconName } from "../icons";
+import { Icon, type IconName, lucideSvg } from "../icons";
 import { toast } from "../toast";
 import { Appear, Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, IconTile, isDark, Inset, Legend, Meter, mono, Press, Row, Segmented, Stat, tints, Toggle, type Tone, toneColor } from "../ui";
 
@@ -368,9 +368,13 @@ function ContextMenu() {
   const chosen = signal("");
   const menu = () =>
     Menu.popup([
-      { label: "Copy", onSelect: () => chosen.set("Copy") },
-      { label: "Paste", disabled: true },
-      { label: "Share", submenu: [{ label: "Mail", onSelect: () => chosen.set("Share > Mail") }] },
+      { label: "Copy", icon: lucideSvg("copy"), onSelect: () => chosen.set("Copy") },
+      { label: "Paste", icon: lucideSvg("clipboard-paste"), disabled: true },
+      {
+        label: "Share",
+        icon: lucideSvg("share-2"),
+        submenu: [{ label: "Mail", icon: lucideSvg("mail"), onSelect: () => chosen.set("Share > Mail") }],
+      },
     ]);
   return (
     <Card icon="bell" title="Context menu" subtitle="nsh/desktop · right click">

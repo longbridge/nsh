@@ -50,6 +50,7 @@
       ]
     },
     "picker": true,
-    "speech": true
+    "speech": true,
+    "notifications": true
   }
 }

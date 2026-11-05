@@ -260,6 +260,10 @@ pub struct Environment {
     /// [`crate::speech`]); without it, a session ends at once
     /// (`unavailable`) unless the core has a [`crate::speech::SpeechBackend`].
     pub speech: bool,
+    /// The platform shows notifications ([`crate::Command::Notification`],
+    /// [`crate::notifications`]); without it, the permission is
+    /// `unavailable` and nothing shows.
+    pub notifications: bool,
     /// The size of one Cell of a grid surface (a terminal, whose content is
     /// whole character Cells), in points; `None` on every other surface.
     /// With it the core lays out with its terminal algorithm, ratatui's
@@ -313,6 +317,7 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            notifications: false,
             cell: None,
             web_input: false,
         }

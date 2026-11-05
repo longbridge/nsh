@@ -648,6 +648,70 @@ pub fn speech_available() -> Answer<bool> {
     answer
 }
 
+/// Whether the app may show notifications (TS: `Notifications.permission`),
+/// without asking the user. To await in a task.
+pub fn notification_permission() -> Answer<crate::notifications::NotificationPermission> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(
+        super::NotificationAction::Permission {
+            ask: false,
+            answer: slot,
+        },
+    ));
+    answer
+}
+
+/// Asks the user to let the app show notifications, once (TS:
+/// `Notifications.requestPermission`), and answers with the permission. To
+/// await in a task.
+pub fn request_notification_permission() -> Answer<crate::notifications::NotificationPermission> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(
+        super::NotificationAction::Permission {
+            ask: true,
+            answer: slot,
+        },
+    ));
+    answer
+}
+
+/// Shows `notification` (TS: `Notifications.show`), answering whether the
+/// system took it: not without the permission. To await in a task.
+pub fn show_notification(notification: crate::notifications::Notification) -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(super::NotificationAction::Show {
+        notification,
+        answer: slot,
+    }));
+    answer
+}
+
+/// Removes the notification called `id`, shown or waiting to show (TS:
+/// `Notifications.close`).
+pub fn close_notification(id: impl Into<String>) {
+    act(Action::Notification(super::NotificationAction::Close(
+        id.into(),
+    )));
+}
+
+/// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
+pub fn set_badge(count: u32) {
+    act(Action::Notification(super::NotificationAction::SetBadge(
+        count,
+    )));
+}
+
+/// The id of the next notification the user presses (TS:
+/// `Notifications.on("press", ...)`), those that started the app first. To
+/// await in a task.
+pub fn next_notification_press() -> Answer<String> {
+    let (answer, slot) = Answer::new();
+    act(Action::Notification(super::NotificationAction::NextPress(
+        slot,
+    )));
+    answer
+}
+
 /// Whether a web view's ref gives its page trusted input here (TS:
 /// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
 /// the platform delivers it (macOS) and the app's capabilities grant

@@ -1745,6 +1745,55 @@ and without a handler a pick is cancelled. See [Testing](../docs/testing-and-tra
 > `"picker"` and `resource` `""`. In Rust, `pick_images` answers no files and the refusal is logged. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
+## Notifications
+
+`Notifications` shows system notifications and sets the app's icon badge, the Dock's on macOS. Ask for the permission
+when the user does something that needs it, then show:
+
+```tsx
+import { Notifications } from "nsh";
+
+Notifications.on("press", ({ id }) => openChat(id));
+
+async function notifyMe() {
+  if ((await Notifications.requestPermission()) !== "granted") return;
+  await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you coming?" });
+  Notifications.setBadge(1);
+}
+```
+
+Rust code calls `request_notification_permission`, `show_notification`, `close_notification`, `set_badge` and
+`next_notification_press` of `nsh_core::prelude`.
+
+| Platform | Notifications | Badge |
+| --- | --- | --- |
+| macOS | The notification center, in a signed app bundle; `unavailable` in `nsh run`'s unbundled host | The Dock, without a permission |
+| iOS | The notification center | The home screen, with the permission |
+| Android | The system's, with `POST_NOTIFICATIONS` on Android 13 (`nsh package` declares it for apps granted `notifications`) | No count to set: launchers mark an app that has notifications showing, and the count goes with those shown after it |
+| Windows | A toast, shown unless the user turned the app's notifications off in Settings, which is `denied`. Windows has no prompt, so `requestPermission` asks nothing. A surface embedded in another app is `unavailable` | The count on the taskbar button, up to `99+`; not shown when the taskbar uses small buttons |
+| Linux | The desktop's notification daemon (`org.freedesktop.Notifications`): `granted` while one runs, with no prompt, `unavailable` otherwise | The Unity launcher API, on docks that read it (Plasma, Ubuntu's, Dash to Dock); elsewhere nothing shows |
+| Web | `Notification`, where the browser shows them from a page (not on Android) | The Badging API, in an installed app |
+| Terminal, GPUI | `unavailable` | None |
+
+### Notifications.show
+
+`show` resolves with whether the system took the notification, which it does not without the permission. A notification
+shows while the app is in front as it does behind it. Showing another with the same `id` replaces it, and
+`Notifications.close(id)` removes it.
+
+### Notifications.on
+
+`press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
+listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
+activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
+embedding app that has a notification center delegate keeps it, and its delegate gets the presses. On Linux a press reaches
+only the running app: one left on screen after the app exits does nothing.
+
+### Notifications.permission
+
+`permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
+
 ## Speech
 
 The speech API turns what the user says into text (dictation): the app starts a session, the platform listens to the

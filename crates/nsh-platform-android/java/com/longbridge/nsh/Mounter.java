@@ -711,6 +711,7 @@ final class Mounter {
      * again.
      */
     void destroyComponents() {
+        Notifications.forget(this);
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
@@ -2122,6 +2123,10 @@ final class Mounter {
             }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 44: {
+                Notifications.command(this, b, objects);
                 break;
             }
             case 26: {
