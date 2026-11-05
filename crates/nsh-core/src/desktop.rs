@@ -849,7 +849,8 @@ pub enum DesktopCommand {
 }
 
 /// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Tray {
     /// The icon, the app's own image (an SVG is a template, drawn in the
     /// panel's text color where the platform has such icons: macOS);

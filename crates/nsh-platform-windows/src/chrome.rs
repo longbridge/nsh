@@ -372,7 +372,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
             crate::global_shortcut::register(surface, *id, shortcut);
         }
-        DesktopCommand::UnregisterGlobalShortcut(id) => crate::global_shortcut::unregister(*id),
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 

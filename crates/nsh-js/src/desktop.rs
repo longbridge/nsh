@@ -656,12 +656,11 @@ unsafe extern "C" fn set_tray(
         0
     };
     keep(cx, &menus(cx).tray, functions);
-    let tray = Tray {
-        icon,
-        tooltip: string(cx, options, c"tooltip").unwrap_or_default(),
-        menu: items,
-        click,
-    };
+    let mut tray = Tray::default();
+    tray.icon = icon;
+    tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
+    tray.menu = items;
+    tray.click = click;
     listen(cx)
         .and_then(|()| send(cx, DesktopCommand::SetTray(Some(tray))))
         .err()

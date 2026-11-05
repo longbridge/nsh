@@ -303,6 +303,20 @@ fn register(bus: &gio::DBusConnection, name: &str) {
     );
 }
 
+/// Removes the icon only when this surface owns it.
+pub(crate) fn clear(surface: &Surface) {
+    let owns = TRAY
+        .try_with(|t| {
+            t.borrow()
+                .as_ref()
+                .is_some_and(|shown| std::ptr::eq(shown.surface.as_ptr(), surface))
+        })
+        .unwrap_or(false);
+    if owns {
+        remove();
+    }
+}
+
 fn remove() {
     let Some(shown) = TRAY.with(|t| t.borrow_mut().take()) else {
         return;
@@ -581,7 +595,9 @@ fn menu_call(method: &str, params: &glib::Variant) -> Option<glib::Variant> {
                     ]))
                 });
                 let ty = glib::VariantTy::new("(ia{sv})").expect("a valid type");
-                Some((glib::Variant::array_from_iter_with_type(ty, found),).to_variant())
+                Some(glib::Variant::tuple_from_iter([
+                    glib::Variant::array_from_iter_with_type(ty, found),
+                ]))
             })
         }
         "GetProperty" => {
@@ -594,12 +610,7 @@ fn menu_call(method: &str, params: &glib::Variant) -> Option<glib::Variant> {
                     .get(usize::try_from(id).ok()?.checked_sub(1)?)?;
                 glib::VariantDict::new(Some(&e.props)).lookup_value(&name, None)
             });
-            Some(
-                (glib::Variant::from_variant(
-                    &value.unwrap_or_else(|| "".to_variant()),
-                ),)
-                    .to_variant(),
-            )
+            Some((value.unwrap_or_else(|| "".to_variant()),).to_variant())
         }
         "Event" => {
             let (id, event, _, _) = params.get::<(i32, String, glib::Variant, u32)>()?;
@@ -663,6 +674,29 @@ mod tests {
             when: nsh_core::keymap::When::Always,
             icon: None,
         })
+    }
+
+    #[test]
+    fn group_properties_obeys_dbusmenu_signature() {
+        let args = (Vec::<i32>::new(), Vec::<String>::new()).to_variant();
+        let response = menu_call("GetGroupProperties", &args).unwrap();
+        assert_eq!(response.type_().as_str(), "(a(ia{sv}))");
+    }
+
+    #[test]
+    fn property_reply_has_one_variant_box() {
+        let args = (1i32, "label").to_variant();
+        let response = menu_call("GetProperty", &args).unwrap();
+        assert_eq!(response.type_().as_str(), "(v)");
+        assert_eq!(
+            response
+                .child_value(0)
+                .as_variant()
+                .unwrap()
+                .type_()
+                .as_str(),
+            "s"
+        );
     }
 
     #[test]

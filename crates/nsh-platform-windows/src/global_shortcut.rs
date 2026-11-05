@@ -57,7 +57,7 @@ thread_local! {
 /// whether Windows took it.
 pub(crate) fn register(surface: &Rc<Surface>, id: u32, shortcut: &Shortcut) {
     // An id the app registers again replaces its earlier hot key.
-    unregister(id);
+    unregister(surface, id);
     let registered = match virtual_key(shortcut.key) {
         Some(vk) => add(surface, id, modifiers(shortcut), vk),
         None => {
@@ -127,12 +127,12 @@ fn next_id() -> Option<i32> {
 }
 
 /// Gives back the hot key of the app's `id`.
-pub(crate) fn unregister(id: u32) {
+pub(crate) fn unregister(surface: &Surface, id: u32) {
     let removed: Vec<HotKey> = HOT_KEYS.with(|h| {
         let mut keys = h.borrow_mut();
         let (removed, kept) = std::mem::take(&mut *keys)
             .into_iter()
-            .partition(|k| k.id == id);
+            .partition(|k| k.id == id && std::ptr::eq(k.surface.as_ptr(), surface));
         *keys = kept;
         removed
     });
