@@ -188,6 +188,12 @@ enum Command {
         /// the primary one when there is no other.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
+        /// With `--target macos`: lets the apps become the active app, as
+        /// they would run for a user. By default they run in the
+        /// background: their windows show but never take the keyboard from
+        /// the app in use, and the tests' input goes to them directly.
+        #[arg(long)]
+        foreground: bool,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -733,6 +739,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser,
             web_host,
             display,
+            foreground,
         } => test::test(
             &path,
             &entry,
@@ -744,6 +751,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser.as_deref(),
             web_host,
             display.map(|n| n as usize),
+            foreground,
         ),
         Command::Dev {
             entry,
