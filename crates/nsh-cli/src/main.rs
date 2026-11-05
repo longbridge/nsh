@@ -13,7 +13,6 @@ mod dev_port;
 mod entry;
 mod init;
 mod logger;
-mod other_version;
 mod package;
 mod run;
 mod runtime;
@@ -499,12 +498,6 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            if let Some(other) = e.downcast_ref::<other_version::OtherVersion>() {
-                return other.run_command().unwrap_or_else(|e| {
-                    ui::report(&e);
-                    ExitCode::FAILURE
-                });
-            }
             ui::report(&e);
             ExitCode::FAILURE
         }
