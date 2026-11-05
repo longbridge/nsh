@@ -348,3 +348,60 @@ text("More").on_press(|| {
 
 > [!NOTE]
 > Menus are the system's (NSMenu, Win32 menus, GTK popover menus): they look and behave like every other app's, follow the system's (or the app's) appearance and are keyboard accessible. `examples/desktop` is an app with a title bar of its own, an application menu and context menus.
+
+## Tray
+
+```ts
+interface TrayModule {
+  set(options: TrayOptions | null): void;
+}
+```
+
+`Tray.set` shows the app's icon in the system tray, or changes it; `null` removes it. There is one per app. The tray is the notification area on Windows, the right side of the menu bar on macOS, and a StatusNotifierItem on Linux, which Plasma, Waybar and most panels show (GNOME needs the AppIndicator extension).
+
+| Option | Description |
+| --- | --- |
+| `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS an SVG is a template drawn in the menu bar's text color. |
+| `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
+| `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
+| `onClick` | Called when the icon is clicked with the primary button. |
+
+Call `set` again to change it; inside an `effect` it follows the signals it reads.
+
+```tsx
+import { Tray, Window } from "nsh/desktop";
+import icon from "./tray.svg";
+
+Tray.set({
+  icon,
+  tooltip: "Mail",
+  onClick: () => Window.orderFront(),
+  menu: [
+    { label: "New Message", onSelect: compose },
+    { type: "separator" },
+    { role: "quit" },
+  ],
+});
+```
+
+TSX only for now; Rust components have no tray yet.
+
+## GlobalShortcut
+
+```ts
+interface GlobalShortcutModule {
+  register(shortcut: string, onPress: () => void): Promise<boolean>;
+  unregister(shortcut: string): void;
+  unregisterAll(): void;
+}
+```
+
+A global shortcut reaches the app whichever app has the keyboard. `register` takes a keystroke written as a menu item's `shortcut` (`"mod+shift+k"`) and resolves with whether the system took it: `false` when another app holds it, or off desktops. Registering a keystroke again replaces its function.
+
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+
+```tsx
+import { GlobalShortcut, Window } from "nsh/desktop";
+
+const ok = await GlobalShortcut.register("mod+shift+space", () => Window.orderFront());
+```

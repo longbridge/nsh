@@ -790,6 +790,39 @@ pub enum DesktopCommand {
         /// Where its top left corner goes.
         at: Option<Point<Points>>,
     },
+    /// Shows the app's icon in the system tray (the notification area on
+    /// Windows, the menu bar's status items on macOS, a StatusNotifierItem
+    /// on Linux), or changes it; `None` removes it. One per app: the last
+    /// window's wins.
+    SetTray(Option<Tray>),
+    /// Registers `shortcut` system-wide, whichever app has the keyboard: the
+    /// root's [`crate::EventKind::Menu`] reports `id` with `registered`
+    /// (whether the system took it), then `id` alone at each press.
+    RegisterGlobalShortcut {
+        /// Reported at each press (not 0).
+        id: u32,
+        /// The keystroke.
+        shortcut: Shortcut,
+    },
+    /// Gives back the global shortcut registered as `id`.
+    UnregisterGlobalShortcut(u32),
+}
+
+/// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tray {
+    /// The icon, the app's own image (an SVG is a template, drawn in the
+    /// panel's text color where the platform has such icons: macOS);
+    /// `None`: the app's icon where the platform has one.
+    pub icon: Option<ImageSource>,
+    /// Shown when the pointer rests on it; `""` for the app's name.
+    pub tooltip: String,
+    /// Its menu: opened by a secondary click (a primary one too when
+    /// [`Self::click`] is 0); empty for none.
+    pub menu: Arc<[MenuItem]>,
+    /// Reported as [`crate::EventKind::Menu`] when the icon is clicked
+    /// (primary button); 0: the click opens the menu.
+    pub click: u32,
 }
 
 pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {

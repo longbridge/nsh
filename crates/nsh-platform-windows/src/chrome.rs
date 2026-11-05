@@ -350,6 +350,18 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 actions: Vec::new(),
             },
         ),
+        // Not yet on Windows: a registration is refused.
+        DesktopCommand::SetTray(_) | DesktopCommand::UnregisterGlobalShortcut(_) => {}
+        DesktopCommand::RegisterGlobalShortcut { id, .. } => {
+            surface.event(
+                nsh_core::ROOT_ID,
+                nsh_core::EventKind::Menu,
+                nsh_core::EventPayload::Map(vec![
+                    ("id", nsh_core::PayloadValue::Number(f64::from(*id))),
+                    ("registered", nsh_core::PayloadValue::Bool(false)),
+                ]),
+            );
+        }
     }
 }
 

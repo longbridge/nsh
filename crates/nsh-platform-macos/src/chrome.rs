@@ -397,6 +397,18 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 objc2_foundation::NSRunLoop::mainRunLoop().performInModes_block(&modes, &block)
             };
         }
+        // Not yet on macOS: a registration is refused.
+        DesktopCommand::SetTray(_) | DesktopCommand::UnregisterGlobalShortcut(_) => {}
+        DesktopCommand::RegisterGlobalShortcut { id, .. } => {
+            surface.event(
+                nsh_core::ROOT_ID,
+                nsh_core::EventKind::Menu,
+                nsh_core::EventPayload::Map(vec![
+                    ("id", nsh_core::PayloadValue::Number(f64::from(*id))),
+                    ("registered", nsh_core::PayloadValue::Bool(false)),
+                ]),
+            );
+        }
     }
 }
 
