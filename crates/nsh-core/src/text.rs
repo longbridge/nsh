@@ -725,6 +725,15 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// Whether each line takes all that fits and [`TextEngine::measure`]'s
+    /// width is the widest line's: a maximum width between that width and
+    /// the one measured then breaks the lines at the same places, so the
+    /// core knows the size without typesetting. A window's resize changes
+    /// the width of every text of a page on every size.
+    fn breaks_lines_greedily(&self) -> bool {
+        false
+    }
+
     /// The final layout in a box of exactly `size`, for drawing.
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
@@ -803,6 +812,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
         (**self).prepare_aligned(text, alignments)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        (**self).breaks_lines_greedily()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
@@ -1230,6 +1243,9 @@ pub(crate) struct MeasureCache {
     previous: FxHashMap<(u64, u32), Size<Points>>,
     pixel_ratio: f32,
     cell: Option<Size<Points>>,
+    /// The commit of a burst of resizes under way (`Core::set_resizing`):
+    /// text it did not find near the screen is not measured.
+    pub(crate) resizing: Option<u32>,
 }
 
 impl Default for MeasureCache {
@@ -1239,6 +1255,7 @@ impl Default for MeasureCache {
             previous: FxHashMap::default(),
             pixel_ratio: 1.0,
             cell: None,
+            resizing: None,
         }
     }
 }

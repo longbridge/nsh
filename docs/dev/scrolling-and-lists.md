@@ -1,5 +1,10 @@
 # Scrolling and lists
 
+- **A resize keeps what a scroll view shows** (`core/resize_anchor.rs`): as a browser's scroll anchoring, in the layout
+  after a change of the viewport a plain vertical scroll view past its start scrolls by as much as the first view it
+  shows moved, with a `ScrollBy` in the same batch, clamped to its content. Text above the viewport wrapping onto more
+  lines moves nothing on screen, through a window's drag and when text that waited catches up (`docs/dev/text.md`).
+  Lists keep their rows themselves.
 - **Scrolling**: `pagingEnabled`, `snapToInterval` / `snapToOffsets` / `snapToAlignment`, `disableIntervalMomentum`,
   `decelerationRate`, `scrollable`, `bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`
   (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
