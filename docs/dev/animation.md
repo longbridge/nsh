@@ -51,7 +51,10 @@
   `navigation::Transitions::deadline` and `scroll::deadline` (a glide's or an eased move's end, a wheel's rest), each
   a millisecond past the end so the step there finds it ended. A backend keeps the earliest with one timer a little
   past it, which steps everything once if no frame ran since it came due, and does nothing while frames come: no
-  second clock beside the display's, and no work for a hidden window whose animations only draw. `scrollValue` writes the scroll offset into an animated value in the same frame; `pan` lets drags drive animated values
+  second clock beside the display's, and no work for a hidden window whose animations only draw. The one exception is
+  a test's app (`nsh test --target macos|windows`): it runs as on screen whatever covers its window (the test windows
+  do not come to the front, a test machine's screen may be locked), so while it wants frames and the display gives
+  none, it gets one a frame later, drawing included (JS frame requests, a list binding rows over frames). `scrollValue` writes the scroll offset into an animated value in the same frame; `pan` lets drags drive animated values
   directly, and JS receives the velocity when the drag ends. Animated values referenced by a view's style (or `pan`, `scrollValue`, ...) are kept by its node
   (`nsh-js` `dom.rs`) and derived nodes hold their inputs, so bindings do not break when JS objects are collected. In
   Rust components `AnimatedValue` / `AnimatedNode` are `Copy` handles their owner keeps; the element's bindings, a
