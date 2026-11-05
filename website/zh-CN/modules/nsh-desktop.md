@@ -74,6 +74,37 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 
 使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
 
+### Window.open
+
+`Window.open(Component, options)` 打开一个应用自己的窗口，并在其中渲染 `Component`。这个窗口运行在应用唯一的 JS 运行时中，
+是同一个应用的一部分：它和主窗口读写相同的 signal、store 和模块，窗口之间不需要传递消息。打开一个已经打开的 `id` 会返回那个窗口。
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+const unread = signal(0);
+
+function Chat() {
+  return <View><Text>{`${unread()} unread`}</Text></View>;
+}
+
+const chat = Window.open(Chat, { id: "chat", title: "Chat", size: { width: 360, height: 480 } });
+chat.focus();
+```
+
+| 选项 | 说明 |
+|---|---|
+| `id` | 窗口的 id：再次打开同一个 id 会返回已打开的窗口。 |
+| `title` | 窗口标题（省略时使用主窗口的标题）。 |
+| `size` | 内容尺寸，单位为点，`{ width, height }`（默认 480×360）。 |
+| `position` | 窗口左上角在屏幕上的位置，`{ x, y }`。GTK 总是自行放置窗口。 |
+| `level` | `"normal"`、`"floating"` 或 `"desktopIcon"`，同 `setLevel`。Linux 上不适用。 |
+| `frame` | `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
+
+返回的窗口有 `id`、`focus()`（显示窗口，`hide()` 之后也可以，并把它提到最前）、`hide()` 和 `close()`（其内容随之卸载）。
+用户关闭它时，效果和 `close()` 相同；关闭主窗口也会关闭它。`Window.open` 在 Linux 和 Windows 上运行；在其他平台上会抛出异常。
+
 ## 自定义标题栏
 
 隐藏标题栏后，应用绘制自己的标题栏，并指定哪些部分可以拖动窗口：Rust 用 `.window_drag(true)`，TSX 用 `desktop={{ windowDrag: true }}`：

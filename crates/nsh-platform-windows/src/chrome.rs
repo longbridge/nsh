@@ -338,8 +338,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
-        // Windows of the app's own (`Window.open`) are not on this backend yet:
-        // the runtime does not send these here.
+        // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::SetMenu(menu) => {

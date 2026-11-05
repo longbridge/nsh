@@ -24,6 +24,7 @@ use std::{
     },
 };
 
+use nsh_core::NodeId;
 use windows::{
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -94,6 +95,9 @@ struct WindowData {
     /// The embedding app's root window an embedded surface's window
     /// observes ([`observe_root`]); none for a top-level one.
     root: Cell<Option<HWND>>,
+    /// The dialog root a window of the app's own shows
+    /// ([`crate::app_window`]); none for the surface's window.
+    window: Option<NodeId>,
 }
 
 thread_local! {
@@ -182,6 +186,7 @@ pub(crate) fn create(
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
         root: Cell::new(None),
+        window: None,
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -243,6 +248,89 @@ pub(crate) fn create(
         }
     }
     sync_size(surface, hwnd);
+    Ok(hwnd)
+}
+
+/// Makes a window of the app's own ([`crate::app_window`]) showing dialog
+/// root `id` of `surface`, hidden: `size` points of content, its top left
+/// corner at `position` (points on the screen) or where the system places
+/// it, with the system's frame or none (`framed`). It is not counted as
+/// one of the app's top-level windows: the surface's window still ends the
+/// app.
+pub(crate) fn create_app_window(
+    surface: &Rc<Surface>,
+    id: NodeId,
+    title: &str,
+    size: (f32, f32),
+    position: Option<(f32, f32)>,
+    framed: bool,
+) -> windows::core::Result<HWND> {
+    register_classes();
+    let data = Box::new(WindowData {
+        surface: Rc::downgrade(surface),
+        top_level: false,
+        tracking: Cell::new(false),
+        buttons: Cell::new(0),
+        last_press: Cell::new((0, (0, 0), 0)),
+        surrogate: Cell::new(0),
+        sys_char: Cell::new(false),
+        windowed: Cell::new(None),
+        root: Cell::new(None),
+        window: Some(id),
+    });
+    let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
+    let style = if framed {
+        WS_OVERLAPPEDWINDOW
+    } else {
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX
+    };
+    // SAFETY: the class is registered; `data` is handed to the window
+    // (`WM_NCCREATE` stores it, `WM_NCDESTROY` frees it).
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            CLASS,
+            PCWSTR(title.as_ptr()),
+            style,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            None,
+            None,
+            Some(instance()),
+            Some(Box::into_raw(data) as *const _),
+        )?
+    };
+    // Points at the DPI of the monitor it opens on.
+    let scale = dpi(hwnd) as f32 / 96.0;
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: (size.0 * scale).round() as i32,
+        bottom: (size.1 * scale).round() as i32,
+    };
+    let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+    let (x, y) = match position {
+        Some((x, y)) => ((x * scale).round() as i32, (y * scale).round() as i32),
+        None => {
+            flags |= SWP_NOMOVE;
+            (0, 0)
+        }
+    };
+    // SAFETY: plain calls on the window just made.
+    unsafe {
+        let _ = AdjustWindowRectExForDpi(&mut rect, style, false, WINDOW_EX_STYLE(0), dpi(hwnd));
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            flags,
+        );
+    }
     Ok(hwnd)
 }
 
@@ -588,7 +676,19 @@ fn handle(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> Option<LRESULT> {
-    let scale = surface.scale();
+    // A window of the app's own handles its frame itself; its input is
+    // the surface's, in its root view.
+    let _root = match data.window {
+        Some(id) => match crate::app_window::handle(surface, id, hwnd, msg, wparam, lparam) {
+            Some(result) => return result,
+            None => crate::app_window::enter(surface, id),
+        },
+        None => None,
+    };
+    let scale = match data.window {
+        Some(_) => dpi(hwnd) as f32 / 96.0,
+        None => surface.scale(),
+    };
     let point = |l: LPARAM| (lo(l.0) as f32 / scale, hi(l.0) as f32 / scale);
     // Registered, so not a constant to match on.
     if data.top_level && msg == crate::notifications::taskbar_button_created() {
@@ -676,7 +776,9 @@ fn handle(
                 // SAFETY: a valid structure for this window.
                 let _ = unsafe { TrackMouseEvent(&mut track) };
             }
-            crate::chrome::client_mouse_moved(surface);
+            if data.window.is_none() {
+                crate::chrome::client_mouse_moved(surface);
+            }
             let (x, y) = point(lparam);
             let held = held_buttons(wparam);
             crate::input::pointer(
@@ -816,7 +918,7 @@ fn handle(
             return Some(LRESULT(0));
         }
         WM_SETCURSOR if lo(lparam.0) == HTCLIENT as i32 => {
-            update_cursor(surface, hwnd);
+            update_cursor(surface, hwnd, scale);
             return Some(LRESULT(1));
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
@@ -990,14 +1092,13 @@ pub(crate) fn lines_per_notch() -> f32 {
 }
 
 /// Sets the cursor of what is under the mouse in the client area.
-fn update_cursor(surface: &Rc<Surface>, hwnd: HWND) {
+fn update_cursor(surface: &Rc<Surface>, hwnd: HWND, scale: f32) {
     let mut p = POINT::default();
     // SAFETY: plain calls with local out values.
     unsafe {
         let _ = GetCursorPos(&mut p);
         let _ = ScreenToClient(hwnd, &mut p);
     }
-    let scale = surface.scale();
     set_cursor(crate::input::cursor(
         surface,
         p.x as f32 / scale,
@@ -1025,7 +1126,7 @@ pub(crate) fn refresh_cursor(surface: &Rc<Surface>) {
                 == HTCLIENT
     };
     if over {
-        update_cursor(surface, hwnd);
+        update_cursor(surface, hwnd, surface.scale());
     }
 }
 
