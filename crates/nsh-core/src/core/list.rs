@@ -1257,6 +1257,13 @@ impl ListState {
     /// (a growing last item, a shrinking viewport); scrolled further up,
     /// they keep what is visible (content grows below it).
     pub(super) fn anchor_end(&mut self) -> f32 {
+        self.anchor_end_after(0.0)
+    }
+
+    /// [`Self::anchor_end`] after this commit's measurements moved the offset
+    /// by `kept` to keep the visible rows in place: that move says nothing
+    /// about where the user is, so a list at its end is still at its end.
+    pub(super) fn anchor_end_after(&mut self, kept: f32) -> f32 {
         if self.viewport <= 0.0 {
             return 0.0;
         }
@@ -1271,13 +1278,18 @@ impl ListState {
             if bottom && !self.anchored_end.is_nan() && self.last_row_being_measured() {
                 // One scroll, to where the row really ends: scrolling by
                 // its estimate first would overshoot and be clamped back.
+                self.anchored_end += kept;
                 return 0.0;
             }
             let was = std::mem::replace(&mut self.anchored_end, end);
             // A bottom-aligned list opens at its end, without a scroll
             // command to pin and follow while its rows are measured.
             let opening = bottom && was.is_nan();
-            if !opening && (was.is_nan() || end <= was || was - self.offset > threshold) {
+            let distance = was - (self.offset - kept);
+            // Rows above the viewport shrinking while visible ones grow can
+            // leave the end where it was and the offset short of it.
+            let settle = bottom && distance <= PIN_SLACK;
+            if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
             }
             let delta = end - self.offset;
@@ -1845,6 +1857,42 @@ mod tests {
         l.jump(offset);
         let mut binds = Vec::new();
         assert!(l.update_window(&mut binds).start);
+    }
+
+    #[test]
+    fn bottom_aligned_lists_stay_at_their_end_as_rows_above_are_measured() {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_alignment(ListAlignment::Bottom);
+        l.anchor_end();
+        let end = l.content_len() - 400.0;
+        assert_eq!(l.offset, end);
+        // A row above the viewport comes out shorter and a visible one taller,
+        // by the same amount: the end stays, and the offset must too.
+        let kept = l.measured(50, 30.0);
+        assert_eq!(kept, -20.0);
+        assert_eq!(l.measured(99, 70.0), 0.0);
+        l.offset += kept;
+        let scroll = l.anchor_end_after(kept);
+        assert_eq!(l.content_len() - 400.0, end);
+        assert_eq!(kept + scroll, 0.0);
+        assert_eq!(l.offset, end);
+        // A kept move while the appended last row is being measured does not
+        // lose the end either.
+        l.splice(100, 0, 1);
+        l.take_splice_anchor();
+        let kept = l.measured(51, 30.0);
+        l.offset += kept;
+        assert_eq!(l.anchor_end_after(kept), 0.0, "waits for the row's real size");
+        l.measured(100, 34.0);
+        assert_eq!(l.anchor_end(), 34.0);
+        assert_eq!(l.offset, l.content_len() - 400.0);
+        // Scrolled up, the same measurements leave it where the user put it.
+        let up = l.content_len() - 400.0 - 500.0;
+        l.reported(up, 0);
+        let kept = l.measured(52, 30.0);
+        l.offset += kept;
+        assert_eq!(l.anchor_end_after(kept), 0.0);
+        assert_eq!(l.offset, up + kept);
     }
 
     #[test]
