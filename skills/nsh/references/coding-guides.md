@@ -843,7 +843,7 @@ padding and margin (read the values with their accessors), which follow rotation
 
 ## Lists, tables, and large data
 
-Use [`List`](./lists.md) (`virtual_list` in Rust) when data can grow beyond a small, bounded collection. Keep row
+Prefer [`List`](./lists.md) (`virtual_list` in Rust) for collections that can grow, including chat timelines, feeds and history. Reserve a scroll view with ordinary children for small, bounded content. Keep row
 identity separate from visible position and avoid copying the full data set on every update. Let the list own
 recycling, scroll coordination and the visible range while row functions own row presentation.
 
