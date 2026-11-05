@@ -1,4 +1,4 @@
-# The application recipe
+# The TSX application recipe
 
 A complete small app: its files follow the [Coding Guides](coding-guides.md) (`App.tsx` the
 shell, `pages/` one file per `NavPage`, `components/` what pages share, `store.ts` the state).

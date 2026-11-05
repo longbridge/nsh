@@ -25,6 +25,7 @@ on:
       - "website/**"
       - "skills/**"
       - "examples/tasks/**"
+      - "examples/tasks-rs/**"
       - "crates/nsh-platform-web/**"
       - "examples/gallery/**"
       - ".github/workflows/website.yml"

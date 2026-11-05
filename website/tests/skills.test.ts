@@ -14,20 +14,23 @@ test('the skills carry the guides verbatim', () => {
   expect(read('skills/nsh-design-guides/references/design-guides.md')).toBe(read('website/docs/design-guides.md'));
 });
 
-test('the recipe shows examples/tasks as it is', () => {
-  const recipe = read('skills/nsh/references/recipes.md');
-  const walk = (dir: string): string[] =>
-    readdirSync(join(REPO, dir)).flatMap((name) => {
-      const path = `${dir}/${name}`;
-      if (name === '.nsh' || name === 'tsconfig.json') return [];
-      return statSync(join(REPO, path)).isDirectory() ? walk(path) : [path];
-    });
-  for (const file of walk('examples/tasks')) {
-    const name = file.slice('examples/tasks/'.length);
-    expect(recipe).toContain(`## \`${name}\``);
-    expect(recipe).toContain(read(file).trimEnd());
-  }
-});
+// The recipes are copies of apps CI builds and tests, file by file.
+const walk = (dir: string): string[] =>
+  readdirSync(join(REPO, dir)).flatMap((name) => {
+    const path = `${dir}/${name}`;
+    if (['.nsh', 'target', 'tsconfig.json', 'Cargo.lock'].includes(name)) return [];
+    return statSync(join(REPO, path)).isDirectory() ? walk(path) : [path];
+  });
+
+for (const [example, recipeFile] of [['examples/tasks', 'tsx-recipe.md'], ['examples/tasks-rs', 'rust-recipe.md']]) {
+  test(`${recipeFile} shows ${example} as it is`, () => {
+    const recipe = read(`skills/nsh/references/${recipeFile}`);
+    for (const file of walk(example)) {
+      expect(recipe).toContain(`## \`${file.slice(example.length + 1)}\``);
+      expect(recipe).toContain(read(file).trimEnd());
+    }
+  });
+}
 
 test("the skills' relative links resolve, and their guide tables name real sections", () => {
   for (const skill of readdirSync(join(REPO, 'skills'))) {
