@@ -34,6 +34,7 @@ pub mod keymap;
 pub mod mobile;
 mod mount;
 pub mod navigation;
+pub mod notifications;
 pub mod open_url;
 mod ops;
 pub mod overlay;

@@ -1,4 +1,4 @@
-import { Image, type JSX, signal, Text, View } from "nsh";
+import { Image, type JSX, platform, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import logo from "../logo@2x.png";
 import { Icon, type IconName } from "../icons";
@@ -405,7 +405,12 @@ function Inputs() {
   );
 }
 
-const sections: (() => JSX.Element)[] = [Hero, Stats, Buttons, Cards, Layout, Shadows, Gradients, Typography, Effects, Motion, Lists, Inputs, Colors];
+// A terminal's Cells draw no shadows or filters: those cards are left out there. Gradients
+// fill each Cell with their color at it.
+const sections: (() => JSX.Element)[] =
+  platform.idiom === "terminal"
+    ? [Hero, Stats, Buttons, Cards, Layout, Gradients, Typography, Motion, Lists, Inputs, Colors]
+    : [Hero, Stats, Buttons, Cards, Layout, Shadows, Gradients, Typography, Effects, Motion, Lists, Inputs, Colors];
 
 export function Tailwind() {
   return <DemoPage cards={sections} />;

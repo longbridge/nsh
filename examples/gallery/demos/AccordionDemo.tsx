@@ -1,6 +1,6 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, Radio, RadioGroup, Switch } from "nsh/base";
-import { alpha, Badge, Button, Card, colors, DemoPage, finish, focusRing, hovered, Icon, mono, Segmented, switchLook } from "../ui";
+import { alpha, Badge, Button, Card, colors, DemoPage, finish, focusRing, hovered, Icon, mono, Segmented, switchLook, terminal } from "../ui";
 
 // `nsh/base`'s `Accordion` owns which triggers report what, the headings,
 // the expanded state screen readers hear and the panels' reveal; the app
@@ -18,6 +18,9 @@ const size = pointer
   : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, icon: 16, control: 22, dot: 8, line: 44, switch: "regular" as const };
 /** How far a row's hover fill reaches past its content on each side. */
 const BLEED = 8;
+/** The bleed a row's own box takes: none in a terminal, where a negative
+ * margin rounds away but its padding stays a column, pushing the label in. */
+const ROW_BLEED = terminal ? 0 : BLEED;
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
 
@@ -28,10 +31,10 @@ const hoverRow = (start = 0) => ({
   alignItems: "center" as const,
   gap: size.gap,
   paddingVertical: size.padding,
-  marginHorizontal: -BLEED,
-  paddingStart: BLEED + start,
-  paddingEnd: BLEED,
-  borderRadius: BLEED,
+  marginHorizontal: -ROW_BLEED,
+  paddingStart: ROW_BLEED + start,
+  paddingEnd: ROW_BLEED,
+  borderRadius: ROW_BLEED,
 });
 
 /** The hairline between two items. */

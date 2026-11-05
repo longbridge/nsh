@@ -53,7 +53,7 @@ function Head(props: { side: Side; title: string; right?: JSX.Element; onClose: 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text style={{ flex: 1, fontSize: pointer ? 16 : 18, fontWeight: "600", color: colors.text }}>{props.title}</Text>
         {props.right}
-        <Trigger icon="x" variant="ghost" accessibilityLabel="Close" onPress={props.onClose} />
+        <Trigger icon="x" variant="ghost" accessibilityLabel="Close" short="×" onPress={props.onClose} />
       </View>
     </View>
   );

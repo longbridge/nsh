@@ -655,6 +655,10 @@ pub struct ImageOptions {
 /// created by the preceding items.
 #[derive(Debug, Clone)]
 pub enum MountItem {
+    /// Mounted nodes in depth-first logical tree order, independent of native
+    /// stacking (`Insert`). Opt-in through `Core::set_tree_order_tracking`;
+    /// emitted after structural changes in the same batch as the affected views.
+    TreeOrder(Vec<NodeId>),
     /// Create a native view. It starts detached and invisible.
     Create {
         /// Node id, used to address the view in later items.
@@ -669,6 +673,17 @@ pub enum MountItem {
     /// platform keep `states & tracked`), so the two never disagree about
     /// a state the platform stopped reporting.
     TrackStates {
+        /// View id.
+        id: NodeId,
+        /// The states.
+        states: u16,
+    },
+    /// The states the view shows as a part of a control (`tailwind::state`
+    /// bits: a list's highlighted option is focused while the focus stays
+    /// on its search field), for a platform that marks them itself. Opt-in
+    /// through `Core::set_projected_state_mounting`; the platform shows
+    /// them and never reports them back.
+    ProjectStates {
         /// View id.
         id: NodeId,
         /// The states.

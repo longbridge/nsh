@@ -763,7 +763,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean \| number` | `true` | The text scrolls on past its last line: up to a screen (`true`), not at all (`false`) or that many rows. |
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-mono` | The font the text is drawn and measured in. |
 | `fontSize` | `.font_size(..)` | `number` | `13` | The font size, in points. |
-| `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points. |
+| `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points; in a terminal a row is one Cell. |
 | `search` | `.search(..)` | `EditorSearch` | | What to find ([Find and replace](#find-and-replace)). |
 | `diagnostics` | `.diagnostics(..)` | `EditorDiagnostic[]` | `[]` | Problems to mark ([Diagnostics](#diagnostics)). |
 | `decorations` | `.decorations(..)` | `EditorDecoration[]` | `[]` | Ranges the app styles ([Decorations](#decorations)). |

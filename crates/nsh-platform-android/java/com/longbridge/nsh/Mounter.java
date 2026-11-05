@@ -711,6 +711,7 @@ final class Mounter {
      * again.
      */
     void destroyComponents() {
+        Notifications.forget(this);
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
@@ -1031,6 +1032,7 @@ final class Mounter {
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
             decor.gradients = fx.gradients;
+            decor.masks = fx.masks;
             decor.outlineWidth = fx.outlineWidth;
             decor.outlineColor = fx.outlineColor;
             decor.outlineStyle = fx.outlineStyle;
@@ -1485,7 +1487,9 @@ final class Mounter {
             panActivations.remove(id);
         }
         boolean selectableView = b.getInt() != 0;
+        boolean continuesText = b.getInt() != 0;
         if (v == null) return;
+        if (v instanceof TextBox) ((TextBox) v).continuesText = continuesText;
         SelectableView area = selectableViews.get(id);
         if (selectableView && (area == null || area.view != v)) {
             if (area != null) area.clear();
@@ -2119,6 +2123,10 @@ final class Mounter {
             }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 44: {
+                Notifications.command(this, b, objects);
                 break;
             }
             case 26: {

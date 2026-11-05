@@ -1,6 +1,6 @@
 import { signal, Text, Video, type VideoRef, View, WebView, type WebViewNavigation, type WebViewRef } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Meter, Press, radius, RoundButton, Segmented } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Meter, Press, radius, RoundButton, Segmented, terminal, TERMINAL_GAP } from "../ui";
 
 /** An inline page in the gallery's colors (for the appearance shown: the page reloads when it changes). */
 const page = () => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -107,7 +107,8 @@ function Site() {
         style={{ height: 340, backgroundColor: colors.inset, ...frame() }}
         onNavigationStateChange={(v) => state.set(v)}
       />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+      {/* Two Cells between the buttons in a terminal, where they are words. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 10 }}>
         <NavButton flip label="Back" enabled={!!state()?.canGoBack} onPress={() => site.goBack()} />
         <NavButton label="Forward" enabled={!!state()?.canGoForward} onPress={() => site.goForward()} />
         <View style={{ flex: 1 }} />

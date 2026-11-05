@@ -155,6 +155,9 @@ function Pager() {
 function Cards() {
   const card = 220;
   const gap = 12;
+  // A terminal's card is as tall as its rows (its padding and two lines):
+  // the list as tall, with no blank rows under it.
+  const height = platform.idiom === "terminal" ? 64 : 128;
   const oneStep = signal(false);
   const align = signal<"start" | "center" | "end">("center");
   return (
@@ -169,7 +172,7 @@ function Cards() {
           decelerationRate="fast"
           disableIntervalMomentum={oneStep()}
           scrollbar={false}
-          style={{ height: 128 }}
+          style={{ height }}
           contentStyle={{ gap, paddingHorizontal: 14 }}
         >
           {(i) => {
@@ -178,7 +181,7 @@ function Cards() {
               <View
                 style={{
                   width: card,
-                  height: 128,
+                  height,
                   borderRadius: radius.control + 4,
                   borderCurve: "continuous",
                   backgroundColor: colors.raised,

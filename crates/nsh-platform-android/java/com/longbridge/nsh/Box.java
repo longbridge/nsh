@@ -511,6 +511,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     }
 
     @Override
+    public void draw(Canvas canvas) {
+        if (decor.masks.length == 0) super.draw(canvas);
+        else decor.drawMasked(canvas, this, () -> super.draw(canvas));
+    }
+
+    @Override
     protected void dispatchDraw(Canvas canvas) {
         // An effect, or a running transition, shows its frame instead (the
         // children still take touches and stay accessible).
@@ -520,9 +526,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
 
     /** Draws the children as they are. */
     private void drawChildren(Canvas canvas) {
-        if (decor.needsPathClip(clip) && content == null) {
+        // The outline clips at the border's outer edge, so children would cover
+        // the border at the corners: like CSS, a uniform border clips inside it.
+        float inset = clip && decor.rounded() && decor.hasBorder() && decor.uniformBorder() ? decor.borderWidths[0] : 0;
+        if ((decor.needsPathClip(clip) || inset > 0) && content == null) {
             canvas.save();
-            canvas.clipPath(decor.shape(new Rect(0, 0, getWidth(), getHeight()), 0, clipPath));
+            canvas.clipPath(decor.shape(new Rect(0, 0, getWidth(), getHeight()), inset, clipPath));
             super.dispatchDraw(canvas);
             canvas.restore();
         } else {

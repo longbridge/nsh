@@ -1,6 +1,6 @@
 import { cleanup, signal, Text, View } from "nsh";
 import { Button, DataTable, type DataTableColumn, type DataTableRef, type DataTableSelection, type DataTableSort } from "nsh/base";
-import { dataTableClasses, dataTableFitPadding, Segmented } from "../ui";
+import { dataTableClasses, dataTableFitPadding, Segmented, terminal } from "../ui";
 
 // `nsh/base`'s `DataTable` over a million stocks of sixty columns the app
 // does not hold, with live quotes as gpui-component's data table story: a
@@ -304,12 +304,15 @@ export function DataTableDemo() {
         <Tool label="Go to row 500000" name="Row 500,000" onPress={() => table?.scrollToRow(499_999)} />
         <Tool label="Go to Indicator 30" name="Indicator 30" onPress={() => table?.scrollToColumn("x30")} />
       </View>
-      <View class="flex-row items-center gap-3">
-        <Text class="font-mono text-[12px] text-foreground">{describe()}</Text>
-        <Text class="font-mono text-[12px] text-muted-foreground">
+      {/* One row in a terminal too: a line that wrapped as the counts grow
+          would move the table under the pointer dragging its bar. The
+          tick gives way first. */}
+      <View class={terminal ? "flex-row items-center gap-x-6" : "flex-row items-center gap-3"}>
+        <Text class="shrink-0 font-mono text-[12px] text-foreground">{describe()}</Text>
+        <Text class="shrink-0 font-mono text-[12px] text-muted-foreground">
           {`rows ${visible().start + 1}–${visible().end} of ${ROWS.toLocaleString("en-US")}`}
         </Text>
-        <Text class="font-mono text-[12px] text-muted-foreground">{`${columns.length} columns · tick ${ticks()}`}</Text>
+        <Text style={{ numberOfLines: 1 }} class="shrink font-mono text-[12px] text-muted-foreground">{`${columns.length} columns · tick ${ticks()}`}</Text>
       </View>
       <DataTable
         ref={(r) => (table = r)}

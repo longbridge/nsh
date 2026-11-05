@@ -3,7 +3,31 @@ import type { Tokens, ViewStyle } from "nsh";
 import { token } from "nsh";
 import { Easing } from "nsh";
 import { colorScheme } from "nsh";
+import { platform } from "nsh";
 import finishes from "./finishes.json";
+
+/**
+ * The Terminal idiom: the shared UI and the gallery leave out what a
+ * terminal program would not show (charts, sparklines, decorative icons and
+ * art, window chrome), put on one row what other platforms stack, and space
+ * in whole Cell rows (16 pt at the default 8 × 16 points per Cell).
+ */
+export const terminal = platform.idiom === "terminal";
+
+/** One Cell row and one Cell column in points (the default 8 × 16 points
+ * per Cell): the terminal's line height and its unit of spacing. */
+export const TERMINAL_ROW = 16;
+export const TERMINAL_COLUMN = 8;
+
+/** The gap the terminal's layout makes two columns (it makes any smaller
+ * gap one): between neighbours that are words, such as icon buttons shown
+ * as their labels, so they read apart. */
+export const TERMINAL_GAP = 24;
+
+/** A vertical space (a gap, a padding) in the terminal's whole rows: none
+ * below half a row, else the nearest whole number of rows. Unchanged
+ * elsewhere. */
+export const wholeRows = (points: number) => (terminal ? Math.round(points / TERMINAL_ROW) * TERMINAL_ROW : points);
 
 /** Whether the shared example UI shows its dark palette (reactive: reading it subscribes). */
 export const isDark = () => colorScheme() !== "light";
@@ -215,6 +239,14 @@ export const motion = {
  * disabled control and off a selected one, whose own fill shows.
  */
 export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
+
+/**
+ * The resting fill of a ghost control (a bare button, an icon button): none,
+ * bare until the pointer is over it; in the terminal, which shows no hover
+ * until the pointer is there and no outline to hint at one, a faint
+ * `secondary` band, so it reads as pressable.
+ */
+export const ghostFill = () => (terminal ? token("secondary") : "transparent");
 
 /**
  * The keyboard focus (`focusStyle`): the edge turns the theme's muted olive

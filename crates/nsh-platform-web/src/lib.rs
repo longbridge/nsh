@@ -484,6 +484,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         None => env.lifecycle,
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
+    env.notifications = flag("notifications").unwrap_or(env.notifications);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -498,6 +499,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
+        e.notifications = env.notifications;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {
@@ -1235,8 +1237,9 @@ fn key_of(code: u32) -> Option<Key> {
 /// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
 /// Windows key), `editing` when a text field has the focus, `repeat` for
 /// an auto-repeat. Returns the binding that fires, -1 for none (the key
-/// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
-/// reports a firing binding with [`nsh_key_command`].
+/// goes on), -2 for a held key's repeat (consumed, nothing fires) or
+/// `-3 - id` for binding `id` passing the key through (it fires, then the
+/// key goes on). JS reports a firing binding with [`nsh_key_command`].
 ///
 /// `f64` keeps every `u32` binding ID positive in JS, including Rust
 /// shortcuts (`1 << 31` and up) and overlay Escape (`u32::MAX`), while
@@ -1262,6 +1265,7 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -
         KeyMatch::None => -1.0,
         KeyMatch::Held => -2.0,
         KeyMatch::Fire(id) => id as f64,
+        KeyMatch::Notify(id) => -3.0 - id as f64,
     }
 }
 

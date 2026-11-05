@@ -1,7 +1,7 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { Button, Tree, type TreeItem, type TreeRef } from "nsh/base";
 import type { IconName } from "../icons";
-import { Caption, Card, colors, DemoPage, desktop, mono, TreeRow, treeItemClass, Toggle as Switch } from "../ui";
+import { Caption, Card, colors, DemoPage, desktop, mono, terminal, TreeRow, treeItemClass, Toggle as Switch } from "../ui";
 
 // `nsh/base`'s `Tree` owns which items are expanded, which one is selected,
 // the keyboard (one Tab stop: the arrows move the selection, Right and Left
@@ -11,6 +11,12 @@ import { Caption, Card, colors, DemoPage, desktop, mono, TreeRow, treeItemClass,
 // icon and label indented by depth.
 
 const pointer = platform.idiom === "desktop";
+/**
+ * A tree's well: in a terminal as wide as the card's content, so its band keeps a column inside the card's line, as
+ * the card's other wells do, and its rows' text a column inside the band.
+ */
+const well = (size: string) => `${size} rounded-xl border border-border bg-card${terminal ? " w-full" : ""}`;
+const wellList = terminal ? "px-2" : "p-1.5";
 
 /** A card's actions: in its header beside the title in a wide window, the
  * first row of its content otherwise, so a narrow card's subtitle keeps
@@ -143,8 +149,8 @@ export function TreeDemo() {
           selected={selected()}
           reveal
           accessibilityLabel="Project files"
-          class="h-80 rounded-xl border border-border bg-card"
-          listClass="p-1.5"
+          class={well("h-80")}
+          listClass={wellList}
           itemClass={treeItemClass}
           onExpandedChange={({ expanded: next }) => expanded.set(next)}
           onSelectedChange={({ selected: next }) => {
@@ -182,7 +188,7 @@ export function TreeDemo() {
             accessibilityLabel="Settings"
             class="rounded-xl border border-border bg-card"
             style={{ height: desktop() ? 280 : 300, width: desktop() ? 210 : undefined }}
-            listClass="p-1.5"
+            listClass={wellList}
             itemClass={treeItemClass}
             onSelectedChange={({ selected: next }) => {
               section.set(next);
@@ -224,8 +230,8 @@ export function TreeDemo() {
           expanded={expanded()}
           selected={selected()}
           accessibilityLabel="Logs"
-          class="h-72 rounded-xl border border-border bg-card"
-          listClass="p-1.5"
+          class={well("h-72")}
+          listClass={wellList}
           itemClass={treeItemClass}
           onExpandedChange={({ expanded: next }) => expanded.set(next)}
           onSelectedChange={({ selected: next }) => {
@@ -263,8 +269,8 @@ export function TreeDemo() {
           defaultSelected="q4/goals"
           disabled={locked()}
           accessibilityLabel="Outline"
-          class="h-40 rounded-xl border border-border bg-card"
-          listClass="p-1.5"
+          class={well("h-40")}
+          listClass={wellList}
           itemClass={treeItemClass}
           onSelectedChange={({ selected: next }) => last.set(`Outline ${next}`)}
           renderItem={(entry) => <TreeRow entry={entry} icon={entry.folder ? "lists" : "document"} />}
