@@ -11486,6 +11486,169 @@ mod components {
         assert_eq!(shown.last().unwrap(), "heard end not-allowed");
     }
 
+    /// Asks for the permission, shows a notification and sets the badge when
+    /// its button is pressed; shows the answers and the presses.
+    #[component]
+    fn Notifier() -> impl IntoElement {
+        let shown = signal(String::new());
+        let add = move |line: String| shown.set(format!("{} {line}", untracked(|| shown.get())));
+        spawn(async move {
+            loop {
+                add(format!("pressed {}", next_notification_press().await));
+            }
+        });
+        view()
+            .child(text(move || format!("said{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                set_badge(3);
+                close_notification("a");
+                spawn(async move {
+                    let permission = request_notification_permission().await;
+                    add(permission.as_str().to_owned());
+                    let shown = show_notification(crate::notifications::Notification::new(
+                        "a", "Title", "Body",
+                    ))
+                    .await;
+                    add(format!("shown {shown}"));
+                });
+            }))
+    }
+
+    /// Mounts [`Notifier`] and presses its button: the commands sent.
+    fn notify(c: &mut Core<FakeEngine>) -> Vec<crate::notifications::NotificationCommand> {
+        c.mount_root(&crate::element::Root::new::<Notifier>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let mut commands = notification_commands(&batch.items);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        commands.extend(notification_commands(
+            &c.commit().map(|b| b.items).unwrap_or_default(),
+        ));
+        commands
+    }
+
+    /// Runs the tasks: the commands they and what came before them sent.
+    fn tasks_commands(c: &mut Core<FakeEngine>) -> Vec<crate::notifications::NotificationCommand> {
+        c.run_component_tasks();
+        notification_commands(&c.commit().map(|b| b.items).unwrap_or_default())
+    }
+
+    fn notification_commands(
+        items: &[MountItem],
+    ) -> Vec<crate::notifications::NotificationCommand> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Notification(command),
+                } => Some(command.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn notification_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) {
+        assert!(c.component_event(ROOT_ID, EventKind::Notification, &EventPayload::Map(fields)));
+    }
+
+    #[test]
+    fn notifications_go_through_the_platform() {
+        use crate::notifications::{NotificationCommand as N, NotificationEvent as Field};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            notifications: true,
+            ..Default::default()
+        });
+        let mut commands = notify(&mut c);
+        commands.extend(tasks_commands(&mut c));
+        assert_eq!(
+            commands[..],
+            [
+                N::SetBadge(3),
+                N::Close("a".into()),
+                N::Listen,
+                N::Permission { id: 0, ask: true }
+            ]
+        );
+        notification_event(
+            &mut c,
+            vec![
+                (Field::ID, PayloadValue::Number(0.0)),
+                (Field::PERMISSION, PayloadValue::Str("granted".into())),
+            ],
+        );
+        let commands = tasks_commands(&mut c);
+        let [
+            N::Show {
+                id: 1,
+                notification,
+            },
+        ] = &commands[..]
+        else {
+            panic!("one notification: {commands:?}");
+        };
+        assert_eq!(
+            *notification,
+            crate::notifications::Notification::new("a", "Title", "Body")
+        );
+        notification_event(
+            &mut c,
+            vec![
+                (Field::ID, PayloadValue::Number(1.0)),
+                (Field::SHOWN, PayloadValue::Bool(true)),
+            ],
+        );
+        run_until(&mut c, |s| s.iter().any(|t| t.contains("shown true")));
+        // One after the other: the second waits for the listener to come back.
+        notification_event(
+            &mut c,
+            vec![(Field::PRESSED, PayloadValue::Str("a".into()))],
+        );
+        notification_event(
+            &mut c,
+            vec![(Field::PRESSED, PayloadValue::Str("b".into()))],
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("pressed b")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "said granted shown true pressed a pressed b"
+        );
+    }
+
+    #[test]
+    fn notifications_answer_at_once_where_the_platform_shows_none() {
+        use crate::notifications::NotificationCommand as N;
+        let mut c = core();
+        // The badge is the platform's to do or ignore.
+        assert_eq!(notify(&mut c), vec![N::SetBadge(3)]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("shown")));
+        assert_eq!(shown.last().unwrap(), "said unavailable shown false");
+    }
+
+    #[test]
+    fn notifications_need_the_capability() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            notifications: true,
+            ..Default::default()
+        });
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        assert_eq!(notify(&mut c), vec![]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("shown")));
+        assert_eq!(shown.last().unwrap(), "said unavailable shown false");
+    }
+
     /// Shows whether a web view's ref gives trusted input here.
     #[component]
     fn WebInputCheck() -> impl IntoElement {

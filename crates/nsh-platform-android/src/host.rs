@@ -1076,6 +1076,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.pixel_ratio = v[9];
     environment.screen_reader = v[10] != 0.0;
     environment.os = nsh_engine::Os::Android;
+    environment.notifications = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,
@@ -1488,6 +1489,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "text" => "text",
                 "has" => "has",
                 "opened" => "opened",
+                "permission" => "permission",
+                "shown" => "shown",
+                "pressed" => "pressed",
                 "reason" => "reason",
                 "composing" => "composing",
                 "caretX" => "caretX",

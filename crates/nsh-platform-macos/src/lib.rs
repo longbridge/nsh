@@ -43,6 +43,7 @@ mod mount;
 mod native;
 mod navigation;
 mod net;
+mod notifications;
 mod picker;
 mod screen_color;
 mod scroll;

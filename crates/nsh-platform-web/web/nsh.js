@@ -1741,6 +1741,7 @@ class Player {
         ? "background"
         : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",
+      notifications: typeof window.Notification === "function",
     };
   }
 
@@ -5442,6 +5443,10 @@ class Player {
         }
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
+      case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
+      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3]); break;
+      case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
@@ -5517,6 +5522,49 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
+  // `Notifications.permission` / `requestPermission`: `Notification`'s own
+  // values. A browser refuses a prompt the user did not cause by answering
+  // `default` or `denied`.
+  async notificationPermission(request, ask) {
+    let permission = window.Notification.permission;
+    if (ask && permission === "default") {
+      try {
+        permission = await window.Notification.requestPermission();
+      } catch (err) {
+        console.warn(`[nsh] notifications: ${err}`);
+      }
+    }
+    this.event(ROOT_ID, "onNotification", { id: request, permission });
+  }
+
+  // `Notifications.show`: replaces the one of the same id (`tag`). Android's
+  // browsers have the class but throw: only a service worker shows there.
+  showNotification(request, id, title, body) {
+    let shown = false;
+    if (window.Notification.permission === "granted") {
+      try {
+        const notification = new window.Notification(title, { body, tag: id });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+          this.event(ROOT_ID, "onNotification", { pressed: id });
+        };
+        (this.notifications ??= new Map()).set(id, notification);
+        shown = true;
+      } catch (err) {
+        console.warn(`[nsh] notifications: ${err}`);
+      }
+    }
+    this.event(ROOT_ID, "onNotification", { id: request, shown });
+  }
+
+  // `Notifications.setBadge`: an installed web app's icon, where browsers
+  // have the Badging API.
+  setBadge(count) {
+    const set = count > 0 ? navigator.setAppBadge?.(count) : navigator.clearAppBadge?.();
+    set?.catch?.((err) => console.warn(`[nsh] setBadge: ${err}`));
   }
 
   // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
