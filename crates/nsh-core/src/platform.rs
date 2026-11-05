@@ -449,6 +449,7 @@ impl std::fmt::Display for Locale {
 /// zone where the system has one (Android's `GMT+01:00`). Held inline so
 /// that the environment stays `Copy`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct TimeZone {
     bytes: [u8; TimeZone::CAPACITY],
     len: u8,
