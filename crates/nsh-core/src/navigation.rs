@@ -391,7 +391,10 @@ mod tests {
         t.tick(5.0);
         let first = t.deadline(5.0).expect("two run");
         assert!((first - 5.201).abs() < 1e-9, "{first}");
-        assert!(matches!(t.tick(first)[..], [Tick::At(0, _), Tick::Ended('b')]));
+        assert!(matches!(
+            t.tick(first)[..],
+            [Tick::At(0, _), Tick::Ended('b')]
+        ));
         let last = t.deadline(first).expect("one runs");
         assert!((last - 5.301).abs() < 1e-9, "{last}");
         assert!(matches!(t.tick(last)[..], [Tick::Ended('a')]));

@@ -681,7 +681,8 @@ impl Timing {
 
     /// When it ends (ms), `now` before its first step.
     fn end(&self, now: f64) -> f64 {
-        self.start.map_or(now, |start| start + (self.delay + self.duration) as f64)
+        self.start
+            .map_or(now, |start| start + (self.delay + self.duration) as f64)
     }
 
     /// Eased progress at `now` (ms): `None` while delayed, then the value
@@ -1304,9 +1305,15 @@ mod tests {
             easing: [0.0, 0.0, 1.0, 1.0],
             iterations,
         };
-        live.keyframes = Some(KeyframeRun { animation: spin(None), start: Some(0.0) });
+        live.keyframes = Some(KeyframeRun {
+            animation: spin(None),
+            start: Some(0.0),
+        });
         assert_eq!(live.deadline(10.0), None);
-        live.keyframes = Some(KeyframeRun { animation: spin(Some(2)), start: Some(0.0) });
+        live.keyframes = Some(KeyframeRun {
+            animation: spin(Some(2)),
+            start: Some(0.0),
+        });
         assert_eq!(live.deadline(10.0), Some(2001.0));
     }
 

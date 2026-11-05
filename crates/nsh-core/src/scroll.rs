@@ -859,7 +859,9 @@ pub fn deadline(host: &impl ScrollHost, now: f64) -> Option<f64> {
                 last + ((STOP / speed).ln() / rate.ln()).max(0.0) as f64
             }
         }
-        Phase::Animate { start, duration, .. } => start + duration,
+        Phase::Animate {
+            start, duration, ..
+        } => start + duration,
         Phase::Wheel {
             last,
             gesture: false,
@@ -2028,7 +2030,10 @@ mod tests {
             let y = host.state.borrow().y.0;
             match phase {
                 // Where frames would have taken it.
-                Phase::Glide { .. } => assert!((y - projected(Points(0.0), 2.0, 0.998).0).abs() < 6.0, "{y}"),
+                Phase::Glide { .. } => assert!(
+                    (y - projected(Points(0.0), 2.0, 0.998).0).abs() < 6.0,
+                    "{y}"
+                ),
                 _ => assert_eq!(y, 400.0),
             }
         }

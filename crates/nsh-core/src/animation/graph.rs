@@ -374,10 +374,14 @@ impl Step {
     fn deadline(&self, g: &Graph, now: f64) -> Option<f64> {
         match self {
             Step::Run { node, leaf, .. } => match *leaf {
-                Some(id) if g.running_id(*node) == Some(id) => g.running(*node).map(|r| r.deadline(now)),
+                Some(id) if g.running_id(*node) == Some(id) => {
+                    g.running(*node).map(|r| r.deadline(now))
+                }
                 _ => Some(now),
             },
-            Step::Sequence { steps, index, .. } => steps.get(*index).map_or(Some(now), |s| s.deadline(g, now)),
+            Step::Sequence { steps, index, .. } => {
+                steps.get(*index).map_or(Some(now), |s| s.deadline(g, now))
+            }
             Step::Parallel { steps, ends, .. } => steps
                 .iter()
                 .zip(ends)
@@ -756,16 +760,23 @@ impl Graph {
                 None => Some(now),
                 Some(_) => p.root.deadline(self, now),
             });
-        let snaps = self.snaps.iter().filter_map(|&node| match self.nodes.get(node as usize) {
-            Some(Some(Node::DiffClamp { snapping, .. })) => {
-                let snap = snapping.get()?;
-                Some(snap.start.map_or(now, |start| start + SNAP_SECONDS))
-            }
-            _ => None,
-        });
+        let snaps = self
+            .snaps
+            .iter()
+            .filter_map(|&node| match self.nodes.get(node as usize) {
+                Some(Some(Node::DiffClamp { snapping, .. })) => {
+                    let snap = snapping.get()?;
+                    Some(snap.start.map_or(now, |start| start + SNAP_SECONDS))
+                }
+                _ => None,
+            });
         // A millisecond past it: a step there finds it ended whatever the
         // rounding of the time elapsed.
-        leaves.chain(programs).chain(snaps).reduce(f64::min).map(|t| t + PAST_SECONDS)
+        leaves
+            .chain(programs)
+            .chain(snaps)
+            .reduce(f64::min)
+            .map(|t| t + PAST_SECONDS)
     }
 
     /// The animation running on value `node`.
@@ -1691,13 +1702,24 @@ mod tests {
     /// Ticks only at the graph's deadlines from `from` (a surface that
     /// draws no frames): the times it ticked at, and the animations that
     /// finished at each.
-    fn run_to_deadlines(g: &mut Graph, f: &mut Vec<Finished>, from: f64) -> Vec<(f64, Vec<AnimationId>)> {
+    fn run_to_deadlines(
+        g: &mut Graph,
+        f: &mut Vec<Finished>,
+        from: f64,
+    ) -> Vec<(f64, Vec<AnimationId>)> {
         let mut t = from;
         let mut ticks = Vec::new();
         for _ in 0..100 {
             let before = f.len();
             g.tick(t, f);
-            ticks.push((t, f[before..].iter().filter(|e| e.finished).map(|e| e.animation).collect()));
+            ticks.push((
+                t,
+                f[before..]
+                    .iter()
+                    .filter(|e| e.finished)
+                    .map(|e| e.animation)
+                    .collect(),
+            ));
             match g.deadline(t) {
                 Some(next) => t = next.max(t),
                 None => return ticks,
@@ -1756,7 +1778,12 @@ mod tests {
         // Not started: tick now, which starts them.
         assert_eq!(g.deadline(1000.0), Some(1000.0 + PAST_SECONDS));
         let ticks = run_to_deadlines(&mut g, &mut f, 1000.0);
-        let ended = |id| ticks.iter().find(|(_, ids)| ids.contains(&id)).map(|(t, _)| t - 1000.0);
+        let ended = |id| {
+            ticks
+                .iter()
+                .find(|(_, ids)| ids.contains(&id))
+                .map(|(t, _)| t - 1000.0)
+        };
         let near = |t: Option<f64>, want: f64| t.is_some_and(|t| (t - want).abs() < 0.01);
         assert!(near(ended(1), 0.25), "{ticks:?}");
         assert!(near(ended(5), 0.25), "{ticks:?}");
@@ -1788,9 +1815,17 @@ mod tests {
             &mut f,
         );
         let ticks = run_to_deadlines(&mut g, &mut f, 50.0);
-        let (end, _) = ticks.iter().find(|(_, ids)| ids.contains(&1)).expect("it settled");
+        let (end, _) = ticks
+            .iter()
+            .find(|(_, ids)| ids.contains(&1))
+            .expect("it settled");
         // Every check a tenth of a second apart.
-        assert!(ticks.windows(2).skip(1).all(|w| (w[1].0 - w[0].0 - (CHECK_SECONDS + PAST_SECONDS)).abs() < 1e-9));
+        assert!(
+            ticks
+                .windows(2)
+                .skip(1)
+                .all(|w| (w[1].0 - w[0].0 - (CHECK_SECONDS + PAST_SECONDS)).abs() < 1e-9)
+        );
         assert!(end - 50.0 < 3.0, "{ticks:?}");
         assert_eq!(g.value(1), Some(100.0));
         assert_eq!(g.deadline(*end), None);
