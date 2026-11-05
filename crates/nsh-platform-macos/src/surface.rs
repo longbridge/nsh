@@ -395,6 +395,8 @@ impl Surface {
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
         crate::keymap::clear(self);
+        crate::tray::release(self.key);
+        crate::global_shortcut::release(self.key);
         self.js_frame.set(false);
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
@@ -949,6 +951,8 @@ impl Drop for Surface {
         if let Some(link) = self.link.borrow_mut().take() {
             link.invalidate();
         }
+        crate::tray::release(key);
+        crate::global_shortcut::release(key);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }

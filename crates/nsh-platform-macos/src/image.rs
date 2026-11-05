@@ -929,6 +929,17 @@ pub(crate) fn load_menu_icon(
     scale: f32,
     done: impl FnOnce(Result<MenuIcon, String>) + 'static,
 ) -> Option<Load> {
+    let want = nsh_core::desktop::menu_icon::want(scale);
+    load_icon(surface, source, want, done)
+}
+
+/// Loads a menu item's or the tray's icon as `want` says.
+pub(crate) fn load_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    want: Want,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
     let done = move |result: Result<(Picture, Lease), String>| {
         done(result.map(|(picture, _)| MenuIcon {
             image: picture.frames[0].clone(),
@@ -937,8 +948,8 @@ pub(crate) fn load_menu_icon(
     };
     fetch(
         surface,
-        &source.at_pixel_ratio(scale),
-        nsh_core::desktop::menu_icon::want(scale),
+        &source.at_pixel_ratio(want.scale),
+        want,
         Frames::First,
         Look::default(),
         Priority::Visible,

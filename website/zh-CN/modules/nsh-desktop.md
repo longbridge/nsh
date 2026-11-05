@@ -398,6 +398,8 @@ interface GlobalShortcutModule {
 
 全局快捷键不论哪个应用持有键盘都会送到本应用。`register` 的按键写法与菜单项的 `shortcut` 相同（`"mod+shift+k"`），返回系统是否接受：被其他应用占用、或不在桌面平台时为 `false`。同一按键再次注册会替换回调。
 
+在 macOS 上不需要用户授予权限。字母对应注册时键盘布局上输入该字母的键，所以 Dvorak 布局下 `k` 仍是 `k`。
+
 在 Linux 上通过桌面 portal（`org.freedesktop.portal.GlobalShortcuts`）注册，这是 Wayland 下唯一的方式。按键只是建议值：桌面可能请用户确认或改选其他按键。Hyprland 在自己的配置里绑定，按应用 id 和小写的按键名：`bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`。
 
 ```tsx
