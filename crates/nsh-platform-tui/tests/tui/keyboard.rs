@@ -1101,19 +1101,22 @@ fn right_and_return_open_a_submenu_at_its_first_item_and_left_and_escape_leave_i
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "File");
     let none = Modifiers::default();
-    let press =
-        |view: &mut nsh_platform_tui::AppView, terminal: &mut Terminal<TestBackend>, name: &str| {
-            view.handle(key(name, none));
-            terminal
-                .draw(|frame| view.render(frame, frame.area()))
-                .unwrap();
+    // Down changes focus on the engine thread. Wait for the focus mark
+    // and key bindings to reach the surface before sending the next key.
+    let down_to =
+        |view: &mut nsh_platform_tui::AppView, terminal: &mut Terminal<TestBackend>, item: &str| {
+            view.handle(key("Down", none));
+            super::app::draw_until_true(view, terminal, &rx, item, |terminal| {
+                super::dock::find(terminal, item)
+                    .is_some_and(|(x, y)| super::app::reversed(terminal.backend().buffer(), x, y))
+            });
         };
     // The menu opens at `New`; Down reaches the submenu's trigger, Right
     // opens it with the focus on `Alpha`, which Return chooses.
     view.handle(key("Tab", none));
     view.handle(key("Enter", none));
     draw_until(&mut view, &mut terminal, &rx, "Quit");
-    press(&mut view, &mut terminal, "Down");
+    down_to(&mut view, &mut terminal, "Recent");
     view.handle(key("Right", none));
     draw_until(&mut view, &mut terminal, &rx, "Alpha");
     view.handle(key("Enter", none));
@@ -1123,7 +1126,7 @@ fn right_and_return_open_a_submenu_at_its_first_item_and_left_and_escape_leave_i
     // back on the trigger, the menu open, so Right opens it again.
     view.handle(key("Enter", none));
     draw_until(&mut view, &mut terminal, &rx, "Quit");
-    press(&mut view, &mut terminal, "Down");
+    down_to(&mut view, &mut terminal, "Recent");
     view.handle(key("Enter", none));
     draw_until(&mut view, &mut terminal, &rx, "Alpha");
     view.handle(key("Left", none));
@@ -1144,7 +1147,7 @@ fn right_and_return_open_a_submenu_at_its_first_item_and_left_and_escape_leave_i
     );
     view.handle(key("Enter", none));
     draw_until(&mut view, &mut terminal, &rx, "Alpha");
-    press(&mut view, &mut terminal, "Down");
+    down_to(&mut view, &mut terminal, "Beta");
     view.handle(key("Enter", none));
     draw_until(
         &mut view,
