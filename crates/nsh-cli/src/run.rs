@@ -565,9 +565,14 @@ fn run_tui(
     parse_points_per_cell(cells).map_err(anyhow::Error::msg)?;
     fs::create_dir_all(work)?;
     let path = work.join("tui.log");
+    let building = ui::Step::start(format!("building {}", ui::path(entry)));
     let session = DevSession::start(entry, port, release, limits)?;
+    building.finish();
     // A Rust root also uses the development host, which receives the Root event.
     let host = crate::runtime::test_host(Platform::Tui)?;
+    // Preparation stays visible until the host takes over the terminal. From
+    // here, diagnostics belong in the panel so they cannot overwrite its UI.
+    let _terminal_logs = ui::LogFile::open(&path)?;
     let diagnostics = fs::OpenOptions::new()
         .create(true)
         .append(true)
