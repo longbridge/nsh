@@ -653,16 +653,17 @@ impl AudioPlayer {
     }
 
     /// Moves to `seconds` (past the end: the end). Throws a `RangeError`
-    /// for a negative or non-finite time.
+    /// for a negative, non-finite or unrepresentable time.
     pub(crate) fn seek(&self, seconds: f64) -> Result<(), JsError> {
-        if !seconds.is_finite() || seconds < 0.0 {
+        // `try_`: a finite time can still be too large for a `Duration`
+        // (`seek(1e30)`), which `from_secs_f64` panics on.
+        let Ok(position) = Duration::try_from_secs_f64(seconds) else {
             return Err(JsError::Range(format!(
                 "`seek` takes a time of 0 seconds or more, not {seconds}"
             )));
-        }
-        self.state.position.set(Duration::from_secs_f64(seconds));
-        self.state
-            .act(Queued::Seek(Duration::from_secs_f64(seconds)));
+        };
+        self.state.position.set(position);
+        self.state.act(Queued::Seek(position));
         Ok(())
     }
 

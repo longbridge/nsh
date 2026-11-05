@@ -78,7 +78,17 @@ function App() {
           voice.play().then(() => player.set(`${voice.state} ${voice.duration}`));
         }}
       />
-      <Button label="Skip" onPress={() => voice.seek(30)} />
+      <Button
+        label="Skip"
+        onPress={() => {
+          voice.seek(30);
+          try {
+            voice.seek(1e30);
+          } catch (e) {
+            refused.set(`seek ${(e as Error).name}`);
+          }
+        }}
+      />
       <Button label="Pause" onPress={() => voice.pause()} />
     </View>
   );

@@ -199,8 +199,9 @@ fn audio_payload(value: &serde_json::Value) -> EventPayload {
         value
             .get(k)
             .and_then(|v| v.as_f64())
-            .filter(|s| s.is_finite() && *s >= 0.0)
-            .map(Duration::from_secs_f64)
+            // `try_`: a time too large for a `Duration` is no time, not a
+            // panic.
+            .and_then(|s| Duration::try_from_secs_f64(s).ok())
     };
     let id = value.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let name = value.get("event").and_then(|v| v.as_str()).unwrap_or("");

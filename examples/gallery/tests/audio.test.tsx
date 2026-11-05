@@ -23,13 +23,14 @@ test("a sound longer than five seconds is refused", async () => {
   expect(app.audio().map(c => c.command)).toEqual(["open", "load", "unload"]);
 });
 
-test("a player streams, seeks and ends", async () => {
+test("a player streams, seeks and ends; a time past what it can hold throws", async () => {
   expect(app.audio()).toEqual([
     { command: "open", src: "https://example.com/voice.m4a", volume: 0.8, rate: 1, position: null },
   ]);
   await app.press("label:Listen");
   await app.waitFor("text:player: playing 60");
   await app.press("label:Skip");
+  await app.waitFor("text:refused: seek RangeError");
   await app.endAudio();
   await app.waitFor("text:player: ended at 60");
   expect(app.audio().map(c => c.command)).toEqual(["open", "resume", "seek"]);
