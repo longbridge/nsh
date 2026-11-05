@@ -120,8 +120,12 @@ pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
     }
 }
 
-/// Becomes the notification center's delegate unless the app has one. On the
-/// main thread, before the app finishes launching where a press can start it.
+/// Becomes the notification center's delegate unless the app has one (or
+/// this already is). On the main thread: `run_app` calls it before the app
+/// finishes launching, where a press can start it; an embedded [`AppView`]
+/// when it is made.
+///
+/// [`AppView`]: crate::AppView
 pub(crate) fn install() {
     let Some(center) = center() else { return };
     // SAFETY: a documented property.

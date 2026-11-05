@@ -291,6 +291,11 @@ impl AppView {
         container.addSubview(root);
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
+        // An embedding app that runs its own `NSApplication` never reaches
+        // `run_app`'s delegate: without this, banners do not show while the
+        // app is in front and presses are lost. `install` keeps a delegate
+        // the app set itself.
+        crate::notifications::install();
         let view = Rc::new(AppView {
             surface,
             container,

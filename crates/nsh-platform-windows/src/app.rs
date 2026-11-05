@@ -223,6 +223,11 @@ impl AppView {
     pub fn new(parent: Option<HWND>, options: AppOptions) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
+        if parent.is_none() {
+            // A window of its own is the app's, also when a host makes it
+            // instead of `run_app`: toasts need the app's id.
+            crate::notifications::start_app(&options.app_id, &options.title);
+        }
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);
@@ -438,8 +443,6 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
     }
-    crate::system::set_app_id(&options.app_id);
-    crate::notifications::start(&options.app_id, &options.title);
     let view = match AppView::new(None, options.clone()) {
         Ok(view) => view,
         Err(err) => {
