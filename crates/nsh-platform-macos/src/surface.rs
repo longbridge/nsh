@@ -76,6 +76,10 @@ const RESIZE_WAIT: std::time::Duration = std::time::Duration::from_millis(16);
 /// shows the display link's frame always comes first.
 const LATE: f64 = 0.05;
 
+/// How long a test's app waits for the link's frame before one runs
+/// without it ([`Surface::keep_deadline`]): a frame at 60 Hz.
+const TEST_FRAME: f64 = 1.0 / 60.0;
+
 /// The main-thread time one frame spends applying queued batches
 /// ([`Surface::apply_queued`]): about half a refresh at 120 Hz, which
 /// leaves the rest to input, animations and Core Animation's commit.
@@ -884,7 +888,13 @@ impl Surface {
     /// with an endless animation does no work.
     fn keep_deadline(self: &Rc<Self>) {
         let now = objc2_quartz_core::CACurrentMediaTime();
-        let Some(at) = self.deadline(now) else {
+        // A test's app runs as on screen whatever covers its window (the
+        // test windows do not come to the front): what wants a frame gets
+        // one a frame later when the link gives none, drawing too (a JS
+        // frame request, a list binding its rows over frames).
+        let testing = self.testing() && self.wants_frames();
+        let deadline = if testing { Some(now) } else { self.deadline(now) };
+        let Some(at) = deadline else {
             return;
         };
         // One timer at a time: the one waiting for an earlier deadline
@@ -894,7 +904,8 @@ impl Surface {
         }
         self.keeper.set(Some(at));
         let key = self.key;
-        let ms = ((at + LATE - now).max(0.0) * 1000.0).ceil() as u64;
+        let late = if testing { TEST_FRAME } else { LATE };
+        let ms = ((at + late - now).max(0.0) * 1000.0).ceil() as u64;
         after(ms, move || {
             let Some(surface) = find(key) else { return };
             // An earlier deadline took its place and schedules on.
@@ -909,6 +920,14 @@ impl Surface {
             }
             surface.keep_deadline();
         });
+    }
+
+    /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
+    fn testing(&self) -> bool {
+        #[cfg(feature = "dev")]
+        return self.test_model.borrow().is_some();
+        #[cfg(not(feature = "dev"))]
+        false
     }
 
     fn ticked(self: &Rc<Self>, link: &CADisplayLink) {
