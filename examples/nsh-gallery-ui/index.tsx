@@ -372,10 +372,15 @@ export function Legend(props: { color: string; label: string; value?: string }) 
 
 /** A row inside an inset, with a hairline above all but the first (one row
  * of the terminal, which keeps no hairlines between rows). */
-export function Row(props: { first?: boolean; onPress?: () => void; children: JSX.Element }) {
+/** A row of a list card. `focusable` makes it a stop of the keyboard focus
+ * that shows the focus ring (a row that is a `ContextMenu`'s trigger, which
+ * Shift+F10 and the Menu key open). */
+export function Row(props: { first?: boolean; focusable?: boolean; onPress?: () => void; children: JSX.Element }) {
   return (
     <View
       onPress={props.onPress}
+      focusable={props.focusable}
+      focusStyle={props.focusable ? focusRing() : undefined}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
         minHeight: terminal ? TERMINAL_ROW : density.row,
