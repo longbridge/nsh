@@ -216,7 +216,7 @@ impl Host for Runtime {
             "keyboard":{"height":e.keyboard_height.0,"duration":e.keyboard_duration},
             "colorScheme":if e.color_scheme==nsh_engine::ColorScheme::Dark {"dark"}else{"light"},
             "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,"pixelRatio":e.pixel_ratio,
-            "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,
+            "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,"lifecycle":e.lifecycle.name(),
             "platform":{"os":"web","version":e.os_version.0,"idiom":format!("{:?}",e.reported_idiom()).to_lowercase(),"desktop":e.desktop(),"appleKeyboard":e.apple_keyboard}
         });
         self.event(
