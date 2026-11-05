@@ -13,8 +13,11 @@
 //!   value (`accessibilityValue`: a range for range roles, the text
 //!   otherwise; the checked state of checkable roles) and its states
 //!   (`accessibilityState`);
-//! - `accessible={true}` makes it one element: its children are hidden
-//!   from VoiceOver (the core labels it with their text);
+//! - buttons, links, tabs, checkboxes, radios, switches, menu items,
+//!   options and tree items fold their content into their name, and so
+//!   does `accessible={true}`: VoiceOver reaches only the controls inside
+//!   them, and one without a label is named by the texts and labels of
+//!   its content ([`content_name`]), as on Windows and GPUI;
 //!   `accessibilityElementsHidden` hides it and its subtree, and so does
 //!   `visibility: hidden`, as in a browser (only its layer is hidden, which
 //!   VoiceOver does not see);
@@ -63,15 +66,119 @@ pub(crate) struct Applied {
     ax: AxState,
 }
 
-/// Whether the view hides its children from VoiceOver (`accessible={true}`,
-/// `accessibilityElementsHidden`, `visibility: hidden`): its
-/// `accessibilityChildren` are none then, AppKit's otherwise.
+/// Which of its children VoiceOver reaches through a view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reached {
+    /// AppKit's.
+    All,
+    /// The controls among AppKit's, inside its content too ([`controls`]):
+    /// the view folds its content into its name (a button, a tab,
+    /// `accessible={true}`).
+    Controls,
+    /// None (`accessibilityElementsHidden`, `visibility: hidden`).
+    None,
+}
+
+/// Which of its children VoiceOver reaches through the view of `s`.
 ///
 /// The view answers them itself: `setAccessibilityChildren:` cannot be
 /// undone, as `nil` leaves the view without children rather than with
 /// AppKit's again, so a subtree shown again stayed out of reach.
-pub(crate) fn hides_children(s: &ViewState) -> bool {
-    s.access.ax.grouped
+pub(crate) fn reached(s: &ViewState) -> Reached {
+    if s.access.ax.hidden {
+        Reached::None
+    } else if s.access.ax.grouped {
+        Reached::Controls
+    } else {
+        Reached::All
+    }
+}
+
+/// The controls among `children` (AppKit's of a view that folds its
+/// content): its content (texts, images, groups) is in its name instead,
+/// and the controls inside that content are reached in its place, as the
+/// Windows and GPUI backends fold it.
+pub(crate) fn controls(children: Option<Retained<NSArray>>) -> Retained<NSArray> {
+    let mut out: Vec<Retained<AnyObject>> = Vec::new();
+    fn gather(children: Option<Retained<NSArray>>, out: &mut Vec<Retained<AnyObject>>) {
+        for child in children.iter().flat_map(|c| c.iter()) {
+            let content = child.downcast_ref::<NSView>().filter(|view| {
+                NshView::from_ns(view)
+                    .is_some_and(|v| v.try_state().is_some_and(|s| is_content(&s)))
+            });
+            match content {
+                Some(view) => gather(view.accessibilityChildren(), out),
+                None => out.push(child),
+            }
+        }
+    }
+    gather(children, &mut out);
+    NSArray::from_retained_slice(&out)
+}
+
+/// True when the view of `s` is content an element folds into its name.
+fn is_content(s: &ViewState) -> bool {
+    s.access
+        .spec
+        .as_ref()
+        .is_some_and(|spec| !spec.hidden && spec.role.is_content())
+}
+
+/// The name of a view that folds its content and has no label: the texts
+/// and labels inside it, not those of the controls inside.
+pub(crate) fn content_name(view: &NshView) -> Option<String> {
+    let folds = view
+        .try_state()
+        .is_some_and(|s| reached(&s) == Reached::Controls);
+    if !folds {
+        return None;
+    }
+    let mut name = String::new();
+    gather_name(view.ns(), &mut name);
+    (!name.is_empty()).then_some(name)
+}
+
+/// The longest name gathered from content.
+const MAX_NAME: usize = 1000;
+
+/// Appends the texts and labels of `view`'s content to `out`.
+fn gather_name(view: &NSView, out: &mut String) {
+    for child in view.subviews().iter() {
+        if out.len() >= MAX_NAME {
+            return;
+        }
+        let Some(nsh) = NshView::from_ns(&child) else {
+            // A container of ours (a scroll view's content): what is in it.
+            gather_name(&child, out);
+            continue;
+        };
+        let Some(s) = nsh.try_state() else { continue };
+        let own = match s.access.spec.as_deref() {
+            Some(spec) if spec.hidden => continue,
+            // Controls inside are elements of their own.
+            Some(spec) if spec.role != Ax::Generic && !spec.role.is_content() => continue,
+            _ => s
+                .props
+                .accessibility
+                .label
+                .as_deref()
+                .or(s.text.as_ref().map(|t| t.text.text.as_str()))
+                .map(str::to_owned),
+        };
+        drop(s);
+        match own {
+            Some(text) => {
+                let text = text.trim();
+                if !text.is_empty() {
+                    if !out.is_empty() {
+                        out.push(' ');
+                    }
+                    out.push_str(text);
+                }
+            }
+            None => gather_name(&child, out),
+        }
+    }
 }
 
 /// What `apply` last wrote, field by field.
@@ -144,6 +251,36 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+}
+
+impl Ax {
+    /// Elements that fold their content into their name, as a button reads
+    /// the text inside it (and as a browser makes these ARIA roles'
+    /// children presentational).
+    fn folds(self) -> bool {
+        matches!(
+            self,
+            Ax::Button
+                | Ax::Toggle
+                | Ax::Link
+                | Ax::CheckBox
+                | Ax::Radio
+                | Ax::Switch
+                | Ax::Tab
+                | Ax::MenuItem
+                | Ax::Option
+                | Ax::TreeItem
+        )
+    }
+
+    /// Elements that are content: an element that folds its content
+    /// reads them in its name.
+    fn is_content(self) -> bool {
+        matches!(
+            self,
+            Ax::Text | Ax::Heading | Ax::Image | Ax::Group | Ax::Timer | Ax::Status
+        )
+    }
 }
 
 /// A view's value.
@@ -613,7 +750,7 @@ fn spec_for(
         expanded: a.state.expanded,
         level: a.level,
         hidden: a.hidden || invisible,
-        grouped: a.accessible == Some(true) && kind != ViewKind::Text,
+        grouped: (a.accessible == Some(true) || role.folds()) && kind != ViewKind::Text,
     }
 }
 
@@ -912,6 +1049,48 @@ mod tests {
         // The same contents on the same kind is unchanged.
         assert_eq!(ValueKind::Text("1".into()), ValueKind::Text("1".into()));
         assert_eq!(ValueKind::Checked(1), ValueKind::Checked(1));
+    }
+
+    /// Controls fold their content into their name, as on Windows and GPUI:
+    /// a tab whose label is its text is one element, not the tab and the
+    /// text again. Content, containers and text do not.
+    #[test]
+    fn controls_fold_their_content() {
+        for (role, pressable) in [
+            (Role::Tab, true),
+            (Role::Button, false),
+            (Role::None, true),
+            (Role::Checkbox, false),
+            (Role::Link, false),
+            (Role::Switch, false),
+        ] {
+            let s = spec_for(&with_role(role), ViewKind::View, pressable, None, false);
+            assert!(s.grouped, "{role:?}");
+        }
+        for role in [
+            Role::None,
+            Role::Header,
+            Role::Tablist,
+            Role::Grid,
+            Role::Cell,
+        ] {
+            let s = spec_for(&with_role(role), ViewKind::View, false, None, false);
+            assert!(!s.grouped, "{role:?}");
+        }
+        let text = spec_for(
+            &with_role(Role::Button),
+            ViewKind::Text,
+            true,
+            Some("Go"),
+            false,
+        );
+        assert!(!text.grouped, "a text has no children to fold");
+        // `accessible={true}` folds any view.
+        let one = Accessibility {
+            accessible: Some(true),
+            ..Default::default()
+        };
+        assert!(spec_for(&one, ViewKind::View, false, None, false).grouped);
     }
 
     /// `visibility: hidden` hides the view and its subtree as
