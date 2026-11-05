@@ -155,6 +155,8 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Imaging",
   "Win32_Graphics_Imaging_D2D",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_XAudio2",
   "Win32_Media_MediaFoundation",
   "Win32_Storage_Xps",
   "Win32_System_Com",

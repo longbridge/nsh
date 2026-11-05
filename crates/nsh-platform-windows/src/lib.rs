@@ -27,6 +27,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod audio;
 mod canvas;
 mod chrome;
 mod compose;
