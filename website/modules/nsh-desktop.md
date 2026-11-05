@@ -50,6 +50,7 @@ const Window: {
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
   orderFront(): void;
   close(): void;
+  open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
 };
 ```
 
@@ -71,6 +72,39 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. In GPUI apps, `setFrame` sets the window's size and the platform places it; GPUI's host chooses its position and level when opening the window.
 
 When sizing a window from content measured with `onLayout`, allow room for window decorations on macOS and Windows. `width` and `height` accept positive finite numbers; `x` and `y` accept finite numbers. Invalid fields keep their previous values.
+
+### Window.open
+
+`Window.open(Component, options)` opens a window of the app's own and renders `Component` in it. The window runs in
+the app's one JS runtime, as part of the same app: it reads and writes the same signals, stores and modules as the main
+window, so there is no messaging between windows. Opening an `id` that is open returns that window.
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+const unread = signal(0);
+
+function Chat() {
+  return <View><Text>{`${unread()} unread`}</Text></View>;
+}
+
+const chat = Window.open(Chat, { id: "chat", title: "Chat", size: { width: 360, height: 480 } });
+chat.focus();
+```
+
+| Option | Description |
+|---|---|
+| `id` | The window's id: opening the same id again returns the open window. |
+| `title` | Its title (the main window's when left out). |
+| `size` | Its content size in points, `{ width, height }` (480×360 by default). |
+| `position` | Its top left corner on the screen, `{ x, y }`. GTK always places windows itself. |
+| `level` | `"normal"`, `"floating"` or `"desktopIcon"`, as `setLevel`. Not on Linux. |
+| `frame` | `"none"`: no title bar or border; the app draws everything. |
+
+The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
+`close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
+it too. Linux only for now: on other platforms `Window.open` throws.
 
 ## A title bar of your own
 

@@ -50,6 +50,7 @@ mod text;
 mod text_input;
 mod transition;
 mod view;
+mod window;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};
