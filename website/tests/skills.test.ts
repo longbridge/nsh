@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve, relative } from 'node:path';
 
 // The skills in skills/ are installed on their own (`npx skills add longbridge/nsh`), so they
 // carry copies. These keep the copies equal to what they copy, and the skills' own links alive.
@@ -46,6 +46,24 @@ test("the skills' relative links resolve, and their guide tables name real secti
     for (const section of sections(`${dir}/references/${guide}.md`)) {
       if (section === 'Make the common path inexpensive') continue;
       expect(skillText).toContain(`| ${section} `);
+    }
+  }
+});
+
+// Mode references are shipped with the skill too. Copied website guides use site-relative
+// links, whose base is documented in each entrypoint; their parity is checked above.
+test('bundled skill references resolve without a repository checkout', () => {
+  for (const skill of readdirSync(join(REPO, 'skills'))) {
+    const dir = `skills/${skill}`;
+    const root = resolve(REPO, dir);
+    for (const file of walk(dir).filter((path) => path.endsWith('.md'))) {
+      if (file.endsWith('/coding-guides.md') || file.endsWith('/design-guides.md')) continue;
+      for (const [, target] of read(file).matchAll(/\]\(([^)]+)\)/g)) {
+        if (/^(?:[a-z]+:|#)/i.test(target)) continue;
+        const path = resolve(REPO, dirname(file), decodeURIComponent(target.split('#')[0]));
+        expect(relative(root, path).startsWith('..')).toBe(false);
+        expect(existsSync(path)).toBe(true);
+      }
     }
   }
 });

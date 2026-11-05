@@ -1,7 +1,9 @@
 # Building UI in Rust with nsh_base
 
 Read [rust.md](rust.md) first. This page goes family by family: the real constructor, the props and events that matter,
-one snippet, and what trips people up. Full prop tables are in `website/elements/<name>.md`; each has a Rust example.
+one snippet, and what trips people up. Full prop tables and Rust examples are at
+`https://nsh.dev/elements/{name}.md` (`website/elements/` in an NSH checkout).
+Check the project’s resolved crate source when its version differs from the site.
 
 Host elements come from `nsh_core::prelude`: `view`, `text`, `scroll`, `image`, `svg`, `virtual_list`, `canvas`,
 `video`, `web_view`. Everything else comes from `nsh_base`, including `input`, which the prelude does **not** export.

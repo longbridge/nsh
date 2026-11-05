@@ -5,6 +5,7 @@ description: 'The normative Design Guides for Native Shell (NSH) apps. Read befo
 
 # NSH Design Guides
 
+Resolve the bundled guide relative to this skill’s directory, not the app directory.
 The guide is [references/design-guides.md](references/design-guides.md). It is a
 requirement, not inspiration. Read the guide file itself before doing UI work. Do
 not answer from this page, from an existing screen in the codebase, or from training
@@ -14,6 +15,15 @@ If the file is missing, fetch `https://nsh.dev/docs/design-guides.md`. The guide
 verbatim copy of that page, so a link in it such as `./coding-guides.md` means
 `https://nsh.dev/docs/coding-guides.md` (also in the `nsh` skill), and
 `../elements/index.md` means `https://nsh.dev/elements/index.md`.
+
+Apply the guide within the user’s requested scope and the app’s established visual
+language. For a narrow change, preserve surrounding screens and components. Use
+semantic NSH base components, style their visible parts, and inspect the actual
+result in the requested appearance and viewport when available. Behavior tests
+alone do not verify layout or styling; state when visual verification is unavailable.
+
+For NSH APIs and implementation, use the `nsh` skill when installed, or the relevant
+page from [the documentation index](https://nsh.dev/llms.txt).
 
 ## How to read it
 

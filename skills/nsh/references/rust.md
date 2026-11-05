@@ -7,8 +7,10 @@ no JavaScript VM ships with it, and `cargo check` and `cargo test` cover the rea
 - [rust-testing.md](rust-testing.md): `cargo test` with `Headless`, `nsh test`, platform runs.
 - [rust-recipe.md](rust-recipe.md): a complete app (store, pages, list, dialog, tests).
 
-The largest example is `examples/gallery-rs`; every demo in it is Rust. When unsure how something is used, grep
-`examples/gallery-rs/native/src` first, then `crates/nsh-base/tests/base`, then `website/elements/<name>.md`.
+Start with the bundled [rust-recipe.md](rust-recipe.md) for a complete app. For a specific
+component, use [rust-ui.md](rust-ui.md) and `https://nsh.dev/elements/{name}.md`,
+then confirm the API against the project’s resolved crate source. In an NSH checkout,
+`examples/gallery-rs/native/src` and `crates/nsh-base/tests/base` provide more compiled uses.
 
 ## The one rule
 

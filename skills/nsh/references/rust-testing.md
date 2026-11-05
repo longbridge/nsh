@@ -15,11 +15,14 @@ Rust ones.
 
 ## cargo test with Headless
 
-```toml
-[dev-dependencies]
-nsh-engine = "0.1"     # the same version as your other nsh-* crates
-nsh-testing = "0.1"    # default features: no QuickJS
-```
+Add `nsh-engine` and `nsh-testing` under `[dev-dependencies]` using the same
+version requirement and source as the project’s existing `nsh-core` dependency.
+For a workspace dependency, reuse its workspace entry; for a path or Git dependency,
+use the corresponding crates from that same checkout or revision. Inspect
+`Cargo.toml` (and its workspace manifest) first; do not copy a release number from
+this guide. Keep `default-features = false` on both for headless Rust-only tests.
+
+Reuse these dev-dependencies if the project already declares them.
 
 A test goes in `tests/app.rs`, or in a `#[cfg(test)]` module of the crate.
 

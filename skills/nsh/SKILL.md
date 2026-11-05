@@ -1,13 +1,13 @@
 ---
 name: nsh
-description: 'How to build apps with Native Shell (NSH) in its three modes: Rust (preferred), Rust with TSX, and TSX, on iOS, Android, macOS, Windows, Linux, the terminal and the web. Use when a project has an nsh.json, depends on nsh-core / nsh-base / nsh-testing, or imports "nsh", "nsh/base", "nsh/mobile" or "nsh/desktop"; when creating, running, testing or packaging an app with the nsh command; when writing #[component], #[native_module], #[module] or #[class]; choosing an element or a base component (view, text, button, input, select, dialog, sheet, nav stack, virtual list, data table, editor, text view); signals, effects, tasks and resources; typed styles, Tailwind classes and theme tokens; navigation, lists, scrolling, the keyboard and the safe area; platform-specific code, capabilities and signed packages. Holds the normative Coding Guides: read them before any architecture, state-ownership, public API, naming or testing decision. Pairs with the nsh-design-guides skill.'
+description: 'Build, run, test and package Native Shell (NSH) apps in Rust, TSX or both. Use for NSH development requests and projects with nsh.json, nsh-* crate dependencies or imports from nsh modules. Covers NSH reactivity, components, styling and tooling, with Coding Guides and working app recipes.'
 ---
 
 # Native Shell
 
 One app, written in Rust, in TSX, or in both, rendered through each platform's own
-views on the same Rust engine. **Rust is the preferred mode: choose it unless there is
-a reason not to.**
+views on the same Rust engine. Follow the user’s chosen language and delivery model.
+When neither is specified, prefer Rust for an app shipped in its binary.
 
 ## Choose the Mode, Then Read Its Page
 
@@ -23,13 +23,32 @@ a reason not to.**
 | Tests | [rust-testing.md](references/rust-testing.md) | mixed.md "Tests on both sides" | tsx.md, [testing guide](https://nsh.dev/docs/testing-and-trace.md) |
 | Whole app | [rust-recipe.md](references/rust-recipe.md) (`examples/tasks-rs`) | `examples/rust-exports` | [tsx-recipe.md](references/tsx-recipe.md) (`examples/tasks`) |
 
-In an existing project, stay in its mode. For a new app, start in Rust unless the table
-says otherwise; a Rust app can gain TSX later, because it already has a
+In an existing project, stay in its mode unless the user requests a change. For a new
+app, honor the requested mode; otherwise use the table above; a Rust app can gain TSX later, because it already has a
 `#[native_module]`. [tooling.md](references/tooling.md) covers the commands, debugging, platforms,
 capabilities, packaging and updates in all three.
 
 **The rule of every mode: a component runs once, and only the bindings that read a
 changed signal run again.** A value read in a component body is a snapshot.
+
+## First App or Existing Project
+
+Resolve `references/` paths relative to this skill’s directory, not the app’s working
+directory. Read only the mode and topic pages needed for the task.
+
+- **Existing project:** inspect `nsh.json`, the entry and, for Rust, `Cargo.toml`.
+  Keep its structure, dependency sources and mode. Use the project’s CLI version.
+- **First app:** run `nsh --version`. For Rust or mixed, also check `cargo --version`.
+  If a tool is missing, read [tooling.md](references/tooling.md#first-run-setup)
+  for setup and the prerequisites of the requested target.
+- Read the guides below and the selected mode page. Initialize with the table’s
+  explicit `--template` in the user’s chosen location. Work from the generated
+  project, preserving its manifest and entry wiring; the quick-start snippets below
+  illustrate edits, rather than replacing all generated files.
+- Get the generated app through `nsh check` and `nsh test` before expanding it.
+  Then implement the requested flow and use the mode’s verification loop below.
+  Check the visible result on the requested target when available; report any
+  verification that the environment cannot perform.
 
 ## Read the Guides First
 
@@ -175,7 +194,7 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```rust
-// tests/app.rs
+// tests/app.rs (add matching dev-dependencies from references/rust-testing.md)
 use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
 
@@ -193,8 +212,23 @@ Rust names are `camelCase` in TSX (`on_open_change` is `onOpenChange`).
 
 ## Documentation
 
-Exact APIs: the crate's source in Rust, `.nsh/types` in TSX. The site follows the latest
-release, and may describe a newer API than the project uses.
+Start with the bundled mode pages and recipes; they work without an NSH checkout.
+For exact APIs, use the project’s `.nsh/types` in TSX and its resolved dependency
+source in Rust. `cargo metadata --format-version 1` reports dependency manifests
+and their source locations; use those paths rather than assuming a Cargo cache path.
+Run `nsh check` to generate missing TS declarations.
+
+Paths starting with `examples/`, `crates/` or `website/` in the references identify
+files in the NSH repository; they are optional source pointers, not files in the
+installed skill or the user’s app. Use them when a checkout is available. Otherwise,
+use the bundled recipes, the online docs below, or the corresponding file at
+`https://github.com/longbridge/nsh` at the project’s matching tag or revision.
+A `website/docs/foo.md` pointer corresponds to `https://nsh.dev/docs/foo.md`;
+`website/elements/` and `website/modules/` similarly map to site paths.
+
+The site follows the latest release and may describe a newer API than the project
+uses. Preserve the project’s version and verify examples against its types or source.
+Fetch individual pages as needed; use `llms-full.txt` only for broad exploration.
 
 - **Find a page**: `https://nsh.dev/llms.txt`, then load its Markdown;
   `https://nsh.dev/llms-full.txt` for broad reference.

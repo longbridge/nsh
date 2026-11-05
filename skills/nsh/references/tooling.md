@@ -3,6 +3,34 @@
 Commands for all three modes, Rust first. "Rust" is an app with `nsh.json` `"root"`. "Mixed" has `"rust"` and no
 `"root"`, so `App.tsx` is the entry. "TSX" has neither. Mode pages: [rust.md](rust.md), [mixed.md](mixed.md), [tsx.md](tsx.md).
 
+## First-run setup
+
+Check `nsh --version` before initializing an app. If it is unavailable, read the
+[installation guide](https://nsh.dev/docs/installation.md) for the current platform’s
+supported distribution and install method. Installing this skill provides guidance;
+the `nsh` CLI is installed separately. Use an existing project’s required CLI version
+rather than updating it as a side effect of a feature change.
+
+Rust and mixed apps also need Cargo and the target’s native build prerequisites;
+TSX apps use the prebuilt runtime. Check only the target the user needs in
+[Platforms and prerequisites](#platforms-and-prerequisites). Follow the environment’s
+permissions when installing tools. If setup is unavailable, continue with code and
+state which checks remain unverified.
+
+For a new app, choose an unused destination and pass an explicit template:
+
+```sh
+nsh init my-app --template rust   # mixed or ts when selected
+cd my-app
+nsh check
+nsh test
+nsh run
+```
+
+Use the generated manifest’s versions and sources. Before adding Rust test
+dependencies, follow [rust-testing.md](rust-testing.md#cargo-test-with-headless).
+For TSX and mixed changes, also run `nsh build` to check bundler diagnostics.
+
 ## Commands by mode
 
 Every command takes `[ENTRY]`: the app's directory (default `.`) or a TSX entry file. `-v` (or `NSH_VERBOSE=1`) prints everything. `nsh <command> --help` lists flags.
