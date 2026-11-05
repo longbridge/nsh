@@ -168,7 +168,7 @@ Web 视图是绘制在 NSH 视图之内的 WebKitGTK 页面：sheet、对话框�
 
 - **视频的 `rate`**：GTK 只能以正常速度播放。`onEnd` 只对不循环的视频触发。
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
-- **`mixBlendMode` 和 `backdropFilter`**（背景色仍会绘制）。背景模糊在这里代价过高：在 Intel 笔记本 GPU 上用 GTK 4.24 的 copy 和 paste 节点，2 倍缩放下对 1200x240 点的区域，单层每帧多约 8 ms，渐进式模糊的五层多约 50 ms；GTK 4.22 之前无法绘制。
+- **`mixBlendMode` 和 `backdropFilter`**（背景色仍会绘制）。背景模糊尚未实现；使用 GTK 4.22 copy 和 paste 节点的实验不属于当前渲染实现。
 - **输入辅助视图**和**状态栏**（桌面上没有对应物）。
 - **无障碍**：`accessible` 分组、自定义 `accessibilityActions`；实时区域改为播报。
 

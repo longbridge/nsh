@@ -401,7 +401,7 @@ mod imp {
             }
             state.draw_overhang(snapshot, phase);
             let soft = crate::decor::soft_shadows(obj.upcast_ref(), &state);
-            crate::decor::draw_background(snapshot, &state, soft);
+            crate::decor::draw_background(snapshot, &state, soft, obj.upcast_ref());
             let clip = state.clips();
             if clip {
                 crate::decor::push_clip(snapshot, &state);

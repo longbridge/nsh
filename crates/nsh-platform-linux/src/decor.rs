@@ -10,8 +10,7 @@
 //! Not drawn: `mixBlendMode` and `backdropFilter` need what lies behind the
 //! view, which a widget's snapshot does not have (GTK 4.22's copy / paste
 //! nodes could provide it, but the bindings are built for 4.14 and the
-//! copy would force an offscreen pass over the whole window; measured in
-//! `website/docs/linux.md`, five layers take a frame's budget and more); the
+//! experimental copy/paste blur path is not part of the renderer); the
 //! background color still draws, so frosted bars stay readable.
 //! Android's `elevation` is Android only.
 //!
@@ -24,11 +23,11 @@
 //! and macOS do: its alpha masks the view's box, so what overflows the box
 //! is masked out, as in CSS.
 //!
-//! Drawing allocates nothing of its own: gradient stops are resolved into
-//! thread-local buffers reused across draws. Dashed borders build a GSK path
-//! (GSK allocates it).
+//! Gradient stops reuse thread-local buffers. Rounded paths use a bounded
+//! cache shared by equal geometry, preserving GSK's raster cache while views
+//! move. Animated geometry replaces old entries rather than retaining every frame.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::VecDeque};
 
 use gtk4::{self as gtk, gdk, graphene, gsk, prelude::*};
 use nsh_core::{
@@ -63,7 +62,7 @@ pub(crate) fn backface_away(state: &ViewState) -> bool {
 }
 
 /// A rounded box as a path: `continuous` corners ease into the edges.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct Shape {
     x: f32,
     y: f32,
@@ -121,9 +120,39 @@ impl Shape {
     }
 
     fn path(&self) -> gsk::Path {
-        let path = gsk::PathBuilder::new();
-        self.add_to(&path);
-        path.to_path()
+        self.cached_path(None)
+    }
+
+    fn cached_path(&self, inner: Option<Self>) -> gsk::Path {
+        // GSK caches rasterized paths by identity. Rebuilding an identical
+        // path invalidates that GPU cache even when only the widget moves.
+        // Bound retained geometry so animated dimensions cannot grow it forever.
+        thread_local! {
+            static PATHS: RefCell<VecDeque<(Shape, Option<Shape>, gsk::Path)>> =
+                const { RefCell::new(VecDeque::new()) };
+        }
+        PATHS.with_borrow_mut(|paths| {
+            if let Some(ix) = paths
+                .iter()
+                .position(|(outer, hole, _)| outer == self && *hole == inner)
+            {
+                let entry = paths.remove(ix).unwrap();
+                let path = entry.2.clone();
+                paths.push_front(entry);
+                return path;
+            }
+            let builder = gsk::PathBuilder::new();
+            self.add_to(&builder);
+            if let Some(inner) = inner {
+                inner.add_to(&builder);
+            }
+            let path = builder.to_path();
+            if paths.len() == 128 {
+                paths.pop_back();
+            }
+            paths.push_front((*self, inner, path.clone()));
+            path
+        })
     }
 
     /// This box moved by `(dx, dy)` and grown by `d` (shrunk when negative);
@@ -142,10 +171,7 @@ impl Shape {
 
     /// The area between this box and `inner`.
     fn ring(&self, inner: &Self) -> gsk::Path {
-        let path = gsk::PathBuilder::new();
-        self.add_to(&path);
-        inner.add_to(&path);
-        path.to_path()
+        self.cached_path(Some(*inner))
     }
 }
 
@@ -177,9 +203,137 @@ pub(crate) fn push_mask(snapshot: &gtk::Snapshot, state: &ViewState) -> bool {
     true
 }
 
+/// A shadow's immutable render inputs, in widget-local coordinates.
+#[derive(Clone, PartialEq)]
+struct ContinuousShadow {
+    shape: Shape,
+    color: gdk::RGBA,
+    params: (f32, f32, f32, f32),
+    inset: bool,
+}
+
+impl ContinuousShadow {
+    fn append(self, snapshot: &gtk::Snapshot, widget: &gtk::Widget) {
+        // A retained BlurNode still runs its GPU passes on every snapshot.
+        // Render immutable decoration once, without downloading its pixels.
+        // Only widget-local shape/color/blur and device scale affect the image;
+        // movement and ancestor opacity are applied by the parent snapshot.
+        thread_local! {
+            static SHADOWS: RefCell<VecDeque<(ContinuousShadow, f32, gsk::RenderNode, usize)>> =
+                const { RefCell::new(VecDeque::new()) };
+        }
+        let native = widget.native();
+        // Preserve vector quality for scale/rotation/perspective transforms,
+        // including transforms inherited from an ancestor.
+        let translated = native
+            .as_ref()
+            .and_then(|n| widget.compute_transform(n))
+            .is_some_and(|m| {
+                m.is_2d()
+                    && m.value(0, 0) == 1.0
+                    && m.value(1, 1) == 1.0
+                    && m.value(0, 1) == 0.0
+                    && m.value(1, 0) == 0.0
+            });
+        if !translated {
+            if self.inset {
+                draw_continuous_inset_shadow(snapshot, &self.shape, &self.color, self.params);
+            } else {
+                draw_continuous_outset_shadow(snapshot, &self.shape, &self.color, self.params);
+            }
+            return;
+        }
+        let scale = native
+            .as_ref()
+            .and_then(|n| n.surface())
+            .map_or(1.0, |s| s.scale() as f32);
+        SHADOWS.with_borrow_mut(|shadows| {
+            if let Some(ix) = shadows
+                .iter()
+                .position(|(key, cached_scale, _, _)| *key == self && *cached_scale == scale)
+            {
+                let entry = shadows.remove(ix).unwrap();
+                snapshot.append_node(&entry.2);
+                shadows.push_front(entry);
+                return;
+            }
+            let drawing = gtk::Snapshot::new();
+            if self.inset {
+                draw_continuous_inset_shadow(&drawing, &self.shape, &self.color, self.params);
+            } else {
+                draw_continuous_outset_shadow(&drawing, &self.shape, &self.color, self.params);
+            }
+            let Some(node) = drawing.to_node() else {
+                return;
+            };
+            let bounds = node.bounds();
+            let pixels = ((bounds.width() * scale).ceil() as usize)
+                .saturating_mul((bounds.height() * scale).ceil() as usize);
+            // Oversized effects keep the vector path; never allocate an
+            // unbounded cached texture for an animated size or blur radius.
+            let renderer = widget.native().and_then(|n| n.renderer());
+            let Some(renderer) = renderer.filter(|_| pixels > 0 && pixels <= 4 * 1024 * 1024)
+            else {
+                snapshot.append_node(&node);
+                return;
+            };
+            let drawing = gtk::Snapshot::new();
+            drawing.scale(scale, scale);
+            drawing.append_node(&node);
+            let viewport = graphene::Rect::new(
+                bounds.x() * scale,
+                bounds.y() * scale,
+                bounds.width() * scale,
+                bounds.height() * scale,
+            );
+            let texture = renderer.render_texture(drawing.to_node().unwrap(), Some(&viewport));
+            let cached: gsk::RenderNode = gsk::TextureNode::new(&texture, &bounds).upcast();
+            snapshot.append_node(&cached);
+            while shadows.len() >= 64
+                || shadows.iter().map(|s| s.3).sum::<usize>() + pixels > 16 * 1024 * 1024
+            {
+                shadows.pop_back();
+            }
+            shadows.push_front((self, scale, cached, pixels));
+        });
+    }
+}
+
+fn continuous_outset_shadow(
+    snapshot: &gtk::Snapshot,
+    shape: &Shape,
+    color: &gdk::RGBA,
+    params: (f32, f32, f32, f32),
+    widget: &gtk::Widget,
+) {
+    ContinuousShadow {
+        shape: *shape,
+        color: *color,
+        params,
+        inset: false,
+    }
+    .append(snapshot, widget);
+}
+
+fn continuous_inset_shadow(
+    snapshot: &gtk::Snapshot,
+    shape: &Shape,
+    color: &gdk::RGBA,
+    params: (f32, f32, f32, f32),
+    widget: &gtk::Widget,
+) {
+    ContinuousShadow {
+        shape: *shape,
+        color: *color,
+        params,
+        inset: true,
+    }
+    .append(snapshot, widget);
+}
+
 /// An outer shadow of a continuous `shape`: the moved and spread shape
 /// blurred, masked to outside `shape` as CSS paints outer shadows.
-fn continuous_outset_shadow(
+fn draw_continuous_outset_shadow(
     snapshot: &gtk::Snapshot,
     shape: &Shape,
     color: &gdk::RGBA,
@@ -201,7 +355,7 @@ fn continuous_outset_shadow(
 
 /// An inset shadow of a continuous padding box: outside the moved and
 /// shrunk box, blurred and clipped to the padding box.
-fn continuous_inset_shadow(
+fn draw_continuous_inset_shadow(
     snapshot: &gtk::Snapshot,
     padding: &Shape,
     color: &gdk::RGBA,
@@ -304,7 +458,12 @@ fn outset_shadow(
 /// Shadows, the background, gradients and inset shadows, under the
 /// content; the border too when the children are not clipped. `soft`
 /// draws outer shadows as blurred shapes ([`soft_shadows`]).
-pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft: bool) {
+pub(crate) fn draw_background(
+    snapshot: &gtk::Snapshot,
+    state: &ViewState,
+    soft: bool,
+    widget: &gtk::Widget,
+) {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
@@ -321,7 +480,7 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
             if !b.inset && b.is_visible() {
                 if let Some(shape) = &shape {
                     let params = (b.offset_x.0, b.offset_y.0, b.spread.0, b.blur.0.max(0.0));
-                    continuous_outset_shadow(snapshot, shape, &rgba(b.color), params);
+                    continuous_outset_shadow(snapshot, shape, &rgba(b.color), params, widget);
                     continue;
                 }
                 outset_shadow(
@@ -368,7 +527,7 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
             if b.inset && b.is_visible() {
                 if let Some(padding) = &continuous {
                     let params = (b.offset_x.0, b.offset_y.0, b.spread.0, b.blur.0.max(0.0));
-                    continuous_inset_shadow(snapshot, padding, &rgba(b.color), params);
+                    continuous_inset_shadow(snapshot, padding, &rgba(b.color), params, widget);
                     continue;
                 }
                 snapshot.append_inset_shadow(
@@ -930,6 +1089,10 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 }
 
 #[cfg(test)]
+#[path = "decor/bench.rs"]
+mod bench;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -938,6 +1101,128 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
+    }
+
+    #[test]
+    fn cached_shadows_match_vector_drawing_and_update_with_their_inputs() {
+        crate::gtk_test::run(|| {
+            use gtk::glib::translate::ToGlibPtr;
+
+            use crate::view::NshView;
+
+            let view = NshView::new(1, nsh_core::ViewKind::View);
+            view.state_mut().frame = crate::gtk_test::frame(0.0, 0.0, 200.0, 100.0);
+            let window = gtk::Window::new();
+            window.set_child(Some(&view));
+            window.set_default_size(200, 100);
+            window.present();
+            assert!(crate::gtk_test::wait_until(|| view.width() > 0));
+            let renderer = window.renderer().unwrap();
+            let pointer =
+                |n: &gsk::RenderNode| -> *mut gsk::ffi::GskRenderNode { n.to_glib_none().0 };
+            let pixels = |node: &gsk::RenderNode| {
+                let drawing = gtk::Snapshot::new();
+                drawing.scale(window.scale_factor() as f32, window.scale_factor() as f32);
+                drawing.append_node(node);
+                let bounds = graphene::Rect::new(
+                    -30.0 * window.scale_factor() as f32,
+                    -30.0 * window.scale_factor() as f32,
+                    260.0 * window.scale_factor() as f32,
+                    160.0 * window.scale_factor() as f32,
+                );
+                let texture = renderer.render_texture(drawing.to_node().unwrap(), Some(&bounds));
+                let mut downloader = gdk::TextureDownloader::new(&texture);
+                downloader.set_format(gdk::MemoryFormat::R8g8b8a8Premultiplied);
+                downloader.download_bytes().0
+            };
+            for inset in [false, true] {
+                let mut previous = None;
+                for (radius, blur, color) in
+                    [(20.0, 8.0, RED), (25.0, 8.0, RED), (25.0, 12.0, BLUE)]
+                {
+                    let key = ContinuousShadow {
+                        shape: Shape::new((0.0, 0.0, 200.0, 100.0), [radius; 4], true),
+                        color: rgba(color),
+                        params: (1.0, 2.0, 0.0, blur),
+                        inset,
+                    };
+                    let drawing = gtk::Snapshot::new();
+                    key.clone().append(&drawing, view.upcast_ref());
+                    let cached = drawing.to_node().unwrap();
+                    assert_eq!(cached.node_type(), gsk::RenderNodeType::TextureNode);
+                    let repeated = gtk::Snapshot::new();
+                    key.clone().append(&repeated, view.upcast_ref());
+                    assert_eq!(pointer(&cached), pointer(&repeated.to_node().unwrap()));
+                    if let Some(previous) = previous {
+                        assert_ne!(pointer(&cached), pointer(&previous));
+                    }
+                    let reference = gtk::Snapshot::new();
+                    if inset {
+                        draw_continuous_inset_shadow(
+                            &reference, &key.shape, &key.color, key.params,
+                        );
+                    } else {
+                        draw_continuous_outset_shadow(
+                            &reference, &key.shape, &key.color, key.params,
+                        );
+                    }
+                    let expected = pixels(&reference.to_node().unwrap());
+                    let actual = pixels(&cached);
+                    assert_eq!(actual.len(), expected.len());
+                    let error = actual
+                        .iter()
+                        .zip(expected.iter())
+                        .map(|(a, b)| a.abs_diff(*b))
+                        .max()
+                        .unwrap();
+                    assert!(
+                        error <= 2,
+                        "cached shadow differs by {error} channel levels"
+                    );
+                    previous = Some(cached);
+                }
+            }
+            // An ancestor/widget scale must bypass an otherwise matching
+            // image, so zooming does not magnify a low-resolution shadow.
+            view.allocate(200, 100, -1, Some(gsk::Transform::new().scale(1.5, 1.5)));
+            let drawing = gtk::Snapshot::new();
+            ContinuousShadow {
+                shape: Shape::new((0.0, 0.0, 200.0, 100.0), [20.0; 4], true),
+                color: rgba(RED),
+                params: (1.0, 2.0, 0.0, 8.0),
+                inset: false,
+            }
+            .append(&drawing, view.upcast_ref());
+            assert_ne!(
+                drawing.to_node().unwrap().node_type(),
+                gsk::RenderNodeType::TextureNode
+            );
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn equal_shapes_reuse_paths_and_changed_geometry_does_not() {
+        use gtk::glib::translate::ToGlibPtr;
+
+        let shape = Shape::new((0.0, 0.0, 200.0, 100.0), [20.0; 4], true);
+        let first = shape.path();
+        let same = shape.path();
+        let pointer = |p: &gsk::Path| -> *mut gsk::ffi::GskPath { p.to_glib_none().0 };
+        assert_eq!(pointer(&first), pointer(&same));
+        let changed = shape.moved(0.0, 0.0, 5.0).path();
+        assert_ne!(pointer(&first), pointer(&changed));
+        assert!(changed.in_fill(&graphene::Point::new(100.0, -4.0), gsk::FillRule::Winding));
+        assert!(!first.in_fill(&graphene::Point::new(100.0, -4.0), gsk::FillRule::Winding));
+        let inner = shape.moved(0.0, 0.0, -2.0);
+        let ring = shape.ring(&inner);
+        assert_eq!(pointer(&ring), pointer(&shape.ring(&inner)));
+        assert!(!ring.in_fill(&graphene::Point::new(100.0, 50.0), gsk::FillRule::EvenOdd));
+        // Eviction must not invalidate a path retained by a render node.
+        for ix in 0..256 {
+            shape.moved(ix as f32, 0.0, 0.0).path();
+        }
+        assert!(first.in_fill(&graphene::Point::new(100.0, 50.0), gsk::FillRule::Winding));
     }
 
     #[test]
