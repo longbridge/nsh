@@ -703,11 +703,12 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
         };
         if listens {
             let (location_x, location_y) = local(surface, &v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: point(Points(location_x), Points(location_y)),
-                page_position: point(Points(x), Points(y)),
-                modifiers: modifiers(flags),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(location_x), Points(location_y)),
+                point(Points(x), Points(y)),
+                modifiers(flags),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }
@@ -918,6 +919,48 @@ pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
         return false;
     }
     activate(surface, view, "accessibility");
+    true
+}
+
+/// Whether an assistive technology's "show menu" (`AXShowMenu`, VoiceOver's
+/// VO-Shift-M) opens a context menu on `view`: it listens to
+/// `onContextMenu` and is inside the newest modal. Other views do not
+/// offer the action.
+pub(crate) fn takes_accessibility_show_menu(surface: &Surface, view: &NshView) -> bool {
+    view.state().events.contains(EventKind::ContextMenu)
+        && view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
+}
+
+/// `AXShowMenu` on `view`: it hears `onContextMenu` with no pointer, at its
+/// bottom-start corner ([`nsh_core::input::context_menu_anchor`]), where a
+/// menu opened below it starts. AppKit has no keyboard key for context
+/// menus (Shift+F10 is Windows' and GTK's), so this is how the keyboard
+/// reaches them on a Mac: VoiceOver and the other clients that perform
+/// `AXShowMenu`.
+pub(crate) fn accessibility_show_menu(surface: &Surface, view: &NshView) -> bool {
+    if !takes_accessibility_show_menu(surface, view) {
+        return false;
+    }
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let (id, size) = {
+        let s = view.state();
+        (s.id, s.frame.size)
+    };
+    let position = nsh_core::input::context_menu_anchor(size, rtl);
+    let page = view.ns().convertPoint_toView(
+        objc2_foundation::NSPoint::new(f64::from(position.x.0), f64::from(position.y.0)),
+        Some(surface.root.ns()),
+    );
+    let event = nsh_core::ContextMenuEvent::new(
+        position,
+        point(Points(page.x as f32), Points(page.y as f32)),
+        Default::default(),
+        None,
+    );
+    log::debug!(target: "nsh::input", "onContextMenu on {id} (accessibility)");
+    surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     true
 }
 

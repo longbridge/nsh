@@ -110,6 +110,9 @@ pub(crate) struct Surface {
     pub(crate) anim: RefCell<UiAnimation>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
+    /// The app's own windows (`Window.open`), by the dialog root each
+    /// shows ([`crate::window`]).
+    pub(crate) windows: RefCell<rustc_hash::FxHashMap<nsh_core::NodeId, crate::window::AppWindow>>,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
     pub(crate) file_drop: crate::file_drop::State,
@@ -226,6 +229,7 @@ impl Surface {
             mounter: RefCell::new(Mounter::new(root.clone())),
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
+            windows: RefCell::default(),
             input: Default::default(),
             file_drop: Default::default(),
             engine: RefCell::new(None),
@@ -274,6 +278,7 @@ impl Surface {
         });
         crate::input::install(&surface);
         crate::scroll::install_keyboard(&surface);
+        crate::key_focus::install(&surface);
         surface
     }
 

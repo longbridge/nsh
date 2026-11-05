@@ -335,6 +335,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();

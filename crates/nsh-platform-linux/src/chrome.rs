@@ -200,6 +200,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::Close => close(surface),
+        DesktopCommand::Hide => {
+            if let Some(window) = window(surface) {
+                window.set_visible(false);
+            }
+        }
+        // Addressed to a dialog root ([`crate::window`]).
+        DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
     }
