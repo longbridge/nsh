@@ -28,3 +28,4 @@ tungstenite = { workspace = true, optional = true }
 [dev-dependencies]
 # Enables both sides for the round-trip test.
 nsh-dev = { path = ".", features = ["client", "server"] }
+tungstenite.workspace = true

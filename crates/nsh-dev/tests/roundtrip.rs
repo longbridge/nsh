@@ -460,3 +460,90 @@ fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
         ["Create { id: 2, kind: View }"]
     );
 }
+
+/// The status code of `GET <path>` with `headers` (raw HTTP/1.1).
+fn status(addr: std::net::SocketAddr, path: &str, headers: &str) -> u16 {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n{headers}\r\n"
+    )
+    .unwrap();
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response);
+    let line = String::from_utf8_lossy(&response);
+    line.split(' ')
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+#[test]
+fn assets_are_the_apps_media_and_named_files_only() {
+    let dir = std::env::temp_dir().join(format!("nsh-dev-served-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    for file in [
+        "logo.png",
+        ".env",
+        "App.tsx",
+        "nsh.json",
+        "data.json",
+        ".git/config",
+    ] {
+        std::fs::write(dir.join(file), b"x").unwrap();
+    }
+    let server = DevServer::start(
+        "127.0.0.1:0".parse().unwrap(),
+        "bc-1",
+        Some(dir.clone()),
+        |_| {},
+    )
+    .unwrap();
+    server.serve_files([("data.json".to_owned(), dir.join("data.json"))]);
+    let addr = server.local_addr();
+    assert_eq!(status(addr, "/assets/logo.png", ""), 200);
+    // Named by a build (an import, a crate's files): any type.
+    assert_eq!(status(addr, "/assets/data.json", ""), 200);
+    for path in [
+        "/assets/.env",
+        "/assets/App.tsx",
+        "/assets/nsh.json",
+        "/assets/.git/config",
+        "/assets/..%2f..%2fetc%2fpasswd",
+    ] {
+        assert_eq!(status(addr, path, ""), 404, "{path}");
+    }
+    drop(server);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_websocket_refuses_other_web_pages() {
+    use tungstenite::client::IntoClientRequest;
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    let addr = server.local_addr();
+    let url = format!("ws://{addr}{WS_PATH}");
+    let connect = |origin: Option<String>| {
+        let mut request = url.as_str().into_client_request().unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("Origin", origin.parse().unwrap());
+        }
+        tungstenite::connect(request)
+    };
+    // A native host, and the dev server's own page.
+    assert!(connect(None).is_ok());
+    assert!(connect(Some(format!("http://{addr}"))).is_ok());
+    for origin in ["https://evil.example", "http://127.0.0.1:1", "null"] {
+        match connect(Some(origin.to_owned())) {
+            Err(tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status(), 403, "{origin}")
+            }
+            other => panic!("{origin}: {:?}", other.map(|_| ())),
+        }
+    }
+}

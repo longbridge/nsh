@@ -147,6 +147,13 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
+- What the dev server serves to others (`crates/nsh-dev/src/server.rs`): `/assets/<path>` is the files a build
+  imported and the UI sets' crates ship (`DevServer::serve_files`, by name, any type), and from the app's directory only
+  media files (images, fonts, audio, video by extension) outside hidden directories, `.nsh`, `node_modules` and
+  `target`, also after following links (`asset_in_root`); sources, `nsh.json`, `.env`, JSON and other files return
+  404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
+  `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
+  browser, even on loopback or under a name rebound to this machine, gets 403.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK

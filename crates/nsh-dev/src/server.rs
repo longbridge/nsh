@@ -14,7 +14,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -120,10 +120,11 @@ enum Event {
 }
 
 struct Shared {
-    /// Directory served at `/assets/` (the app's source directory).
+    /// Directory whose media files are served at `/assets/` (the app's
+    /// source directory; [`asset_in_root`] says which of its files).
     assets_root: Option<std::path::PathBuf>,
-    /// Files served at `/assets/<path>` from elsewhere (the files the UI
-    /// sets' crates ship), by path.
+    /// Files served at `/assets/<path>` by name: the app's imported assets
+    /// and the files the UI sets' crates ship, by path.
     files: Mutex<std::collections::HashMap<String, std::path::PathBuf>>,
     /// The web host's files ([`DevServer::serve_web`]), by path (`""`:
     /// the page).
@@ -188,6 +189,12 @@ impl DevServer {
     /// bytecode this server publishes; clients reporting another version get
     /// JS source instead. `on_event` receives what hosts do (connecting,
     /// disconnecting, their log lines), on the server's threads.
+    ///
+    /// `/assets/<path>` serves the files [`DevServer::serve_files`] names
+    /// and, from `assets_root`, only images, fonts, audio and video outside
+    /// hidden directories ([`asset_in_root`]): never the app's sources, its
+    /// `nsh.json`, `.env` or other configuration. `/ws` refuses browsers
+    /// whose page is not the server's own ([`allowed_origin`]).
     pub fn start(
         addr: SocketAddr,
         bytecode_version: impl Into<String>,
@@ -243,8 +250,9 @@ impl DevServer {
     }
 
     /// Serves each `(path, file)` at `/assets/<path>` (`asset:/<path>` on
-    /// device), besides the assets root: files that live elsewhere, as the
-    /// crates of Rust components ship them.
+    /// device), whatever its type: the assets a build imported and the
+    /// files the crates of Rust components ship. The assets root serves
+    /// only media files besides them ([`DevServer::start`]).
     pub fn serve_files(&self, files: impl IntoIterator<Item = (String, std::path::PathBuf)>) {
         self.shared.files.lock().expect("files lock").extend(files);
     }
@@ -448,8 +456,8 @@ async fn bundle_source(State(shared): State<Arc<Shared>>) -> Response {
 }
 
 /// Serves an app asset (`asset:/<path>` on device). Only the files
-/// [`DevServer::serve_files`] named and files inside the assets root are
-/// reachable.
+/// [`DevServer::serve_files`] named and the media files inside the assets
+/// root ([`asset_in_root`]) are reachable.
 async fn asset(
     State(shared): State<Arc<Shared>>,
     axum::extract::Path(path): axum::extract::Path<String>,
@@ -462,13 +470,10 @@ async fn asset(
             let Some(root) = &shared.assets_root else {
                 return StatusCode::NOT_FOUND.into_response();
             };
-            let Ok(file) = dunce::canonicalize(root.join(&path)) else {
-                return StatusCode::NOT_FOUND.into_response();
-            };
-            if !file.starts_with(root) {
-                return StatusCode::FORBIDDEN.into_response();
+            match asset_in_root(root, &path) {
+                Some(file) => file,
+                None => return StatusCode::NOT_FOUND.into_response(),
             }
-            file
         }
     };
     let Ok(bytes) = tokio::fs::read(&file).await else {
@@ -533,6 +538,42 @@ fn byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
         (start, end) => (start.parse().ok()?, end.parse::<u64>().ok()?.min(len - 1)),
     };
     (start <= end && start < len).then_some((start, end))
+}
+
+/// The file `path` names under `root` (canonical), when the dev server may
+/// serve it without a build naming it: a media file (an image, a font,
+/// audio or video, by its extension), with no part of its path hidden
+/// (`.env`, `.git/`) or a directory of tools (`.nsh`, `node_modules`,
+/// `target`), inside `root` once links are followed, and the same
+/// holds for the file a link leads to. Scripts, sources, JSON and every
+/// other file reach hosts only as a build's imported assets.
+pub(crate) fn asset_in_root(root: &std::path::Path, path: &str) -> Option<std::path::PathBuf> {
+    let servable = |rel: &std::path::Path| {
+        let mut parts = rel.components().peekable();
+        parts.peek().is_some()
+            && parts.all(|part| match part {
+                std::path::Component::Normal(name) => name.to_str().is_some_and(|name| {
+                    !name.starts_with('.') && name != "node_modules" && name != "target"
+                }),
+                _ => false,
+            })
+            && is_media(rel)
+    };
+    if !servable(std::path::Path::new(path)) {
+        return None;
+    }
+    let file = dunce::canonicalize(root.join(path)).ok()?;
+    let rel = file.strip_prefix(root).ok()?;
+    (servable(rel) && file.is_file()).then_some(file)
+}
+
+/// Whether a file is an image, a font, audio or video, by its extension:
+/// what an app shows from its directory.
+fn is_media(path: &std::path::Path) -> bool {
+    let kind = content_type(path);
+    ["image/", "font/", "audio/", "video/"]
+        .iter()
+        .any(|prefix| kind.starts_with(prefix))
 }
 
 /// The web host's page and runtime ([`DevServer::serve_web`]); never
@@ -604,7 +645,19 @@ pub(crate) fn content_type(path: &std::path::Path) -> &'static str {
     }
 }
 
-async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> Response {
+async fn upgrade(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(shared): State<Arc<Shared>>,
+) -> Response {
+    let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    if !allowed_origin(header(header::ORIGIN), header(header::HOST)) {
+        log::warn!(
+            "dev server: refused a WebSocket from the page at {}",
+            header(header::ORIGIN).unwrap_or_default()
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
     // Bundles are ~100 KB of bytecode; allow generous frames.
     ws.max_message_size(64 << 20)
         .on_upgrade(move |socket| async move {
@@ -612,6 +665,40 @@ async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> Res
                 log::debug!("dev client disconnected: {err}");
             }
         })
+}
+
+/// Whether a WebSocket handshake with these `Origin` and `Host` headers
+/// may connect. Native hosts send no `Origin`. A browser always does: its
+/// page must be the dev server's own (the web host, which connects to
+/// `location.host`), so the origin is `http(s)://` and the very host the
+/// request names, and that host an IP address or `localhost`. Any other
+/// page open in a browser on this machine or the network is refused, even
+/// one whose name resolves to this machine (DNS rebinding).
+pub(crate) fn allowed_origin(origin: Option<&str>, host: Option<&str>) -> bool {
+    let Some(origin) = origin else {
+        return true;
+    };
+    let Some(host) = host else {
+        return false;
+    };
+    let Some(origin_host) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    if !origin_host.eq_ignore_ascii_case(host) {
+        return false;
+    }
+    // The host without its port: `[::1]:80`, `127.0.0.1:80`, `localhost`.
+    let name = match host.strip_prefix('[') {
+        Some(rest) => match rest.split_once(']') {
+            Some((ip, port)) if port.is_empty() || port.starts_with(':') => ip,
+            _ => return false,
+        },
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok()
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -984,6 +1071,112 @@ async fn send_event(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_dev_servers_own_pages_and_native_hosts_open_the_websocket() {
+        use super::allowed_origin;
+        // Native hosts send no Origin.
+        assert!(allowed_origin(None, Some("127.0.0.1:18790")));
+        assert!(allowed_origin(None, None));
+        // The web host, at each address a browser may open it on.
+        for host in [
+            "127.0.0.1:18790",
+            "localhost:18790",
+            "LOCALHOST:18790",
+            "192.168.1.20:18790",
+            "[::1]:18790",
+            "[fe80::1]",
+            "127.0.0.1",
+        ] {
+            assert!(
+                allowed_origin(Some(&format!("http://{host}")), Some(host)),
+                "{host}"
+            );
+        }
+        assert!(allowed_origin(
+            Some("https://127.0.0.1:443"),
+            Some("127.0.0.1:443")
+        ));
+        // Other pages.
+        for (origin, host) in [
+            ("https://evil.example", "127.0.0.1:18790"),
+            ("http://127.0.0.1:3000", "127.0.0.1:18790"),
+            ("http://localhost:18790", "127.0.0.1:18790"),
+            ("null", "127.0.0.1:18790"),
+            ("file://", "127.0.0.1:18790"),
+            ("http://127.0.0.1:18790/", "127.0.0.1:18790"),
+            // A name rebound to this machine: same origin, but not an
+            // address or localhost.
+            ("http://evil.example:18790", "evil.example:18790"),
+            ("http://[::1]x", "[::1]x"),
+        ] {
+            assert!(
+                !allowed_origin(Some(origin), Some(host)),
+                "{origin} at {host}"
+            );
+        }
+        assert!(!allowed_origin(Some("http://127.0.0.1:18790"), None));
+    }
+
+    #[test]
+    fn the_assets_root_serves_media_files_only() {
+        let root = std::env::temp_dir().join(format!("nsh-dev-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for file in [
+            "logo.png",
+            "img/photo@2x.jpg",
+            "fonts/Inter.woff2",
+            ".env",
+            "App.tsx",
+            "nsh.json",
+            "notes.txt",
+            ".git/logo.png",
+            ".nsh/types/a.png",
+            "node_modules/x/a.png",
+            "target/a.png",
+        ] {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"x").unwrap();
+        }
+        let outside = root.with_extension("outside.png");
+        std::fs::write(&outside, b"x").unwrap();
+        let root = dunce::canonicalize(&root).unwrap();
+        let served = |path: &str| super::asset_in_root(&root, path).is_some();
+        assert!(served("logo.png"));
+        assert!(served("img/photo@2x.jpg"));
+        assert!(served("fonts/Inter.woff2"));
+        for path in [
+            ".env",
+            "App.tsx",
+            "nsh.json",
+            "notes.txt",
+            ".git/logo.png",
+            ".nsh/types/a.png",
+            "node_modules/x/a.png",
+            "target/a.png",
+            "missing.png",
+            "img",
+            "",
+            "img/../logo.png",
+        ] {
+            assert!(!served(path), "{path}");
+        }
+        let name = outside.file_name().unwrap().to_str().unwrap();
+        assert!(!served(&format!("../{name}")));
+        #[cfg(unix)]
+        {
+            // A link named as an image leads to what it leads to.
+            std::os::unix::fs::symlink(root.join(".env"), root.join("env.png")).unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("out.png")).unwrap();
+            std::os::unix::fs::symlink(root.join("logo.png"), root.join("alias.png")).unwrap();
+            assert!(!served("env.png"));
+            assert!(!served("out.png"));
+            assert!(served("alias.png"));
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
     #[test]
     fn a_host_that_cannot_run_the_app_is_told_why() {
         let message = super::cannot_run_message(

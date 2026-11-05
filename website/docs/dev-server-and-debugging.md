@@ -100,7 +100,9 @@ installs the app's host.
 
 > [!NOTE]
 > A device on the LAN needs to reach your computer on the dev server's port: same network, no firewall in between.
-> Assets (images, fonts) are served over plain HTTP from the same port.
+> Assets are served over plain HTTP from the same port: the files the app imports, and the images, fonts, audio and
+> video in its directory outside hidden directories. Its sources and configuration (`nsh.json`, `.env`) stay on your
+> computer. The WebSocket takes the development hosts and the dev server's own web page.
 
 ## Rust edits
 
