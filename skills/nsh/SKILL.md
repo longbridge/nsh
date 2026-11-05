@@ -9,6 +9,27 @@ One app, written in Rust, in TSX, or in both, rendered through each platform's o
 views on the same Rust engine. Follow the user’s chosen language and delivery model.
 When neither is specified, prefer Rust for an app shipped in its binary.
 
+## Establish the App's Design System First
+
+Before building feature screens, read the Design and Coding Guides and establish
+or reuse the app's design standards, semantic Theme Tokens and styled component
+library. Keep them in the app repository. `nsh-base` (`nsh/base`) supplies unstyled
+behavior, as [`gpui-base`](https://gpui-kit.com/base) does; the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component)
+belongs to the app or its chosen community library.
+
+Define theme colors centrally and consume semantic tokens throughout pages,
+components and states: `theme()` in Rust; token classes or `token()` in TSX.
+Do not introduce raw hex, RGBA/HSLA or palette classes in presentation code. Add
+missing roles to the theme first. User-selected or data colors remain data.
+Build complete styled controls for the feature's needs, then compose pages from
+them; extend shared variants instead of restyling base controls per screen.
+
+Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
+navigation, input and overlays to those targets, preserving shared semantics.
+TUI uses character Cells and terminal colors; Web follows the device's input.
+Review token use, component reuse and platform states before finishing. For a
+narrow change, extend the existing system within the requested scope.
+
 ## Choose the Mode, Then Read Its Page
 
 | | 1. Rust (preferred) | 2. Rust with TSX | 3. TSX |
@@ -75,6 +96,7 @@ first, then the section for the change (`grep -n '^## ' references/coding-guides
 
 | Section                                       | Read when                                                     |
 | --------------------------------------------- | ------------------------------------------------------------- |
+| Build the app's UI foundations before pages | Always; design standards, tokens, styled controls, target platforms |
 | Architecture at a glance                      | Always; layers, an app's files, the store                     |
 | Bootstrap and root ownership                  | `mount`, the root, what one surface is                        |
 | Understand what runs once and what runs again | Always; components, bindings, owners, context                 |
