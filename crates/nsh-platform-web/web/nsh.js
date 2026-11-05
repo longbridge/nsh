@@ -6453,7 +6453,11 @@ class Player {
    * `onContextMenu` of the nearest view around `e`'s target that listens,
    * unless a field or selectable text is nearer (it keeps the browser's
    * menu); true when a view took it. The browser raises `contextmenu` for
-   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   * right clicks, Control-clicks on macOS, the keyboard's Menu key and
+   * Shift+F10 (on the focused element), and screen readers' "show menu"
+   * action. Those come with no pointer (the DOM's `pointerType` `""`): the
+   * event names none (`pointerType: null`) and is placed at the view's
+   * bottom-start corner, where a menu opened below it starts.
    */
   contextMenu(e) {
     const view = this.viewOf(e.target);
@@ -6461,12 +6465,20 @@ class Player {
     for (const el of this.ancestors(view)) {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
-        const [pageX, pageY] = this.point(e);
         const r = el.getBoundingClientRect();
+        // A `MouseEvent` (no `pointerType`) is a browser's older mouse one.
+        const pointerType = e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        let at = e;
+        if (pointerType === null) {
+          const rtl = getComputedStyle(el).direction === "rtl";
+          at = { clientX: rtl ? r.right : r.left, clientY: r.bottom, target: e.target };
+        }
+        const [pageX, pageY] = this.point(at);
         this.event(el._id, "onContextMenu", {
-          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          position: { x: at.clientX - r.left, y: at.clientY - r.top },
           pagePosition: { x: pageX, y: pageY },
           modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+          pointerType: ["mouse", "pen", "touch"].includes(pointerType) ? pointerType : pointerType && "mouse",
         });
         return true;
       }

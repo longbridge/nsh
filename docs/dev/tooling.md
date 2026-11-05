@@ -121,13 +121,16 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, or `--port`) to all
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
+- Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
+  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
   exit through its normal cleanup path; the replacement waits up to ten seconds for the lock before
   starting. A second simultaneous takeover fails. Locks release on process exit, and stale stop files
   are cleared by the next owner. All cooperating commands use the same cache directory. A listener
-  outside this mechanism (including an older CLI) produces a bind error naming the port; `--port 0`
+  outside this mechanism (including an older CLI) given by `--port` produces a bind error naming the port; `--port 0`
   asks the OS for a free port. The control files stay local to the machine.
 - Imported source directories and theme files outside the entry directory are watched too, using the last
   successful bundle's dependencies. The gallery and website demos share `examples/nsh-gallery-ui`; saving one of
@@ -323,7 +326,8 @@ report it:
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
-  presses (a press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
+  presses (a press of the pointer takes it off), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls

@@ -535,13 +535,18 @@ export interface MouseEvent {
 /** A mouse button (GPUI's `MouseButton`). */
 export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
+/** The kind of pointer behind an event (the DOM's `pointerType`). */
+export type PointerType = "mouse" | "pen" | "touch";
+
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
-  /** Position in the view (its transforms undone). */
+  /** Position in the view (its transforms undone): the pointer's, or the view's bottom-start corner when no pointer asked. */
   position: Point;
   /** Position in the root view the view is in: where `Menu.popup` opens a menu (`Menu.popup(items, e.pagePosition)`). */
   pagePosition: Point;
   modifiers: Modifiers;
+  /** The pointer that asked for the menu, or `null` when the keyboard (Shift+F10, the Menu key) or an assistive technology's "show menu" action did: a menu opened then puts the keyboard focus on its first item. */
+  pointerType: PointerType | null;
 }
 
 /** Where a scroll view is: the payload of `onScroll`. */

@@ -549,7 +549,7 @@ fn wrong(titles: Signal<Vec<SharedString>>) -> impl IntoElement {
   different kinds, `when` inside the cell works, at a cost on each reuse.
 - Index with care during a removal. A binding can run while the count changes, so use `p.get(i)` with a fallback, as above,
   when rows can be removed.
-- Layout methods come from `ListLayout`: `.columns(n)`, `.horizontal()`, `.inverted()` (chat), `.content_padding(..)`,
+- Layout methods come from `ListLayout`: `.columns(n)`, `.horizontal()`, `.inverted()`, `.alignment(ListAlignment::Bottom)` (chat), `.content_padding(..)`,
   `.row_gap(..)`, `.column_gap(..)`, `.viewport(ListViewport::Parent)` (a list inside a page's `scroll`, without nesting
   scrollers).
 - Also on the list: `.sticky_header_indices(..)`, `.initial_scroll_index(..)`, `.on_load_more_at_start(..)`,

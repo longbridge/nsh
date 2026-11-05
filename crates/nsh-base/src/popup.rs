@@ -47,7 +47,9 @@ pub enum OpenChangeReason {
     /// A finger was held on its trigger (a context menu's on touch
     /// screens).
     LongPress,
-    /// The secondary button was pressed on its trigger (a context menu's).
+    /// A context menu was asked for on its trigger (a context menu's): the
+    /// secondary button, the keyboard's menu keys or an assistive
+    /// technology's "show menu" action.
     ContextMenu,
     /// The user typed in its input (a combobox's).
     InputChange,
