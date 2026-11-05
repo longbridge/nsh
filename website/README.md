@@ -210,7 +210,7 @@ its `<!-- demo: <name> -->` line is (on the English and the Chinese page alike):
 `play/index.html?idiom=…#<name>`, beside its source (wide pages, Mobile) or
 behind a Preview / Source switch (narrow ones), and two icon buttons: edit in
 the playground, open in a new tab. The home
-page runs `demos/home-menu.tsx` in two frames of its own, at the desktop and the
+page runs `demos/home-chat.tsx` in two frames of its own, at the desktop and the
 phone idioms.
 
 The panel switches the demo between two layouts (`LAYOUTS` in

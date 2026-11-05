@@ -1,8 +1,8 @@
 # Website design
 
 Rules for `website/`, so later changes stay coherent. The site follows the
-shared example UI's design language (`examples/nsh-gallery-ui`): graphite surfaces lit
-from above, one citrus accent, tinted status colours — neutral and refined,
+shared example UI's design language (`examples/nsh-gallery-ui`) on one ink
+blue-black ground (white in light), one citrus accent, tinted status colours — neutral and refined,
 the look of the UI nsh draws.
 
 ## Principles
@@ -11,13 +11,13 @@ the look of the UI nsh draws.
    the banners' composition; the lead says it in plain words: write TSX, ship
    native clients that keep pace with Rust, on 8 platforms. The home page
    follows that order: the numbers beside Rust, TSX with 0 dependencies, the
-   8 platforms and what each is built from, one Menu in three forms, Rust as
+   8 platforms and what each is built from, one chat app in three forms, Rust as
    an equal way in, retained views, delivery, the ways to ship, the
    foundations. Other frameworks are named only on the comparison page.
 2. **Show the real thing.** The picture says what NSH is, and the proof runs:
-   the Menu band shows `demos/home-menu.tsx` live on the web player at the
+   the chat band shows `demos/home-chat.tsx` live on the web player at the
    desktop and the phone idioms, beside a terminal capture of the same
-   component, and the numbers come from `docs/performance-report.md` and
+   app, and the numbers come from `docs/performance-report.md` and
    `docs/web.md`, which a change to them updates first. Documentation pages run
    their demos in a frame at phone width; the code shown is always the source
    of what runs. The product is written "Native Shell" in formal places and
@@ -33,8 +33,12 @@ the look of the UI nsh draws.
 ## Colour
 
 The shared source is `examples/nsh-gallery-ui/theme.json`, with surfaces in `finishes.json`. The website
-loads their generated CSS through `virtual:nsh-gallery-ui.css`; its own semantic variables alias those values.
-The NSH gallery and runnable demos consume the same files.
+loads their generated CSS through `virtual:nsh-gallery-ui.css`; its text, accent and status variables alias
+those values, and the controls (`ui.css`) keep their finishes. The page surfaces are the site's own: every
+page, the home page included, sits on one ground (`--background`), and the cards, insets, raised fills,
+borders, hairlines, the sidebar, code and popovers are stepped from it in the same hue. No page overrides
+them. The NSH gallery and runnable demos consume the shared files as they are, so a demo frame's screen
+(`--screen`) keeps the demos' own background.
 
 Tokens live in `src/styles/global.css`: `:root` holds the dark theme,
 `html.light` its light variant. A pre-paint script in `BaseLayout.astro`
@@ -42,23 +46,29 @@ sets `dark` or `light` on `<html>` from `localStorage.theme` ("light",
 "dark", or absent for the system's), so nothing flashes; the nav's
 System / Light / Dark segmented control (`ThemeSwitch.astro`) sets it.
 
-The light variant keeps the design and its material: a warm off-white page
-`#f3f3ef` with a faint grain (`--grain`, both themes), cards `#ffffff →
-#fafaf7` with a 1px border, a crisp top highlight, a faint bottom edge and
-layered warm shadows; insets `#ecece7` with an inner shadow; raised
-controls `#ffffff → #f4f4f0` with a top highlight; text `#15161a`, muted
-`#565a61`, faint `#8c9097`. The accent token (`--citrus`) becomes `#4a6a0a`
+The light variant keeps the design and its material: a white page
+`#ffffff` and a white nav with a hairline, flat (no grain or light wash),
+and neutral grays, never tinted: cards and popovers `#ffffff` with a 1px
+border `#e2e2e6`, hairlines `#ececef`, input borders `#d8d8dd`; insets and
+muted fills `#f2f2f4`; raised fills and code `#f7f7f8`, the sidebar
+`#fafafa`. Only the home page uses the banners' pale green, echoing its
+art: the hero and the closing on `#f6f8f4`, the tinted bands on `#f2f5ef`
+(Home.astro), with the panels and code on them white under a green hairline.
+Text, muted and faint
+are the gallery's. The accent token (`--citrus`) becomes `#4f6e0c`
 so it reads as text and lines; the bright citrus stays the fill of accent
 badges and buttons (`--finish-accent-bg`, a `#a7cf3f` border, text
-`#1b2207`). Primary buttons are dark (`#2a2b30 → #16171a`). Status colours
-for white: up `#0f8a55`, danger `#d43345`, info `#3d63d1`, warn `#b26a00`.
+`#1b2207`). Status colours for light: up `#138a5a`, danger `#d43a4a`,
+info `#3d63d1`, warn `#b26a00`.
 The values below are the dark theme's.
 
-- **Surfaces**, as in the gallery: page `#101113`, card `#18191c`, inset
-  `#0c0d0f`, raised `#24262a`; border `#2c2e33`, hairline `#1f2124`; text
-  `#eceef1`, muted `#8d9198`, faint `#5a5e65`.
-- **Finishes** (`--finish-*`, the gallery's `finish`): cards take a
-  `#1d1e22 → #17181b` gradient, an inner top highlight and a soft shadow;
+- **Surfaces**, an ink blue-black ground and its steps: page `#0e1016`
+  (flat, every page), card `#161920`, popover `#181b22`, inset `#0b0d12`,
+  raised `#1c1f27`, muted `#1a1d24`, sidebar `#0c0e13`, tinted bands
+  `#12141b`, code `#0a0c10`; border `#282c35`, input border `#30343e`,
+  hairline `#1f222a`; text `#eceef1`, muted `#9a9ea5`, faint `#6b6f76`.
+- **Finishes** (`--finish-*`, the gallery's `finish`): cards take the
+  site's flat card fill (`--finish-card-bg`), an inner top highlight and a soft shadow;
   insets (code, the demo stage, the search field, segmented tracks) are
   recessed with an inner shadow; raised controls (secondary buttons, kbd,
   segmented thumbs) have a top highlight. Navigation stays quiet: the
@@ -171,8 +181,9 @@ the site's one webfont.
 ## The hero
 
 The home hero is the banners' composition drawn live: the name, the citrus
-slogan, the 8 platforms, on the banners' grounds (`#0e1016`, `#f0f3ef`, set on
-the home page only, a little deeper than the docs' graphite).
+slogan, the 8 platforms, on the banners' grounds: `#0e1016`, the whole site's
+`--background`, in dark; the pale green `#f6f8f4` in light, which only the
+home page's hero, tinted bands and closing use.
 
 `HeroArches.astro` draws the mark with a fragment shader (WebGL, one pass):
 eight glass arches around a lit citrus tube holding a bead, over a halftone

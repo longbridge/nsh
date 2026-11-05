@@ -59,7 +59,8 @@ if (update?.canInstall) {
 the app is installed where the user cannot write, such as by a system package. In a development run `checkForUpdate`
 resolves `null`.
 
-`installAndRestart` exits this run, so save what you need first. If it fails, the app stays as it was.
+`installAndRestart` exits this run, so save what you need first. If it fails, the app stays as it was. The
+[nsh/updater reference](../modules/nsh-updater.md) has every function, its errors and the `nsh.json` keys.
 
 ## Publish a release
 

@@ -37,19 +37,33 @@ vec4 dots(vec2 p){
   // Beside the copy the field stays faint; where the copy runs full width, it only opens around the arch.
   float copy=uCopy>0.?mix(.42,1.,smoothstep(uCopy*.72,uCopy*1.08,p.x)):mix(.1,1.,smoothstep(top-90.,top+30.,p.y));
   float fade=smoothstep(0.,140.,uRes.y-p.y);
-  float o=(uDark>.5?.34:.26)*(.35+.65*patch_+near)*copy*fade*a;
-  vec3 col=uDark>.5?vec3(.74,.78,.82):vec3(.36,.42,.38);
-  return vec4(col*o,o);
+  // A few dots light in citrus and go out again: each cell draws a new lot
+  // every few seconds, at its own offset, so they come irregularly; one in
+  // about forty wins, more inside a patch, and fades in and out.
+  float off=h21(id+vec2(3.1,7.7))*9.;
+  float clock=uT*.22+off;
+  float lot=h21(id*1.37+floor(clock));
+  float lit=smoothstep(.93-.04*patch_,.985,lot)*pow(sin(fract(clock)*3.14159),2.);
+  // And along a golden-angle spiral from the arch, a slow wave of them.
+  vec2 rel=c-vec2(uArch.x,uRes.y-uArch.y);
+  float ang=atan(rel.y,rel.x), rr=length(rel);
+  float arm=cos(ang*1.-log(max(rr,1.))*5.236+uT*.35);
+  lit=max(lit,smoothstep(.985,1.,arm)*smoothstep(.55,.8,fine)*smoothstep(1400.,200.,rr)*.8);
+  // Only dots the field already shows light: the ground between stays open.
+  lit*=smoothstep(.25,.6,patch_);
+  rad+=cell*.06*lit;
+  a=smoothstep(rad+.7,rad-.7,length(p-c));
+  float o=(uDark>.5?.34:.55)*(.35+.65*patch_+near)*copy*fade*a;
+  vec3 col=uDark>.5?vec3(.74,.78,.82):vec3(.29,.44,.2);
+  vec3 tint=uDark>.5?CITRUS:vec3(.52,.76,.08);
+  float lo=mix(o,(uDark>.5?.9:.85)*copy*fade*a,lit);
+  col=mix(col,tint,lit);
+  return vec4(col*lo,lo);
 }
-vec4 arch(vec2 p){
+// The arch's color at x (its distance from the axis over R): rings, the gap,
+// the tube and the core with the bead. Not premultiplied.
+vec4 shade(float x, vec2 p, vec2 g, float al){
   float R=uArch.z;
-  vec2 q=vec2(p.x-uArch.x,uRes.y-p.y-uArch.y);
-  float r,al; vec2 g;
-  if(q.y>0.){r=length(q);g=q/max(r,.001);al=atan(q.x,q.y);}
-  else{r=abs(q.x);g=vec2(q.x<0.?-1.:1.,0.);al=g.x*(1.5708-q.y/R*1.25);}
-  float x=r/R, px=1./R;
-  float mask=smoothstep(1.+px,1.-px,x);
-  if(mask<=0.)return vec4(0.);
   vec3 L=normalize(vec3(-.42,.62,.66));
   vec3 col; float alpha=1.;
   float t0=uT;
@@ -82,7 +96,11 @@ vec4 arch(vec2 p){
       col=mix(col,vec3(1.),apex*h*.4);
       col+=vec3(1.)*spec*.5;
       col=mix(col,vec3(.56,.80,.08)*(.72+.42*ch),cit*.86);
-      col*=mix(.82,1.,groove);
+      // The seam is a narrow shadow with a hairline of light just inside it,
+      // sized in pixels so it stays crisp whatever the arch's size.
+      float ed=(1.-abs(t))*.039375*R;
+      col*=mix(.8,1.,smoothstep(.2,2.4,ed));
+      col=mix(col,vec3(1.),smoothstep(1.,0.,abs(ed-2.1))*.55);
       alpha=mix(.62,.94,h);
     }
     col=mix(col,(uDark>.5?CITRUS*(.42+.95*h):vec3(.46,.70,.04)*(.72+.42*h)),lit*.92);
@@ -113,15 +131,51 @@ vec4 arch(vec2 p){
       float dif=max(dot(n,L),0.), sp=pow(dif,44.);
       vec3 c=uDark>.5?mix(vec3(.30,.33,.37),vec3(.97),dif*dif):mix(vec3(.05,.06,.07),vec3(.34,.36,.40),dif*dif);
       c+=vec3(1.)*sp*.9;
-      col=mix(col,c,smoothstep(1.+px*14.,1.-px*14.,d));
+      // The bead's rim covers one device pixel.
+      col=mix(col,c,clamp(.5+(1.-sqrt(d))*.082*R*uDpr,0.,1.));
     }
   }
-  alpha*=mask*smoothstep(0.,40.,uRes.y-p.y);
-  return vec4(col*alpha,alpha);
+  return vec4(col,alpha);
+}
+// The edge between two parts of the arch nearest to x: a seam between rings,
+// or the ring / gap / tube / core edges.
+float seam(float x){
+  if(x>.37)return .37+min(floor((x-.37)/.07875+.5),7.)*.07875;
+  if(x>.345)return .37;
+  if(x>.25)return .32;
+  return .18;
+}
+float gCover;
+vec4 arch(vec2 p){
+  float R=uArch.z;
+  vec2 q=vec2(p.x-uArch.x,uRes.y-p.y-uArch.y);
+  float r,al; vec2 g;
+  if(q.y>0.){r=length(q);g=q/max(r,.001);al=atan(q.x,q.y);}
+  else{r=abs(q.x);g=vec2(q.x<0.?-1.:1.,0.);al=g.x*(1.5708-q.y/R*1.25);}
+  // x is a true distance over R, so a device pixel is dp in x: every edge
+  // below is one device pixel wide, neither blurred nor stepped.
+  float x=r/R, dp=1./(R*uDpr);
+  float mask=clamp(.5+(1.-x)/dp,0.,1.);
+  gCover=mask;
+  if(mask<=0.)return vec4(0.);
+  vec4 c=shade(x,p,g,al);
+  c.rgb*=c.a;
+  // Within a pixel of an edge, the part beyond it covers the rest of the pixel.
+  float b=seam(x), e=(x-b)/dp;
+  if(abs(e)<.5){
+    float s=e>=0.?1.:-1.;
+    vec4 o=shade(b-s*max(abs(x-b),1e-5),p,g,al);
+    o.rgb*=o.a;
+    c=mix(o,c,.5+abs(e));
+  }
+  float a=mask*smoothstep(0.,40.,uRes.y-p.y);
+  return c*a;
 }
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y*uDpr-gl_FragCoord.y)/uDpr;
-  gl_FragColor=over(arch(p),dots(p));
+  vec4 a=arch(p);
+  // The glass hides the field beneath it.
+  gl_FragColor=over(a,dots(p)*(1.-gCover));
 }`;
 
   for (const canvas of document.querySelectorAll<HTMLCanvasElement>('.hero-arches')) {
@@ -157,12 +211,22 @@ void main(){
     const target = new Float32Array(8);
     let width = 0, height = 0, dpr = 1, copy = 0;
 
+    // The backing store matches the canvas's device pixels exactly (up to 2x),
+    // so the browser never resamples the picture; the shader's ratio is the
+    // backing's own, so its one-pixel edges land on whole pixels.
+    let device: { w: number; h: number } | null = null;
     const layout = () => {
-      width = canvas.clientWidth;
-      height = canvas.clientHeight;
-      dpr = Math.min(devicePixelRatio || 1, 2);
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
+      const box = canvas.getBoundingClientRect();
+      const css = { w: box.width || canvas.clientWidth, h: box.height || canvas.clientHeight };
+      const ratio = devicePixelRatio || 1;
+      const scale = Math.min(ratio, 2) / ratio;
+      const w = Math.max(1, Math.round(device ? device.w * scale : css.w * Math.min(ratio, 2)));
+      const h = Math.max(1, Math.round(device ? device.h * scale : css.h * Math.min(ratio, 2)));
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      dpr = css.w > 0 ? w / css.w : 1;
+      width = css.w;
+      height = h / dpr;
       gl.viewport(0, 0, canvas.width, canvas.height);
       const content = Math.min(1280, width - 48);
       const left = (width - content) / 2;
@@ -266,11 +330,18 @@ void main(){
       if (!raf) raf = requestAnimationFrame(step);
     };
 
-    new ResizeObserver(() => {
+    const resized = new ResizeObserver(([entry]) => {
+      const size = entry.devicePixelContentBoxSize?.[0];
+      device = size ? { w: size.inlineSize, h: size.blockSize } : null;
       layout();
       draw(performance.now());
       wake();
-    }).observe(canvas);
+    });
+    try {
+      resized.observe(canvas, { box: 'device-pixel-content-box' });
+    } catch {
+      resized.observe(canvas);
+    }
     new IntersectionObserver(([entry]) => {
       visible = entry.isIntersecting;
       if (visible) wake();
