@@ -98,6 +98,11 @@ impl ShaderView {
     }
 
     /// `false`: there are no frames.
+    pub fn time_only(&self) -> bool {
+        false
+    }
+
+    /// `false`: there are no frames.
     pub fn pending(&self) -> bool {
         false
     }
