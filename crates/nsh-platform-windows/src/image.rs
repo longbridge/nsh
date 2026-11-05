@@ -1596,6 +1596,24 @@ fn tint_matrix(tint: nsh_core::Color) -> [f32; 20] {
     m
 }
 
+/// The world transform's scale that maps an effect's output, an image of
+/// `pixels`, onto `fitted` points in a context of `scale` pixels per
+/// point. Direct2D does not DPI-compensate a bitmap given to an effect:
+/// effects work in pixels, so before this scale one image pixel spans
+/// `1 / scale` points, not one.
+fn effect_scale(fitted: (f32, f32), pixels: (f32, f32), scale: f32) -> (f32, f32) {
+    (fitted.0 / pixels.0 * scale, fitted.1 / pixels.1 * scale)
+}
+
+/// The Gaussian blur's standard deviation for a `blur` radius in points,
+/// drawn at [`effect_scale`]'s `(sx, sy)`. A radius is twice the standard
+/// deviation (GSK's and CSS's reading); the effect reads it in DIPs and
+/// turns it into its pixels at the context's scale, each of which spans
+/// `sx / scale` points, so a deviation `d` shows as `d * sx` points.
+fn blur_deviation(blur: f32, (sx, sy): (f32, f32)) -> f32 {
+    blur / 2.0 / sx.min(sy).max(1e-6)
+}
+
 /// The effects images are drawn through, made once per device.
 struct Effects {
     generation: u64,
@@ -1690,9 +1708,9 @@ fn draw_one(
         return;
     }
     let saved = cx.transform;
-    // Effects draw in the image's own pixels (one DIP each): mapped onto
-    // the rectangle by the world transform.
-    let (sx, sy) = (fw / bw, fh / bh);
+    // Effects draw in the image's own pixels: mapped onto the rectangle by
+    // the world transform.
+    let (sx, sy) = effect_scale((fw, fh), (bw, bh), cx.scale);
     cx.set_transform(Mat4::new().translate(x, y).scale(sx, sy).then(&saved));
     with_effects(cx.dc, |effects| {
         // SAFETY: COM calls on the live context and effects of its device;
@@ -1716,9 +1734,7 @@ fn draw_one(
                 }
             }
             if blur > 0.0 {
-                // A blur radius is twice the standard deviation (GSK's and
-                // CSS's reading), in points: in image pixels here.
-                let sigma = blur / 2.0 / sx.min(sy).max(1e-6);
+                let sigma = blur_deviation(blur, (sx, sy));
                 let _ = effects.blur.SetValue(
                     D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0 as u32,
                     D2D1_PROPERTY_TYPE_FLOAT,
@@ -2098,5 +2114,41 @@ mod tests {
         // Red, of the input's alpha; nothing from its colors.
         assert_eq!(&m[15..19], &[1.0, 1.0, 0.0, 0.0]);
         assert!(m[..15].iter().all(|v| *v == 0.0));
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn effects_fill_their_rectangle_at_any_scale() {
+        // A 48 point logo, decoded at the screen's pixels: an effect's
+        // image pixel spans `sx / scale` points, so the image covers the
+        // whole rectangle, not `1 / scale` of it from its top left.
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let pixels = (48.0 * scale, 48.0 * scale);
+            let (sx, sy) = effect_scale((48.0, 48.0), pixels, scale);
+            assert!(close(pixels.0 * sx / scale, 48.0), "at {scale}");
+            assert!(close(pixels.1 * sy / scale, 48.0), "at {scale}");
+        }
+        // An image larger or smaller than the screen's pixels, stretched.
+        let (sx, sy) = effect_scale((24.0, 12.0), (100.0, 10.0), 1.5);
+        assert!(close(100.0 * sx / 1.5, 24.0));
+        assert!(close(10.0 * sy / 1.5, 12.0));
+    }
+
+    #[test]
+    fn blurs_by_points_at_any_scale() {
+        // The deviation shows as `d * sx` points: half the radius, whatever
+        // the screen's scale and the image's pixels.
+        for scale in [1.0, 1.5, 2.0] {
+            for pixels in [24.0, 36.0, 200.0] {
+                let s = effect_scale((24.0, 24.0), (pixels, pixels), scale);
+                assert!(close(blur_deviation(8.0, s) * s.0, 4.0), "at {scale}");
+            }
+        }
+        // A stretched image blurs by its smaller scale.
+        let s = effect_scale((24.0, 48.0), (24.0, 24.0), 1.0);
+        assert!(close(blur_deviation(8.0, s), 4.0));
     }
 }
