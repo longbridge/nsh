@@ -125,7 +125,7 @@ pub struct Screen {
     image_infos: Vec<u32>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
-    picks: Vec<(u32, nsh_core::picker::PickRequest)>,
+    picks: Vec<(u32, nsh_core::picker::Pick)>,
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
@@ -520,7 +520,12 @@ impl Screen {
             // Headless runs load no images: the size is answered as a
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
-            Command::PickImages { id, request } => self.picks.push((*id, *request)),
+            Command::PickImages { id, request } => self
+                .picks
+                .push((*id, nsh_core::picker::Pick::Images(*request))),
+            Command::PickFiles { id, request } => self
+                .picks
+                .push((*id, nsh_core::picker::Pick::Files(request.clone()))),
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
@@ -953,15 +958,19 @@ impl Screen {
         self.answered = (self.answered + 1).min(self.dialogs.len());
     }
 
-    /// The picks the app asked for so far, in order (`Picker.pickImages`).
-    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
-        self.picks.iter().map(|(_, request)| *request).collect()
+    /// The picks the app asked for so far, in order (`Picker.pickImages`,
+    /// `Picker.pickFiles`).
+    pub fn picks(&self) -> Vec<nsh_core::picker::Pick> {
+        self.picks
+            .iter()
+            .map(|(_, request)| request.clone())
+            .collect()
     }
 
     /// The oldest pick not answered yet: its request's id and what it
     /// asks.
-    pub(crate) fn pending_pick(&self) -> Option<(u32, nsh_core::picker::PickRequest)> {
-        self.picks.get(self.picks_answered).copied()
+    pub(crate) fn pending_pick(&self) -> Option<(u32, nsh_core::picker::Pick)> {
+        self.picks.get(self.picks_answered).cloned()
     }
 
     /// The oldest pick was answered.

@@ -162,6 +162,7 @@ tap id:run
 expect Clipboard: Error ERR_ACCESS_DENIED clipboard ""
 expect Clipboard denied: 7 of 7
 expect Picker: Error ERR_ACCESS_DENIED picker ""
+expect Picker files: Error ERR_ACCESS_DENIED picker ""
 expect Open: Error ERR_ACCESS_DENIED openUrl "https://example.com/docs"
 expect Image size: Error ERR_ACCESS_DENIED network "https://example.com/a.png"
 expect Image prefetch: Error ERR_ACCESS_DENIED network "https://example.com/b.png"
