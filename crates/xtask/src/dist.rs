@@ -143,54 +143,19 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // the browser's JavaScript engine: the linkable one `nsh package` links
     // each published app's from (only what the app uses), and the
     // development host's (hot updates, `nsh test --target web`). They build
-    // to the same file, copied in turn.
-    for (features, file) in [
-        (
-            &["--no-default-features", "--features", "browser,linkable"][..],
-            "nsh-browser.wasm",
-        ),
-        (
-            &["--no-default-features", "--features", "dev"][..],
-            "nsh-dev.wasm",
-        ),
-    ] {
-        let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        web.current_dir(&root)
-            .args(["build", "--profile", "web", "-p", "nsh-platform-web"])
-            .args(features)
-            .args(["--target", "wasm32-unknown-unknown"]);
-        if env::var_os("AR_wasm32_unknown_unknown").is_none() && env::var_os("AR").is_none() {
-            web.env("AR_wasm32_unknown_unknown", "llvm-ar");
-        }
-        term::cargo(&mut web, "the web runtime")?;
-        copy(
-            &release.join("wasm32-unknown-unknown/web/nsh_platform_web.wasm"),
-            &out.join("runtime/web").join(file),
-        )?;
-    }
-    copy(
-        &root.join("crates/nsh-platform-web/web/nsh.js"),
-        &out.join("runtime/web/nsh.js"),
-    )?;
-    // The syntaxes the web runtime leaves out and fetches when it first
-    // highlights code: two-face's dump, as this workspace resolves it.
-    copy(
-        &package_dir(&root, "two-face")?.join("generated/syntaxes-fancy-newlines.bin"),
-        &out.join("runtime/web/nsh-syntaxes.bin"),
-    )?;
-
-    for entry in fs::read_dir(root.join("crates/nsh-platform-web/web/browser"))? {
-        let entry = entry?;
-        if entry
-            .path()
-            .extension()
-            .is_some_and(|ext| ext == "js" || ext == "txt")
-        {
-            copy(
-                &entry.path(),
-                &out.join("runtime/web/browser").join(entry.file_name()),
-            )?;
-        }
+    // to the same file, copied in turn. They need a clang that targets
+    // wasm32: without one the distribution is made without them, as with
+    // the Android runtimes without an SDK.
+    let web = Command::new("clang")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok();
+    if web {
+        web_runtimes(&root, &out, &release)?;
+    } else {
+        term::warn("no clang for wasm32: the distribution has no web runtime");
     }
 
     // Android runtimes. Windows machines often have no Android SDK: the
@@ -236,6 +201,60 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         fs::remove_dir_all(out.join("work"))?;
     }
     term::note(out.strip_prefix(&root).unwrap_or(&out).display());
+    Ok(())
+}
+
+/// The web runtimes: the linkable one and the development host's, the same
+/// build linked from in turn, with the scripts and syntaxes they fetch.
+fn web_runtimes(root: &Path, out: &Path, release: &Path) -> anyhow::Result<()> {
+    for (features, file) in [
+        (
+            &["--no-default-features", "--features", "browser,linkable"][..],
+            "nsh-browser.wasm",
+        ),
+        (
+            &["--no-default-features", "--features", "dev"][..],
+            "nsh-dev.wasm",
+        ),
+    ] {
+        let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        web.current_dir(root)
+            .args(["build", "--profile", "web", "-p", "nsh-platform-web"])
+            .args(features)
+            .args(["--target", "wasm32-unknown-unknown"]);
+        if env::var_os("AR_wasm32_unknown_unknown").is_none() && env::var_os("AR").is_none() {
+            web.env("AR_wasm32_unknown_unknown", "llvm-ar");
+        }
+        term::cargo(&mut web, "the web runtime")?;
+        copy(
+            &release.join("wasm32-unknown-unknown/web/nsh_platform_web.wasm"),
+            &out.join("runtime/web").join(file),
+        )?;
+    }
+    copy(
+        &root.join("crates/nsh-platform-web/web/nsh.js"),
+        &out.join("runtime/web/nsh.js"),
+    )?;
+    // The syntaxes the web runtime leaves out and fetches when it first
+    // highlights code: two-face's dump, as this workspace resolves it.
+    copy(
+        &package_dir(root, "two-face")?.join("generated/syntaxes-fancy-newlines.bin"),
+        &out.join("runtime/web/nsh-syntaxes.bin"),
+    )?;
+
+    for entry in fs::read_dir(root.join("crates/nsh-platform-web/web/browser"))? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            copy(
+                &entry.path(),
+                &out.join("runtime/web/browser").join(entry.file_name()),
+            )?;
+        }
+    }
     Ok(())
 }
 
