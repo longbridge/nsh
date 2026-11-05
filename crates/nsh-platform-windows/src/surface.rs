@@ -905,6 +905,14 @@ impl Surface {
             .reduce(f64::min)
     }
 
+    /// Whether `nsh test --target windows` drives the app.
+    fn testing(&self) -> bool {
+        #[cfg(feature = "dev")]
+        return self.test_model.borrow().is_some();
+        #[cfg(not(feature = "dev"))]
+        false
+    }
+
     /// Makes what comes due happen on time while no frames are ticked: the
     /// ticker posts none while nothing composes (`DwmFlush` fails in a
     /// locked or remote session), and animations must still end (a
@@ -918,14 +926,6 @@ impl Surface {
     /// Nothing is scheduled for what only draws (a spinner, a JS frame
     /// request), so a session without composition and an endless animation
     /// does no work.
-    /// Whether `nsh test --target windows` drives the app.
-    fn testing(&self) -> bool {
-        #[cfg(feature = "dev")]
-        return self.test_model.borrow().is_some();
-        #[cfg(not(feature = "dev"))]
-        false
-    }
-
     fn keep_deadline(self: &Rc<Self>) {
         let now = self.clock();
         // A test's app runs as on screen whatever the session shows (a
