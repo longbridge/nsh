@@ -109,6 +109,9 @@ pub(crate) struct Composition {
     layers: RefCell<Vec<Layer>>,
     /// The root's visuals as last arranged, bottom to top.
     order: RefCell<Vec<IDCompositionVisual2>>,
+    /// A transparent window's swap chain, below everything else
+    /// ([`Composition::set_base`]).
+    base: RefCell<Option<IDCompositionVisual2>>,
 }
 
 /// What nsh draws above a web view: a composition swap chain the size of
@@ -143,6 +146,7 @@ impl Composition {
                 root,
                 layers: RefCell::default(),
                 order: RefCell::default(),
+                base: RefCell::default(),
             }))
         }
     }
@@ -271,7 +275,12 @@ impl Composition {
         unsafe {
             if !same {
                 let _ = self.root.RemoveAllVisuals();
+                let base = self.base.borrow();
                 let mut below: Option<&IDCompositionVisual> = None;
+                if let Some(base) = &*base {
+                    let _ = self.root.AddVisual(base, true, None);
+                    below = Some(base);
+                }
                 for visual in &order {
                     // Above the one added before it: with no reference,
                     // `insertAbove` puts a visual below all its siblings.
@@ -286,6 +295,35 @@ impl Composition {
         }
     }
 
+    /// Shows `swap` (a transparent window's own swap chain, made again
+    /// after a device loss) at the bottom of the tree, below the web views
+    /// and their layers.
+    pub(crate) fn set_base(&self, swap: &IDXGISwapChain1) -> Result<()> {
+        let mut base = self.base.borrow_mut();
+        // SAFETY: plain calls on the live device and tree, on its thread.
+        unsafe {
+            let visual = match &*base {
+                Some(v) => v.clone(),
+                None => {
+                    let v = self.device.CreateVisual()?;
+                    // With no reference, `insertAbove` puts it below all
+                    // its siblings.
+                    self.root.AddVisual(&v, true, None)?;
+                    *base = Some(v.clone());
+                    v
+                }
+            };
+            visual.SetContent(swap)?;
+            self.device.Commit()
+        }
+    }
+
+    /// A swap chain is shown at the bottom ([`Composition::set_base`]).
+    #[cfg(test)]
+    pub(crate) fn has_base(&self) -> bool {
+        self.base.borrow().is_some()
+    }
+
     /// Drops what lives on the lost device (the layers' swap chains).
     pub(crate) fn device_lost(&self) {
         for layer in self.layers.borrow_mut().iter_mut() {
@@ -298,7 +336,7 @@ impl Composition {
 }
 
 /// A swap chain for composition of `size` pixels, premultiplied.
-fn composition_swap_chain(gfx: &Gfx, size: (u32, u32)) -> Result<IDXGISwapChain1> {
+pub(crate) fn composition_swap_chain(gfx: &Gfx, size: (u32, u32)) -> Result<IDXGISwapChain1> {
     // SAFETY: plain factory creation.
     let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))? };
     let desc = DXGI_SWAP_CHAIN_DESC1 {

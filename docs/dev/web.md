@@ -357,8 +357,9 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   through the engine (`nsh_core::element::fetch`: `Action::Fetch`, `Core::take_fetches` / `fetch_event`, the engine's
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
-- **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+- **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's: the
+  environment's (`timeZone`, `timeZoneName`), before the page reports it the `nsh.time_zone` import (`intl/mod.rs`
+  `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser
@@ -402,8 +403,10 @@ their own calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query li
 
 The app's side, `browser/environment.js`, gets the engine's environment (`Host::set_environment`,
 `src/browser/engine.rs`) and keeps one signal per part, written only when the part changed, as nsh-js's `env.rs`
-does. `environment.test.mjs` checks that it serves every export of `nsh/device` and `nsh/accessibility` that `env.rs`
-declares: one it lacks fails the browser runtime's apps that import it.
+does. Its accessors are grouped as `env.rs` declares them: the exports of `nsh/device` and `nsh/accessibility`, which
+`nsh` serves and `runtime.js` also serves as namespaces of those names (`modules`), the same values in both.
+`environment.test.mjs` checks them against `env.rs`: `nsh` has every one, each namespace exactly those its module
+declares, so a part added to `env.rs` fails there rather than in apps.
 
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched

@@ -926,7 +926,7 @@ const languages: Accessor<readonly string[]>;
 const timeZone: Accessor<string>;
 ```
 
-设备的时区，即系统给它的名称：IANA 名称（`"Europe/Berlin"`、`"America/New_York"`）、`"UTC"`，或系统使用偏移量时区时的名称（Android 上的 `"GMT+01:00"`）。响应式：随系统设置变化，例如用户出行时。Rust：`time_zone() -> TimeZone`（`time_zone().as_str()` 即名称）。`Date` 的本地时间跟随系统时区；读取这个名称来显示它、和日期一起保存，或交给时区库（[设备与环境](../docs/device-and-environment.md#时区)）。除非 `open` 设置了 `timeZone`，headless 测试中它是 `"UTC"`。
+设备的时区，即系统给它的名称：IANA 名称（`"Europe/Berlin"`、`"America/New_York"`）、`"UTC"`，或系统使用偏移量时区时的名称（Android 上的 `"GMT+01:00"`）。响应式：随系统设置变化，例如用户出行时。Rust：`time_zone() -> TimeZone`（`time_zone().as_str()` 即名称）。`Date` 的本地时间跟随系统时区，`Intl` 给出的名称与它相同（`Intl.DateTimeFormat().resolvedOptions().timeZone`）；读取这个名称来显示它、和日期一起保存，或交给时区库（[设备与环境](../docs/device-and-environment.md#时区)）。除非 `open` 设置了 `timeZone`，headless 测试中它是 `"UTC"`。
 
 ### lifecycle
 
@@ -1590,7 +1590,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // 允许选择多个（false：一个）
+  limit?: number; // multiple 时最多选几个（最多 100）
+  filters?: { name: string; extensions: string[] }[]; // 提供的文件类型（不给：任意文件）
+}
+
+interface PickedFile {
+  file: File; // 名称、类型、字节大小和内容，都保持原样
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // 允许选多张（false：一张）
@@ -1609,6 +1620,7 @@ interface PickedImage {
 | TS | Rust |
 |---|---|
 | `await Picker.pickImages(options)` | `pick_images(request).await -> Vec<PickedFile>` |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `multiple`、`limit` | `PickRequest::new(multiple, limit)`（`limit` 为 0 表示最多 100） |
 | `maxDimension` | `request.max_dimension = Some(DevicePixels(2048))` |
 | `quality` | `request.quality = Some(Percentage(0.8))` |
@@ -1717,12 +1729,47 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+显示系统的文件选择器，可选任意类型的文件，resolve 为用户选中的文件；用户取消时 resolve 为 `[]`。拒绝的情况与
+`pickImages` 相同：超出范围的选项（`limit: 0`、没有扩展名的过滤器）以 `RangeError` reject，没有 `picker` 能力时以
+`ERR_ACCESS_DENIED` reject。Rust：`pick_files(request)`。
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "文档", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| 平台 | 选择器 | 过滤器 |
+|---|---|---|
+| macOS | `NSOpenPanel` 表单 | 所有扩展名合为一组 |
+| Windows | `IFileOpenDialog` | 每个过滤器一个选项，显示其名称 |
+| Linux | `GtkFileDialog`（有 portal 时用 portal 的） | 每个过滤器一个选项，显示其名称 |
+| iOS | `UIDocumentPickerViewController`，以副本形式 | 所有扩展名合为一组 |
+| Android | `ACTION_OPEN_DOCUMENT` | 按媒体类型；有 Android 不认识的扩展名时提供任意文件 |
+| Web | `<input type=file>` | 所有扩展名合为一组 |
+| GPUI | GPUI 的打开对话框，可选任意文件 | 不符合的文件在选择后被剔除 |
+
+所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，因此超过 512 MiB 的文件不会出现在
+结果中，并记录到日志。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
+
 ### 嵌入 NSH 的应用
 
 嵌入 NSH、并且有自己选择器（比如带有应用自己的相册）的应用可以自己回答选取：在 Rust 中，把 `PickerBackend`
 （`nsh_core::picker`）交给引擎（`EngineConfig::picker`，GPUI 和 GPUI Kit 应用用 `AppView::set_picker`），它会收到每次选取的
 `PickRequest` 并返回文件，系统的选择器不会出现。它返回的文件和平台给的一样会被补全：截到请求的数量上限，大小、类型和
-扩展名从字节中读出。
+扩展名从字节中读出。`pick_files` 以同样的方式回答 `pickFiles`；没有实现它的 backend 会取消这些选取，系统的选择器同样不会出现。
 
 ### 测试
 
@@ -1730,9 +1777,9 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 和 `pickFiles` 什么也不显示，
 > 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
-> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 中，`pick_images` 和 `pick_files` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
 
 ## Notifications
 

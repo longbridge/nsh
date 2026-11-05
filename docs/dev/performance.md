@@ -570,3 +570,40 @@ shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and
 The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
 Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f. Repeat the same command
 before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
+
+## TUI development startup
+
+Measure development compilation separately from host rendering:
+
+```sh
+cargo test -p nsh-cli bench_dev_startup -- --ignored --nocapture
+```
+
+The ignored benchmark runs the unchanged counter and gallery three times, splitting hot bundling,
+script/source-map assembly and QuickJS bytecode compilation. It checks that compilation produces bytecode;
+it reports timings rather than imposing a machine-dependent startup threshold.
+
+Linux x86_64, debug, revision `889872685`, three runs after building the CLI and TUI host:
+
+| App | Hot bundle | Script / source map | Bytecode |
+| --- | --- | --- | --- |
+| Counter | 8.6–14.5 ms | 0.12–0.13 ms | 0.54–0.94 ms |
+| Gallery | 1,014–1,059 ms | 82.8–83.3 ms | 70.9–72.3 ms |
+
+Gallery produces 2,330,102 source bytes and 11,103,922 bytecode bytes. Hot development includes the demo
+modules in the initial script even though the gallery executes their factories when first shown.
+
+Separately, `target/debug/nsh run examples/<app> --target tui --trace --port 18973` on a private
+200 × 60 PTY (three fresh processes, existing builds, terminal queries unanswered) reached visible
+Counter content in 629–635 ms and Gallery content in 1,864–1,899 ms. The TUI host's Cargo freshness
+check took about 288 ms. Gallery's engine first frame was about 77 ms: 3,172 operations,
+2,202 mount items, 997 nodes. These are local development measurements, including CLI preparation,
+not release-host startup numbers. Initial compilation and terminal query handling are separate costs;
+repeat on the reported command and machine before attributing a longer startup to rendering.
+
+Startup feedback: the CLI previously redirected output before app preparation, suppressing Cargo's spinner
+and crate status throughout a cold build. It now keeps preparation visible and opens the diagnostic log
+immediately before launching the TUI host. A private-PTY Gallery run with the change showed build progress
+at 52 ms, build completion before alternate-screen entry, and Gallery content at 5.436 s (including host
+recompilation). This verifies feedback during a build, not a startup speedup. The CLI integration test
+checks startup output and host-diagnostic isolation in ordinary and verbose modes.

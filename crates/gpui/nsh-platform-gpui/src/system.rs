@@ -53,8 +53,9 @@
 //!   after it);
 //! - the time zone (`timeZone()`), as the native backends name it: on
 //!   Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its
-//!   IANA name from the ICU Windows ships; elsewhere `TZ` when it names a
-//!   zone, else the zone `/etc/localtime` links to (else `/etc/timezone`).
+//!   IANA name from the ICU Windows ships; elsewhere the zone `TZ` names
+//!   (`GMT`, `Europe/Berlin`, as the C library reads it), else the zone
+//!   `/etc/localtime` links to (else `/etc/timezone`).
 //!   GPUI reports no change of it: it is read again whenever a window
 //!   becomes the active one, as the user comes back from changing it.
 //!
@@ -411,30 +412,22 @@ fn update(surface: &Surface) {
     surface.set_environment(env);
 }
 
-/// The time zone on POSIX systems: `TZ` when it names a zone (the process's
-/// local times follow it; not a POSIX rule such as `CET-1CEST`), else the
-/// zone `/etc/localtime` links to, else `/etc/timezone`'s; `UTC` when none
-/// says.
+/// The time zone on POSIX systems: the zone `TZ` names (`GMT`,
+/// `Europe/Berlin`: the process's local times follow it; a POSIX rule such
+/// as `CET-1CEST` names none), else the zone `/etc/localtime` links to, else
+/// `/etc/timezone`'s; `UTC` when none says ([`TimeZone::posix`]).
 #[cfg_attr(windows, allow(dead_code))]
 fn posix_time_zone() -> TimeZone {
-    std::env::var("TZ")
-        .ok()
-        .filter(|tz| {
-            let tz = tz.trim_start_matches(':');
-            tz.contains('/') || tz == "UTC"
-        })
-        .and_then(|tz| TimeZone::parse(&tz))
-        .or_else(|| {
-            std::fs::read_link("/etc/localtime")
-                .ok()
-                .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
-        })
-        .or_else(|| {
-            std::fs::read_to_string("/etc/timezone")
-                .ok()
-                .and_then(|name| TimeZone::parse(name.trim()))
-        })
-        .unwrap_or_default()
+    TimeZone::posix(std::env::var("TZ").ok().as_deref(), || {
+        std::fs::read_link("/etc/localtime")
+            .ok()
+            .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
+            .or_else(|| {
+                std::fs::read_to_string("/etc/timezone")
+                    .ok()
+                    .and_then(|name| TimeZone::parse(name.trim()))
+            })
+    })
 }
 
 /// The user's locale on POSIX systems: the first locale variable set that
@@ -901,23 +894,22 @@ mod os {
         type ToIana =
             unsafe extern "C" fn(*const u16, i32, *const u8, *mut u16, i32, *mut i32) -> i32;
         const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x0000_0800;
-        thread_local! {
-            static TO_IANA: Option<ToIana> = {
-                // SAFETY: system libraries by name, from System32 only; the
-                // function, if there, has the signature above (ICU's C API).
-                unsafe {
-                    ["icu.dll", "icuin.dll"]
-                        .into_iter()
-                        .map(wide)
-                        .map(|name| LoadLibraryExW(name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32))
-                        .find(|module| *module != 0)
-                        .map(|icu| GetProcAddress(icu, c"ucal_getTimeZoneIDForWindowsID".as_ptr()))
-                        .filter(|proc| !proc.is_null())
-                        .map(|proc| std::mem::transmute::<*mut c_void, ToIana>(proc))
-                }
-            };
-        }
-        let to_iana = TO_IANA.with(|f| *f)?;
+        // Looked up once for the process, not once per thread that asks.
+        static TO_IANA: std::sync::OnceLock<Option<ToIana>> = std::sync::OnceLock::new();
+        let to_iana = (*TO_IANA.get_or_init(|| {
+            // SAFETY: system libraries by name, from System32 only; the
+            // function, if there, has the signature above (ICU's C API).
+            unsafe {
+                ["icu.dll", "icuin.dll"]
+                    .into_iter()
+                    .map(wide)
+                    .map(|name| LoadLibraryExW(name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32))
+                    .find(|module| *module != 0)
+                    .map(|icu| GetProcAddress(icu, c"ucal_getTimeZoneIDForWindowsID".as_ptr()))
+                    .filter(|proc| !proc.is_null())
+                    .map(|proc| std::mem::transmute::<*mut c_void, ToIana>(proc))
+            }
+        }))?;
         let mut name = [0u16; 64];
         let mut status = 0i32;
         // SAFETY: `key` and `name` hold the lengths given; no region (ICU's
@@ -1261,6 +1253,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             });
         }
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
@@ -1328,6 +1321,43 @@ fn pick_images(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::PickRe
                 .collect();
             std::thread::spawn(move || {
                 let files = nsh_core::picker::read_files(&paths, &request);
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id, files },
+                );
+            });
+        })
+        .detach();
+    });
+}
+
+/// `Picker.pickFiles`: GPUI's open dialog. It filters nothing, so the files
+/// whose extension the request does not take are left out; they are read on
+/// a thread of their own.
+fn pick_files(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::FilePickRequest) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    crate::rt::on_app(move |cx| {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: request.multiple(),
+            prompt: None,
+        });
+        cx.spawn(async move |_| {
+            let paths: Vec<_> = paths
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| nsh_core::file_dialog::passes(&request.filters, p))
+                .collect();
+            std::thread::spawn(move || {
+                let files = nsh_core::picker::read_picked_files(&paths, &request);
                 control.dispatch_event(
                     ROOT_ID,
                     EventKind::Pick,

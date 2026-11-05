@@ -811,7 +811,7 @@ pub struct EngineConfig {
     /// posts. A view keeps one for every app it runs; the default is a
     /// channel of the engine's own, with none of them.
     pub host: HostChannel,
-    /// Answers the app's picks (`Picker.pickImages`) in place of the
+    /// Answers the app's picks (`Picker.pickImages`, `Picker.pickFiles`) in place of the
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
     pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,

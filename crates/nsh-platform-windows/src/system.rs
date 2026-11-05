@@ -195,7 +195,9 @@ pub(crate) fn dark(surface: &Surface) -> bool {
 
 /// The color behind the app's views (the default theme's background).
 pub(crate) fn window_background(surface: &Surface) -> Color {
-    if dark(surface) {
+    if surface.transparent() {
+        Color::TRANSPARENT
+    } else if dark(surface) {
         Color(0x0a0a_0aff)
     } else {
         Color(0xffff_ffff)
@@ -394,20 +396,20 @@ fn time_zone() -> TimeZone {
 /// it is missing.
 fn iana_name(key: &[u16]) -> Option<String> {
     type ToIana = unsafe extern "C" fn(*const u16, i32, *const u8, *mut u16, i32, *mut i32) -> i32;
-    thread_local! {
-        static TO_IANA: Option<ToIana> = {
-            // SAFETY: system libraries by name, from System32 only; the
-            // function, if there, has the signature above (ICU's C API).
-            unsafe {
-                [w!("icu.dll"), w!("icuin.dll")]
-                    .into_iter()
-                    .find_map(|name| LoadLibraryExW(name, None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok())
-                    .and_then(|icu| GetProcAddress(icu, s!("ucal_getTimeZoneIDForWindowsID")))
-                    .map(|proc| std::mem::transmute::<_, ToIana>(proc))
-            }
-        };
-    }
-    let to_iana = TO_IANA.with(|f| *f)?;
+    // Looked up once for the process, not once per thread that asks (each
+    // surface's own, when they run on several).
+    static TO_IANA: std::sync::OnceLock<Option<ToIana>> = std::sync::OnceLock::new();
+    let to_iana = (*TO_IANA.get_or_init(|| {
+        // SAFETY: system libraries by name, from System32 only; the
+        // function, if there, has the signature above (ICU's C API).
+        unsafe {
+            [w!("icu.dll"), w!("icuin.dll")]
+                .into_iter()
+                .find_map(|name| LoadLibraryExW(name, None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok())
+                .and_then(|icu| GetProcAddress(icu, s!("ucal_getTimeZoneIDForWindowsID")))
+                .map(|proc| std::mem::transmute::<_, ToIana>(proc))
+        }
+    }))?;
     let mut name = [0u16; 64];
     let mut status = 0i32;
     // SAFETY: `key` and `name` hold the lengths given; no region (ICU's
@@ -663,6 +665,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             clipboard::files_answer(*id, &clipboard_files()),
         ),
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }

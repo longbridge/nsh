@@ -87,9 +87,9 @@ pub(crate) trait Driver: Send {
     /// The oldest dialog not answered yet.
     fn pending_dialog(&mut self) -> Option<Dialog>;
     fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String>;
-    /// The oldest pick (`Picker.pickImages`) not answered yet; a real
+    /// The oldest pick (`Picker.pickImages`, `Picker.pickFiles`) not answered yet; a real
     /// platform shows its picker and has none to answer.
-    fn pending_pick(&mut self) -> Option<nsh_core::picker::PickRequest> {
+    fn pending_pick(&mut self) -> Option<nsh_core::picker::Pick> {
         None
     }
     /// Answers the oldest pick with `files`.
@@ -98,7 +98,7 @@ pub(crate) trait Driver: Send {
         Err(headless_only("answering a pick"))
     }
     /// The picks the app asked for, in order.
-    fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
+    fn picks(&mut self) -> Result<Vec<nsh_core::picker::Pick>, String> {
         Err(headless_only("`picks()`"))
     }
     /// What the app's speech sessions asked for, in order.
@@ -255,13 +255,13 @@ impl Driver for Headless {
     fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String> {
         Headless::answer_dialog(self, answer)
     }
-    fn pending_pick(&mut self) -> Option<nsh_core::picker::PickRequest> {
+    fn pending_pick(&mut self) -> Option<nsh_core::picker::Pick> {
         Headless::pending_pick(self)
     }
     fn answer_pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
         Headless::answer_pick(self, files)
     }
-    fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
+    fn picks(&mut self) -> Result<Vec<nsh_core::picker::Pick>, String> {
         self.catch_up();
         Ok(Headless::picks(self))
     }

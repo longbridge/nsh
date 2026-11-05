@@ -298,6 +298,25 @@ export function Chip(props: { label: string; class?: string }) {
 - `nsh/base` has behaviour and no look. A `Switch` without `trackClass` and `thumbClass` draws nothing, and its test still passes. Style each part and look at it.
 - An unknown static class is a `warn` from `nsh build`, and does nothing. A class built at run time is logged once when first seen. Raw `#hex` and arbitrary values pass every tool; use tokens.
 
+### Liquid Glass on Apple platforms
+
+Use the native material on a floating `View`, with a blur for older systems and other platforms:
+
+```tsx
+<View style={{ borderRadius: 24, borderCurve: "continuous", glassEffect: "regular", backdropFilter: "blur(20px)" }}>
+  {props.children}
+</View>
+```
+
+`glassEffect` draws Apple's Liquid Glass on iOS 26+ and macOS 26+; elsewhere `backdropFilter` supplies the fallback.
+Verify these properties against the project's generated types. An opaque background drawn over the material hides the
+effect; use a transparent or restrained translucent tint if needed, checking contrast in light and dark appearance.
+The native material already draws its edge: inspect before adding a border or shadow, which can make a double outline.
+Platforms without a usable backdrop need a legible solid fallback. Keep content and hit targets above the material.
+Test against both light and dark content moving behind the surface, in focused and unfocused states on the actual
+target when available; an empty or uniform background and a headless test cannot establish the visual result. Use glass
+for surfaces that float over content when appropriate, not automatically for every settings row or card.
+
 ## Events take one object
 
 Every handler takes one object. Destructure the event; that is safe, unlike props.

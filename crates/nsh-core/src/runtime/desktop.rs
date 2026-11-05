@@ -112,6 +112,14 @@ impl Window {
         desktop(cx, DesktopCommand::SetLevel(level));
     }
 
+    /// Keeps the window out of the taskbar (`true`) or puts it back
+    /// (`false`), for overlays, pets and pop-ups that should not show as
+    /// an app there. Windows only: macOS's Dock and Linux's docks show
+    /// apps, not windows, and are left as they are.
+    pub(crate) fn set_skip_taskbar(skip: bool, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetSkipTaskbar(skip));
+    }
+
     /// Brings the window to the front of its level and focuses it (the app
     /// activates). The window keeps its level. On macOS, desktop-level
     /// surfaces stay behind other windows.

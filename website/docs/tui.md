@@ -1,11 +1,11 @@
 ---
-title: Terminal
+title: TUI
 description: "Run Rust and TSX NSH apps in a terminal: the Cell layout, keyboard and mouse input, the terminal's colors, how components and popups look on the grid, detecting the terminal in app code, testing, and embedding AppView in a ratatui app."
-order: 15.7
+order: 16.5
 group: platforms
 ---
 
-# Terminal
+# TUI
 
 NSH apps also run in a terminal. The terminal backend draws an app on the terminal's grid of character Cells with
 [ratatui](https://ratatui.rs), in the terminal's own font and colors, and takes its input from the keyboard and the
@@ -31,7 +31,8 @@ The app fills the terminal it was started in, with hot updates on save; a Rust a
 development host built with its crate, rebuilt and restarted when its Rust code changes. In a checkout, `nsh run`
 builds the development host (`nsh-tui-host`) first.
 
-The terminal shows the app alone. Diagnostics (the CLI's output, the host's logs, `console.log`) go to the app's
+During startup, the CLI shows build progress, and the crate being compiled when a development host is built; `-v` streams the tools’ output.
+Once the app opens, the terminal shows the app alone. Diagnostics (the CLI's output, the host's logs, `console.log`) go to the app's
 `.nsh/tui.log`, and `C-h e` (Ctrl+H, then E) opens them in a panel over the app: the arrows and Page Up / Page Down
 scroll it, `r` reloads the latest build, and Escape, `C-g` or `q` closes it. An error in the app opens the panel by
 itself, and the next update closes it. Ctrl+C copies a text selection, and otherwise quits; the terminal is restored

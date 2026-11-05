@@ -1563,6 +1563,27 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .bool(asked.format == nsh_core::picker::PickFormat::Current)
                 .end();
         }
+        // `nsh.js` `pickFiles`: the request, the limit, the extensions
+        // offered as an input's `accept` (empty: any file), the largest file
+        // read.
+        Command::PickFiles {
+            id: request,
+            request: asked,
+        } => {
+            let accept = nsh_core::file_dialog::extensions(&asked.filters)
+                .iter()
+                .map(|extension| format!(".{extension}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            out.item("cmd")
+                .num(id)
+                .str("pickFiles")
+                .num(*request)
+                .num(asked.limit)
+                .str(&accept)
+                .num(nsh_core::picker::MAX_PICKED_FILE_BYTES as f64)
+                .end();
+        }
         // The id is written whole (`num` rounds); the page answers with
         // `onHost` `{ type: "reply" }` (`nsh.js` `hostCall`).
         Command::HostCall {

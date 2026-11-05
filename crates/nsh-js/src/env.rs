@@ -432,6 +432,12 @@ pub(crate) fn locale(cx: *mut JsContext) -> nsh_core::platform::Locale {
     current(cx).locale
 }
 
+/// The device's time zone (`Intl`'s default, `timeZone()`), read where it
+/// is used as the locale is; `None` until the platform reports one.
+pub(crate) fn time_zone(cx: *mut JsContext) -> Option<nsh_core::platform::TimeZone> {
+    env(cx).current.borrow().as_ref().map(|e| e.time_zone)
+}
+
 /// `safeAreaInsets()`: the insets of the nearest screen or modal (an
 /// accessor).
 unsafe extern "C" fn safe_area_insets(

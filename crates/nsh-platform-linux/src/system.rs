@@ -36,11 +36,12 @@
 //!   unmapped, the window minimized, or suspended: on another workspace or
 //!   covered, where the compositor says so), active while one of the
 //!   app's windows has the focus, inactive otherwise;
-//! - the time zone (`timeZone()`): the process's own (`TZ`, when it names
-//!   a zone: its local times follow it), else the system's as systemd's
-//!   `timedated` keeps it (`org.freedesktop.timedate1`'s `Timezone` on the
-//!   system bus, live: a change of the setting comes as a property
-//!   change), else the zone `/etc/localtime` links to, else
+//! - the time zone (`timeZone()`): the process's own (the zone `TZ` names,
+//!   `GMT` or `Europe/Berlin`, as the C library reads it:
+//!   `TimeZone::posix`; its local times follow it), else the system's as
+//!   systemd's `timedated` keeps it (`org.freedesktop.timedate1`'s
+//!   `Timezone` on the system bus, live: a change of the setting comes as
+//!   a property change), else the zone `/etc/localtime` links to, else
 //!   `/etc/timezone`'s.
 //!
 //! Safe area and keyboard height are zero: desktop windows have neither.
@@ -518,29 +519,23 @@ fn watch_portal() {
     );
 }
 
-/// The time zone (`timeZone()`): the process's own (`TZ`), else the
-/// system's.
+/// The time zone (`timeZone()`): the process's own (the zone `TZ` names),
+/// else the system's.
 fn time_zone() -> TimeZone {
-    // As `Intl` takes `TZ`: a zone's name, not a POSIX rule (`CET-1CEST`).
-    let own = std::env::var("TZ")
-        .ok()
-        .filter(|tz| {
-            let tz = tz.trim_start_matches(':');
-            tz.contains('/') || tz == "UTC"
-        })
-        .and_then(|tz| TimeZone::parse(&tz));
-    own.or_else(|| SYSTEM.with(|s| s.borrow().time_zone))
-        .or_else(|| {
-            std::fs::read_link("/etc/localtime")
-                .ok()
-                .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
-        })
-        .or_else(|| {
-            std::fs::read_to_string("/etc/timezone")
-                .ok()
-                .and_then(|name| TimeZone::parse(name.trim()))
-        })
-        .unwrap_or_default()
+    TimeZone::posix(std::env::var("TZ").ok().as_deref(), || {
+        SYSTEM
+            .with(|s| s.borrow().time_zone)
+            .or_else(|| {
+                std::fs::read_link("/etc/localtime")
+                    .ok()
+                    .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
+            })
+            .or_else(|| {
+                std::fs::read_to_string("/etc/timezone")
+                    .ok()
+                    .and_then(|name| TimeZone::parse(name.trim()))
+            })
+    })
 }
 
 /// Follows the system's time zone as `timedated` keeps it: a change of the
@@ -656,6 +651,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::OpenUrl { id, url } => open_url(surface, *id, url),
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)

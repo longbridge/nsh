@@ -246,7 +246,7 @@ if (host.available()) {
 | Remote image, video source, web view source or `html` | Nothing is shown, and the element's `onError` reports it with `code` `"ERR_ACCESS_DENIED"`. A web view's navigation to a host not granted is cancelled and reported the same way. |
 | Status bar change, canvas image | Nothing changes or is drawn; the refusal is logged. |
 | Clipboard | Every function of `Clipboard` rejects with `ERR_ACCESS_DENIED`, `permission` `"clipboard"` and `resource` `""`; the system clipboard is never touched. |
-| Picker | `pickImages` shows nothing and rejects with `ERR_ACCESS_DENIED`, `permission` `"picker"` and `resource` `""`. |
+| Picker | `pickImages` and `pickFiles` show nothing and reject with `ERR_ACCESS_DENIED`, `permission` `"picker"` and `resource` `""`. |
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |

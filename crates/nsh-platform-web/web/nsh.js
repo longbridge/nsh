@@ -5531,6 +5531,7 @@ class Player {
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
+      case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
@@ -5712,6 +5713,55 @@ class Player {
         for (const p of picked) {
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, p.width, p.height, p.lastModified));
+        }
+        return w.nsh_picked(request);
+      });
+    };
+    input.addEventListener("change", () => answer([...(input.files ?? [])]));
+    input.addEventListener("cancel", () => answer([]));
+    this.root.append(input);
+    input.click();
+  }
+
+  /**
+   * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
+   * bytes and names stay as they are; a file larger than `maxBytes` is left
+   * out. A cancelled input sends none.
+   */
+  pickFiles(request, limit, accept, maxBytes) {
+    const app = this.app;
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) input.accept = accept;
+    input.multiple = limit > 1;
+    input.style.display = "none";
+    let answered = false;
+    const answer = async (files) => {
+      if (answered) return;
+      answered = true;
+      input.remove();
+      const picked = [];
+      for (const file of files.slice(0, limit)) {
+        if (file.size > maxBytes) {
+          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          continue;
+        }
+        try {
+          picked.push({
+            name: file.name,
+            type: file.type,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            lastModified: file.lastModified,
+          });
+        } catch {
+          // Unreadable: left out.
+        }
+      }
+      if (app !== this.app) return;
+      this.call((w) => {
+        for (const p of picked) {
+          this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
+            w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }
         return w.nsh_picked(request);
       });
@@ -6408,7 +6458,11 @@ class Player {
    * `onContextMenu` of the nearest view around `e`'s target that listens,
    * unless a field or selectable text is nearer (it keeps the browser's
    * menu); true when a view took it. The browser raises `contextmenu` for
-   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   * right clicks, Control-clicks on macOS, the keyboard's Menu key and
+   * Shift+F10 (on the focused element), and screen readers' "show menu"
+   * action. Those come with no pointer (the DOM's `pointerType` `""`): the
+   * event names none (`pointerType: null`) and is placed at the view's
+   * bottom-start corner, where a menu opened below it starts.
    */
   contextMenu(e) {
     const view = this.viewOf(e.target);
@@ -6416,12 +6470,20 @@ class Player {
     for (const el of this.ancestors(view)) {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
-        const [pageX, pageY] = this.point(e);
         const r = el.getBoundingClientRect();
+        // A `MouseEvent` (no `pointerType`) is a browser's older mouse one.
+        const pointerType = e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        let at = e;
+        if (pointerType === null) {
+          const rtl = getComputedStyle(el).direction === "rtl";
+          at = { clientX: rtl ? r.right : r.left, clientY: r.bottom, target: e.target };
+        }
+        const [pageX, pageY] = this.point(at);
         this.event(el._id, "onContextMenu", {
-          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          position: { x: at.clientX - r.left, y: at.clientY - r.top },
           pagePosition: { x: pageX, y: pageY },
           modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+          pointerType: ["mouse", "pen", "touch"].includes(pointerType) ? pointerType : pointerType && "mouse",
         });
         return true;
       }

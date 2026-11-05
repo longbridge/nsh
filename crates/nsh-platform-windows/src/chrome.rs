@@ -158,6 +158,8 @@ pub(crate) struct Chrome {
     inactive: Cell<bool>,
     /// The application menu.
     menu: RefCell<Option<Arc<[MenuItem]>>>,
+    /// The window stays out of the taskbar (`Window.setSkipTaskbar`).
+    pub(crate) skip_taskbar: Cell<bool>,
     /// The menu bar shown (`HMENU`, 0 for none).
     bar: Cell<isize>,
     /// What the menu bar's items do, by command id - 1.
@@ -324,6 +326,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
+        DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
             // Restoring an already maximized or snapped window would change
             // its bounds when the caller only asked to focus it.
@@ -335,6 +338,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
@@ -408,6 +414,49 @@ fn set_level(hwnd: HWND, level: WindowLevel) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         )
     };
+}
+
+/// Keeps the window out of the taskbar or puts it back. The taskbar
+/// forgets a deleted tab when the window is shown again (or Explorer
+/// restarts), so the choice is kept and applied again on every show
+/// ([`reapply_skip_taskbar`]).
+pub(crate) fn set_skip_taskbar(surface: &Surface, skip: bool) {
+    surface.chrome.skip_taskbar.set(skip);
+    apply_skip_taskbar(surface.hwnd(), skip);
+}
+
+/// [`set_skip_taskbar`]'s choice again, after the window was shown.
+pub(crate) fn reapply_skip_taskbar(surface: &Surface) {
+    if surface.chrome.skip_taskbar.get() {
+        apply_skip_taskbar(surface.hwnd(), true);
+    }
+}
+
+fn apply_skip_taskbar(hwnd: HWND, skip: bool) {
+    use windows::Win32::{
+        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+        UI::Shell::{ITaskbarList, TaskbarList},
+    };
+    if hwnd.is_invalid() || !top_level(hwnd) {
+        return;
+    }
+    // SAFETY: COM is initialized on the UI thread (`OleInitialize`); plain
+    // calls on a live window.
+    let result = unsafe {
+        CoCreateInstance::<_, ITaskbarList>(&TaskbarList, None, CLSCTX_INPROC_SERVER).and_then(
+            |taskbar| {
+                taskbar.HrInit()?;
+                if skip {
+                    taskbar.DeleteTab(hwnd)
+                } else {
+                    taskbar.AddTab(hwnd)
+                }
+            },
+        )
+    };
+    if let Err(err) = result {
+        log::warn!("skip taskbar: {err}");
+    }
 }
 
 /// Asks the message loop to show the context menu waiting; it takes the
