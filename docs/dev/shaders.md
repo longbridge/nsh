@@ -132,7 +132,7 @@ is. Views out of sight stop rendering until they show again.
 | Platform | Ticks on | Shows a frame as | Out of sight |
 |---|---|---|---|
 | Linux (GTK 4) | each view's tick callback | a `GdkMemoryTexture` appended in the view's snapshot, after the background, under text, images and children | `reveal` on the frame clock's layout, for views outside a clipping ancestor or the window |
-| macOS (AppKit) | one frame callback of the surface's display link, at the window's backing scale | a `CGImage`, the contents of a sublayer under the children (`decor.rs` shapes it) | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
+| macOS (AppKit) | one frame callback of the surface's display link, at the window's backing scale (views that only read `nsh.time` do not tick a hidden window: `ShaderView::time_only`) | a `CGImage`, the contents of a sublayer under the children (`decor.rs` shapes it) | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
 | iOS | a `CADisplayLink` of its own, at the screen's scale | a `CGImage` in a sublayer under the children | views outside any window render once back in one |
 | Android | the UI-thread animator's `Choreographer`, kept ticking by `UiAnimation::outputs` while a view wants a frame | a bitmap of `Box.java`, filled by `NshView.shaderFrame` | — |
 | Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children (made again after a device loss) | `reveal`: hidden, concealed or detached views |

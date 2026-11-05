@@ -626,6 +626,19 @@ impl ShaderView {
             || self.pending()
     }
 
+    /// Whether only its time asks for frames: its shader reads `nsh.time`
+    /// and runs, and nothing it reads changed since the last frame
+    /// rendered, nor does a transition run. Such frames never end by
+    /// themselves; a platform may stop them while its window does not show
+    /// (the clock goes on, and the next frame shows the current time).
+    pub fn time_only(&self) -> bool {
+        self.layer
+            .as_ref()
+            .is_some_and(|l| l.shader.animated() && !l.paused)
+            && !self.dirty
+            && self.transition.is_none()
+    }
+
     /// Whether a frame is on its way back from the GPU.
     pub fn pending(&self) -> bool {
         self.target.as_ref().is_some_and(|t| {
@@ -1030,14 +1043,18 @@ mod tests {
         let source = "fn shade(uv: vec2f) -> vec4f { return vec4f(min(nsh.time / 1000.0, 1.0), 0.0, 0.0, 1.0); }";
         view.set_layer(Some(layer(source, &[])));
         assert!(view.wants_frame());
+        // A new layer has a frame to render before only time is left.
+        assert!(!view.time_only());
         let late = Instant::now() + Duration::from_secs(500);
         let f = frame_at(&mut view, &renderer, late);
+        assert!(view.time_only());
         // Bgra: red is the third byte; about half a second in a thousand.
         let red = pixel(&f, 0, 0)[2];
         assert!((120..=135).contains(&red), "{red}");
         let mut paused = (*layer(source, &[])).clone();
         paused.paused = true;
         view.set_layer(Some(Arc::new(paused)));
+        assert!(!view.time_only());
         frame(&mut view, &renderer);
         // What was still on its way comes back; then nothing is due.
         for _ in 0..10 {

@@ -498,7 +498,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
 - `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked: a surface
-  that wants frames falls back to a main-queue timer after 100 ms without one (`surface.rs`), or transitions never end.
+  that wants frames falls back to a main-queue timer after 100 ms without one (`surface.rs`), or transitions never end;
+  endless animations alone do not keep the timer going, or a hidden window with a spinner ticks at 60 Hz for good.
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).

@@ -13,6 +13,13 @@
 //! (list binds while scrolling) spread over frames instead of one frame
 //! taking them all. An idle surface applies a batch as soon as it lands.
 //!
+//! The display link does not fire while none of the window shows; a
+//! main-queue timer then ticks in its place for work that ends by itself
+//! ([`Surface::watch_link`]). Endless animations alone (the graph's loops
+//! with no end, keyframe animations that repeat for good, shaders that only
+//! read their time) do not keep it going: they wait for the display link, and being timed, continue from
+//! the current time when the window shows again.
+//!
 //! The one exception to "the main thread never waits for JS": when the
 //! window resizes the root ([`Surface::resized`]), the main thread waits
 //! for the engine's layout at the new size, at most [`RESIZE_WAIT`], and
@@ -211,8 +218,10 @@ pub(crate) struct Surface {
     /// ([`Surface::apply_queued`]).
     queued: RefCell<VecDeque<Message>>,
     /// Frame callbacks of the platform's own animations (scroll glides,
-    /// transitions): called on every frame while they return true.
-    frame_callbacks: RefCell<Vec<FrameCallback>>,
+    /// transitions): called on every frame until they return
+    /// [`Next::Stop`]; each with whether it said [`Next::Endless`] last
+    /// (a new one has not yet).
+    frame_callbacks: RefCell<Vec<(FrameCallback, bool)>>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out): what [`Surface::animating`] does not
     /// count.
@@ -231,6 +240,9 @@ pub(crate) struct Surface {
     /// fallback timer is scheduled ([`Surface::watch_link`]).
     last_tick: Cell<f64>,
     fallback: Cell<bool>,
+    /// The last frame left only endless work, and nothing asked for frames
+    /// since ([`Surface::ensure_ticking`]): the fallback timer stops.
+    endless_only: Cell<bool>,
     /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
     /// resizes do not wait until it reports one done.
     resize_late: Cell<bool>,
@@ -259,8 +271,55 @@ pub(crate) struct Surface {
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
-/// time in seconds, returns whether it wants the next frame.
-pub(crate) type FrameCallback = Box<dyn FnMut(&Rc<Surface>, f64) -> bool>;
+/// time in seconds, returns what it wants next.
+pub(crate) type FrameCallback = Box<dyn FnMut(&Rc<Surface>, f64) -> Next>;
+
+/// What a frame callback wants after a frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Next {
+    /// No more frames: the callback ends.
+    Stop,
+    /// The next frame.
+    Frame,
+    /// The next frame, for work that never ends by itself (a keyframe
+    /// animation that repeats for good): it does not keep the fallback
+    /// timer going while none of the window shows ([`Surface::watch_link`]).
+    Endless,
+}
+
+impl From<bool> for Next {
+    /// `true`: the next frame.
+    fn from(more: bool) -> Self {
+        if more { Next::Frame } else { Next::Stop }
+    }
+}
+
+/// What the fallback timer does at one of its checks ([`Surface::watch_link`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Fallback {
+    /// Nothing wants frames, or the link stalled with only endless work
+    /// left: the timer stops.
+    Stop,
+    /// The link ticks: check again later.
+    Watch,
+    /// The link stalled while work that ends by itself wants frames: the
+    /// timer ticks a frame.
+    Tick,
+}
+
+/// The fallback timer's decision: `wants_frames`, as
+/// [`Surface::wants_frames`]; `stalled`, the display link has not fired
+/// for a while; `endless_only`, the last frame left only endless work and
+/// nothing asked for frames since.
+fn fallback(wants_frames: bool, stalled: bool, endless_only: bool) -> Fallback {
+    if !wants_frames || (stalled && endless_only) {
+        Fallback::Stop
+    } else if stalled {
+        Fallback::Tick
+    } else {
+        Fallback::Watch
+    }
+}
 
 impl Surface {
     /// A surface with no app yet.
@@ -297,6 +356,7 @@ impl Surface {
             perf_on: Arc::new(AtomicBool::new(false)),
             last_tick: Cell::new(0.0),
             fallback: Cell::new(false),
+            endless_only: Cell::new(false),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
             resized: RefCell::default(),
@@ -399,6 +459,7 @@ impl Surface {
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
+        self.endless_only.set(false);
         #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
@@ -680,12 +741,15 @@ impl Surface {
         }
     }
 
-    /// Calls `f` on every display frame while it returns true.
-    pub(crate) fn add_frame_callback(
+    /// Calls `f` on every display frame while it wants the next one (true
+    /// or a [`Next`]).
+    pub(crate) fn add_frame_callback<R: Into<Next>>(
         self: &Rc<Self>,
-        f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static,
+        mut f: impl FnMut(&Rc<Surface>, f64) -> R + 'static,
     ) {
-        self.frame_callbacks.borrow_mut().push(Box::new(f));
+        self.frame_callbacks
+            .borrow_mut()
+            .push((Box::new(move |surface, now| f(surface, now).into()), false));
         self.ensure_ticking();
     }
 
@@ -743,9 +807,27 @@ impl Surface {
             || !self.frame_callbacks.borrow().is_empty()
     }
 
+    /// Whether frames are wanted for work that ends by itself: as
+    /// [`Surface::wants_frames`], without endless animations (the graph's
+    /// loops with no end, frame callbacks that said [`Next::Endless`]).
+    fn wants_finishing_frames(&self) -> bool {
+        self.js_frame.get()
+            || !self.queued.borrow().is_empty()
+            || self.anim.borrow().finishing()
+            || self
+                .frame_callbacks
+                .borrow()
+                .iter()
+                .any(|(_, endless)| !endless)
+    }
+
     /// Runs the display link while animations run or JS wants a frame (or
     /// a performance monitor measures).
     pub(crate) fn ensure_ticking(self: &Rc<Self>) {
+        // Something may want frames that the last one did not see (a
+        // batch, an animation): a stalled link is made up for again until
+        // a frame shows that only endless work is left.
+        self.endless_only.set(false);
         if !self.wants_frames() {
             if self.perf.borrow().is_none() {
                 return;
@@ -806,24 +888,31 @@ impl Surface {
     /// and animations must still end (a transition detaches its views when
     /// it does, a modal reports its dismissal). While frames are wanted and
     /// the link has not ticked for 100 ms, a 60 Hz main-queue timer ticks
-    /// instead.
+    /// instead, until a frame leaves only endless animations: they wait for
+    /// the link, so a hidden window with a spinner does not keep the main
+    /// thread busy ([`fallback`]). [`Surface::ensure_ticking`] starts it
+    /// again.
     fn watch_link(self: &Rc<Self>) {
         if self.fallback.replace(true) {
             return;
         }
         fn check(key: u64) {
             let Some(surface) = find(key) else { return };
-            if !surface.wants_frames() {
-                surface.fallback.set(false);
-                return;
-            }
             let now = objc2_quartz_core::CACurrentMediaTime();
             let stalled = now - surface.last_tick.get() > 0.1;
-            if stalled {
-                surface.last_tick.set(now);
-                surface.frame(now, 1.0 / 60.0);
-            }
-            let delay = if stalled { 16 } else { 100 };
+            let delay = match fallback(surface.wants_frames(), stalled, surface.endless_only.get())
+            {
+                Fallback::Stop => {
+                    surface.fallback.set(false);
+                    return;
+                }
+                Fallback::Watch => 100,
+                Fallback::Tick => {
+                    surface.last_tick.set(now);
+                    surface.frame(now, 1.0 / 60.0);
+                    16
+                }
+            };
             after(delay, move || check(key));
         }
         let key = self.key;
@@ -864,9 +953,12 @@ impl Surface {
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
-        let mut kept: Vec<FrameCallback> = callbacks
+        let mut kept: Vec<(FrameCallback, bool)> = callbacks
             .into_iter()
-            .filter_map(|mut f| f(self, now).then_some(f))
+            .filter_map(|(mut f, _)| match f(self, now) {
+                Next::Stop => None,
+                next => Some((f, next == Next::Endless)),
+            })
             .collect();
         {
             let mut added = self.frame_callbacks.borrow_mut();
@@ -883,6 +975,8 @@ impl Surface {
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }
+        self.endless_only
+            .set(self.wants_frames() && !self.wants_finishing_frames());
     }
 
     /// Applies the batches that waited for this frame, in order, until
@@ -969,4 +1063,30 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     let r = f();
     CATransaction::commit();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fallback_ticks_only_for_work_that_ends() {
+        // The link fires: the timer only watches it.
+        assert_eq!(fallback(true, false, false), Fallback::Watch);
+        assert_eq!(fallback(true, false, true), Fallback::Watch);
+        // Stalled (the window hidden): a transition, a batch, a JS frame
+        // request get their frames.
+        assert_eq!(fallback(true, true, false), Fallback::Tick);
+        // Only a spinner is left: it waits for the link.
+        assert_eq!(fallback(true, true, true), Fallback::Stop);
+        // Nothing wants frames.
+        assert_eq!(fallback(false, true, false), Fallback::Stop);
+        assert_eq!(fallback(false, false, false), Fallback::Stop);
+    }
+
+    #[test]
+    fn frame_callbacks_returning_bools_want_frames_or_stop() {
+        assert_eq!(Next::from(true), Next::Frame);
+        assert_eq!(Next::from(false), Next::Stop);
+    }
 }

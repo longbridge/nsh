@@ -111,7 +111,10 @@ belong to the app, which owns retention and its storage budget.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
   link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
   screen's `maximumFramesPerSecond` (set again when the link resumes). The link does not fire while the window is
-  occluded or minimized or the screen is locked; a main-queue timer then ticks instead, so animations still end.
+  occluded or minimized or the screen is locked; a main-queue timer then ticks instead, so animations still end. Endless
+  animations alone (the graph's loops with no end, keyframe `animation`s that repeat for good, shaders that only read
+  `nsh.time`) do not keep that timer going: they wait for the link and, being timed, continue from the current time when the window shows again (a loop
+  skips the runs it missed). JS frame requests keep it going as before.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view; `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
   Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
@@ -215,7 +218,7 @@ it reads is `nsh_engine::perf` (`docs/dev/performance.md`):
   link runs on every refresh, and each refresh closes a frame: the main-thread time since the previous one (batches
   with Core Animation's commit, which is where content layers draw; ticks; wheel, drag and key handling).
   Refreshes in which nothing changed are not frames. The fallback timer closes frames at 60 Hz while the link is
-  stopped (the screen locked).
+  stopped (the screen locked) and work that ends by itself runs.
 - Batches carry when the sink got them (only while measuring), for `HOP`.
 - The engine records its commits (`EngineControl::set_perf_monitor`).
 

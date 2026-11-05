@@ -356,8 +356,19 @@ impl Step {
                                 }
                             }
                             **current = Step::new(template);
-                            at = end;
-                            *start = Some(end);
+                            // A loop with no end that fell whole runs behind
+                            // (its frames stopped while none of the surface
+                            // showed) skips them rather than playing each
+                            // again: it continues from the current time.
+                            let run = end - at;
+                            let behind = if iterations.is_none() && run > 0.0 {
+                                ((now - end) / run).floor()
+                            } else {
+                                0.0
+                            };
+                            at = end + behind * run;
+                            *runs = runs.saturating_add(behind as u32);
+                            *start = Some(at);
                         }
                     }
                 }
@@ -1778,6 +1789,38 @@ mod tests {
         g.set(1, 7.0, &mut f);
         g.apply(AnimationOp::ResetComposite { key: 2 }, &mut f);
         assert_eq!(g.value(1), Some(10.0));
+    }
+
+    #[test]
+    fn endless_loops_continue_from_the_current_time() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1]);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 1,
+                key: 1,
+                spec: Composite::Loop {
+                    child: Box::new(Composite::Run {
+                        node: 1,
+                        driver: timing(360.0, 900.0),
+                    }),
+                    iterations: None,
+                    reset: true,
+                },
+            },
+            &mut f,
+        );
+        run(&mut g, &mut f, 0.0, 0.1);
+        // No frames for an hour (the window was hidden): one frame takes
+        // the loop to where it is now, half way through its 4000th run.
+        g.tick(3600.45, &mut f);
+        let v = g.value(1).unwrap();
+        assert!((v - 180.0).abs() < 0.01, "{v}");
+        g.tick(3600.675, &mut f);
+        let v = g.value(1).unwrap();
+        assert!((v - 270.0).abs() < 0.01, "{v}");
+        assert!(g.is_animating() && !g.is_finishing() && f.is_empty());
     }
 
     #[test]

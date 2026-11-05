@@ -6,7 +6,10 @@
 //!
 //! A view that animates gets a [`Live`] in [`ViewState::live`] and a frame
 //! callback ([`Surface::add_frame_callback`]) that runs until nothing is
-//! left to animate; other views carry nothing and cost nothing.
+//! left to animate; other views carry nothing and cost nothing. While only
+//! a keyframe animation that repeats for good is left ([`Live::endless`]),
+//! the callback says so ([`Next::Endless`]), and a hidden window does not
+//! tick for it.
 //!
 //! Frames and styles are animated by writing the in-between values into
 //! the view's state (`frame`, `style`) on every frame while [`Live`] keeps
@@ -34,7 +37,10 @@ use nsh_core::{
     transition::{self, Extra},
 };
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// `E · m`: `extra` (scale, then rotation, then the shift), then `m` (row
 /// vectors, in the view's local space about its transform origin).
@@ -224,38 +230,43 @@ fn ancestor_dying(view: &NshView) -> bool {
 }
 
 /// One display frame (`now` in ms) of `view`'s animations: whether it
-/// wants the next one.
-fn tick(view: &NshView, now: f64) -> bool {
+/// wants the next one, and for endless work only.
+fn tick(view: &NshView, now: f64) -> Next {
     // A view deleted inside a deleted subtree leaves with its ancestor
     // instead of fading on its own (deletions arrive in any order, so this
     // is decided once the batch is applied).
     let starting_out = view.state().live.as_ref().is_some_and(|l| l.leaving());
     let inherited = starting_out && ancestor_dying(view);
 
-    let step = {
+    let (step, endless) = {
         let mut s = view.state_mut();
         let s = &mut *s;
         let Some(mut live) = s.live.take() else {
-            return false;
+            return Next::Stop;
         };
         if inherited {
             live.leave_with_ancestor();
         }
         let step = live.step(now, &mut s.frame, &mut s.style);
+        let endless = live.endless();
         if !live.idle() {
             s.live = Some(live);
         }
-        step
+        (step, endless)
     };
 
     if step.removed {
         view.unparent();
-        return false;
+        return Next::Stop;
     }
     view.moved();
     if step.restyled {
         // Text and canvas drawings may use the style (tint).
         view.redraw();
     }
-    !step.finished
+    match (step.finished, endless) {
+        (true, _) => Next::Stop,
+        (false, true) => Next::Endless,
+        (false, false) => Next::Frame,
+    }
 }

@@ -11,7 +11,9 @@
 //! `CGImage`, the layer's contents, stretched over the view's box. A view
 //! out of sight (a list row scrolled away, a screen under another) stops
 //! rendering and starts again once it shows ([`shown`], from
-//! [`crate::mount::Mounter::revisit`]).
+//! [`crate::mount::Mounter::revisit`]). Views that only their time keeps
+//! rendering ([`ShaderView::time_only`]) are endless work for the surface
+//! ([`Next::Endless`]): a hidden window does not tick for them.
 //!
 //! Effects and transitions ([`ShaderRole`]) draw their children through
 //! the shader: the children move into a container (as for clipping,
@@ -56,7 +58,10 @@ use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGImage;
 use objc2_quartz_core::{CALayer, kCAGravityResize};
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// A surface's shader views: the GPU device, and the views rendering.
 #[derive(Default)]
@@ -901,23 +906,38 @@ fn start(surface: &Rc<Surface>) {
     }
     shaders.running.set(true);
     surface.add_frame_callback(|surface, _| {
-        let more = frame(surface);
-        if !more {
+        let next = frame(surface);
+        if next == Next::Stop {
             surface.shaders.running.set(false);
         }
-        more
+        next
     });
 }
 
-/// One display frame: each view renders and collects; whether a view has
-/// more to render.
-fn frame(surface: &Rc<Surface>) -> bool {
+/// What the views left to render want of the next frame, each given by
+/// whether only its time asks for frames ([`ShaderView::time_only`], no
+/// picture due): none, nothing; all of them, endless frames (a hidden
+/// window does not tick for them).
+fn frames_wanted(time_only: impl IntoIterator<Item = bool>) -> Next {
+    let mut next = Next::Stop;
+    for time_only in time_only {
+        if !time_only {
+            return Next::Frame;
+        }
+        next = Next::Endless;
+    }
+    next
+}
+
+/// One display frame: each view renders and collects; what the views left
+/// to render want next.
+fn frame(surface: &Rc<Surface>) -> Next {
     let shaders = &surface.shaders;
     let Some(renderer) = shaders.renderer() else {
-        return false;
+        return Next::Stop;
     };
     let Ok(mounter) = surface.mounter.try_borrow() else {
-        return true;
+        return Next::Frame;
     };
     let views = std::mem::take(&mut *shaders.views.borrow_mut());
     let now = Instant::now();
@@ -951,7 +971,12 @@ fn frame(surface: &Rc<Surface>) -> bool {
     let mut views = shaders.views.borrow_mut();
     kept.append(&mut views);
     *views = kept;
-    !views.is_empty()
+    frames_wanted(views.iter().map(|view| {
+        view.state()
+            .shader
+            .as_ref()
+            .is_some_and(|s| s.view.time_only() && !s.stale && !s.backdrop_stale)
+    }))
 }
 
 /// Renders and collects `view`'s frame, showing one that came back;
@@ -1297,6 +1322,16 @@ mod tests {
         state.role = role;
         state.view.set_layer(Some(Arc::new(layer)));
         state
+    }
+
+    #[test]
+    fn views_ticking_only_for_their_time_want_endless_frames() {
+        assert_eq!(frames_wanted([]), Next::Stop);
+        assert_eq!(frames_wanted([true]), Next::Endless);
+        assert_eq!(frames_wanted([true, true]), Next::Endless);
+        // One with a change to render or a picture due: frames that end.
+        assert_eq!(frames_wanted([true, false]), Next::Frame);
+        assert_eq!(frames_wanted([false]), Next::Frame);
     }
 
     /// Shaders whose GPU device was looked for and not found.

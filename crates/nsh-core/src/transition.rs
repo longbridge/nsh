@@ -123,6 +123,21 @@ impl Live {
             && self.keyframes.is_none()
     }
 
+    /// True when all that animates never ends by itself: a keyframe
+    /// animation that repeats for good, nothing else. A backend's frame
+    /// clock may stop while none of the surface shows and such work alone
+    /// runs; keyframes are timed from their start, so they continue from
+    /// the current time when frames come again.
+    pub fn endless(&self) -> bool {
+        self.frame.is_none()
+            && self.style.is_none()
+            && !self.color.running()
+            && self.presence.is_none()
+            && self.keyframes.as_ref().is_some_and(|run| {
+                run.animation.iterations.is_none() && run.animation.duration > 0.0
+            })
+    }
+
     /// True while a frame callback steps it.
     pub fn ticking(&self) -> bool {
         self.ticking
@@ -1242,6 +1257,40 @@ mod tests {
         assert!(close(live.opacity(), 0.5));
         let step = live.step(2000.0, &mut frame, &mut style);
         assert!(step.removed && step.finished && !live.ticking());
+    }
+
+    #[test]
+    fn only_repeating_keyframes_are_endless() {
+        let pulse = |iterations| ViewStyle {
+            animation: Some(KeyframeAnimation {
+                iterations,
+                ..KeyframeAnimation::new(Keyframes::Pulse)
+            }),
+            ..ViewStyle::default()
+        };
+        let (mut frame, mut style) = (Bounds::default(), Box::new(pulse(None)));
+        let mut live = Live::default();
+        assert!(!live.endless());
+        live.restyle(restyle(&ViewStyle::default(), &mut style, false).unwrap());
+        live.step(0.0, &mut frame, &mut style);
+        assert!(live.endless());
+        // Something that ends beside it: not endless until it does.
+        live.appear(LayoutAnimation::LINEAR.create.unwrap());
+        assert!(!live.endless());
+        live.step(10_000.0, &mut frame, &mut style);
+        assert!(!live.endless());
+        live.step(20_000.0, &mut frame, &mut style);
+        assert!(live.endless());
+        // Continues from the current time after frames stopped for a while.
+        live.step(3_600_250.0, &mut frame, &mut style);
+        assert!(live.endless() && close(live.opacity(), 0.75));
+
+        // A keyframe animation with a number of iterations ends.
+        let (old, mut style) = (ViewStyle::default(), Box::new(pulse(Some(2))));
+        let mut live = Live::default();
+        live.restyle(restyle(&old, &mut style, false).unwrap());
+        live.step(0.0, &mut frame, &mut style);
+        assert!(!live.endless());
     }
 
     fn text(colors: &[Color]) -> AttributedText {
