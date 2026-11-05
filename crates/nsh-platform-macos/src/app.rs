@@ -465,6 +465,7 @@ fn initial_environment() -> Environment {
         screen_color: true,
         file_requests: true,
         speech: true,
+        notifications: true,
         web_input: true,
         ..Environment::default()
     }
@@ -510,6 +511,12 @@ define_class!(
     unsafe impl NSObjectProtocol for Delegate {}
 
     unsafe impl NSApplicationDelegate for Delegate {
+        // Before launching finishes, or a press that starts the app is lost.
+        #[unsafe(method(applicationWillFinishLaunching:))]
+        fn will_finish_launching(&self, _notification: &NSNotification) {
+            crate::notifications::install();
+        }
+
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn should_terminate_after_last_window_closed(&self, _app: &NSApplication) -> bool {
             false

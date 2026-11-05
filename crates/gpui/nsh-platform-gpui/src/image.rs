@@ -524,6 +524,80 @@ impl Drop for Texture {
     }
 }
 
+/// A menu item's icon, as drawn for the screen.
+pub(crate) struct MenuIcon {
+    texture: Rc<Texture>,
+    /// An SVG: a template, painted in the color of the menu's text.
+    template: bool,
+    /// Its color's texture, the one a menu's rows last asked for.
+    tinted: RefCell<Vec<(Color, Rc<Texture>)>>,
+}
+
+impl MenuIcon {
+    /// Its size in pixels.
+    pub(crate) fn size(&self) -> (u32, u32) {
+        let size = self.texture.image().size(0);
+        (size.width.0.max(0) as u32, size.height.0.max(0) as u32)
+    }
+
+    /// What a row of text in `color` draws: an SVG in that color, a bitmap
+    /// as it is. A menu shows few colors (its text and its disabled text),
+    /// each painted once.
+    pub(crate) fn texture(&self, color: Color) -> Rc<Texture> {
+        if !self.template {
+            return self.texture.clone();
+        }
+        let mut tinted = self.tinted.borrow_mut();
+        if let Some((_, texture)) = tinted.iter().find(|(c, _)| *c == color) {
+            return texture.clone();
+        }
+        let image = self.texture.image();
+        let frames = image.as_bytes(0).map(|bytes| {
+            let ops = Ops {
+                mip: 0,
+                blur: 0,
+                matrix: None,
+                tint: Some(color),
+                alpha: ALPHA_STEPS,
+            };
+            vec![image::Frame::new(render_frame(bytes, self.size(), &ops))]
+        });
+        let texture = match frames {
+            Some(frames) => Rc::new(Texture::new(Arc::new(RenderImage::new(frames)))),
+            None => self.texture.clone(),
+        };
+        tinted.push((color, texture.clone()));
+        texture
+    }
+}
+
+/// Loads a menu item's icon off the main thread, at `scale` pixels per
+/// point; `done` runs on the main thread, before this returns when the
+/// icon is in memory. Dropping the load gives up.
+pub(crate) fn load_menu_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    scale: f32,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(picture, _)| MenuIcon {
+            texture: picture.texture.clone(),
+            template: matches!(picture.natural, Natural::Vector(_)),
+            tinted: RefCell::default(),
+        }));
+    };
+    fetch(
+        surface,
+        &source.at_pixel_ratio(scale),
+        nsh_core::desktop::menu_icon::want(scale),
+        Frames::First,
+        Priority::Visible,
+        None,
+        Box::new(done),
+    )
+}
+
 /// Removes the textures dropped since the last call from the atlases
 /// (paint phase: nothing painted in this frame was dropped, as nothing
 /// owns a dropped texture to paint it).

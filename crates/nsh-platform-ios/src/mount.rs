@@ -1709,6 +1709,9 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (Command::Notification(command), _) if id == nsh_core::ROOT_ID => {
+                crate::notifications::command(&self.control, &command);
+            }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
             }

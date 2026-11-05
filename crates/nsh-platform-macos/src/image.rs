@@ -913,6 +913,40 @@ pub(crate) fn load(
     }
 }
 
+/// A menu item's icon, as drawn for the screen.
+pub(crate) struct MenuIcon {
+    pub(crate) image: CFRetained<CGImage>,
+    /// An SVG: a template, which AppKit paints in the menu's text color.
+    pub(crate) template: bool,
+}
+
+/// Loads a menu item's icon off the main thread, at `scale` pixels per
+/// point; `done` runs on the main thread, before this returns when the
+/// icon is in memory. Dropping the load gives up.
+pub(crate) fn load_menu_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    scale: f32,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(picture, _)| MenuIcon {
+            image: picture.frames[0].clone(),
+            template: matches!(picture.natural, Natural::Vector(_)),
+        }));
+    };
+    fetch(
+        surface,
+        &source.at_pixel_ratio(scale),
+        nsh_core::desktop::menu_icon::want(scale),
+        Frames::First,
+        Look::default(),
+        Priority::Visible,
+        None,
+        Box::new(done),
+    )
+}
+
 /// The first frame of `picture`, loaded from `uri`, unless it is an SVG.
 fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
     match picture.natural {

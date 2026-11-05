@@ -16,7 +16,7 @@
 
 use std::{fmt, rc::Rc};
 
-use super::{Owner, cleanup, menus::MenuHandler, task::Answer};
+use super::{ImageSrc, Owner, cleanup, menus::MenuHandler, task::Answer};
 use crate::{
     desktop::{
         self, DesktopCommand, MenuAction, MenuBarMode, MenuRole, Shortcut, TitleBarStyle,
@@ -141,6 +141,7 @@ pub struct MenuItem {
     when: When,
     enabled: bool,
     checked: Option<bool>,
+    icon: Option<ImageSrc>,
     on_select: Option<MenuHandler>,
 }
 
@@ -161,6 +162,7 @@ impl MenuItem {
             when: When::Always,
             enabled: true,
             checked: None,
+            icon: None,
             on_select: None,
         }
     }
@@ -231,6 +233,19 @@ impl MenuItem {
         self
     }
 
+    /// The image beside its label, or beside a submenu's (the top-level
+    /// menus of a menu bar show their titles alone): a URL or an
+    /// [`asset!`](crate::asset)'s image, as [`image`](crate::element::image)
+    /// takes, fitted in the menu's icon size for the screen. An SVG takes
+    /// the color of the menu's text; a bitmap keeps its colors. It loads
+    /// off the main thread and shows once it has (one that fails to load
+    /// leaves the item without an icon, with a warning). GTK's menus show
+    /// no icons beside labels, and a terminal shows no images.
+    pub fn icon(mut self, src: impl Into<ImageSrc>) -> Self {
+        self.icon = Some(src.into());
+        self
+    }
+
     /// Runs `f` when it is chosen, by a click or its shortcut, under the
     /// owner that showed the menu.
     pub fn on_select(mut self, f: impl Fn() + 'static) -> Self {
@@ -275,6 +290,7 @@ fn decode(
                 label: item.label,
                 enabled: item.enabled,
                 items: decode(items, mac, owner, handlers),
+                icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
             },
             Kind::Action => {
                 let id = match item.on_select {
@@ -299,6 +315,7 @@ fn decode(
                     checked: item.checked,
                     role: item.role,
                     when: item.when,
+                    icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
                 })
             }
         })

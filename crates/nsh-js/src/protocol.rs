@@ -288,6 +288,12 @@ fn field_f32(obj: &Object<'_>, key: &str) -> rquickjs::Result<Option<f32>> {
     Ok(obj.get::<_, Option<f64>>(key)?.map(|v| v as f32))
 }
 
+/// An image source as `<Image>`'s `src` reads it: a string or an imported
+/// image. `None` for anything else, an empty string among them (no image).
+pub(crate) fn image_source(value: Value<'_>) -> Option<nsh_core::ImageSource> {
+    <nsh_core::ImageSource as HostValue>::decode(&Js(value), &mut HostCx::default())
+}
+
 /// A QuickJS value as host props read it.
 struct Js<'js>(Value<'js>);
 

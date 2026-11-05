@@ -484,6 +484,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         None => env.lifecycle,
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
+    env.notifications = flag("notifications").unwrap_or(env.notifications);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -498,6 +499,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
+        e.notifications = env.notifications;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {

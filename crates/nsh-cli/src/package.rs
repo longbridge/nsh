@@ -136,6 +136,17 @@ impl AppConfig {
         }
     }
 
+    /// Whether the app may show notifications: it declares no capabilities
+    /// (it gets them all) or grants `notifications`.
+    pub(crate) fn notifications(&self) -> bool {
+        match &self.capabilities {
+            None => true,
+            Some(capabilities) => {
+                capabilities.get("notifications") == Some(&serde_json::Value::Bool(true))
+            }
+        }
+    }
+
     /// Adds what the system shows when the app first asks for the
     /// microphone and speech recognition, which it requires (it ends an app
     /// that asks without them), when the app may recognize speech.
@@ -562,6 +573,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            notifications: config.notifications(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,

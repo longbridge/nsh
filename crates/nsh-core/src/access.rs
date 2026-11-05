@@ -371,6 +371,9 @@ pub struct Capabilities {
     /// microphone listens while a session runs, and the transcript reaches
     /// the app.
     pub speech: bool,
+    /// The app may show notifications and set its badge (`Notifications` of
+    /// `nsh`). The user's permission is the system's, on top of this.
+    pub notifications: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -471,6 +474,7 @@ impl Capabilities {
             clipboard: true,
             picker: true,
             speech: true,
+            notifications: true,
             open_url: Some(OpenUrlGrant::default()),
             // The host's functions are never granted without a declaration.
             ..Self::default()
@@ -498,13 +502,14 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 10] = [
+        const KNOWN: [&str; 11] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
             "picker",
             "speech",
+            "notifications",
             "openUrl",
             "process",
             "fs",
@@ -620,6 +625,11 @@ impl Capabilities {
             caps.speech = speech
                 .as_bool()
                 .ok_or("capabilities.speech must be a boolean")?;
+        }
+        if let Some(notifications) = obj.get("notifications") {
+            caps.notifications = notifications
+                .as_bool()
+                .ok_or("capabilities.notifications must be a boolean")?;
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -802,6 +812,9 @@ impl Capabilities {
         // Only when granted: older runtimes read what newer signers write.
         if self.speech {
             obj.insert("speech".into(), true.into());
+        }
+        if self.notifications {
+            obj.insert("notifications".into(), true.into());
         }
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
@@ -1345,6 +1358,12 @@ impl Access {
     /// Whether the app may recognize the user's speech (`Speech` of `nsh`).
     pub fn allows_speech(&self) -> bool {
         self.each(|c| c.speech)
+    }
+
+    /// Whether the app may show notifications and set its badge
+    /// (`Notifications` of `nsh`).
+    pub fn allows_notifications(&self) -> bool {
+        self.each(|c| c.notifications)
     }
 
     /// Whether `nsh/host` may call the embedding app's function `name`.
