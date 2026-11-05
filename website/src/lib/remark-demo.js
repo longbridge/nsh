@@ -1,3 +1,4 @@
+import { contentLang } from './markdown.js';
 import { demoPanelHtml } from './demo.js';
 
 // A page whose frontmatter names a demo (`demo: counter`) shows it after its
@@ -11,7 +12,7 @@ const SECTION_DEMO = /^<!--\s*demo:\s*([\w-]+)\s*-->$/;
 export function remarkDemo({ base = '/' } = {}) {
   return async (tree, file) => {
     const path = file?.path ?? file?.history?.[0] ?? '';
-    const lang = /[\\/]zh-CN[\\/]/.test(path) ? 'zh-CN' : 'en';
+    const lang = contentLang(path);
     for (const node of tree.children) {
       const section = node.type === 'html' && SECTION_DEMO.exec(node.value.trim());
       if (section) node.value = await demoPanelHtml(section[1], { base, lang });

@@ -1,7 +1,7 @@
 import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
 
-// One schema for every section and both locales; `tests/content.test.ts` checks
+// One schema for every section and locale; `tests/content.test.ts` checks
 // that the Chinese pages mirror the English ones.
 const schema = z.object({
   title: z.string().min(1),
@@ -27,6 +27,9 @@ export const collections = {
   docs: section('./docs'),
   elements: section('./elements'),
   modules: section('./modules'),
+  'ko-docs': section('./ko/docs'),
+  'ko-elements': section('./ko/elements'),
+  'ko-modules': section('./ko/modules'),
   'zh-docs': section('./zh-CN/docs'),
   'zh-elements': section('./zh-CN/elements'),
   'zh-modules': section('./zh-CN/modules'),

@@ -1,9 +1,11 @@
+import { contentLang } from './markdown.js';
 // GitHub alerts — `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`,
 // `> [!CAUTION]` — rendered as `<aside class="callout callout--note">` with a
 // title, so the same Markdown reads well on GitHub and on the site.
 
 const LABELS = {
   en: { note: 'Note', tip: 'Tip', important: 'Important', warning: 'Warning', caution: 'Caution' },
+  ko: { note: '참고', tip: '팁', important: '중요', warning: '경고', caution: '주의' },
   'zh-CN': { note: '备注', tip: '提示', important: '重要', warning: '警告', caution: '注意' },
 };
 
@@ -12,7 +14,7 @@ const MARKER = /^\[!(note|tip|important|warning|caution)\][ \t]*(?:\r?\n|$)/i;
 export function remarkCallouts() {
   return (tree, file) => {
     const path = file?.path ?? file?.history?.[0] ?? '';
-    const labels = /[\\/]zh-CN[\\/]/.test(path) ? LABELS['zh-CN'] : LABELS.en;
+    const labels = LABELS[contentLang(path)];
 
     const walk = (node) => {
       for (const child of node.children ?? []) walk(child);

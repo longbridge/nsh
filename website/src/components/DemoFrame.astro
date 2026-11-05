@@ -16,7 +16,11 @@ export interface Props {
 }
 
 const { name, lang = 'en', variant = 'panel', eager = false } = Astro.props;
-const zh = lang === 'zh-CN';
+const labels = {
+  en: { live: 'Running live', open: 'Open' },
+  'zh-CN': { live: '实时运行', open: '新标签页打开' },
+  ko: { live: '실행 중', open: '새 탭에서 열기' },
+}[lang];
 const html = variant === 'panel' ? await demoPanelHtml(name, { base: BASE, lang }) : phoneHtml(name, { base: BASE, lang, eager });
 const live = hasPlayer();
 ---
@@ -30,8 +34,8 @@ const live = hasPlayer();
       {live ? (
         <>
           <span class="demo-phone__live" aria-hidden="true"></span>
-          <span>{zh ? '实时运行' : 'Running live'} · <code>{name}.tsx</code></span>
-          <a href={playerHref(name, BASE)} target="_blank" rel="noopener">{zh ? '新标签页打开' : 'Open'} ↗</a>
+          <span>{labels.live} · <code>{name}.tsx</code></span>
+          <a href={playerHref(name, BASE)} target="_blank" rel="noopener">{labels.open} ↗</a>
         </>
       ) : (
         <span><code>{name}.tsx</code></span>

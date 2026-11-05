@@ -7,6 +7,7 @@
 // what native means, cross-platform, Rust first, foundations, then the
 // ways to ship, with dynamic and AI-generated UI on the same engine.
 import { BASE, REPO_URL, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, url, type Lang } from '../lib/site';
+import { localizedRoute } from '../lib/sections';
 import { hasPlayer } from '../lib/demo.js';
 import HeroField from './HeroField.astro';
 import Badge from './ui/Badge.astro';
@@ -17,7 +18,8 @@ import TabsTrigger from './ui/TabsTrigger.astro';
 export interface Props { lang?: Lang }
 const { lang = 'en' } = Astro.props;
 const zh = lang === 'zh-CN';
-const link = (path: string) => url(zh ? `zh-CN/${path}` : path);
+const ko = lang === 'ko';
+const link = async (path: string) => url(await localizedRoute(path, lang));
 const player = hasPlayer();
 // Structured data for search engines and AI answers: the site, the
 // framework as a free developer application, and its source code.
@@ -32,7 +34,7 @@ const jsonLd = JSON.stringify({
       url: `${SITE_URL}/`,
       description: zh
         ? 'Native Shell 是 Rust First 的全平台 Native UI 框架：一套代码构建 iOS、Android、macOS、Windows、Linux 和 Web 应用，每个平台都使用系统自己的界面与交互。'
-        : SITE_DESCRIPTION,
+        : ko ? 'Native Shell은 Rust 기반의 크로스 플랫폼 네이티브 UI 프레임워크입니다. iOS, Android, macOS, Windows, Linux, 웹에서 각 플랫폼 고유의 UI와 상호작용을 갖춘 앱을 하나의 코드로 만들 수 있습니다.' : SITE_DESCRIPTION,
       applicationCategory: 'DeveloperApplication',
       operatingSystem: 'iOS, Android, macOS, Windows, Linux, Web',
       license: 'https://www.apache.org/licenses/LICENSE-2.0',
@@ -109,6 +111,63 @@ const copy = zh
       principleBody: '同一个应用在每个平台上功能一致：一套组件、状态和逻辑。它在手指或指针下的手感、文本如何编辑、菜单如何打开——这些属于每个平台自己。',
       principleCta: '开始构建',
     }
+  : ko
+  ? {
+      eyebrow: '모든 플랫폼을 위한 Rust 기반 네이티브 UI 프레임워크',
+      title: ['하나의 코드로,', '어디서나 네이티브로'],
+      lead: 'Native Shell은 하나의 앱 모델과 도구 모음으로 iOS, Android, macOS, Windows, Linux, 웹 앱을 만드는 Rust 기반 UI 프레임워크입니다. 각 플랫폼 고유의 UI와 조작 방식을 따르며, 앱 출시 후에도 같은 엔진으로 팀이 작성하거나 AI가 생성한 화면을 배포할 수 있습니다.',
+      points: [
+        ['layers', '플랫폼 고유의 UI와 조작 방식', 'UIKit, Android View, AppKit, Win32, GTK 4, HTML이 제공하는 텍스트·입력기·접근성 기능을 사용합니다. 같은 메뉴가 데스크톱에서는 팝업으로, 휴대폰에서는 하단 시트로 열립니다.'],
+        ['braces', 'Rust로 앱 개발', '앱 전체를 네이티브 코드로 컴파일합니다. 화면을 빠르게 구성할 때는 TSX를 쓸 수 있습니다.'],
+        ['gauge', '변경된 뷰만 갱신', '스크롤과 애니메이션은 120 FPS로 동작하고, 화면이 정지해 있으면 CPU를 거의 쓰지 않습니다.'],
+        ['spark', 'AI와 함께 개발', '하나의 앱 모델과 nsh 명령줄 도구로 개발하며, AI가 생성한 UI에 서명해 출시 후에도 배포할 수 있습니다.'],
+      ],
+      start: '시작하기',
+      try: '플레이그라운드',
+      gallery: '갤러리',
+      meta: [
+        ['scale', '오픈 소스 · Apache-2.0'],
+        ['building', 'Longbridge에서 개발'],
+      ],
+      runsOn: '휴대폰, 데스크톱, 웹에서 실행되는 하나의 앱',
+      snippetLang: 'CLI',
+      demo: {
+        title: 'Chat.tsx',
+        badge: '실행 중',
+        frame: '실행 예제: AI 채팅',
+        caption: '갤러리의 AI 채팅 예제입니다. TSX로 작성한 앱이 Native Shell 웹 런타임을 통해 지금 브라우저에서 실행됩니다. 미리 작성한 답변을 로컬에서 차례로 표시합니다. 추천 항목이나 + 버튼을 누르면 대화를 다시 재생할 수 있습니다.',
+        pending: '실시간 미리보기를 빌드하려면 bun run dev 또는 cargo xtask web을 실행하세요.',
+      },
+      replay: '다시 재생',
+      nativeKicker: '네이티브 UI',
+      nativeTitle: '네이티브를 구성하는 두 가지 요소',
+      nativeLead: 'NSH에서는 컴포넌트, 상태, 로직, API를 공유합니다. 앱의 시각 디자인은 개발자가 정하고, 뷰와 조작 방식은 각 플랫폼의 기본 기능을 활용합니다.',
+      layers: [
+        { n: '01', title: '플랫폼의 기본 뷰', body: '각 백엔드는 플랫폼의 기본 요소로 UI를 구성합니다. UIKit 뷰, Android 뷰, AppKit 뷰, GTK 4 위젯, Direct2D와 DirectWrite로 그리는 Win32 창, CSS로 꾸민 HTML 요소를 사용합니다. 텍스트 입력과 선택, 입력기, 접근성도 플랫폼이 제공합니다.' },
+        { n: '02', title: '기기에 익숙한 조작 방식', body: '메뉴를 한 번만 작성해도 기기에 따라 자연스럽게 동작합니다. Menu는 포인터로 누르면 해당 위치에 팝업으로 열리고, 휴대폰에서는 하단 시트로 열립니다. ContextMenu는 마우스 오른쪽 버튼을 클릭하거나 터치 화면을 길게 눌러 엽니다.' },
+      ],
+      platHead: '플랫폼별 백엔드',
+      crossKicker: '크로스 플랫폼',
+      crossTitle: '휴대폰부터 데스크톱과 웹까지',
+      crossLead: '창 크기에 따라 레이아웃이 바뀌고, 기기에 따라 입력 방식이 달라집니다. 앱 로직은 공유하므로 개발자 한 명이 앱을 한 번 작성하고 모든 대상 플랫폼에서 검증할 수 있습니다.',
+      langKicker: 'Rust로 개발하기',
+      langTitle: '앱은 Rust로, 필요한 화면은 TSX로',
+      langLead: 'NSH 앱은 Rust만으로 작성할 수 있습니다. Rust의 소유권과 타입 체계, 스레드, crates.io의 크레이트를 활용하며 UI와 로직, 컴포넌트까지 네이티브 코드로 컴파일합니다. 빠르게 만들 화면이나 플러그인, 실행 중에 배포할 UI에는 TSX를 쓸 수 있습니다. 두 언어는 같은 엔진에서 기본 요소와 컴포넌트, 시그널을 공유하며, TSX 화면에서 직접 Rust 컴포넌트를 가져올 수 있습니다.',
+      langCta: 'Rust로 앱 만들기',
+      capKicker: '기반 기술',
+      capTitle: '각 플랫폼의 강점을 활용합니다',
+      capLead: '텍스트, 입력 처리, 네이티브 컴포넌트, 웹 렌더링은 UI 프레임워크에서 구현하기 까다로운 부분입니다. NSH는 이 작업을 각 플랫폼에 맡기고 엔진, 기본 컴포넌트, 개발 도구에 집중합니다.',
+      usesKicker: '배포 방식',
+      usesTitle: '앱 전체를 배포하거나, 출시 후 화면을 추가하거나',
+      usesLead: 'NSH로 독립 실행형 앱을 만들 수 있습니다. 같은 엔진으로 팀이 작성하거나 모델이 생성한 UI를 실행 중에도 받아올 수 있습니다. 새 UI는 서명된 모듈로 배포되며 호스트가 설정한 샌드박스에서 실행됩니다.',
+      howKicker: '동적 배포',
+      howTitle: '서버에서 생성하고 기기에서 검증합니다',
+      howLead: '모듈은 Ed25519로 서명한 .nshpkg 파일로 전달됩니다. 오프라인 루트 키가 릴리스 키를 인증하고 기기는 키의 폐기 여부를 확인합니다. 각 뷰는 메모리, 호출 시간, 노드 수를 제한한 QuickJS 가상 머신에서 모듈을 실행하며 호스트가 부여한 권한만 사용합니다.',
+      principleKicker: '설계 원칙',
+      principle: ['각 플랫폼의 뷰와 조작 방식,', '앱 고유의 디자인'],
+      principleBody: '컴포넌트, 상태, 로직을 공유하므로 어느 플랫폼에서나 같은 앱 기능을 제공합니다. 손가락이나 포인터로 조작할 때의 감각, 텍스트를 편집하고 메뉴를 여는 방식은 각 플랫폼을 따릅니다.',
+      principleCta: '첫 앱 만들기',
+    }
   : {
       eyebrow: 'Rust first · a native UI framework for every platform',
       title: ['Build once,', 'native everywhere.'],
@@ -172,6 +231,12 @@ const cross = zh
       { id: 'input', icon: 'pointer', title: '每种设备的输入方式', body: '桌面上是指针、悬停、右键、快捷键和焦点；手机上是触摸、手势、软键盘和页面导航。nsh/base 的基础组件同时承载两者，应用代码只有一份。', chips: ['Menu', 'ContextMenu', 'NavStack'] },
       { id: 'verify', icon: 'check', title: '在每个目标上验证', body: 'nsh test 无界面地运行应用的测试，也能在 macOS、Windows、Linux 和 GPUI 窗口、iOS 模拟器、Android 设备或浏览器里，用平台自己的输入运行同样的测试。', chips: ['nsh test', '--target ios', '--target web'] },
     ]
+  : ko
+  ? [
+      { id: 'layout', icon: 'layout', title: '창 크기에 맞춰 바뀌는 레이아웃', body: 'Taffy가 Flexbox와 Grid 레이아웃을 계산합니다. Tailwind의 반응형 분기점(md:, lg:)과 Rust에서 읽은 창 크기를 활용하면, 채팅 앱이 넓은 창에서는 사이드바·대화 목록·메시지를 나란히 표시하고 휴대폰에서는 한 화면씩 보여 줍니다.', chips: ['md:', 'window()', 'Taffy'] },
+      { id: 'input', icon: 'pointer', title: '기기에 맞는 입력 방식', body: '데스크톱에서는 포인터, 마우스 오버, 오른쪽 클릭, 단축키, 포커스를 사용하고, 휴대폰에서는 터치, 제스처, 화면 키보드, 페이지 탐색을 사용합니다. nsh/base 컴포넌트가 두 방식을 모두 처리하므로 앱 코드를 공유할 수 있습니다.', chips: ['Menu', 'ContextMenu', 'NavStack'] },
+      { id: 'verify', icon: 'check', title: '모든 플랫폼에서 같은 테스트 실행', body: 'nsh test로 화면 없이 테스트하거나 macOS·Windows·Linux·GPUI 창, iOS 시뮬레이터, Android 기기, 브라우저에서 같은 테스트를 실행할 수 있습니다. 각 환경에서는 플랫폼 고유의 입력을 사용합니다.', chips: ['nsh test', '--target ios', '--target web'] },
+    ]
   : [
       { id: 'layout', icon: 'layout', title: 'Layouts that reshape', body: 'Flexbox and grid laid out by Taffy, with Tailwind breakpoints (md:, lg:) and the window’s size in Rust: a chat app shows its sidebar, conversations and messages side by side in a wide window, and one screen at a time on a phone.', chips: ['md:', 'window()', 'Taffy'] },
       { id: 'input', icon: 'pointer', title: 'The input each device expects', body: 'A pointer, hover, right clicks, shortcuts and focus on the desktop; touches, gestures, the software keyboard and page navigation on phones. nsh/base’s components carry both, so the app’s code stays one.', chips: ['Menu', 'ContextMenu', 'NavStack'] },
@@ -187,6 +252,15 @@ const caps = zh
       { group: 'own', id: 'base', icon: 'layers', title: '行为来自 NSH，外观来自你', body: 'nsh/base 提供无样式的基础组件——导航、对话框、菜单、弹出层、标签页、复选框、面板——负责状态、焦点、键盘和无障碍；每个部分的样式由应用决定，用 Tailwind 类或类型化样式。', chips: ['nsh/base', 'Menu', 'Dialog', 'Tailwind'] },
       { group: 'own', id: 'tool', icon: 'terminal', title: '一个工具链，人和 AI 都能用', body: '一个 nsh 可执行文件负责创建、构建、类型检查、热更新开发、测试、打包和签名，覆盖每个目标平台，并自带 TSX 打包器和 TypeScript 检查器。每个 API 都有从 Rust 源码生成的类型声明，文档以 llms.txt 提供，AI agent 用同一套命令就能完成生成、运行、测试、修复和打包的整个循环。', chips: ['nsh run', 'nsh test', 'nsh package', 'llms.txt'] },
     ]
+  : ko
+  ? [
+      { group: 'platform', id: 'native', icon: 'cursor', title: '시스템의 텍스트 편집과 입력기', body: '텍스트 필드에는 UITextView, EditText, NSTextView, GTK의 TextView, 브라우저 입력란 등 플랫폼의 편집기를 사용합니다. 시스템의 입력기, 선택 핸들, 편집 메뉴, 단축키를 그대로 쓸 수 있습니다. Windows에서는 NSH 편집기가 DirectWrite와 IMM32를 사용합니다. 운영체제 업데이트로 텍스트·입력 기능이 향상되면 앱에도 반영됩니다.', chips: ['UITextView', 'EditText', 'NSTextView', 'GtkTextView', 'DirectWrite'] },
+      { group: 'platform', id: 'embed', icon: 'plug', title: '네이티브 컴포넌트 삽입', body: '지도, 웹 뷰, 동영상 플레이어, 호스트에 등록한 네이티브 뷰는 모두 앱의 뷰 계층에 자식 뷰로 들어갑니다. NSH가 다른 뷰와 함께 배치하므로 영역에 맞춰 잘리고 화면과 함께 스크롤되며 터치도 받습니다.', chips: ['WebView', 'Video', 'nativeComponent'] },
+      { group: 'platform', id: 'web', icon: 'globe', title: 'HTML로 구성한 웹 앱', body: '웹에서 NSH는 CSS로 꾸민 HTML 요소를 렌더링합니다. 스크롤, 텍스트 선택, 입력 처리는 브라우저가 맡습니다. nsh package --target web을 실행하면 파일 내용에 따라 이름이 정해진 정적 사이트를 생성해 CDN에 캐시할 수 있습니다.', chips: ['HTML', 'CSS', '--target web'] },
+      { group: 'own', id: 'fast', icon: 'gauge', title: '뷰를 재사용해 120 FPS 유지', body: '플랫폼은 각 요소의 뷰를 유지합니다. 시그널이 바뀌면 그 값을 읽은 표현식만 다시 평가하고, 영향을 받은 뷰만 프레임당 한 번 모아서 전달합니다. 네이티브 애니메이션은 프레임마다 JS를 호출할 필요가 없습니다. 채팅·폼·목록 같은 화면은 정지 상태에서 CPU를 거의 쓰지 않고, ProMotion 디스플레이에서 스크롤과 애니메이션은 120 FPS를 유지합니다.', chips: ['signal', 'MountBatch', 'Taffy', '120 FPS'] },
+      { group: 'own', id: 'base', icon: 'layers', title: '동작은 NSH가, 디자인은 앱이', body: 'nsh/base의 기본 컴포넌트는 정해진 스타일 없이 탐색, 대화 상자, 메뉴, 팝오버, 탭, 체크박스, 시트의 동작을 제공합니다. 상태, 포커스, 키보드 입력, 접근성은 컴포넌트가 관리하며 앱은 Tailwind 클래스나 타입이 지정된 스타일로 각 부분을 꾸밉니다.', chips: ['nsh/base', 'Menu', 'Dialog', 'Tailwind'] },
+      { group: 'own', id: 'tool', icon: 'terminal', title: '개발자와 AI 에이전트가 함께 쓰는 도구', body: 'nsh 실행 파일 하나로 모든 플랫폼에서 앱 생성, 빌드, 타입 검사, 핫 리로드, 테스트, 패키징, 서명을 수행합니다. TSX 번들러와 TypeScript 검사기도 내장되어 있습니다. 각 API의 타입 선언은 Rust 소스에서 생성되며 문서는 llms.txt로도 제공됩니다. AI 에이전트도 같은 명령어로 코드 생성부터 실행, 테스트, 수정, 패키징까지 진행할 수 있습니다.', chips: ['nsh run', 'nsh test', 'nsh package', 'llms.txt'] },
+    ]
   : [
       { group: 'platform', id: 'native', icon: 'cursor', title: 'The system’s text and input', body: 'Text fields are the platform’s editors — UITextView, EditText, NSTextView, GTK’s TextView, the browser’s — with its input methods, selection handles, editing menus and shortcuts; on Windows, NSH’s editor works with DirectWrite and IMM32. What a new OS release brings to text and input reaches the app with it.', chips: ['UITextView', 'EditText', 'NSTextView', 'GtkTextView', 'DirectWrite'] },
       { group: 'platform', id: 'embed', icon: 'plug', title: 'Native components that layer in', body: 'Maps, web views, video players and any native view the host registers are one more subview in the same hierarchy: NSH lays them out with the rest of the app, and they clip, scroll and take touches like any view.', chips: ['WebView', 'Video', 'nativeComponent'] },
@@ -200,6 +274,11 @@ const capGroups = zh
       { key: 'platform', label: '取自平台', note: '系统已经做好的，NSH 直接使用' },
       { key: 'own', label: '由 NSH 构建', note: '平台之上，NSH 自己的部分' },
     ]
+  : ko
+  ? [
+      { key: 'platform', label: '플랫폼이 제공하는 기능', note: '시스템의 기본 기능을 그대로 사용합니다' },
+      { key: 'own', label: 'NSH가 제공하는 기능', note: '플랫폼 위에 엔진과 도구를 더합니다' },
+    ]
   : [
       { key: 'platform', label: 'From the platform', note: 'what the system already does well, used as it is' },
       { key: 'own', label: 'Built by NSH', note: 'NSH’s own work, on top of the platform' },
@@ -211,6 +290,12 @@ const uses = zh
       { tag: '', label: '动态界面与插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）、AppView（桌面与 GPUI 应用）或在网页里用 createPlayer，运行时加载签名的 TSX 模块。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的 Native 组件', '更新按你的节奏下发'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
       { tag: '', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里以 Native 方式显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '签名与沙箱', href: 'docs/sandbox-and-capabilities' },
     ]
+  : ko
+  ? [
+      { tag: '여기서 시작', label: '독립 실행형 앱', title: '여섯 플랫폼에 배포', body: 'Rust와 TSX 중 하나 또는 둘 다 사용해 앱을 작성하세요. nsh package로 iOS, Android, macOS, Windows, Linux에 설치할 앱이나 정적 웹사이트를 만들 수 있습니다.', code: 'app', checks: ['Rust 앱 전체를 네이티브 코드로 컴파일', '플랫폼별 명령 하나로 패키징', 'Rust는 변경 시 다시 빌드하고 TSX는 핫 리로드'], cta: '시작하기', href: 'docs/getting-started' },
+      { tag: '', label: '동적 UI와 플러그인', title: '출시 후 앱 기능 확장', body: 'iOS는 NshAppView, Android는 NshView, 데스크톱과 GPUI 앱은 AppView, 웹 페이지는 createPlayer를 사용합니다. 원하는 화면에 삽입하면 실행 중에 서명된 TSX 모듈을 불러올 수 있습니다.', code: 'host', checks: ['한 화면에 여러 모듈 배치', '호스트의 네이티브 컴포넌트 사용', '원하는 시점에 업데이트 배포'], cta: '플랫폼별 임베딩 방법', href: 'docs/platforms' },
+      { tag: '', label: 'AI가 생성하는 UI', title: '요청에 화면으로 응답', body: '모델이 요청마다 모듈을 작성하면 서버가 검사하고 서명합니다. 앱은 샌드박스 안에서 이 모듈을 네이티브 UI로 표시합니다.', code: 'ai', checks: ['응답마다 TSX 파일 하나', '배포 전 타입 검사와 실행 추적', '호스트가 허용한 권한만 사용'], cta: '서명과 샌드박스', href: 'docs/sandbox-and-capabilities' },
+    ]
   : [
       { tag: 'Start here', label: 'Standalone apps', title: 'Ship to six platforms', body: 'Write the app in Rust, TSX or both, and nsh package makes an installable iOS, Android, macOS, Windows or Linux app, or a static website.', code: 'app', checks: ['Rust apps compile entirely to native code', 'One command per target', 'Rebuilds for Rust, hot updates for TSX'], cta: 'Getting started', href: 'docs/getting-started' },
       { tag: '', label: 'Dynamic UI and plugins', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android), AppView (desktop and GPUI apps) or createPlayer (a web page) on any screen, and load signed TSX modules into it at run time.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates on your schedule'], cta: 'Embedding, per platform', href: 'docs/platforms' },
@@ -219,25 +304,15 @@ const uses = zh
 
 // Platforms in the order the docs list them: phones, desktops, the web,
 // then GPUI (all three desktops, for apps that embed NSH).
-const platforms = zh
-  ? [
-      { name: 'iOS', detail: 'UIKit · CoreText · iOS 15+', cmd: '--target ios' },
-      { name: 'Android', detail: 'Android View · StaticLayout · API 28+', cmd: '--target android' },
-      { name: 'macOS', detail: 'AppKit · CoreText · macOS 14+', cmd: '--target macos' },
-      { name: 'Windows', detail: 'Win32 · Direct2D · DirectWrite · 10 1809+', cmd: '--target windows' },
-      { name: 'Linux', detail: 'GTK 4 · Pango · GTK 4.14+', cmd: '--target linux' },
-      { name: 'Web', detail: 'HTML · CSS · 现代浏览器', cmd: '--target web' },
-      { name: 'GPUI', detail: 'GPUI · 嵌入 GPUI 与 GPUI Kit 应用（macOS / Windows / Linux）', cmd: '--target gpui' },
-    ]
-  : [
-      { name: 'iOS', detail: 'UIKit · CoreText · iOS 15+', cmd: '--target ios' },
-      { name: 'Android', detail: 'Android View · StaticLayout · API 28+', cmd: '--target android' },
-      { name: 'macOS', detail: 'AppKit · CoreText · macOS 14+', cmd: '--target macos' },
-      { name: 'Windows', detail: 'Win32 · Direct2D · DirectWrite · 10 1809+', cmd: '--target windows' },
-      { name: 'Linux', detail: 'GTK 4 · Pango · GTK 4.14+', cmd: '--target linux' },
-      { name: 'Web', detail: 'HTML · CSS · modern browsers', cmd: '--target web' },
-      { name: 'GPUI', detail: 'GPUI · embedded in GPUI and GPUI Kit apps (macOS / Windows / Linux)', cmd: '--target gpui' },
-    ];
+const platforms = [
+  { name: 'iOS', detail: 'UIKit · CoreText · iOS 15+', cmd: '--target ios' },
+  { name: 'Android', detail: 'Android View · StaticLayout · API 28+', cmd: '--target android' },
+  { name: 'macOS', detail: 'AppKit · CoreText · macOS 14+', cmd: '--target macos' },
+  { name: 'Windows', detail: 'Win32 · Direct2D · DirectWrite · 10 1809+', cmd: '--target windows' },
+  { name: 'Linux', detail: 'GTK 4 · Pango · GTK 4.14+', cmd: '--target linux' },
+  { name: 'Web', detail: zh ? 'HTML · CSS · 现代浏览器' : ko ? 'HTML · CSS · 최신 브라우저' : 'HTML · CSS · modern browsers', cmd: '--target web' },
+  { name: 'GPUI', detail: zh ? 'GPUI · 嵌入 GPUI 与 GPUI Kit 应用（macOS / Windows / Linux）' : ko ? 'GPUI · GPUI 및 GPUI Kit 앱에 삽입(macOS / Windows / Linux)' : 'GPUI · embedded in GPUI and GPUI Kit apps (macOS / Windows / Linux)', cmd: '--target gpui' },
+];
 
 // Hand-colored snippets: real API, coloured with the site's code tokens.
 const k = (s: string) => `<span class="c-k">${s}</span>`;
@@ -362,9 +437,9 @@ const icon = (name: string, size = 16) =>
           {copy.points.map(([i, label, text]) => <li><Fragment set:html={icon(i, 16)} /><span><strong>{label}</strong>{text}</span></li>)}
         </ul>
         <div class="hero__actions">
-          <Button size="lg" href={link('docs')}>{copy.start}<Fragment set:html={icon('arrow')} /></Button>
-          <Button size="lg" variant="secondary" href={link('gallery')}>{copy.gallery}</Button>
-          <Button size="lg" variant="secondary" href={link('playground')}>{copy.try}</Button>
+          <Button size="lg" href={await link('docs')}>{copy.start}<Fragment set:html={icon('arrow')} /></Button>
+          <Button size="lg" variant="secondary" href={await link('gallery')}>{copy.gallery}</Button>
+          <Button size="lg" variant="secondary" href={await link('playground')}>{copy.try}</Button>
         </div>
         <div class="hero__platforms">
           <span><Fragment set:html={icon('devices', 14)} />{copy.runsOn}</span>
@@ -453,10 +528,10 @@ const icon = (name: string, size = 16) =>
               {c.id === 'input' && (
                 <div class="mini-adapt">
                   <div class="frame frame--wide">
-                    <span class="popup">{(zh ? ['回复', '转发', '删除'] : ['Reply', 'Forward', 'Delete']).map((m) => <i>{m}</i>)}</span>
+                    <span class="popup">{(zh ? ['回复', '转发', '删除'] : ko ? ['답장', '전달', '삭제'] : ['Reply', 'Forward', 'Delete']).map((m) => <i>{m}</i>)}</span>
                   </div>
                   <div class="frame frame--narrow">
-                    <span class="sheet">{(zh ? ['回复', '转发', '删除'] : ['Reply', 'Forward', 'Delete']).map((m) => <i>{m}</i>)}</span>
+                    <span class="sheet">{(zh ? ['回复', '转发', '删除'] : ko ? ['답장', '전달', '삭제'] : ['Reply', 'Forward', 'Delete']).map((m) => <i>{m}</i>)}</span>
                   </div>
                 </div>
               )}
@@ -481,7 +556,7 @@ const icon = (name: string, size = 16) =>
         <span class="kicker">{copy.langKicker}</span>
         <h2>{copy.langTitle}</h2>
         <p>{copy.langLead}</p>
-        <a class="use__cta" href={link('docs/rust')}>{copy.langCta}<Fragment set:html={icon('arrow', 14)} /></a>
+        <a class="use__cta" href={await link('docs/rust')}>{copy.langCta}<Fragment set:html={icon('arrow', 14)} /></a>
       </header>
       <div class="langs" data-langs>
         <div class="langs__bar">
@@ -528,9 +603,9 @@ const icon = (name: string, size = 16) =>
               {c.id === 'native' && (
                 <div class="mini-native">
                   <div class="menu">
-                    {(zh ? ['拷贝', '分享', '翻译', '查询'] : ['Copy', 'Share', 'Translate', 'Look Up']).map((m) => <span>{m}</span>)}
+                    {(zh ? ['拷贝', '分享', '翻译', '查询'] : ko ? ['복사', '공유', '번역', '찾아보기'] : ['Copy', 'Share', 'Translate', 'Look Up']).map((m) => <span>{m}</span>)}
                   </div>
-                  <p>{zh ? <>英伟达本周上涨 <mark>8.6%</mark>，苹果 4.4%</> : <>NVDA gained <mark>8.6% this week</mark>, AAPL 4.4%</>}</p>
+                  <p>{zh ? <>英伟达本周上涨 <mark>8.6%</mark>，苹果 4.4%</> : ko ? <>이번 주 NVDA는 <mark>8.6%</mark>, AAPL은 4.4% 상승</> : <>NVDA gained <mark>8.6% this week</mark>, AAPL 4.4%</>}</p>
                 </div>
               )}
               {c.id === 'web' && (
@@ -581,7 +656,7 @@ const icon = (name: string, size = 16) =>
         <p>{copy.usesLead}</p>
       </header>
       <div class="uses">
-        {uses.map((u, i) => (
+        {uses.map(async (u, i) => (
           <article class:list={['use', { 'use--primary': i === 0 }]}>
             <div class="use__label">
               <span>{u.label}</span>
@@ -591,7 +666,7 @@ const icon = (name: string, size = 16) =>
             <p>{u.body}</p>
             <pre class="use__code"><code set:html={snippets[u.code]} /></pre>
             <ul class="use__checks">{u.checks.map((c) => <li><Fragment set:html={icon('check', 13)} />{c}</li>)}</ul>
-            <a class="use__cta" href={link(u.href)}>{u.cta}<Fragment set:html={icon('arrow', 14)} /></a>
+            <a class="use__cta" href={await link(u.href)}>{u.cta}<Fragment set:html={icon('arrow', 14)} /></a>
           </article>
         ))}
       </div>
@@ -623,7 +698,7 @@ const icon = (name: string, size = 16) =>
       </div>
       <div>
         <p>{copy.principleBody}</p>
-        <Button size="lg" href={link('docs/getting-started')}>{copy.principleCta}<Fragment set:html={icon('arrow')} /></Button>
+        <Button size="lg" href={await link('docs/getting-started')}>{copy.principleCta}<Fragment set:html={icon('arrow')} /></Button>
       </div>
     </div>
   </section>
@@ -706,6 +781,7 @@ const icon = (name: string, size = 16) =>
   .eyebrow { display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.32rem 0.8rem 0.32rem 0.65rem; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--foreground) 3%, transparent); color: var(--muted-foreground); font-size: 0.78rem; font-weight: 500; line-height: 1.2; letter-spacing: 0.01em; }
   .eyebrow__dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--citrus); box-shadow: 0 0 8px color-mix(in srgb, var(--citrus) 70%, transparent); }
   h1 { margin: 1.25rem 0 0; font-size: clamp(2.6rem, 5.2vw, 4.1rem); line-height: 1.02; letter-spacing: -0.045em; font-weight: 750; }
+  :global(html[lang="ko"]) h1 { font-size: clamp(1.9rem, 4.2vw, 2.9rem); line-height: 1.18; word-break: keep-all; }
   html[lang^="zh"] h1 { letter-spacing: -0.01em; line-height: 1.16; font-size: clamp(1.9rem, 4.2vw, 2.9rem); }
   .hero__lead { margin: 1.25rem 0 0; color: var(--muted-foreground); font-size: 1.1rem; line-height: 1.6; }
   .hero__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }

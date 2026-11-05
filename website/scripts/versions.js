@@ -32,7 +32,7 @@ const cache = process.env.NSH_SITE_VERSION_CACHE ?? join(website, '.versions');
 const showcases = process.env.SHOWCASES_DIR ?? resolve(root, '..', 'nsh-showcases');
 
 /** What a release takes from its tag; everything else is this checkout's. */
-const CONTENT = ['docs', 'elements', 'modules', 'zh-CN', 'demos'];
+const CONTENT = ['docs', 'elements', 'modules', 'zh-CN', 'ko', 'demos'];
 /** The first release whose site this one can build. */
 const FIRST = [0, 2, 0];
 const MAX_RELEASES = 20;

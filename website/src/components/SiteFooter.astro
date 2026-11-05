@@ -1,6 +1,6 @@
 ---
 import Logo from './Logo.astro';
-import { REPO_URL, url, type Lang } from '../lib/site';
+import { REPO_URL, localePrefix, url, type Lang } from '../lib/site';
 import { isLatestVersion } from '../lib/versions';
 import { SECTIONS, sectionHrefs } from '../lib/sections';
 
@@ -9,25 +9,27 @@ const { lang = 'en' } = Astro.props;
 const isZh = lang === 'zh-CN';
 const hrefs = await sectionHrefs(lang);
 
-const copy = isZh
-  ? { tagline: '一次构建，全平台 Native', license: '代码以 Apache-2.0 许可发布，由', by: '开发。', docs: '文档以', docsAfter: ' 许可发布。', nav: '页脚导航', issues: '报告问题', source: '源代码' }
-  : { tagline: 'Build once, native everywhere.', license: 'Code licensed under Apache-2.0. Developed by', by: '.', docs: 'Documentation licensed under', docsAfter: '.', nav: 'Footer', issues: 'Report an issue', source: 'Source code' };
+const copy = {
+  'zh-CN': { tagline: '一次构建，全平台 Native', license: '代码以 Apache-2.0 许可发布，由', by: '开发。', docs: '文档以', docsAfter: ' 许可发布。', nav: '页脚导航', issues: '报告问题', source: '源代码', apps: '应用案例', releases: '版本发布', brand: '品牌' },
+  en: { tagline: 'Build once, native everywhere.', license: 'Code licensed under Apache-2.0. Developed by', by: '.', docs: 'Documentation licensed under', docsAfter: '.', nav: 'Footer', issues: 'Report an issue', source: 'Source code', apps: 'App Stories', releases: 'Releases', brand: 'Brand' },
+  ko: { tagline: '하나의 코드로, 어디서나 네이티브로.', license: '코드는 Apache-2.0 라이선스로 배포합니다. 개발은', by: '에서 맡았습니다.', docs: '문서는', docsAfter: ' 라이선스로 배포합니다.', nav: '하단 메뉴', issues: '문제 신고', source: '소스 코드', apps: '앱 사례', releases: '릴리스', brand: '브랜드' },
+}[lang];
 ---
 
 <footer class="site-footer">
   <div class="site-footer__brand">
-    <a href={url(isZh ? 'zh-CN' : '')} class="site-footer__name"><Logo class="site-footer__logo" /> Native Shell</a>
+    <a href={url(localePrefix(lang))} class="site-footer__name"><Logo class="site-footer__logo" /> Native Shell</a>
     <p>{copy.tagline}</p>
     <p>{copy.license} <a href="https://longbridge.com" target="_blank" rel="noopener noreferrer">Longbridge</a>{copy.by}</p>
     <p>{copy.docs} <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="license noopener noreferrer">CC BY 4.0</a>{copy.docsAfter}</p>
   </div>
   <nav aria-label={copy.nav}>
     {SECTIONS.map((section) => <a href={hrefs[section.id]}>{section.label[lang]}</a>)}
-    <a href={url(isZh ? 'zh-CN/apps' : 'apps')}>{isZh ? '应用案例' : 'App Stories'}</a>
-    <a href={isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases'}>{isZh ? '版本发布' : 'Releases'}</a>
+    <a href={url(isZh ? 'zh-CN/apps' : 'apps')}>{copy.apps}</a>
+    <a href={isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases'}>{copy.releases}</a>
     <a href={REPO_URL} target="_blank" rel="noopener noreferrer">{copy.source}</a>
     <a href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">{copy.issues}</a>
-    <a href={url(isZh ? 'zh-CN/brand' : 'brand')}>{isZh ? '品牌' : 'Brand'}</a>
+    <a href={url(isZh ? 'zh-CN/brand' : 'brand')}>{copy.brand}</a>
     <a href={url('llms.txt')}>llms.txt</a>
   </nav>
 </footer>

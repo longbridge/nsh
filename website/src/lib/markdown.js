@@ -17,3 +17,8 @@ export const shikiConfig = {
   defaultColor: 'light',
   langs,
 };
+
+/** The content directory determines the language of Markdown-generated controls. */
+export function contentLang(path) {
+  return /(?:^|[\\/])(zh-CN|ko)[\\/](?:docs|elements|modules)[\\/]/.exec(path)?.[1] ?? 'en';
+}
