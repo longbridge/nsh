@@ -303,6 +303,13 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
+        <!-- Serves the app's own files to the apps that open them
+            (`SystemUi.openPath`): the authority matches what
+            `FilesProvider.uriFor` builds. -->
+        <provider android:name="com.longbridge.nsh.FilesProvider"
+            android:authorities="{package}.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity android:name="{activity}" android:exported="true"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">

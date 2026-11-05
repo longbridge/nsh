@@ -684,10 +684,19 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::HostCall { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
-                    | Command::PickScreenColor { .. }
-                    // No file dialogs (`Environment::file_requests`): the
-                    // core answers first.
-                    | Command::FileRequest { .. }
+                    | Command::PickScreenColor { .. } => e.int(-1),
+                    // `SystemUi.openPath`: the file at the path, a `content:`
+                    // URI the app's FilesProvider serves, to the system's
+                    // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
+                    // have no answer on Android.
+                    Command::FileRequest { id, request } => match *request {
+                        nsh_core::file_dialog::FileRequest::OpenPath(path) => {
+                            e.int(28);
+                            e.int(id as i32);
+                            e.string(path.to_string_lossy().into_owned());
+                        }
+                        _ => e.int(-1),
+                    },
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
                     | Command::Speech(_)

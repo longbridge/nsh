@@ -2161,6 +2161,18 @@ final class Mounter {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
                 break;
             }
+            case 28: {
+                int request = b.getInt();
+                String path = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openPath(context, path);
+                if (opened) {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id"}, new Object[] {(double) request});
+                } else {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                            new Object[] {(double) request, "no app opened the file"});
+                }
+                break;
+            }
             case 44: {
                 Notifications.command(this, b, objects);
                 break;

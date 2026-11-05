@@ -551,7 +551,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         answers: Mutex::new(None),
         pending: Mutex::new(None),
         viewport: Mutex::new(Size::new(px(0.0), px(0.0))),
-        environment: Mutex::new(Environment::default()),
+        environment: Mutex::new(Environment {
+            // `OpenPath` of one of the app's own files (`SystemUi.openPath`):
+            // the system's viewer reads it through the FilesProvider. The
+            // dialogs have no answer here.
+            file_requests: true,
+            ..Environment::default()
+        }),
         animation_queue: Mutex::new(VecDeque::new()),
         seq: AtomicU64::new(0),
         ui: Mutex::new(UiAnimation::default()),
@@ -1444,7 +1450,39 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             .ok()?;
         Some(PayloadValue::Number(n))
     };
-    let payload = if keys.is_null() {
+    let payload = if kind == EventKind::FileRequest {
+        // "id", "error": the answer to an `OpenPath` (`SystemUi.openPath`;
+        // the paths of the request say nothing new, an open answers none).
+        let len = if keys.is_null() {
+            0
+        } else {
+            env.get_array_length(&keys).unwrap_or(0)
+        };
+        let mut id = None;
+        let mut error = None;
+        for i in 0..len {
+            let Ok(key) = env.get_object_array_element(&keys, i) else {
+                continue;
+            };
+            let Ok(key) = env.get_string(&JString::from(key)).map(String::from) else {
+                continue;
+            };
+            let Some(v) = read(&mut env, i) else {
+                continue;
+            };
+            match (key.as_str(), v) {
+                ("id", PayloadValue::Number(n)) => id = Some(n as u32),
+                ("error", PayloadValue::Str(message)) => error = Some(message),
+                ("error", PayloadValue::Null) => {}
+                _ => {}
+            }
+        }
+        EventPayload::FileRequest {
+            id: id.unwrap_or(0),
+            paths: Vec::new(),
+            error,
+        }
+    } else if keys.is_null() {
         match read(&mut env, 0) {
             Some(v) => EventPayload::Value(v),
             None => EventPayload::None,
