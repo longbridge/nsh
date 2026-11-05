@@ -17,7 +17,8 @@
 //!   options and tree items fold their content into their name, and so
 //!   does `accessible={true}`: VoiceOver reaches only the controls inside
 //!   them, and one without a label is named by the texts and labels of
-//!   its content ([`content_name`]), as on Windows and GPUI;
+//!   its content ([`content_label`]; static text's value,
+//!   [`content_value`]), as on Windows and GPUI;
 //!   `accessibilityElementsHidden` hides it and its subtree, and so does
 //!   `visibility: hidden`, as in a browser (only its layer is hidden, which
 //!   VoiceOver does not see);
@@ -124,18 +125,50 @@ fn is_content(s: &ViewState) -> bool {
         .is_some_and(|spec| !spec.hidden && spec.role.is_content())
 }
 
-/// The name of a view that folds its content and has no label: the texts
-/// and labels inside it, not those of the controls inside.
-pub(crate) fn content_name(view: &NshView) -> Option<String> {
-    let folds = view
-        .try_state()
-        .is_some_and(|s| reached(&s) == Reached::Controls);
-    if !folds {
-        return None;
-    }
+/// The name of a view that folds its content and has no label of its own,
+/// as its label: the texts and labels inside it ([`gather_name`]). Static
+/// text (an option, a tree item) reads it as its value instead
+/// ([`content_value`]).
+pub(crate) fn content_label(view: &NshView) -> Option<String> {
+    folded_name(view, false)
+}
+
+/// [`content_label`] for the elements that read their name as their value
+/// ([`Ax::reads_value`]), as [`spec_for`] puts a label there: VoiceOver
+/// reads static text's value. A value the app gives comes after it, as
+/// after a label.
+pub(crate) fn content_value(view: &NshView) -> Option<String> {
+    folded_name(view, true)
+}
+
+/// The folded name of `view`, if it goes to its value (`as_value`) or else
+/// its label: none when the view does not fold its content, or has a label
+/// of its own (already its label or its value).
+fn folded_name(view: &NshView, as_value: bool) -> Option<String> {
+    let value_text = {
+        let s = view.try_state()?;
+        if reached(&s) != Reached::Controls || s.props.accessibility.label.is_some() {
+            return None;
+        }
+        if s.access.spec.as_deref()?.role.reads_value() != as_value {
+            return None;
+        }
+        s.props
+            .accessibility
+            .value
+            .as_ref()
+            .and_then(|v| v.text.as_deref())
+            .map(str::to_owned)
+    };
     let mut name = String::new();
     gather_name(view.ns(), &mut name);
-    (!name.is_empty()).then_some(name)
+    if name.is_empty() {
+        return None;
+    }
+    Some(match value_text.filter(|_| as_value) {
+        Some(v) => format!("{name}, {v}"),
+        None => name,
+    })
 }
 
 /// The longest name gathered from content.
@@ -271,6 +304,12 @@ impl Ax {
                 | Ax::Option
                 | Ax::TreeItem
         )
+    }
+
+    /// Elements that are static text for AppKit, which VoiceOver reads by
+    /// their value: their label is given as their value ([`spec_for`]).
+    fn reads_value(self) -> bool {
+        matches!(self, Ax::Text | Ax::Heading | Ax::Option | Ax::TreeItem)
     }
 
     /// Elements that are content: an element that folds its content
@@ -728,7 +767,7 @@ fn spec_for(
             }),
         ),
         // VoiceOver reads static text's value, not its label.
-        (Ax::Text | Ax::Heading | Ax::Option | Ax::TreeItem, _, _) => (
+        (r, _, _) if r.reads_value() => (
             None,
             label.map_or(Value::None, |l| match value_text {
                 Some(v) => Value::Text(format!("{l}, {v}")),

@@ -787,15 +787,29 @@ define_class!(
         }
 
         // Its label, else for a view that folds its content the texts in
-        // it ([`crate::access::content_name`]).
+        // it ([`crate::access::content_label`]).
         #[unsafe(method_id(accessibilityLabel))]
         fn accessibility_label(&self) -> Option<Retained<NSString>> {
             // SAFETY: NSView's own label, as `setAccessibilityLabel:` set it.
             let own: Option<Retained<NSString>> =
                 unsafe { msg_send![super(self), accessibilityLabel] };
             own.or_else(|| {
-                crate::access::content_name(&NshView(self.retain()))
+                crate::access::content_label(&NshView(self.retain()))
                     .map(|name| NSString::from_str(&name))
+            })
+        }
+
+        // Its value, else for static text that folds its content (an
+        // option, a tree item) the texts in it
+        // ([`crate::access::content_value`]).
+        #[unsafe(method_id(accessibilityValue))]
+        fn accessibility_value(&self) -> Option<Retained<AnyObject>> {
+            // SAFETY: NSView's own value, as `setAccessibilityValue:` set it.
+            let own: Option<Retained<AnyObject>> =
+                unsafe { msg_send![super(self), accessibilityValue] };
+            own.or_else(|| {
+                crate::access::content_value(&NshView(self.retain()))
+                    .map(|name| Retained::into_super(Retained::into_super(NSString::from_str(&name))))
             })
         }
 
