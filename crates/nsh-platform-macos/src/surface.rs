@@ -71,6 +71,15 @@ enum Message {
 /// (a frame at 60 Hz): see the module doc.
 const RESIZE_WAIT: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// How long after a deadline the timer that keeps it fires
+/// ([`Surface::keep_deadline`]): more than a frame, so while the window
+/// shows the display link's frame always comes first.
+const LATE: f64 = 0.05;
+
+/// How long a test's app waits for the link's frame before one runs
+/// without it ([`Surface::keep_deadline`]): a frame at 60 Hz.
+const TEST_FRAME: f64 = 1.0 / 60.0;
+
 /// The main-thread time one frame spends applying queued batches
 /// ([`Surface::apply_queued`]): about half a refresh at 120 Hz, which
 /// leaves the rest to input, animations and Core Animation's commit.
@@ -211,8 +220,9 @@ pub(crate) struct Surface {
     /// ([`Surface::apply_queued`]).
     queued: RefCell<VecDeque<Message>>,
     /// Frame callbacks of the platform's own animations (scroll glides,
-    /// transitions): called on every frame while they return true.
-    frame_callbacks: RefCell<Vec<FrameCallback>>,
+    /// transitions), called on every frame until they are done, each with
+    /// its deadline ([`Next::At`]; a new one's is when it was added).
+    frame_callbacks: RefCell<Vec<(FrameCallback, Option<f64>)>>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out): what [`Surface::animating`] does not
     /// count.
@@ -227,10 +237,11 @@ pub(crate) struct Surface {
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
     perf_on: Arc<AtomicBool>,
-    /// When the last frame ran (`CACurrentMediaTime`), and whether the
-    /// fallback timer is scheduled ([`Surface::watch_link`]).
+    /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
-    fallback: Cell<bool>,
+    /// The deadline the timer scheduled waits for
+    /// ([`Surface::keep_deadline`]).
+    keeper: Cell<Option<f64>>,
     /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
     /// resizes do not wait until it reports one done.
     resize_late: Cell<bool>,
@@ -259,8 +270,30 @@ pub(crate) struct Surface {
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
-/// time in seconds, returns whether it wants the next frame.
-pub(crate) type FrameCallback = Box<dyn FnMut(&Rc<Surface>, f64) -> bool>;
+/// time in seconds, returns what it has left.
+pub(crate) type FrameCallback = Box<dyn FnMut(&Rc<Surface>, f64) -> Next>;
+
+/// What a frame callback has left after a frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Next {
+    /// Nothing: it is not called again.
+    Done,
+    /// Drawing only (a shader, a scroll indicator's fade): the next frame,
+    /// when there is one.
+    Frame,
+    /// Something that changes the app's state ends at this time (seconds,
+    /// the frames' clock: a view detached, an event sent): it is called by
+    /// then even while no frames are drawn ([`Surface::keep_deadline`]),
+    /// and on every frame until then.
+    At(f64),
+}
+
+impl From<bool> for Next {
+    /// Whether it wants the next frame, for drawing only.
+    fn from(more: bool) -> Self {
+        if more { Next::Frame } else { Next::Done }
+    }
+}
 
 impl Surface {
     /// A surface with no app yet.
@@ -296,7 +329,7 @@ impl Surface {
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
             last_tick: Cell::new(0.0),
-            fallback: Cell::new(false),
+            keeper: Cell::new(None),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
             resized: RefCell::default(),
@@ -640,6 +673,14 @@ impl Surface {
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
+        // A batch may change what a running frame callback has left (a
+        // transition retargeted, a scroll view told to scroll) without
+        // adding one: their deadlines are of before it, so each runs again
+        // by now, without frames too, and tells its new one.
+        let now = objc2_quartz_core::CACurrentMediaTime();
+        for (_, at) in self.frame_callbacks.borrow_mut().iter_mut() {
+            *at = Some(now);
+        }
         crate::access::prepare(batch);
         for item in &batch.items {
             self.anim.borrow_mut().apply(item);
@@ -680,13 +721,27 @@ impl Surface {
         }
     }
 
-    /// Calls `f` on every display frame while it returns true.
+    /// Calls `f` on every display frame until it is done ([`Next`]); the
+    /// first time by now even while no frames are drawn.
     pub(crate) fn add_frame_callback(
         self: &Rc<Self>,
-        f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static,
+        f: impl FnMut(&Rc<Surface>, f64) -> Next + 'static,
     ) {
-        self.frame_callbacks.borrow_mut().push(Box::new(f));
+        let now = objc2_quartz_core::CACurrentMediaTime();
+        self.frame_callbacks
+            .borrow_mut()
+            .push((Box::new(f), Some(now)));
         self.ensure_ticking();
+    }
+
+    /// Calls `f` on every display frame while it returns true, for what
+    /// only draws (a shader, a selection's autoscroll): nothing it does
+    /// comes due without frames ([`Next::Frame`]).
+    pub(crate) fn add_draw_callback(
+        self: &Rc<Self>,
+        mut f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static,
+    ) {
+        self.add_frame_callback(move |surface, now| f(surface, now).into());
     }
 
     /// A frame callback's work left became cosmetic (`on`: a scroll
@@ -751,7 +806,7 @@ impl Surface {
                 return;
             }
         } else {
-            self.watch_link();
+            self.keep_deadline();
         }
         if let Some(link) = &*self.link.borrow() {
             if link.isPaused() {
@@ -801,38 +856,86 @@ impl Surface {
         }
     }
 
-    /// Keeps frames coming when the display link stops: it does not fire
-    /// while the window is occluded or minimized, or the screen is locked,
-    /// and animations must still end (a transition detaches its views when
-    /// it does, a modal reports its dismissal). While frames are wanted and
-    /// the link has not ticked for 100 ms, a 60 Hz main-queue timer ticks
-    /// instead.
-    fn watch_link(self: &Rc<Self>) {
-        if self.fallback.replace(true) {
+    /// When the next thing that changes the app's state comes due without
+    /// a frame: an animation of the graph or a frame callback ending, a
+    /// batch waiting for a frame (`now`). `None` when only drawing is
+    /// left: an animation looping forever, a JS frame request.
+    fn deadline(&self, now: f64) -> Option<f64> {
+        let queued = (!self.queued.borrow().is_empty()).then_some(now);
+        let callbacks = self
+            .frame_callbacks
+            .borrow()
+            .iter()
+            .filter_map(|(_, at)| *at)
+            .reduce(f64::min);
+        [self.anim.borrow().deadline(now), callbacks, queued]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min)
+    }
+
+    /// Makes what comes due happen on time while no frames are drawn: the
+    /// display link does not fire while the window is occluded or
+    /// minimized, or the screen is locked, and animations must still end
+    /// (a transition detaches its views when it does, a modal reports its
+    /// dismissal, an animation its end to JS). A timer waits for the next
+    /// deadline ([`Surface::deadline`]) and a little more ([`LATE`]); if
+    /// no frame ran since it came due, it runs one, which steps everything
+    /// to its time, ends what ended and gives the next deadline. While the
+    /// window shows, frames always come first and the timer does nothing:
+    /// frames are the display link's only. Nothing is scheduled for what
+    /// only draws (a spinner, a JS frame request), so a hidden window
+    /// with an endless animation does no work.
+    fn keep_deadline(self: &Rc<Self>) {
+        let now = objc2_quartz_core::CACurrentMediaTime();
+        // A test's app runs as on screen whatever covers its window (the
+        // test windows do not come to the front): what wants a frame gets
+        // one a frame later when the link gives none, drawing too (a JS
+        // frame request, a list binding its rows over frames).
+        let testing = self.testing() && self.wants_frames();
+        let deadline = if testing {
+            Some(now)
+        } else {
+            self.deadline(now)
+        };
+        let Some(at) = deadline else {
+            return;
+        };
+        // One timer at a time: the one waiting for an earlier deadline
+        // schedules the next when it fires.
+        if self.keeper.get().is_some_and(|pending| pending <= at) {
             return;
         }
-        fn check(key: u64) {
+        self.keeper.set(Some(at));
+        let key = self.key;
+        let late = if testing { TEST_FRAME } else { LATE };
+        let ms = ((at + late - now).max(0.0) * 1000.0).ceil() as u64;
+        after(ms, move || {
             let Some(surface) = find(key) else { return };
-            if !surface.wants_frames() {
-                surface.fallback.set(false);
+            // An earlier deadline took its place and schedules on.
+            if surface.keeper.get() != Some(at) {
                 return;
             }
-            let now = objc2_quartz_core::CACurrentMediaTime();
-            let stalled = now - surface.last_tick.get() > 0.1;
-            if stalled {
-                surface.last_tick.set(now);
-                surface.frame(now, 1.0 / 60.0);
+            surface.keeper.set(None);
+            if surface.last_tick.get() < at {
+                let now = objc2_quartz_core::CACurrentMediaTime();
+                let period = now - surface.last_tick.get();
+                surface.frame(now, period);
             }
-            let delay = if stalled { 16 } else { 100 };
-            after(delay, move || check(key));
-        }
-        let key = self.key;
-        after(100, move || check(key));
+            surface.keep_deadline();
+        });
+    }
+
+    /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
+    fn testing(&self) -> bool {
+        #[cfg(feature = "dev")]
+        return self.test_model.borrow().is_some();
+        #[cfg(not(feature = "dev"))]
+        false
     }
 
     fn ticked(self: &Rc<Self>, link: &CADisplayLink) {
         let now = link.timestamp();
-        self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         self.frame(now, link.targetTimestamp() - link.timestamp());
         if !self.wants_frames() && self.perf.borrow().is_none() {
             link.setPaused(true);
@@ -840,8 +943,9 @@ impl Surface {
     }
 
     /// One display frame at `now`, `period` seconds after the previous one
-    /// (the display link's, or the fallback timer's).
+    /// (the display link's, or one a deadline ran without a frame).
     fn frame(self: &Rc<Self>, now: f64, period: f64) {
+        self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         let Some(monitor) = self.perf.borrow().clone() else {
             return quiet(|| self.tick(now));
         };
@@ -864,9 +968,13 @@ impl Surface {
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
-        let mut kept: Vec<FrameCallback> = callbacks
+        let mut kept: Vec<(FrameCallback, Option<f64>)> = callbacks
             .into_iter()
-            .filter_map(|mut f| f(self, now).then_some(f))
+            .filter_map(|(mut f, _)| match f(self, now) {
+                Next::Done => None,
+                Next::Frame => Some((f, None)),
+                Next::At(at) => Some((f, Some(at))),
+            })
             .collect();
         {
             let mut added = self.frame_callbacks.borrow_mut();

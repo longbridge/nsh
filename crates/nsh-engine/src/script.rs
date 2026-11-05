@@ -10,6 +10,8 @@ pub(crate) struct SystemConfig {
     pub(crate) websocket: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
     pub(crate) refuse_connections: Option<nsh_core::element::RefuseConnections>,
     pub(crate) filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
+    /// Read by QuickJS's host only: nothing updates on the web (`nsh/updater`).
+    #[cfg_attr(not(feature = "js-core"), allow(dead_code))]
     pub(crate) updater: Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>,
     pub(crate) data_dir: Option<std::path::PathBuf>,
     pub(crate) paths: nsh_core::access::TrustedPaths,

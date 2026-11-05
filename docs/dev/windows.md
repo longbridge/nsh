@@ -87,11 +87,28 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 - **Frames**: a ticker thread waits for each composition (`DwmFlush`) and posts `WM_NSH_TICK` (one at a time) while
   something animates: native animation values (`animation.rs` over `nsh_core::animation`), JS frame requests,
   transitions and keyframes (`transition.rs`; curves, interpolation and timing in `nsh_core::transition`), scroll
-  glides, navigation transitions, video frames (`Surface::on_frame`). The ticker parks when nothing animates. Caret
-  blinking and animated GIF / WebP frames use thread timers instead, so they cost no frames.
+  glides, navigation transitions (`Surface::on_frame`), video frames, shaders and fades (`Surface::on_draw_frame`).
+  The ticker parks when nothing animates. While nothing composes (`DwmFlush` fails: a locked or remote session) it
+  posts no ticks and asks the compositor again every 100 ms. Frame clients report what they have left (`Next`: done,
+  drawing only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's or a client's;
+  batches never wait for a frame, `drain` applies them as they arrive) with one thread timer 50 ms past it: if no
+  frame ran since it came due, it runs one, so animations end and report it on time without frames ("Deadlines" in
+  docs/dev/animation.md), and pauses the ticker once nothing is left. Drawing-only work (an endless animation, a
+  shader, a JS frame request) waits for the compositor. Caret blinking and animated GIF / WebP frames use thread
+  timers instead, so they cost no frames.
 - **Devices**: one Direct3D 11 device (hardware, else WARP) and its Direct2D device and context per thread
   (`gfx.rs`); a lost device (driver update, GPU reset) is made again and `gfx::generation` tells caches of device
-  resources (bitmaps, command lists) to make theirs again.
+  resources (bitmaps, command lists) to make theirs again. Devices are made with
+  `D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS`: NSH draws with a device from the thread that made
+  it (video decoding takes Direct3D's multithread lock), and the worker threads drivers otherwise start for each
+  device (about 28 on NVIDIA, 15 on AMD) only contend with the UI threads; the driver does its work on the calling
+  thread instead, and no call becomes unsafe. Measured against the flag's absence on an NVIDIA laptop (RTX 3050, 4K
+  60 Hz), one 1280×800 window: animating lightly, CPU 27% → 12% of a core; redrawing the whole window every frame,
+  78% → 53% and the UI thread's frames 1.4 ms shorter at p95; scrolling text, 52% → 40%; playing a video, 17% → 9%;
+  44 → 25 threads; frame rates unchanged. With a device per thread on several UI threads the contention grows
+  with each: 4 such windows missed 300–500 frames a minute each and recovered fully without the threads, on NVIDIA,
+  Intel UHD and AMD Radeon alike. On WARP, which then rasterizes on the calling thread too, 1 and 4 windows improved
+  and 8 windows missed about 0.3% more of their frames.
 - **The standalone app** (`run_app`, `app.rs`) runs the window and its message loop on a thread of its own
   (`nsh-ui`, 8 MiB of stack for deep trees) and joins it: the devices, font faces and bitmaps cached in that thread's
   thread-locals are released at a plain thread exit. Released by the main thread's thread-local destructors instead,
@@ -209,7 +226,7 @@ shown frame and its phases (`tick`: the ticker's animations and frame callbacks;
 arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:
 `Present`, which waits for the vertical blank and is not counted as work), the engine's commits, its busy share, and
 the process' CPU (`GetProcessTimes`) and working set. While it measures, the ticker runs on every refresh: its ticks
-close the frames. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
+close the frames. While nothing composes, only the frames deadlines run (`Surface::keep_deadline`) are measured. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
 Windows).
 
 ### Partial frames
