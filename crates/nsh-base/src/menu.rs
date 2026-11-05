@@ -176,7 +176,7 @@ impl Items {
     /// are there (now, when they already are).
     fn focus_first(&self, level: u32) {
         self.keyed.replace(Some(Keyed::Submenu(level)));
-        self.order.invalidate();
+        self.order.request();
     }
 
     /// Adds an item of submenu `level`, which the menu forgets when the
@@ -190,7 +190,13 @@ impl Items {
             level,
             disabled,
         });
-        self.order.invalidate();
+        // An opening from the keyboard waits for its item: the core tells
+        // the order even when the items came in it (a single one), and the
+        // handler focuses the item.
+        match self.keyed.get() {
+            Some(_) => self.order.request(),
+            None => self.order.invalidate(),
+        }
         let (list, order) = (self.list.clone(), self.order.clone());
         cleanup(move || {
             list.borrow_mut().retain(|e| e.key != key);

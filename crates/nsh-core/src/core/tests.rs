@@ -14386,6 +14386,56 @@ mod views {
         assert_eq!(HEARD.with(|h| h.borrow().clone()), [vec![2, 0, 1]]);
     }
 
+    thread_local! {
+        static SOLO: std::cell::RefCell<Option<crate::element::OrderWatch>> =
+            const { std::cell::RefCell::new(None) };
+        static SOLO_TICK: Cell<Option<Signal<u32>>> = const { Cell::new(None) };
+        static SOLO_HEARD: std::cell::RefCell<Vec<Vec<usize>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// One element whose order a watch follows, and a count that renders a
+    /// round when the test asks.
+    #[component]
+    fn WatchedOne() -> impl IntoElement {
+        let one = element_ref();
+        let tick = signal(0u32);
+        SOLO_TICK.with(|t| t.set(Some(tick)));
+        let watch = crate::element::watch_order(
+            move || vec![one],
+            |order| SOLO_HEARD.with(|h| h.borrow_mut().push(order.to_vec())),
+        );
+        SOLO.with(|s| *s.borrow_mut() = Some(watch));
+        view()
+            .child(view().element_ref(&one))
+            .child(text(move || tick.get().to_string()))
+    }
+
+    #[test]
+    fn a_requested_order_watch_hears_its_order_even_unchanged() {
+        let mut c = core();
+        c.mount_root(&Root::new::<WatchedOne>(|| ()));
+        c.commit().unwrap();
+        let heard = || SOLO_HEARD.with(|h| h.borrow().clone());
+        assert!(heard().is_empty(), "one element is in order");
+        let tick = SOLO_TICK.with(Cell::get).unwrap();
+        let round = |c: &mut Core<_>, ask: fn(&crate::element::OrderWatch)| {
+            SOLO.with(|s| ask(s.borrow().as_ref().unwrap()));
+            {
+                let _entered = c.components.runtime.enter();
+                tick.update(|n| *n += 1);
+            }
+            c.commit().unwrap();
+        };
+        round(&mut c, crate::element::OrderWatch::invalidate);
+        assert!(heard().is_empty(), "invalidated: in order, nothing to tell");
+        round(&mut c, crate::element::OrderWatch::request);
+        assert_eq!(heard(), [vec![0]], "requested: told");
+        // A request is heard once.
+        round(&mut c, |_| {});
+        assert_eq!(heard(), [vec![0]]);
+    }
+
     /// Made with `#[component]`: reads the appearance and a timer.
     #[component]
     fn Clock(_props: (), cx: Scope<NoEvent>) -> impl IntoElement {

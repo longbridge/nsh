@@ -23,6 +23,8 @@ struct Due {
     elements: OrderElements,
     handler: OrderHandler,
     container: Rc<Cell<Option<NodeId>>>,
+    /// The handler hears the order even when it is the list's own.
+    requested: bool,
 }
 
 /// A watch as one round sees it, taken out of the executor's list so its
@@ -129,11 +131,12 @@ impl<M: TextEngine> Core<M> {
             .borrow()
             .orders
             .iter()
-            .filter(|o| o.dirty.replace(false))
+            .filter(|o| o.flags.dirty.replace(false))
             .map(|o| Due {
                 elements: o.elements.clone(),
                 handler: o.handler.clone(),
                 container: o.container.clone(),
+                requested: o.flags.requested.replace(false),
             })
             .collect();
         let _entered = self.components.runtime.enter();
@@ -142,6 +145,7 @@ impl<M: TextEngine> Core<M> {
             elements,
             handler,
             container,
+            requested,
         } in due
         {
             let nodes: Vec<Option<NodeId>> = untracked(|| (elements)())
@@ -162,8 +166,8 @@ impl<M: TextEngine> Core<M> {
                 (None, None) => std::cmp::Ordering::Equal,
             });
             // In order already (what the watch keeps sorted stays so):
-            // nothing to tell, no round to run.
-            if order.iter().enumerate().all(|(at, &i)| at == i) {
+            // nothing to tell, no round to run, unless the watch asked.
+            if !requested && order.iter().enumerate().all(|(at, &i)| at == i) {
                 continue;
             }
             if let Err(message) = caught(|| handler(&order)) {
@@ -196,7 +200,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         for order in orders {
-            if order.dirty.get() {
+            if order.flags.dirty.get() {
                 continue;
             }
             let reached = all
@@ -206,7 +210,7 @@ impl<M: TextEngine> Core<M> {
                     .and_then(|id| self.key(id).ok())
                     .is_none_or(|key| above.contains(&key));
             if reached {
-                order.dirty.set(true);
+                order.flags.dirty.set(true);
             }
         }
     }

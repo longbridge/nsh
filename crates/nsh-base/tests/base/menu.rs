@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuEvent, context_menu, menu, menu_item};
+use nsh_base::{MenuEvent, context_menu, menu, menu_item, submenu};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
@@ -563,5 +563,102 @@ fn shift_f10_opens_no_context_menu_elsewhere() {
         app.app.press_key("shift+f10").unwrap();
         assert!(app.app.shows("asked:none"), "{os:?}: no context menu");
         assert!(!app.app.shows("Rename"), "{os:?}: no menu open");
+    }
+}
+
+/// Menus of one item each: a File menu with Open, a Send menu whose
+/// Share submenu holds Mail, and a document's context menu with Rename.
+/// The text says the item chosen last.
+#[component]
+fn OneItemMenus() -> impl IntoElement {
+    let chose = signal("none");
+    let item = move |label: &'static str| {
+        menu_item()
+            .accessibility_label(label)
+            .on_select(move || chose.set(label))
+            .child(text(label))
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("file")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("File")),
+                )
+                .child(item("Open")),
+        )
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("send")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("Send")),
+                )
+                .child(
+                    submenu()
+                        .trigger(view().h(px(30.0)).child(text("Share")))
+                        .child(item("Mail")),
+                ),
+        )
+        .child(
+            context_menu()
+                .trigger(
+                    view()
+                        .test_id("doc")
+                        .focusable(true)
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("Document")),
+                )
+                .child(item("Rename")),
+        )
+        .child(text(move || format!("chose:{}", chose.get())))
+}
+
+#[test]
+fn an_opening_from_the_keyboard_focuses_a_menus_only_item() {
+    // The only item is in the tree's order as it comes: the menu focuses
+    // it all the same.
+    let mut app = start_with(Root::of::<OneItemMenus>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Open").unwrap();
+}
+
+#[test]
+fn right_on_a_submenus_trigger_focuses_its_only_item() {
+    let mut app = start_with(Root::of::<OneItemMenus>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Share").unwrap();
+    app.app.press_key("right").unwrap();
+    app.app.wait_for("Mail").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Mail").unwrap();
+}
+
+#[test]
+fn shift_f10_focuses_a_context_menus_only_item() {
+    for os in [Os::Web, Os::Linux] {
+        let mut app = start_on(Root::of::<OneItemMenus>(), os);
+        for _ in 0..3 {
+            app.app.press_key("tab").unwrap();
+        }
+        app.app.press_key("shift+f10").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for("text:chose:Rename")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
     }
 }

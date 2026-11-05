@@ -1323,18 +1323,21 @@ impl super::NodeRef {
 /// the current owner lives: `handler` hears it as indices into that list
 /// (`[2, 0, 1]`: the third element comes first; elements carried by no
 /// node in the tree last, in the order given) whenever it differs from the
-/// list's own. `nsh-base`'s roving focus keeps a group's items (a
-/// toolbar's) in order this way: components render in the order the core
-/// makes them, which is not the tree's (an item inside a group renders
-/// after the toolbar's later children).
+/// list's own, and after [`super::OrderWatch::request`] in any case.
+/// `nsh-base`'s roving focus keeps a group's items (a toolbar's) in order
+/// this way: components render in the order the core makes them, which is
+/// not the tree's (an item inside a group renders after the toolbar's later
+/// children); its menus also focus the first item of an opening from the
+/// keyboard once the items are there, which they request.
 ///
 /// The core looks at the end of a commit round: in the round the watch is
-/// made in, after [`super::OrderWatch::invalidate`] (an element came), and
-/// after a round that moved a node inside the subtree the elements share
-/// (an app's keyed reorder of them), asking `elements` untracked; what the
-/// handler changes goes out in the same batch. A round that moved nothing
-/// there and invalidated nothing costs nothing: a list of rows reordered,
-/// each row with a group of its own, costs those groups nothing.
+/// made in, after [`super::OrderWatch::invalidate`] (an element came) or
+/// [`super::OrderWatch::request`], and after a round that moved a node
+/// inside the subtree the elements share (an app's keyed reorder of them),
+/// asking `elements` untracked; what the handler changes goes out in the
+/// same batch. A round that moved nothing there and invalidated nothing
+/// costs nothing: a list of rows reordered, each row with a group of its
+/// own, costs those groups nothing.
 #[doc(hidden)]
 pub fn watch_order(
     elements: impl Fn() -> Vec<super::ElementRef> + 'static,
@@ -1343,7 +1346,7 @@ pub fn watch_order(
     let owner = Owner::current();
     let handler = Rc::new(move |order: &[usize]| owner.run(|| handler(order)));
     let watches = executor().watches.clone();
-    let (id, dirty) = watches.borrow_mut().add_order(Rc::new(elements), handler);
+    let (id, flags) = watches.borrow_mut().add_order(Rc::new(elements), handler);
     let weak = Rc::downgrade(&watches);
     cleanup(move || {
         if let Some(watches) = weak.upgrade() {
@@ -1351,7 +1354,7 @@ pub fn watch_order(
             drop(removed);
         }
     });
-    super::OrderWatch::new(dirty)
+    super::OrderWatch::new(flags)
 }
 
 fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::ScrollHandler) {

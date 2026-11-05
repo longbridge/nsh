@@ -21,7 +21,11 @@
 //! common ancestor when the core last looked); the core then puts its
 //! elements in tree order at the end of the round. A move elsewhere (a
 //! keyed list of rows reordered, each row with a group of its own) leaves
-//! it alone: nothing outside that subtree orders its elements.
+//! it alone: nothing outside that subtree orders its elements. The handler
+//! hears the order only when it differs from the list's own, unless the
+//! watch asked to hear it in any case ([`super::OrderWatch::request`]): a
+//! menu opened from the keyboard focuses its first item then, which is
+//! already first when it is the only one.
 //!
 //! Views also watch the keyboard focus come into an element and leave it
 //! ([`super::ElementRef::on_focus_in`], `on_focus_out`, GPUI's
@@ -63,13 +67,24 @@ pub(crate) struct Order {
     /// The elements, asked when the core looks.
     pub(crate) elements: OrderElements,
     pub(crate) handler: OrderHandler,
-    /// Whether the core looks at the end of the round.
-    pub(crate) dirty: Rc<Cell<bool>>,
+    /// Whether the core looks at the end of the round, and whether it tells
+    /// the handler then.
+    pub(crate) flags: Rc<OrderFlags>,
     /// The nearest common ancestor of the elements in the tree when the
     /// core last looked: only a move inside it can reorder them. `None`
     /// before the first look and while none of them is in the tree (any
     /// move makes the core look again).
     pub(crate) container: Rc<Cell<Option<NodeId>>>,
+}
+
+/// What an order watch asks of the core's next look, shared with its
+/// [`OrderWatch`].
+#[derive(Default)]
+pub(crate) struct OrderFlags {
+    /// The core looks at the end of the round.
+    pub(crate) dirty: Cell<bool>,
+    /// The handler hears the order then, even when it is the list's own.
+    pub(crate) requested: Cell<bool>,
 }
 
 /// A focus watch's handler: whether the focus is within its element now.
@@ -122,23 +137,26 @@ impl Watches {
         Some(self.list.remove(i))
     }
 
-    /// Adds an order watch, to look at in this round; its id and its flag.
+    /// Adds an order watch, to look at in this round; its id and its flags.
     pub(crate) fn add_order(
         &mut self,
         elements: Rc<dyn Fn() -> Vec<ElementRef>>,
         handler: OrderHandler,
-    ) -> (u32, Rc<Cell<bool>>) {
+    ) -> (u32, Rc<OrderFlags>) {
         let id = self.next;
         self.next += 1;
-        let dirty = Rc::new(Cell::new(true));
+        let flags = Rc::new(OrderFlags {
+            dirty: Cell::new(true),
+            ..Default::default()
+        });
         self.orders.push(Order {
             id,
             elements,
             handler,
-            dirty: dirty.clone(),
+            flags: flags.clone(),
             container: Rc::new(Cell::new(None)),
         });
-        (id, dirty)
+        (id, flags)
     }
 
     /// Removes order watch `id`; returns it so it is dropped outside the
@@ -150,7 +168,7 @@ impl Watches {
 
     /// Whether an order watch waits to be looked at.
     pub(crate) fn orders_dirty(&self) -> bool {
-        self.orders.iter().any(|o| o.dirty.get())
+        self.orders.iter().any(|o| o.flags.dirty.get())
     }
 
     /// Adds a focus watch; its id.
@@ -188,26 +206,37 @@ impl Watches {
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct OrderWatch {
-    dirty: Rc<Cell<bool>>,
+    flags: Rc<OrderFlags>,
 }
 
 impl OrderWatch {
-    pub(crate) fn new(dirty: Rc<Cell<bool>>) -> Self {
-        Self { dirty }
+    pub(crate) fn new(flags: Rc<OrderFlags>) -> Self {
+        Self { flags }
     }
 
     /// The elements changed (one came): the core puts them in tree order at
     /// the end of this commit round, and the handler hears it in the same
-    /// batch.
+    /// batch when it differs from the list's own.
     pub fn invalidate(&self) {
-        self.dirty.set(true);
+        self.flags.dirty.set(true);
+    }
+
+    /// As [`Self::invalidate`], and the handler hears the order even when
+    /// it is the list's own: for a watch that acts on its elements in
+    /// order once they are there rather than only sorting them (a menu
+    /// opened from the keyboard focusing its first item, which is first
+    /// already when it is the only one).
+    pub fn request(&self) {
+        self.flags.requested.set(true);
+        self.flags.dirty.set(true);
     }
 }
 
 impl std::fmt::Debug for OrderWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OrderWatch")
-            .field("dirty", &self.dirty.get())
+            .field("dirty", &self.flags.dirty.get())
+            .field("requested", &self.flags.requested.get())
             .finish()
     }
 }
