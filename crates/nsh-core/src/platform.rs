@@ -450,8 +450,8 @@ impl std::fmt::Display for Locale {
 }
 
 /// The user's preferred languages, most preferred first, as BCP 47 tags
-/// (`languages()`): never empty, at most [`Languages::CAPACITY`], each
-/// once. Held inline so that the environment stays `Copy`.
+/// (`languages()`): never empty, at most eight, each once. Held inline so
+/// that the environment stays `Copy`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Languages {
     tags: [Locale; Languages::CAPACITY],
@@ -461,7 +461,7 @@ pub struct Languages {
 impl Languages {
     /// How many it keeps: systems list a few (iOS and Android up to the
     /// ones the user added, desktops their UI languages).
-    pub const CAPACITY: usize = 8;
+    const CAPACITY: usize = 8;
 
     /// `en-US` alone, the default when a platform reports none.
     pub const EN_US: Languages = Languages {
@@ -479,8 +479,8 @@ impl Languages {
 
     /// The languages of platform identifiers, most preferred first
     /// ([`Locale::parse`]'s forms: `en_US`, `zh-Hans-CN`): ones that name
-    /// no language and repeats are left out, the first
-    /// [`Languages::CAPACITY`] kept. `None` when none is a language.
+    /// no language and repeats are left out, the first eight kept. `None`
+    /// when none is a language.
     pub fn parse<'a>(identifiers: impl IntoIterator<Item = &'a str>) -> Option<Languages> {
         let mut languages = Languages::EN_US;
         languages.len = 0;
@@ -498,8 +498,8 @@ impl Languages {
 
     /// These with `locale` first (an embedding app's own language): it
     /// moves there if it is listed, else comes before them (the last one
-    /// then left out when they are [`Languages::CAPACITY`]).
-    pub fn preferring(&self, locale: Locale) -> Languages {
+    /// then left out when they are eight).
+    pub(crate) fn preferring(&self, locale: Locale) -> Languages {
         let mut languages = Languages::one(locale);
         for &other in self.as_slice() {
             if usize::from(languages.len) == Self::CAPACITY {
