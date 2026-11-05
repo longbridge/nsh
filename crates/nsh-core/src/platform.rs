@@ -499,11 +499,64 @@ impl TimeZone {
         })
     }
 
+    /// The zone a process's local times follow on a POSIX system (Linux,
+    /// macOS, the BSDs): the one its `TZ` variable (`tz`, `None` when
+    /// unset) names, as the C library reads it, else the system's
+    /// (`system`, asked only then), else UTC.
+    ///
+    /// `TZ` names a zone of the tz database by its name, with a slash or
+    /// without (`Europe/Berlin`, `Etc/GMT+5`, `GMT`, `EST`) and with or
+    /// without its leading `:`, or by a path into the database
+    /// (`/usr/share/zoneinfo/Asia/Tokyo`); empty, it is UTC. A POSIX rule
+    /// (`JST-9`, `<+08>-8`, `CET-1CEST,M3.5.0,M10.5.0/3`) names no zone,
+    /// nor does a path elsewhere (`:/etc/localtime`, the system's): the
+    /// system's zone is reported for them. The database's few names that
+    /// read as rules too (`EST5EDT`, `GMT0`) are its zones, which mean the
+    /// same.
+    pub fn posix(tz: Option<&str>, system: impl FnOnce() -> Option<TimeZone>) -> TimeZone {
+        let zone = match tz.map(str::trim) {
+            None => None,
+            // glibc and tzcode alike take an empty `TZ` for UTC.
+            Some("") => Some(Self::UTC),
+            Some(tz) => {
+                let name = tz.strip_prefix(':').unwrap_or(tz);
+                if is_posix_rule(name) && !RULE_NAMED_ZONES.contains(&name) {
+                    None
+                } else {
+                    Self::parse(name)
+                }
+            }
+        };
+        zone.or_else(system).unwrap_or_default()
+    }
+
     /// The name (`Europe/Berlin`).
     pub fn as_str(&self) -> &str {
         // ASCII, as parsed.
         std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("UTC")
     }
+}
+
+/// The tz database's names that read as POSIX rules too (`EST5EDT` is
+/// Eastern time with US rules, `GMT0` UTC under either reading): the C
+/// library loads their zones' files.
+const RULE_NAMED_ZONES: [&str; 7] = [
+    "EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT", "GMT0", "GMT+0", "GMT-0",
+];
+
+/// Whether `TZ`'s value `tz` is a POSIX rule: a zone abbreviation, quoted
+/// (`<+08>`) or of three letters or more (`JST`), then its offset from UTC
+/// (`-9`, `5`, `+5:30`). No zone's name but [`RULE_NAMED_ZONES`] has that
+/// shape: the database's other names without a slash have no offset
+/// (`GMT`, `Japan`) or a shorter word before it (`NZ-CHAT`).
+fn is_posix_rule(tz: &str) -> bool {
+    let letters = tz.bytes().take_while(u8::is_ascii_alphabetic).count();
+    tz.starts_with('<')
+        || letters >= 3
+            && tz
+                .as_bytes()
+                .get(letters)
+                .is_some_and(|b| b.is_ascii_digit() || matches!(b, b'+' | b'-'))
 }
 
 impl Default for TimeZone {
@@ -779,5 +832,51 @@ mod tests {
         assert_eq!(zone(&"A".repeat(40)), None);
         assert_eq!(TimeZone::default().as_str(), "UTC");
         assert_eq!(Environment::default().time_zone, TimeZone::UTC);
+    }
+
+    #[test]
+    fn posix_time_zones_follow_the_zone_tz_names() {
+        // A system zone other than UTC, so that falling back on it shows.
+        let singapore = || TimeZone::parse("Asia/Singapore");
+        let zone = |tz: Option<&str>| TimeZone::posix(tz, singapore).as_str().to_owned();
+        // `TZ=GMT` is the process's zone, eight hours from the system's.
+        assert_eq!(zone(Some("GMT")), "GMT");
+        assert_eq!(
+            TimeZone::posix(Some("GMT"), || unreachable!("TZ names the zone")).as_str(),
+            "GMT"
+        );
+        // The tz database's names, with a slash or without, and with `:`.
+        for name in [
+            "UTC",
+            "EST",
+            "Japan",
+            "NZ-CHAT",
+            "Etc/GMT+5",
+            "Europe/Berlin",
+            "EST5EDT",
+            "GMT0",
+            "GMT-0",
+        ] {
+            assert_eq!(zone(Some(name)), name);
+            assert_eq!(zone(Some(&format!(":{name}"))), name);
+        }
+        assert_eq!(zone(Some(":/usr/share/zoneinfo/Asia/Tokyo")), "Asia/Tokyo");
+        // An empty `TZ` is UTC.
+        assert_eq!(zone(Some("")), "UTC");
+        // POSIX rules and other files name no zone: the system's stands.
+        for tz in [
+            "JST-9",
+            "EST5",
+            "CET-1CEST",
+            "<+08>-8",
+            "CET-1CEST,M3.5.0,M10.5.0/3",
+            "GMT+01:00",
+            ":/etc/localtime",
+            ":",
+        ] {
+            assert_eq!(zone(Some(tz)), "Asia/Singapore", "TZ={tz}");
+        }
+        assert_eq!(zone(None), "Asia/Singapore");
+        assert_eq!(TimeZone::posix(None, || None), TimeZone::UTC);
     }
 }
