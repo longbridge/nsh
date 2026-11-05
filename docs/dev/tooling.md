@@ -112,7 +112,7 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 `NSH_VERBOSE` to see it all (`cargo xtask clippy-android` streams clippy's output: it is what the task is for).
 
 For `nsh run --target tui` (and `nsh dev --target tui`), app preparation and host builds show progress
-on stderr, including Cargo's current crate; `-v` streams tool output. Immediately before launching the host,
+on stderr, with Cargo's current crate when a host is built (a checkout or a Rust app); `-v` streams tool output. Immediately before launching the host,
 the CLI routes diagnostics to the app's `.nsh/tui.log` until the host stops, including hot rebuilds.
 Spinners and colors are disabled there; verbose subprocess output is captured into the same file.
 A Rust restart restores terminal output for preparation before the next host launches. The terminal host inherits stdin/stdout and appends stderr and its logger
