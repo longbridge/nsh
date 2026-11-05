@@ -10,7 +10,9 @@
 //!   network and start as fast as GStreamer prepares a local file. The
 //!   decoded size reported is an estimate (duration at 48 kHz, stereo,
 //!   `f32`). A sound longer than the `max_duration` asked for is reported
-//!   `truncated`, and its voices are stopped at that length.
+//!   `truncated`, and its voices are stopped at that length of playback:
+//!   timed from the moment the stream prepared and started, so the time
+//!   GStreamer takes to prepare never shortens a sound.
 //! - **Players** are one `MediaFile` each, made at the first preload or
 //!   resume, which streams its source (a file, an `http(s)` URL).
 //! - GTK streams have no playback rate: `rate` is ignored (warned once).
@@ -54,11 +56,12 @@ struct Inner {
     players: HashMap<u32, Rc<Player>>,
 }
 
-/// A sound: its file and what it lasts.
+/// A sound: its file, and where its voices stop when it was truncated.
 struct Sound {
     path: PathBuf,
-    /// How long a voice plays at most.
-    limit: Duration,
+    /// How long a voice plays at most: `Some` only for a sound longer than
+    /// the core allows (the others end by themselves).
+    cut: Option<Duration>,
 }
 
 /// A sound playing.
@@ -317,7 +320,7 @@ impl Probe {
                             id,
                             Sound {
                                 path: self.path.clone(),
-                                limit: length,
+                                cut: truncated.then_some(length),
                             },
                         );
                     }
@@ -351,11 +354,26 @@ impl Probe {
     }
 }
 
+/// Stops `stream` once it played `cut`, counted from where it is now.
+fn cut_at(stream: &gtk::MediaFile, cut: Duration) {
+    let played = Duration::from_micros(stream.timestamp().max(0) as u64);
+    let weak = stream.downgrade();
+    glib::timeout_add_local(
+        cut.saturating_sub(played).max(Duration::from_millis(1)),
+        move || {
+            if let Some(stream) = weak.upgrade() {
+                stream.set_playing(false);
+            }
+            glib::ControlFlow::Break
+        },
+    );
+}
+
 impl Speaker {
     fn play(&self, id: u32, volume: f32, rate: f32) {
         warn_rate(rate);
         let mut inner = self.inner.borrow_mut();
-        let Some((path, limit)) = inner.sounds.get(&id).map(|s| (s.path.clone(), s.limit)) else {
+        let Some((path, cut)) = inner.sounds.get(&id).map(|s| (s.path.clone(), s.cut)) else {
             return;
         };
         // Voices that ended free their streams (and their places).
@@ -382,14 +400,17 @@ impl Speaker {
         });
         let flag = done.clone();
         let _ = stream.connect_error_notify(move |_| flag.set(true));
+        if let Some(cut) = cut {
+            // Timed from the start of playback, which waits for the stream
+            // to prepare.
+            let armed = Cell::new(false);
+            let _ = stream.connect_prepared_notify(move |stream| {
+                if stream.is_prepared() && !armed.replace(true) {
+                    cut_at(stream, cut);
+                }
+            });
+        }
         stream.set_playing(true);
-        let weak = stream.downgrade();
-        glib::timeout_add_local(limit.max(Duration::from_millis(1)), move || {
-            if let Some(stream) = weak.upgrade() {
-                stream.set_playing(false);
-            }
-            glib::ControlFlow::Break
-        });
         inner.voices.push(Voice {
             sound: id,
             stream,
@@ -428,6 +449,8 @@ struct Player {
     buffering: Cell<bool>,
     /// A play waits for the load.
     wants_play: Cell<bool>,
+    /// A seek waits for the load: GTK seeks only a prepared stream.
+    seek_to: Cell<Option<Duration>>,
     playing: Cell<bool>,
 }
 
@@ -455,6 +478,7 @@ impl Player {
             failed: Cell::new(false),
             buffering: Cell::new(false),
             wants_play: Cell::new(false),
+            seek_to: Cell::new(None),
             playing: Cell::new(false),
         });
         if player.file.is_none() {
@@ -588,9 +612,27 @@ impl Player {
         self.report(AudioEvent::Load {
             duration: micros(stream.duration()),
         });
+        if let Some(position) = self.seek_to.take() {
+            self.seek(&stream, position);
+        }
         if self.wants_play.replace(false) {
             self.start(&stream);
         }
+    }
+
+    /// Moves a prepared stream to `position` (at most its end) and reports
+    /// where it is: there, or where it stays when it cannot seek (a live
+    /// stream).
+    fn seek(&self, stream: &gtk::MediaFile, position: Duration) {
+        let duration = micros(stream.duration());
+        let position = duration.map_or(position, |d| position.min(d));
+        let position = if stream.is_seekable() {
+            stream.seek(position.as_micros().min(i64::MAX as u128) as i64);
+            position
+        } else {
+            Duration::from_micros(stream.timestamp().max(0) as u64)
+        };
+        self.report(AudioEvent::Progress { position, duration });
     }
 
     fn start(&self, stream: &gtk::MediaFile) {
@@ -647,14 +689,12 @@ impl Player {
             }
             AudioCommand::Seek { position, .. } => {
                 let Some(stream) = self.stream() else { return };
-                let position = self.duration().map_or(*position, |d| (*position).min(d));
-                if stream.is_prepared() && stream.is_seekable() {
-                    stream.seek(position.as_micros().min(i64::MAX as u128) as i64);
+                if self.loaded.get() {
+                    self.seek(&stream, *position);
+                } else {
+                    // `prepared` applies it (the last one asked).
+                    self.seek_to.set(Some(*position));
                 }
-                self.report(AudioEvent::Progress {
-                    position,
-                    duration: self.duration(),
-                });
             }
             AudioCommand::Set { settings, .. } => {
                 self.settings.set(*settings);
@@ -684,6 +724,7 @@ impl Player {
         }
         self.playing.set(false);
         self.wants_play.set(false);
+        self.seek_to.set(None);
     }
 }
 
