@@ -820,10 +820,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             server_only,
         } => {
             no_limits_for_rust(&entry, limits)?;
-            // `nsh dev` serves hosts on other machines.
+            // `--server-only` serves hosts started elsewhere, on other
+            // machines too; a host `nsh dev` starts is on the network only
+            // as `nsh run` starts it.
             let listen = dev::Listen {
                 port: port.unwrap_or_default(),
-                network: true,
+                network: server_only || target.uses_network(),
             };
             if server_only {
                 let session = dev::DevSession::start(&entry, listen, release, limits)?;
@@ -909,12 +911,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 &entry,
                 dev::Listen {
                     port: port.unwrap_or_default(),
-                    // Phones open the web page; a device's host may be on
-                    // the network. A window here needs only this machine.
-                    network: matches!(
-                        target,
-                        run::Target::Ios | run::Target::Android | run::Target::Web
-                    ),
+                    network: target.uses_network(),
                 },
                 release,
                 run::HostFlags {

@@ -39,6 +39,14 @@ pub(crate) enum Target {
 }
 
 impl Target {
+    /// Whether the dev server listens on every interface for this target,
+    /// or on loopback only. Phones open the web page at the LAN address
+    /// and a device's host may be on the network; a desktop window, the
+    /// terminal and Catalyst connect on this machine.
+    pub(crate) fn uses_network(self) -> bool {
+        matches!(self, Target::Ios | Target::Android | Target::Web)
+    }
+
     /// The default: this system’s native desktop host (AppKit on macOS,
     /// GTK on Linux, Win32 on Windows; the browser elsewhere).
     pub(crate) fn native() -> Target {
@@ -1092,6 +1100,19 @@ mod tests {
     use clap::ValueEnum as _;
 
     use super::{HostWindow, Target};
+
+    /// Only phones and browsers that may be on the network get a dev
+    /// server listening on every interface; hosts on this machine get
+    /// loopback.
+    #[test]
+    fn only_targets_that_may_be_other_machines_listen_on_the_network() {
+        let network: Vec<_> = Target::value_variants()
+            .iter()
+            .filter(|target| target.uses_network())
+            .copied()
+            .collect();
+        assert_eq!(network, [Target::Ios, Target::Android, Target::Web]);
+    }
 
     /// `--window-size` reaches every desktop host; GPUI runs no app of
     /// Rust only.
