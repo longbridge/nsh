@@ -7,22 +7,21 @@ the look of the UI nsh draws.
 
 ## Principles
 
-1. **Say what it is, immediately.** The headline states the purpose in plain
-   words: a native UI framework for every platform — one app, native on
-   each. The home page follows the positioning in that order: what native
-   means (the platform's foundations and its interaction), cross-platform
-   from phone to desktop to the web, Rust first with TSX beside it, the
-   foundations, then the ways to ship (standalone apps first, dynamically
-   delivered and AI-generated UI on the same engine). Other frameworks are
-   named only on the comparison page. Architecture comes further down.
-2. **Show the real thing.** The hero runs the gallery's AI chat
-   (`demos/home-chat.tsx`, its files in `demos/hero-chat/`, copied from
-   `examples/gallery`) live on the web player: it plays one scenario on
-   load (a tool call and a streamed Markdown reply, fictional content) and
-   stays interactive. Documentation pages run their demos in a frame at
-   phone width; the code shown is always the source of what runs.
-   The product is written "Native Shell" in formal places and "NSH" in
-   prose; `nsh` stays as it is in code, commands and URLs.
+1. **Say what it is, immediately.** The headline is the name and the slogan,
+   the banners' composition; the lead says it in plain words: write TSX, ship
+   native clients that keep pace with Rust, on 8 platforms. The home page
+   follows that order: the numbers beside Rust, TSX with 0 dependencies, the
+   8 platforms and what each is built from, one Menu in three forms, Rust as
+   an equal way in, retained views, delivery, the ways to ship, the
+   foundations. Other frameworks are named only on the comparison page.
+2. **Show the real thing.** The picture says what NSH is, and the proof runs:
+   the Menu band shows `demos/home-menu.tsx` live on the web player at the
+   desktop and the phone idioms, beside a terminal capture of the same
+   component, and the numbers come from `docs/performance-report.md` and
+   `docs/web.md`, which a change to them updates first. Documentation pages run
+   their demos in a frame at phone width; the code shown is always the source
+   of what runs. The product is written "Native Shell" in formal places and
+   "NSH" in prose; `nsh` stays as it is in code, commands and URLs.
 3. **Specifics over adjectives.** Every capability card names something a
    reader can check in the repository: a crate, an element, a module, a
    command (`Taffy`, `<List>`, `Animated`, `nsh publish`). Claims track
@@ -141,7 +140,9 @@ widths) and picks a variant; a new kind of control is a new component.
 ## Typography
 
 The platform font (SF Pro, Segoe UI, Roboto; PingFang / Noto Sans SC for
-Chinese); `ui-monospace` / SF Mono for code. No webfonts. Base 15px.
+Chinese); `ui-monospace` / SF Mono for code. Base 15px. The home page's
+headings are in Figtree (`@fontsource-variable/figtree`), the banners' face,
+the site's one webfont.
 
 - Display: `clamp(2.3rem, 4.6vw, 3.75rem)`, weight 680, tracking −0.045em.
 - Section heading: `clamp(1.9rem, 3.4vw, 2.8rem)`, weight 660.
@@ -169,42 +170,24 @@ Chinese); `ui-monospace` / SF Mono for code. No webfonts. Base 15px.
 
 ## The hero
 
-The chat sits in a card frame of the site's design (a slim bar with the
-file name and a "Live" badge, the app on an inset surface; no device
-chrome) and follows the page's theme (the player's `?theme=`, then a
-message on every change); the gallery's palette has both. The caption says
-what runs; Replay reloads it, which plays the scenario again. Entrance
-motion only, 620ms `cubic-bezier(.16, 1, .3, 1)`. The copied chat imports
-`./clipboard`, a no-op, because this runtime has no `Clipboard` yet;
-the playground lists every demo but this one (it compiles single files).
+The home hero is the banners' composition drawn live: the name, the citrus
+slogan, the 8 platforms, on the banners' grounds (`#0e1016`, `#f0f3ef`, set on
+the home page only, a little deeper than the docs' graphite).
 
-Behind the hero, `HeroField.astro` draws the night sky from inside a galaxy
-with a fragment shader (WebGL, two passes: the clouds' field into a texture
-of a texel every 11 px, then the sky per pixel, sampling it). The hero's sky
-darkens toward the night, fading out along its bottom into the page. The
-nebula takes the site's own colors, slate blue and grey by region and teal in
-a few clouds, the primary's green tinting them and lighting their ridged
-wisps, which lie in belts as Jupiter's clouds do; darker reaches open here
-and there. Its light opens between the copy and the device from the first
-frame, dims behind the device, and is softly capped. The stars are crisp
-round discs (gravity bends the space they sit in, never their shape) in the
-blue, teal, red, orange and violet besides white, most faint and a few bright, the
-brightest, white or blue-white, with long diffraction spikes; some wear a tilted ring, some have
-companions orbiting them. They crowd where the clouds are, with a fine grain
-of star dust, gather in clusters and leave voids; they drift slowly, nearer
-ones faster, and now and then a meteor crosses. Presses act
-on gravity: a held press is a small mass that bends the starlight toward
-it; released, it sends a gentle wave that carries the stars outward as it
-passes before they settle back, and turns their drift to a new heading. The
-sky shows across the hero, about half as strong behind the copy, every mask
-a smooth gradient. The colors are the `--hero-*` tokens. It moves all the
-time, pauses off screen and in hidden tabs, draws one still frame and takes
-no presses with reduced motion, never takes pointer events itself, and
-draws nothing without WebGL (`?fieldperf` logs its frame time).
+`HeroArches.astro` draws the mark with a fragment shader (WebGL, one pass):
+eight glass arches around a lit citrus tube holding a bead, over a halftone
+field. The bead is the app, the tube the engine, each arch a platform, inner
+to outer in the order of the platform names beside it. Hovering or focusing a
+name lights its arch and names its stack; hovering an arch does the same. On
+load one ripple runs outward through the arches. Light slides slowly over the
+glass. It draws at 30 FPS, pauses off screen and in hidden tabs, draws still
+frames with reduced motion, never takes pointer events itself, and without
+WebGL the hero is its copy. On narrow screens the arch sits under the copy,
+in the room `--arch-room` keeps.
 
 ## Demo frames
 
-- Demos (`demos/*.tsx`), the hero's chat and the playground follow the
+- Demos (`demos/*.tsx`), the home page's live frames and the playground follow the
   page's theme: the player starts with `?theme=` and gets a message on every
   change (`themeDemos` in `src/lib/demo-client.ts`), and demos read their
   colours from `demos/palette.ts`, an adapter of `examples/nsh-gallery-ui`, inside JSX. Its palette reads the
