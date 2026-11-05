@@ -212,14 +212,19 @@ pub(crate) fn build_apk(sdk: &Sdk, apk: &Apk<'_>, out: &Path) -> anyhow::Result<
     // Resources: only the launcher icon.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
-        let res = work.join("res/mipmap-xxxhdpi");
+        // aapt2 parses the file's path itself: the components joined in one
+        // go (`join("res/mipmap-xxxhdpi")`) leave a mix of `/` and `\` on
+        // Windows, which it calls no valid file path. Joined by component
+        // the path comes out uniform.
+        let res = work.join("res").join("mipmap-xxxhdpi");
         fs::create_dir_all(&res)?;
-        resize_png(icon, &res.join("ic_launcher.png"), 192)?;
+        let icon_path = res.join("ic_launcher.png");
+        resize_png(icon, &icon_path, 192)?;
         let compiled = work.join("compiled");
         fs::create_dir_all(&compiled)?;
         run(Command::new(sdk.tool("aapt2"))
             .arg("compile")
-            .arg(res.join("ic_launcher.png"))
+            .arg(&icon_path)
             .arg("-o")
             .arg(&compiled))?;
         for entry in fs::read_dir(&compiled)? {
