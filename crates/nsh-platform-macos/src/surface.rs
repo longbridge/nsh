@@ -893,7 +893,11 @@ impl Surface {
         // one a frame later when the link gives none, drawing too (a JS
         // frame request, a list binding its rows over frames).
         let testing = self.testing() && self.wants_frames();
-        let deadline = if testing { Some(now) } else { self.deadline(now) };
+        let deadline = if testing {
+            Some(now)
+        } else {
+            self.deadline(now)
+        };
         let Some(at) = deadline else {
             return;
         };
