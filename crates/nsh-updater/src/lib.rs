@@ -55,6 +55,7 @@ pub enum Error {
 /// `"updater"` with the app's id and version, as `nsh package` writes it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct Config {
     /// The app's id: a manifest for another app is refused.
     pub id: String,
@@ -185,8 +186,9 @@ impl Config {
 }
 
 /// `latest.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Manifest {
     /// The app's id.
     pub id: String,
@@ -200,8 +202,9 @@ pub struct Manifest {
 }
 
 /// One platform's entry of a [`Manifest`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Asset {
     /// Where it is, absolute or relative to the manifest. With no `sha256`,
     /// a page to send the user to (a store's).
@@ -215,7 +218,8 @@ pub struct Asset {
 }
 
 /// A newer version for this machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Available {
     /// Its version.
     pub version: String,

@@ -38,6 +38,13 @@ or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These
   `sha2`, `ed25519-dalek` and `flate2` are linked already. `nsh-updater` is not a dependency in WebAssembly, where
   `checkForUpdate` resolves `null`.
 - **Rust apps** (`nsh.json` `"root"`) have no JS modules: they use `nsh-updater` directly and bring their own HTTP.
+  After verifying the archive, use `Installation::install_and_launch` and exit only on success. It retains the old
+  installation until launching succeeds and rolls back on launch failure. Separate `install` / `launch` calls do not
+  provide that transaction.
+- **Concurrent calls** are refused while a check, download or install is in progress. Downloads use exclusively
+  created unique files, so a retry cannot truncate a previously verified archive.
+- **Public records** (`Config`, `Manifest`, `Asset`, `Available`) are non-exhaustive and implement `Default`, so later
+  fields do not require applications to change exhaustive struct literals.
 
 ## Limits
 

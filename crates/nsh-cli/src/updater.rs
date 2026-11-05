@@ -37,13 +37,12 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     let Some(updater) = &config.updater else {
         return Ok(None);
     };
-    let runtime = Config {
-        id: id.to_owned(),
-        version: version(config).to_owned(),
-        github: updater.github.clone(),
-        url: updater.url.clone(),
-        public_key: updater.public_key.clone(),
-    };
+    let mut runtime = Config::default();
+    runtime.id = id.to_owned();
+    runtime.version = version(config).to_owned();
+    runtime.github = updater.github.clone();
+    runtime.url = updater.url.clone();
+    runtime.public_key = updater.public_key.clone();
     runtime.validate().context("nsh.json")?;
     Ok(Some(runtime))
 }
@@ -187,39 +186,30 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
             Some(base) => format!("{}/{file}", base.trim_end_matches('/')),
             None => file.to_owned(),
         };
-        platforms.insert(
-            platform,
-            Asset {
-                url,
-                sha256: Some(nsh_updater::sha256(&bytes)),
-                size: Some(bytes.len() as u64),
-            },
-        );
+        let mut asset = Asset::default();
+        asset.url = url;
+        asset.sha256 = Some(nsh_updater::sha256(&bytes));
+        asset.size = Some(bytes.len() as u64);
+        platforms.insert(platform, asset);
     }
     for link in options.links {
         let Some((platform @ ("ios" | "android"), url)) = link.split_once('=') else {
             bail!("--link {link}: expected ios=<url> or android=<url>");
         };
-        platforms.insert(
-            platform.to_owned(),
-            Asset {
-                url: url.to_owned(),
-                sha256: None,
-                size: None,
-            },
-        );
+        let mut asset = Asset::default();
+        asset.url = url.to_owned();
+        platforms.insert(platform.to_owned(), asset);
     }
     let notes = options
         .notes
         .map(fs::read_to_string)
         .transpose()
         .context("read the notes")?;
-    let manifest = Manifest {
-        id,
-        version: version.to_owned(),
-        notes,
-        platforms,
-    };
+    let mut manifest = Manifest::default();
+    manifest.id = id;
+    manifest.version = version.to_owned();
+    manifest.notes = notes;
+    manifest.platforms = platforms;
     let bytes = serde_json::to_vec_pretty(&manifest)?;
     fs::create_dir_all(options.out)?;
     let path = options.out.join(MANIFEST);

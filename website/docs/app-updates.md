@@ -93,3 +93,16 @@ next to each other. A release marked as a draft or prerelease on GitHub is not o
 On macOS, `nsh package` signs ad hoc, which is fine to test, but Gatekeeper may stop it on other Macs. To distribute, sign
 the `.app` with your Developer ID, notarize it, and archive it again under the same name (`tar -czf <archive> <Name>.app`)
 before `nsh update-manifest`.
+
+## Rust apps
+
+A native Rust app uses `nsh-updater` directly and supplies its own HTTP transport.
+Use `Config::check` to verify the manifest and `Download` to verify the archive.
+Then call `Installation::install_and_launch` and exit only if it succeeds; this
+keeps the old installation until the new process can be launched and rolls back
+on launch failure. Calling `install` followed by `launch` separately does not
+provide that rollback. This detects launch errors, not a crash after a process
+has already started.
+
+The `Config`, `Manifest`, `Asset` and `Available` records are non-exhaustive.
+Construct them with `Default::default()` and assign the fields you need.

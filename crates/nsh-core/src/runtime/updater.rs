@@ -7,7 +7,12 @@
 //! module running inside another app has no installation to replace.
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
+};
 
 use crate::element::{Callback, JsError, JsObject, Later, System, codes, module};
 
@@ -107,13 +112,29 @@ mod native {
 
     /// What the VM's last check found and its download left.
     #[derive(Default)]
-    struct Found(RefCell<Option<Rc<Pending>>>);
+    struct Found(RefCell<Option<Rc<Pending>>>, Cell<bool>);
+
+    struct Operation<'a>(&'a Cell<bool>);
+
+    impl Drop for Operation<'_> {
+        fn drop(&mut self) {
+            self.0.set(false);
+        }
+    }
+
+    fn begin(found: &Found) -> Result<Operation<'_>, JsError> {
+        if found.1.replace(true) {
+            return Err(JsError::Error(
+                "an update operation is already in progress".into(),
+            ));
+        }
+        Ok(Operation(&found.1))
+    }
 
     impl crate::element::Local for Found {}
 
     struct Pending {
         host: Arc<dyn UpdaterHost>,
-        config: Config,
         available: Available,
         dir: PathBuf,
         archive: RefCell<Option<PathBuf>>,
@@ -130,6 +151,7 @@ mod native {
 
     pub(super) async fn check(sys: System) -> Result<Option<AppUpdate>, JsError> {
         let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
         *found.0.borrow_mut() = None;
         let Some(host) = sys.updater.clone() else {
             return Ok(None);
@@ -140,6 +162,13 @@ mod native {
                 return Ok(None);
             };
             let config = Config::parse(&bytes).map_err(|e| e.to_string())?;
+            #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+            if let Some(installation) =
+                nsh_updater::install::Installation::current(&config.id, &bytes)
+            {
+                // Windows leftovers also need removal when no newer update exists.
+                installation.remove_leftovers();
+            }
             let manifest = get_all(&*worker, &config.manifest_url())?;
             let signature = match config.signature_url() {
                 Some(url) => Some(get_all(&*worker, &url)?),
@@ -165,7 +194,6 @@ mod native {
             let id = config.id.clone();
             let installation = blocking(move || {
                 Ok(nsh_updater::install::Installation::current(&id, &bytes)
-                    .inspect(|installation| installation.remove_leftovers())
                     .filter(|installation| installation.can_install()))
             })
             .await?;
@@ -177,7 +205,6 @@ mod native {
                 update.can_install = true;
                 *found.0.borrow_mut() = Some(Rc::new(Pending {
                     host,
-                    config,
                     available,
                     dir: dir.join("updates"),
                     archive: RefCell::new(None),
@@ -220,18 +247,29 @@ mod native {
     ) -> Result<(), JsError> {
         use std::io::Write as _;
 
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
         let pending = pending(&sys)?;
         let host = pending.host.clone();
         let dir = pending.dir.clone();
         let url = pending.available.url.clone();
         let sha256 = pending.available.sha256.clone().unwrap_or_default();
         let size = pending.available.size;
-        let name = format!("{}-{}", pending.config.id, pending.available.version);
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let name = format!(
+            "download-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut work = std::pin::pin!(blocking(move || {
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let path = dir.join(name);
-            let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|e| e.to_string())?;
             let mut check = Download::new(&sha256, size);
             let result = host
                 .get(&url, &mut |chunk, total| {
@@ -261,25 +299,29 @@ mod native {
                 }
             }
         };
-        *pending.archive.borrow_mut() = Some(path);
+        if let Some(previous) = pending.archive.borrow_mut().replace(path) {
+            let _ = std::fs::remove_file(previous);
+        }
         Ok(())
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     pub(super) async fn install(sys: System) -> Result<(), JsError> {
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
         let pending = pending(&sys)?;
         let archive = pending.archive.borrow().clone().ok_or_else(|| {
             JsError::Error("nothing is downloaded: call downloadUpdate first".into())
         })?;
         let installation = pending.installation.clone();
         blocking(move || {
-            installation.install(&archive).map_err(|e| e.to_string())?;
-            let _ = std::fs::remove_file(&archive);
-            // The app's last storage writes are on their way to the disk, on
-            // a thread of their own that this run's exit would end, and the
-            // new run reads that file.
+            // Let the writer settle before the new process reads storage.
             std::thread::sleep(std::time::Duration::from_millis(300));
-            installation.launch().map_err(|e| e.to_string())
+            installation
+                .install_and_launch(&archive)
+                .map_err(|e| e.to_string())?;
+            let _ = std::fs::remove_file(&archive);
+            Ok(())
         })
         .await?;
         std::process::exit(0);
@@ -288,6 +330,22 @@ mod native {
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     pub(super) async fn install(_: System) -> Result<(), JsError> {
         Err(unavailable())
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn operations_are_serial_and_release_on_error_or_cancellation() {
+            let found = Found::default();
+            let operation = begin(&found).unwrap();
+            assert!(begin(&found).is_err());
+            drop(operation);
+            let operation = begin(&found).unwrap();
+            assert!(begin(&found).is_err());
+            drop(operation);
+            assert!(begin(&found).is_ok());
+        }
     }
 }
 

@@ -84,3 +84,14 @@ nsh update-manifest *.tar.gz *.zip \
 - 当前进程就是这个包本身：运行在其他应用内的 NSH 模块无法替换宿主。
 
 macOS 上 `nsh package` 用的是 ad hoc 签名，可用于测试，但在其他 Mac 上可能被 Gatekeeper 拦截。正式分发时，请用 Developer ID 给 `.app` 签名并公证，再以同样的文件名重新打包（`tar -czf <压缩包> <Name>.app`），然后运行 `nsh update-manifest`。
+
+## Rust 应用
+
+原生 Rust 应用直接使用 `nsh-updater`，并提供自己的 HTTP 传输。
+用 `Config::check` 验证清单，用 `Download` 验证更新包；之后调用
+`Installation::install_and_launch`，仅在成功后退出旧进程。它会保留旧安装，
+直到新进程能够启动；启动失败时回滚。分别调用 `install` 和 `launch` 不提供
+这项回滚保证。这里检测的是启动错误，无法检测进程已经启动后发生的崩溃。
+
+`Config`、`Manifest`、`Asset` 和 `Available` 均为非穷尽结构体。
+使用 `Default::default()` 创建，再给所需字段赋值。
