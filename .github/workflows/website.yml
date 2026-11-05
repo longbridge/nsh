@@ -62,6 +62,9 @@ jobs:
   build:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      # Pushes the releases' players to the `website-versions` branch.
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -153,9 +156,19 @@ jobs:
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
         run: bun run test
 
-      # Each release's pages and player are built once and kept here, again
-      # when the site itself changes (the script's digest of it).
-      - name: Restore the releases' builds
+      # Each release's player (its `cargo xtask web`, ~15 minutes a tag) is
+      # built once and kept on the orphan branch `website-versions`, which,
+      # unlike the Actions cache, the Rust caches cannot evict. The releases'
+      # pages, rebuilt whenever the site changes, stay in the cache.
+      - name: Restore the releases' players
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          mkdir -p website/.versions
+          if git fetch --depth=1 origin website-versions:refs/remotes/origin/website-versions; then
+            git archive origin/website-versions | tar -x -C website/.versions
+          fi
+
+      - name: Restore the releases' pages
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         uses: actions/cache/restore@v4
         with:
@@ -184,12 +197,35 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/versions.js
 
-      - name: Save the releases' builds
+      - name: Save the releases' pages
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         uses: actions/cache/save@v4
         with:
           path: website/.versions
           key: website-versions-${{ github.run_id }}
+
+      # Only a new release adds to the branch: one commit with its player.
+      - name: Save the releases' players
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          branch="$RUNNER_TEMP/website-versions"
+          if git rev-parse -q --verify refs/remotes/origin/website-versions >/dev/null; then
+            git worktree add "$branch" -B website-versions origin/website-versions
+          else
+            git worktree add --orphan -b website-versions "$branch"
+          fi
+          for play in website/.versions/v*/play; do
+            tag=$(basename "$(dirname "$play")")
+            [ -f "$play/index.html" ] && [ ! -e "$branch/$tag/play" ] || continue
+            mkdir -p "$branch/$tag" && cp -R "$play" "$branch/$tag/play"
+          done
+          cd "$branch"
+          git add -A
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Keep the players of $(git diff --cached --name-only | cut -d/ -f1 | sort -u | tr '\n' ' ')"
+          # A concurrent run may have pushed first; its players are the same.
+          git push origin website-versions || echo "::warning::website-versions not updated"
 
       - name: Check standalone Gallery code size
         run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=4100000

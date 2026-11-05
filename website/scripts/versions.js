@@ -8,7 +8,8 @@
 // run on that release's own WebAssembly runtime (its `cargo xtask web`, in a
 // worktree of the tag), so a page and its live demo always match.
 //
-// A release's built pages are kept in `.versions/` (CI caches it) under the
+// A release's built pages are kept in `.versions/` (CI caches it, and keeps
+// the players on the `website-versions` branch) under the
 // tag and a digest of this checkout's site, and its player under the tag
 // alone: a release is built once, and again only when the site changes. The
 // latest's is also kept under the catalog's commit and a digest of the release
