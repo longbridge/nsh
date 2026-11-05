@@ -673,7 +673,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // offered (comma-separated; empty: any file) and the
                     // largest file read.
                     Command::PickFiles { id, request } => {
-                        e.int(44);
+                        e.int(45);
                         e.int(id as i32);
                         e.int(request.limit as i32);
                         e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));

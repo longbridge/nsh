@@ -1256,7 +1256,11 @@ impl ListState {
     /// when the end moves away while they are within the threshold of it
     /// (a growing last item, a shrinking viewport); scrolled further up,
     /// they keep what is visible (content grows below it).
-    pub(super) fn anchor_end(&mut self) -> f32 {
+    ///
+    /// `kept` is how far this commit's measurements moved the offset to keep
+    /// the visible rows in place: that move says nothing about where the user
+    /// is, so a list at its end is still at its end.
+    pub(super) fn anchor_end(&mut self, kept: f32) -> f32 {
         if self.viewport <= 0.0 {
             return 0.0;
         }
@@ -1271,13 +1275,18 @@ impl ListState {
             if bottom && !self.anchored_end.is_nan() && self.last_row_being_measured() {
                 // One scroll, to where the row really ends: scrolling by
                 // its estimate first would overshoot and be clamped back.
+                self.anchored_end += kept;
                 return 0.0;
             }
             let was = std::mem::replace(&mut self.anchored_end, end);
             // A bottom-aligned list opens at its end, without a scroll
             // command to pin and follow while its rows are measured.
             let opening = bottom && was.is_nan();
-            if !opening && (was.is_nan() || end <= was || was - self.offset > threshold) {
+            let distance = was - (self.offset - kept);
+            // Rows above the viewport shrinking while visible ones grow can
+            // leave the end where it was and the offset short of it.
+            let settle = bottom && distance <= PIN_SLACK;
+            if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
             }
             let delta = end - self.offset;
@@ -1848,12 +1857,48 @@ mod tests {
     }
 
     #[test]
+    fn bottom_aligned_lists_stay_at_their_end_as_rows_above_are_measured() {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_alignment(ListAlignment::Bottom);
+        l.anchor_end(0.0);
+        let end = l.content_len() - 400.0;
+        assert_eq!(l.offset, end);
+        // A row above the viewport comes out shorter and a visible one taller,
+        // by the same amount: the end stays, and the offset must too.
+        let kept = l.measured(50, 30.0);
+        assert_eq!(kept, -20.0);
+        assert_eq!(l.measured(99, 70.0), 0.0);
+        l.offset += kept;
+        let scroll = l.anchor_end(kept);
+        assert_eq!(l.content_len() - 400.0, end);
+        assert_eq!(kept + scroll, 0.0);
+        assert_eq!(l.offset, end);
+        // A kept move while the appended last row is being measured does not
+        // lose the end either.
+        l.splice(100, 0, 1);
+        l.take_splice_anchor();
+        let kept = l.measured(51, 30.0);
+        l.offset += kept;
+        assert_eq!(l.anchor_end(kept), 0.0, "waits for the row's real size");
+        l.measured(100, 34.0);
+        assert_eq!(l.anchor_end(0.0), 34.0);
+        assert_eq!(l.offset, l.content_len() - 400.0);
+        // Scrolled up, the same measurements leave it where the user put it.
+        let up = l.content_len() - 400.0 - 500.0;
+        l.reported(up, 0);
+        let kept = l.measured(52, 30.0);
+        l.offset += kept;
+        assert_eq!(l.anchor_end(kept), 0.0);
+        assert_eq!(l.offset, up + kept);
+    }
+
+    #[test]
     fn bottom_aligned_lists_rest_at_their_end() {
         let on_screen = |l: &ListState, i: u32| l.to_content(l.item_at(i), 50.0) - l.offset;
         let mut l = list(100, 50.0, 400.0);
         l.set_alignment(ListAlignment::Bottom);
         // Opens at the end, its window there in the same commit.
-        assert_eq!(l.anchor_end(), 4600.0);
+        assert_eq!(l.anchor_end(0.0), 4600.0);
         let mut binds = Vec::new();
         l.update_window(&mut binds);
         assert!(binds.iter().any(|&(_, i)| i == 99));
@@ -1862,20 +1907,20 @@ mod tests {
         let row = l.to_content(l.item_at(90), 50.0);
         l.splice(100, 0, 1);
         assert_eq!(l.take_splice_anchor(), 0.0);
-        assert_eq!(l.anchor_end(), 0.0, "waits for the row's real size");
+        assert_eq!(l.anchor_end(0.0), 0.0, "waits for the row's real size");
         assert_eq!(l.measured(100, 34.0), 0.0);
-        assert_eq!(l.anchor_end(), 34.0);
+        assert_eq!(l.anchor_end(0.0), 34.0);
         assert_eq!(l.to_content(l.item_at(90), 50.0), row);
         // So does the last row growing (a reply streaming in).
         let anchor = l.measured(100, 80.0);
-        assert_eq!(anchor + l.anchor_end(), 46.0);
+        assert_eq!(anchor + l.anchor_end(0.0), 46.0);
         assert_eq!(l.to_content(l.item_at(90), 50.0), row);
         // Older rows above the viewport leave what shows in place.
         let before = on_screen(&l, 95);
         l.splice(0, 0, 10);
         let scrolled = l.take_splice_anchor();
         assert_eq!(scrolled, 500.0);
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(on_screen(&l, 105), before);
         // Scrolled up, growth below leaves it alone; back at the end, it
         // follows again.
@@ -1883,26 +1928,26 @@ mod tests {
         l.reported(end - 500.0, 0);
         l.splice(l.count, 0, 1);
         l.take_splice_anchor();
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         l.measured(l.count - 1, 50.0);
-        l.anchor_end();
+        l.anchor_end(0.0);
         l.reported(l.content_len() - 400.0, 0);
         l.splice(l.count, 0, 1);
         l.take_splice_anchor();
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         l.measured(l.count - 1, 50.0);
-        assert_eq!(l.anchor_end(), 50.0);
+        assert_eq!(l.anchor_end(0.0), 50.0);
         // A page too long for the window to reach its last row follows by
         // the estimate, or the row would never be measured.
         l.splice(l.count, 0, 100);
-        assert_eq!(l.anchor_end(), 5000.0);
+        assert_eq!(l.anchor_end(0.0), 5000.0);
     }
 
     #[test]
     fn bottom_aligned_lists_keep_short_content_at_the_bottom() {
         let mut l = list(2, 50.0, 400.0);
         l.set_alignment(ListAlignment::Bottom);
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(l.content_len(), 400.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 300.0);
         assert_eq!(l.to_content(l.item_at(1), 50.0), 350.0);
@@ -1911,7 +1956,7 @@ mod tests {
         assert_eq!(binds.len(), 2);
         // A row more: they rise, with nothing to scroll.
         l.splice(2, 0, 1);
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 250.0);
     }
 
@@ -1920,7 +1965,7 @@ mod tests {
         let mut l = list(100, 50.0, 400.0);
         l.set_inverted(true);
         l.loads_at_start = true;
-        l.anchor_end();
+        l.anchor_end(0.0);
         let mut binds = Vec::new();
         // Opens at its start (item 0 at the bottom): no event.
         assert!(!l.update_window(&mut binds).start);
@@ -1933,33 +1978,33 @@ mod tests {
         let on_screen = |l: &ListState, i: u32| l.to_content(l.item_at(i), 50.0) - l.offset;
         let before = on_screen(&l, 4);
         l.splice(0, 0, 4);
-        let scrolled = l.take_splice_anchor() + l.anchor_end();
+        let scrolled = l.take_splice_anchor() + l.anchor_end(0.0);
         assert_eq!(scrolled, 0.0);
         assert_eq!(on_screen(&l, 8), before);
         // So does their measuring.
         let offset = l.offset;
         let anchor = l.measured(0, 80.0);
         l.offset += anchor;
-        assert_eq!(anchor + l.anchor_end(), 0.0);
+        assert_eq!(anchor + l.anchor_end(0.0), 0.0);
         assert_eq!(l.offset, offset);
         // At the start, what arrives there shows (a chat's new message).
         let mut c = list(100, 50.0, 400.0);
         c.set_inverted(true);
         c.loads_at_start = true;
-        c.anchor_end();
+        c.anchor_end(0.0);
         c.splice(0, 0, 1);
         c.take_splice_anchor();
-        c.anchor_end();
+        c.anchor_end(0.0);
         assert_eq!(c.natural_offset(), 0.0);
         // Without `onLoadMoreAtStart`, an inverted list keeps its distance
         // from the end wherever it is, as it always did.
         let mut d = list(100, 50.0, 400.0);
         d.set_inverted(true);
-        d.anchor_end();
+        d.anchor_end(0.0);
         d.reported(5000.0 - 400.0 - 200.0, 0);
         d.splice(0, 0, 4);
         assert_eq!(d.take_splice_anchor(), 0.0);
-        d.anchor_end();
+        d.anchor_end(0.0);
         assert_eq!(d.natural_offset(), 200.0);
     }
 
@@ -2061,23 +2106,23 @@ mod tests {
     fn lists_follow_the_end_within_the_threshold() {
         let mut l = list(100, 50.0, 400.0);
         l.set_follow_end(Some(10.0));
-        assert_eq!(l.anchor_end(), 0.0, "starts where it is");
+        assert_eq!(l.anchor_end(0.0), 0.0, "starts where it is");
         // At the end: the last item grows by 30, the list follows.
         l.offset = 5000.0 - 400.0;
         l.measured(99, 80.0);
-        assert_eq!(l.anchor_end(), 30.0);
+        assert_eq!(l.anchor_end(0.0), 30.0);
         assert_eq!(l.offset, 5030.0 - 400.0);
         // Scrolled up: it grows below what is visible, which stays.
         l.offset = 1000.0;
         l.measured(99, 120.0);
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(l.offset, 1000.0);
         // Without the option, nothing follows.
         let mut m = list(100, 50.0, 400.0);
-        m.anchor_end();
+        m.anchor_end(0.0);
         m.offset = 5000.0 - 400.0;
         m.measured(99, 80.0);
-        assert_eq!(m.anchor_end(), 0.0);
+        assert_eq!(m.anchor_end(0.0), 0.0);
     }
 
     #[test]
@@ -2085,7 +2130,7 @@ mod tests {
         let mut l = list(100, 50.0, 400.0);
         l.set_inverted(true);
         // Starts scrolled to the end; item 0 is at the bottom.
-        assert_eq!(l.anchor_end(), 5000.0 - 400.0);
+        assert_eq!(l.anchor_end(0.0), 5000.0 - 400.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 4950.0);
         let mut binds = Vec::new();
         l.update_window(&mut binds);
@@ -2093,13 +2138,13 @@ mod tests {
         assert!(binds.iter().all(|b| b.1 <= 16));
         // Older items load (appended): the visible content stays put.
         l.set_count(120);
-        assert_eq!(l.anchor_end(), 1000.0);
+        assert_eq!(l.anchor_end(0.0), 1000.0);
         assert_eq!(l.offset, 5600.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 5950.0);
         // A short list sits at the bottom.
         let mut s = list(2, 50.0, 400.0);
         s.set_inverted(true);
-        s.anchor_end();
+        s.anchor_end(0.0);
         assert_eq!(s.offset, 0.0);
         assert_eq!(s.to_content(s.item_at(0), 50.0), 350.0);
     }
