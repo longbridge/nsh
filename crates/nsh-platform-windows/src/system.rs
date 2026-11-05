@@ -557,6 +557,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             clipboard::files_answer(*id, &clipboard_files()),
         ),
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }

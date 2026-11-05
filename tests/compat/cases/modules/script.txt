@@ -65,6 +65,10 @@ expect Refused: rejected RangeError
 expect Picked: pending
 wait 300
 expect Picked: pending
+expect Files: not picked
+tap id:pick-files
+expect Files refused: rejected RangeError
+expect Files: pending
 covers [nsh] Picker
 # mod-speech
 tap id:case-mod-speech
