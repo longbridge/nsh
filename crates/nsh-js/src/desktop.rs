@@ -12,13 +12,13 @@ use std::{
 };
 
 use nsh_core::{
-    Command, EventKind, Op, ROOT_ID,
+    Command, EventKind, ImageSource, Op, ROOT_ID,
     desktop::{DesktopCommand, MenuAction, MenuItem, MenuRole, Shortcut},
     geometry::{Points, point},
     keymap::When,
     platform::Os,
 };
-use rquickjs::qjs;
+use rquickjs::{Ctx, Value, qjs};
 
 use crate::{
     dom,
@@ -163,6 +163,36 @@ fn flag(cx: *mut JsContext, object: JsValue, key: &CStr) -> Option<bool> {
     b
 }
 
+/// The source of item `v`'s `icon`, as `<Image>`'s `src` takes it (a `blob:`
+/// URL's bytes, in this VM, go with it); `None` when it has none. Anything
+/// else throws, as a menu's other wrong values do: a failed load only
+/// warns, on the platform.
+fn icon(cx: *mut JsContext, v: JsValue) -> Result<Option<ImageSource>, String> {
+    let icon = get(cx, v, c"icon");
+    if nullish(icon) {
+        return Ok(None);
+    }
+    // SAFETY: a context reference for the decoder, which reads a live
+    // value it owns (its reference given to `Value`).
+    let value =
+        unsafe { Value::from_raw(Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)), icon) };
+    let empty = value.as_string().is_some_and(|s| {
+        // A string that cannot be read is no empty one.
+        s.to_string().is_ok_and(|s| s.is_empty())
+    });
+    let Some(mut source) = crate::protocol::image_source(value) else {
+        return match empty {
+            true => Ok(None),
+            false => Err("an item's `icon` is a URL or an imported image".into()),
+        };
+    };
+    if let Some((uri, data)) = crate::web::blob::resolve_image_url(cx, &source.uri) {
+        source.uri = uri;
+        source.data = Some(data);
+    }
+    Ok(Some(source.inline()))
+}
+
 /// Decodes menus, keeping their functions.
 struct Decoder {
     cx: *mut JsContext,
@@ -212,6 +242,7 @@ impl Decoder {
         }
         let label = string(cx, v, c"label");
         let enabled = !flag(cx, v, c"disabled").unwrap_or(false);
+        let icon = icon(cx, v)?;
         let submenu = get(cx, v, c"submenu");
         if !nullish(submenu) {
             let items = self.items(submenu);
@@ -220,6 +251,7 @@ impl Decoder {
                 label: label.ok_or("a submenu needs a label")?,
                 enabled,
                 items: items?,
+                icon,
             }));
         }
         let role = match string(cx, v, c"role") {
@@ -265,6 +297,7 @@ impl Decoder {
             checked: flag(cx, v, c"checked"),
             role,
             when,
+            icon,
         })))
     }
 
@@ -572,6 +605,21 @@ export type MenuItem =
       checked?: boolean;
       /** Called when it is chosen (by a click or its shortcut). */
       onSelect?: () => void;
+      /** The image beside its label, as `<Image>`'s `src` takes it (an
+       * imported file, or a URL such as a `data:` one), so that an app's menus
+       * show its own icon set on every platform. It is fitted in the menu's
+       * icon size (16 points on macOS, the small icon size at the window's
+       * DPI on Windows) and drawn for the screen. An SVG is a template: only
+       * its shape counts, in the color of the menu's text, whatever that is
+       * (dark mode, a selected or disabled item); a bitmap keeps its colors.
+       * It loads off the main thread, so a menu never blocks on it and the
+       * icon shows once it has loaded (a context menu on Windows gives it
+       * up to 100ms before opening); one that fails to load leaves the item
+       * without an icon and logs a warning. The top-level menus of a
+       * menu bar show their titles alone, and so do GPUI's native menus on
+       * macOS. GTK's menus show no icon beside a label: GTK draws a menu
+       * item's icon only when it has no text. A terminal shows no images. */
+      icon?: ImageAsset | string;
       /** Its items: makes it a submenu (`label` is required). */
       submenu?: readonly (MenuItem | null | undefined | false)[];
     };

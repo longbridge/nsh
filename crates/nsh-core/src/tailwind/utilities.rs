@@ -1457,6 +1457,9 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
             sets(K::Overflow, "hidden")
         }
         "overflow-visible" => sets(K::Overflow, "visible"),
+        // Corner shapes: the names of `corner-shape`'s keywords.
+        "corner-squircle" => sets(K::BorderCurve, "continuous"),
+        "corner-round" => sets(K::BorderCurve, "circular"),
         // Flexbox.
         "flex-row" => sets(K::FlexDirection, "row"),
         "flex-row-reverse" => sets(K::FlexDirection, "row-reverse"),

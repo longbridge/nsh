@@ -15,7 +15,7 @@ use super::{
     ListItem, MarkdownExtension, MarkdownOptions, MarkdownPlugins, Parser, Table,
     parts::{TextViewClasses, TextViewPart as Part, TextViewParts, TextViewStyles},
 };
-use crate::theme::theme;
+use crate::{terminal::is_terminal, theme::theme};
 
 /// The props of [`TextView`].
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -265,9 +265,11 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 let last = computed(move || index.get() + 1 == count.get());
                 // A memo as well: what comes before decides a heading's
                 // room above it.
-                let before = computed(move || match index.get() {
-                    0 => Before::Nothing,
-                    i => blocks.with(|b| Before::of(b.get(i - 1).map(|(_, b)| b))),
+                let before = computed(move || {
+                    let i = index.get();
+                    blocks.with(|b| {
+                        Before::of(shown_before(b[..i.min(b.len())].iter().map(|(_, b)| b)))
+                    })
                 });
                 // A node as the row's root: an `Each` keeps rows by their
                 // root's key, which a region has none of.
@@ -284,14 +286,16 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 return None;
             }
             let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
+            // A terminal's blank row before them, as before a block.
             let footnotes = view()
                 .flex_col()
                 .gap(px(4.0))
                 .text_size(px(SMALL_SIZE))
                 .line_height(px(SMALL_SIZE * 1.6))
                 .text_color(move || theme().muted_foreground);
+            let gap = is_terminal().then(|| view().h(crate::terminal::cell_height()));
             Some(
-                cx.part(footnotes, Part::Footnotes)
+                cx.part(footnotes.child(gap), Part::Footnotes)
                     .children(notes.iter().map(|note| {
                         let key = format!("f{}", note.index);
                         cx.part(view().flex_row().gap(px(6.0)), Part::Footnote)
@@ -527,18 +531,40 @@ impl Cx {
         key: &str,
         tail: bool,
     ) -> E {
-        let n = blocks.len();
-        column.children(blocks.iter().enumerate().map(|(i, b)| {
-            let before = match i {
-                0 => Before::Nothing,
-                i => Before::of(blocks.get(i - 1)),
-            };
-            self.block(b, &format!("{key}.{i}"), tail && i + 1 == n, before)
+        // A terminal draws nothing for a rule (the blank row between the
+        // blocks around it is the break) nor for a paragraph of images
+        // without alt text: they take no row, and no blank row either.
+        let terminal = is_terminal();
+        let shown: Vec<(usize, &Block)> = blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| !terminal || !blank_in_terminal(b))
+            .collect();
+        let n = shown.len();
+        column.children(shown.iter().enumerate().map(|(at, &(i, b))| {
+            let before = Before::of(shown_before(shown[..at].iter().map(|(_, b)| *b)));
+            self.block(b, &format!("{key}.{i}"), tail && at + 1 == n, before)
         }))
     }
 
     fn block(&self, block: &Block, key: &str, tail: bool, before: Before) -> AnyElement {
+        if is_terminal() && blank_in_terminal(block) {
+            return view().into_element();
+        }
         let el = self.block_content(block, key, tail, before);
+        // A terminal's blocks carry no margins: a block after another, a
+        // heading's included, takes one blank row before it, as a Markdown
+        // source has. Not in a list (its items' blocks stay together).
+        let after_block = !matches!(before, Before::Nothing);
+        let el = if is_terminal() && self.list_depth.get() == 0 && after_block {
+            view()
+                .flex_col()
+                .child(view().h(crate::terminal::cell_height()))
+                .child(el)
+                .into_element()
+        } else {
+            el
+        };
         // A block with no text of its own at its end (a rule, the app's
         // content): the caret goes on a line after it.
         if tail && self.caret.is_some() && !self.caret_placed.get() {
@@ -573,6 +599,14 @@ impl Cx {
                     5 => Part::Heading5,
                     _ => Part::Heading6,
                 };
+                if is_terminal() {
+                    return self
+                        .parts(
+                            self.terminal_heading(*level, content, tail),
+                            &[Part::Heading, part],
+                        )
+                        .into_element();
+                }
                 let h = Heading::of(*level);
                 let el = self
                     .with_line(h.size * h.line, || self.paragraph(content, key, tail))
@@ -580,6 +614,8 @@ impl Cx {
                     .text_size(px(h.size))
                     .line_height(px(h.size * h.line))
                     .letter_spacing(px(h.size * h.tracking))
+                    // A terminal's blank row before it is the one every
+                    // block after another takes (`block`).
                     .mt(px(h.margin_top(before)))
                     .role(AccessibilityRole::Header);
                 self.parts(el, &[Part::Heading, part]).into_element()
@@ -588,15 +624,30 @@ impl Cx {
                 children,
                 alert: None,
             } => {
-                let column = view()
-                    .flex_col()
-                    .gap(px(BLOCK_GAP))
-                    .border_l(px(2.0))
-                    .border_color(strong_border)
-                    .ps(px(BODY_SIZE * 0.9))
-                    .text_color(move || theme().foreground.opacity(0.8));
-                self.part(self.blocks(column, children, key, tail), Part::Blockquote)
-                    .into_element()
+                let column = view().flex_col().gap(px(BLOCK_GAP));
+                // A terminal's quote is a bar of `▎` in the accent down its
+                // left side, a Cell before its text, which is muted, as a
+                // Markdown source's `>`: a one-sided border has no Cell of
+                // its own there.
+                let quote = match is_terminal() {
+                    true => crate::terminal::quoted(self.blocks(
+                        column.text_color(move || theme().muted_foreground),
+                        children,
+                        key,
+                        tail,
+                    )),
+                    false => self.blocks(
+                        column
+                            .text_color(move || theme().foreground.opacity(0.8))
+                            .border_l(px(2.0))
+                            .border_color(strong_border)
+                            .ps(px(BODY_SIZE * 0.9)),
+                        children,
+                        key,
+                        tail,
+                    ),
+                };
+                self.part(quote, Part::Blockquote).into_element()
             }
             Block::Blockquote {
                 children,
@@ -617,6 +668,20 @@ impl Cx {
                             tex: tex.clone().into(),
                             display: true,
                         },
+                    )
+                    .into_element(),
+                // A terminal's as text in a band as a code block's.
+                None if is_terminal() => self
+                    .part(
+                        view().flex_col().items_start().child(
+                            terminal_band(
+                                text(super::tex_text::tex_text(tex))
+                                    .font_family(mono_font)
+                                    .when(self.selectable, |t| t.select_text()),
+                            )
+                            .bg(move || theme().muted),
+                        ),
+                        Part::MathBlock,
                     )
                     .into_element(),
                 // Typeset, centered, scrolling sideways when wider than
@@ -677,6 +742,33 @@ impl Cx {
         }
     }
 
+    /// A heading in a terminal, which has one text size: its text in its
+    /// level's weight and color, over any inline styles in it, so the line
+    /// reads as one heading (h1 and h2 bold in the accent, h3 bold, the
+    /// others bold and muted); h1 has a rule in the border color across
+    /// the view under it.
+    fn terminal_heading(&self, level: u8, content: &[Inline], tail: bool) -> View {
+        let mut line = String::new();
+        super::document::inline_text(content, &mut line);
+        let color: AdaptiveColor = match level {
+            1 | 2 => crate::terminal::ACCENT.into(),
+            3 => theme().foreground,
+            _ => theme().muted_foreground,
+        };
+        let heading = self.caret_after(
+            text(line)
+                .font_weight(FontWeight::BOLD)
+                .text_color(color)
+                .when(self.selectable, |t| t.select_text())
+                .role(AccessibilityRole::Header),
+            tail,
+        );
+        view()
+            .flex_col()
+            .child(heading)
+            .child((level == 1).then(crate::terminal::rule_line))
+    }
+
     fn list(
         &self,
         ordered: bool,
@@ -693,9 +785,49 @@ impl Cx {
             Part::UnorderedList
         };
         let depth = self.list_depth.get();
+        let terminal = is_terminal();
+        // A terminal's numbers right-aligned to the widest, so the items'
+        // content stays in line.
+        let digits = (start as usize + n.saturating_sub(1)).to_string().len();
         let rows = items.iter().enumerate().map(|(i, item)| {
             let key = format!("{key}.{i}");
             let marker = match item.checked {
+                // A ballot box and a space before the content.
+                Some(checked) if terminal => {
+                    let mut parts = vec![Part::ListMarker, Part::TaskMarker];
+                    if checked {
+                        parts.push(Part::TaskMarkerChecked);
+                    }
+                    // A ballot box, as a Markdown reader in a terminal
+                    // shows `[ ]` and `[x]`: checked in the accent.
+                    let marker = text(if checked { "☑ " } else { "☐ " })
+                        .flex_none()
+                        .text_color(move || match checked {
+                            true => AdaptiveColor::from(crate::terminal::ACCENT),
+                            false => theme().muted_foreground,
+                        })
+                        .role(AccessibilityRole::Checkbox)
+                        .accessibility_state(AccessibilityState {
+                            checked: Some(if checked {
+                                nsh_core::Checked::True
+                            } else {
+                                nsh_core::Checked::False
+                            }),
+                            ..AccessibilityState::default()
+                        });
+                    self.parts(marker, &parts).into_element()
+                }
+                None if terminal => {
+                    let marker = if ordered {
+                        format!("{:>digits$}. ", start as usize + i)
+                    } else {
+                        format!("{} ", bullet(depth))
+                    };
+                    let marker = text(marker)
+                        .flex_none()
+                        .text_color(move || theme().muted_foreground);
+                    self.part(marker, Part::ListMarker).into_element()
+                }
                 Some(checked) => {
                     let mut parts = vec![Part::ListMarker, Part::TaskMarker];
                     if checked {
@@ -739,13 +871,7 @@ impl Cx {
                     let marker = if ordered {
                         format!("{}.", start as usize + i)
                     } else {
-                        // A browser's markers by depth: disc, circle, square.
-                        match depth {
-                            0 => "•",
-                            1 => "◦",
-                            _ => "▪",
-                        }
-                        .to_owned()
+                        bullet(depth).to_owned()
                     };
                     // In the indent before the content, its end against
                     // it, as a browser places it: wider numbers reach
@@ -773,7 +899,9 @@ impl Cx {
                         .text_decoration_color(move || theme().muted_foreground.opacity(0.6))
                 });
             let row = view().flex_row().map(|v| {
-                if task {
+                if terminal {
+                    v
+                } else if task {
                     v.gap(px(8.0)).ps(px(1.5))
                 } else {
                     v.ps(px(LIST_INDENT))
@@ -782,7 +910,8 @@ impl Cx {
             let content = self.blocks(content, &item.children, &key, tail && i + 1 == n);
             // Before the content when a box, inside it (placed over the
             // indent) when a bullet or a number.
-            let (before, inside) = if task {
+            // In a terminal the marker is text before the content, always.
+            let (before, inside) = if task || terminal {
                 (Some(marker), None)
             } else {
                 (None, Some(marker))
@@ -812,6 +941,36 @@ impl Cx {
             Alert::Caution => (Part::AlertCaution, "!"),
         };
         let tint = move || alert_color(alert);
+        if is_terminal() {
+            // One band across the text's width (in a row, so it does not
+            // reach across a card's padding), a Cell of padding each side
+            // and no rows: its icon in its color, its text right after.
+            // Where a terminal shows no bands (16 colors, none), its line
+            // on the left in its color instead, where a quote's bar is.
+            let icon = text(glyph)
+                .flex_none()
+                .font_weight(FontWeight::BOLD)
+                .text_color(tint);
+            let band = view()
+                .flex_row()
+                .flex_1()
+                .min_w(px(0.0))
+                .px(crate::terminal::cell_width())
+                .bg(move || tint().opacity(0.12))
+                .border_l(px(1.0))
+                .border_color(tint)
+                .child(self.part(icon, Part::AlertIcon))
+                .child(self.blocks(
+                    view().flex_col().flex_1().min_w(px(0.0)),
+                    children,
+                    key,
+                    tail,
+                ));
+            return view()
+                .flex_row()
+                .child(self.parts(band, &[Part::Blockquote, Part::Alert, part]))
+                .into_element();
+        }
         let icon = view()
             .flex_none()
             .size(px(ALERT_ICON))
@@ -849,6 +1008,9 @@ impl Cx {
             return render
                 .render(format!("code:{key}"), code.clone())
                 .into_element();
+        }
+        if is_terminal() {
+            return self.terminal_code_block(code, tail);
         }
         // The app's actions float over the top right corner, so the code
         // keeps its first line (no row is kept for them). Where a pointer
@@ -917,6 +1079,44 @@ impl Cx {
             .into_element()
     }
 
+    /// A code block in a terminal: a band as wide as its longest line and
+    /// a Cell each side (at most the text's width, its longer lines
+    /// wrapping), from the text's left edge, with no rows of padding; its
+    /// language named above it in reverse (` ts `, bold, on the border
+    /// color).
+    fn terminal_code_block(&self, code: &CodeBlock, tail: bool) -> AnyElement {
+        let body = match &self.highlighter {
+            Some(h) => text("").children(h.spans(code)),
+            None => match super::highlight::built_in(code) {
+                Some(spans) => text("").children(spans),
+                None => text(code.code.clone()),
+            },
+        };
+        let body = self.caret_after(
+            body.font_family(mono_font)
+                .when(self.selectable, |t| t.select_text()),
+            tail,
+        );
+        let language = code
+            .language
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                text(format!(" {l} "))
+                    .flex_none()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(move || theme().background)
+                    .bg(move || theme().border)
+            });
+        let band = terminal_band(self.part(body, Part::CodeBlockCode)).bg(move || theme().muted);
+        self.part(
+            view().flex_col().items_start().child(language).child(band),
+            Part::CodeBlock,
+        )
+        .into_element()
+    }
+
     /// A table as one grid, so its columns line up across rows: each column
     /// fits its content when there is room (the spare width shared out),
     /// shrinks (its cells wrapping) down to a floor when the view is
@@ -927,9 +1127,116 @@ impl Cx {
     /// so its classes draw backgrounds and borders; text styles go on the
     /// cells.
     fn table(&self, table: &Table, key: &str, tail: bool) -> AnyElement {
+        if is_terminal() {
+            return self.table_cells(table, key, tail);
+        }
         self.with_line(TABLE_SIZE * TABLE_LINE, || {
             self.table_grid(table, key, tail)
         })
+    }
+
+    /// A table in a terminal: its rows one after the other, each column as
+    /// many Cells wide as its widest cell's text, ruled in box drawing
+    /// (`┌─┬─┐` above, `│` between the cells, `├─┼─┤` under the header,
+    /// `└─┴─┘` below), the header bold. A cell spanning columns takes their
+    /// Cells and the rules between them. A table wider than the view
+    /// scrolls, as everywhere.
+    fn table_cells(&self, table: &Table, key: &str, tail: bool) -> AnyElement {
+        let columns = table.columns().max(1);
+        let align = |i: usize| table.align.get(i).copied().unwrap_or_default();
+        let glyph = measure_text("", "0");
+        let natural = Rc::new(column_cells(table, |line| match glyph.0 > 0.0 {
+            true => (measure_text("", line).0 / glyph.0 - 0.01).ceil().max(0.0) as usize,
+            false => line.chars().count(),
+        }));
+        let cell = crate::terminal::cell_width();
+        // The Cells the text is wide, once laid out: the columns fit them
+        // (their cells wrapping), or the table scrolls.
+        let room = signal(0usize);
+        let widths = move || fit_columns(&natural, room.get());
+        let ruled = |ends: [char; 3]| {
+            let widths = widths.clone();
+            text(move || SharedString::from(table_rule(&widths(), ends)))
+                .number_of_lines(1u32)
+                .text_color(move || theme().border)
+                .into_element()
+        };
+        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        let last_row = table.rows.len();
+        let mut lines = vec![ruled(['┌', '┬', '┐'])];
+        let rows = std::iter::once(&table.head).chain(&table.rows);
+        for (r, cells) in rows.enumerate() {
+            let head = r == 0;
+            let row_parts: &[Part] = if head {
+                &[Part::TableRow, Part::TableHead]
+            } else {
+                &[Part::TableRow]
+            };
+            let cell_parts: &[Part] = if head {
+                &[Part::TableCell, Part::TableHeaderCell]
+            } else {
+                &[Part::TableCell]
+            };
+            let mut placed = Vec::new();
+            let mut col = 0;
+            for cell in cells.iter() {
+                if col >= columns {
+                    break;
+                }
+                let span = cell.span().min(columns - col);
+                placed.push((col, span, cell.content.as_slice()));
+                col += span;
+            }
+            placed.extend((col..columns).map(|c| (c, 1, &[][..])));
+            let mut row = view().flex_row().child(bar("│ "));
+            for (n, (c, span, content)) in placed.into_iter().enumerate() {
+                if n > 0 {
+                    row = row.child(bar(" │ "));
+                }
+                let end = tail && r == last_row && c + span == columns;
+                let key = format!("{key}.{r}.{c}");
+                // The columns it spans and the ` │ ` between them.
+                let widths = widths.clone();
+                let cells = move || widths()[c..c + span].iter().sum::<usize>() + 3 * (span - 1);
+                let t = self.paragraph(content, &key, end);
+                let t = match align(c) {
+                    ColumnAlign::Center => t.text_center(),
+                    ColumnAlign::Right => t.text_right(),
+                    ColumnAlign::Left => t.text_left(),
+                    ColumnAlign::None => t,
+                };
+                let t = t.when(head, |t| t.font_weight(FontWeight::BOLD));
+                let cell = view()
+                    .flex_none()
+                    .w(move || Length::from(cell * cells() as f32));
+                row = row.child(self.parts(cell, cell_parts).child(t));
+            }
+            lines.push(self.parts(row.child(bar(" │")), row_parts).into_element());
+            if head {
+                lines.push(ruled(['├', '┼', '┤']));
+            }
+        }
+        lines.push(ruled(['└', '┴', '┘']));
+        let actions = self
+            .render_table_actions
+            .as_ref()
+            .map(|r| r.render(format!("table:{key}"), table.clone()));
+        let table_view = view().flex_col().on_layout(move |frame: &Bounds<Points>| {
+            let n = crate::terminal::columns_in(frame.size.width, cell);
+            if room.get_untracked() != n {
+                room.set(n);
+            }
+        });
+        self.part(table_view, Part::Table)
+            .child(actions)
+            .child(
+                self.part(
+                    scroll().horizontal().scrollbar(self.table_scrollbar),
+                    Part::TableScroll,
+                )
+                .child(view().flex_col().items_start().children(lines)),
+            )
+            .into_element()
     }
 
     /// A code block's action: a ghost button (its background shows while
@@ -1300,6 +1607,11 @@ impl Cx {
                         },
                     )
                     .into_element(),
+                // A terminal reads the formula as text (`16.7 ms`), not
+                // its source.
+                None if is_terminal() => self
+                    .part(text(super::tex_text::tex_text(tex)), Part::Math)
+                    .into_element(),
                 // Typeset in the line, its middle on the text's.
                 None => match self.formula(tex, false, BODY_SIZE) {
                     Some(formula) => self
@@ -1321,8 +1633,14 @@ impl Cx {
             Inline::FootnoteReference { label, index } => {
                 let scope = self.scope;
                 let url = SharedString::from(format!("#footnote-{label}"));
+                // A terminal has one text size: the number in brackets,
+                // apart from the word it follows.
+                let number = match is_terminal() {
+                    true => format!("[{index}]"),
+                    false => index.to_string(),
+                };
                 self.part(
-                    text(index.to_string())
+                    text(number)
                         .text_size(rems(0.75))
                         .text_color(move || theme().primary)
                         .role(AccessibilityRole::Link)
@@ -1409,6 +1727,22 @@ impl Cx {
                     .into_element(),
                 None => el.into_element(),
             };
+        }
+        // A terminal's block image reads as its alt text in brackets, as a
+        // text browser shows one: a line of text, pressable as the image
+        // (`block` leaves out a paragraph of images without alt text).
+        if is_terminal() && matches!(flow, ImageFlow::Block) {
+            if image.alt.trim().is_empty() {
+                return view().into_element();
+            }
+            let el = text(format!("[{}]", image.alt.trim()))
+                .text_color(move || theme().muted_foreground)
+                .label(SharedString::from(image.alt.clone()));
+            let el = match press {
+                Some(press) => el.role(role).on_press(press),
+                None => el.role(AccessibilityRole::Image),
+            };
+            return self.part(el, Part::Image).into_element();
         }
         let (width, height) = (image.width, image.height);
         // Its natural size (a pixel a point, as a browser takes it), once
@@ -1634,6 +1968,125 @@ const BODY_LINE: f32 = 1.7;
 const CODE_SIZE: f32 = 13.0;
 /// The line height of code blocks, a multiple of [`CODE_SIZE`].
 const CODE_LINE: f32 = 1.6;
+/// How many Cells each of `table`'s columns takes in a terminal: its
+/// widest cell's widest line (`cells` measures one), at least one; a
+/// spanning cell widens its last column by what its columns and the rules
+/// between them lack.
+fn column_cells(table: &Table, cells: impl Fn(&str) -> usize) -> Vec<usize> {
+    let columns = table.columns().max(1);
+    let mut widths = vec![1; columns];
+    let mut spans = Vec::new();
+    for row in std::iter::once(&table.head).chain(&table.rows) {
+        let mut col = 0;
+        for cell in row {
+            if col >= columns {
+                break;
+            }
+            let span = cell.span().min(columns - col);
+            let mut text = String::new();
+            super::document::inline_text(&cell.content, &mut text);
+            let width = text.lines().map(&cells).max().unwrap_or(0);
+            match span {
+                1 => widths[col] = widths[col].max(width),
+                _ => spans.push((col, span, width)),
+            }
+            col += span;
+        }
+    }
+    for (col, span, width) in spans {
+        let has = widths[col..col + span].iter().sum::<usize>() + 3 * (span - 1);
+        if width > has {
+            widths[col + span - 1] += width - has;
+        }
+    }
+    widths
+}
+
+/// The narrowest a terminal's table narrows a column to: 6 Cells.
+const MIN_COLUMN: usize = 6;
+
+/// `natural`'s column widths fitted to `room` Cells (none yet: as they
+/// are): the widest column narrowed a Cell at a time, its cells wrapping,
+/// until the table and its rules (a `│` before each column and after the
+/// last, a Cell each side in each) fit or every column is down to
+/// [`MIN_COLUMN`], when it scrolls.
+fn fit_columns(natural: &[usize], room: usize) -> Vec<usize> {
+    let mut widths = natural.to_vec();
+    if room == 0 {
+        return widths;
+    }
+    let budget = room.saturating_sub(3 * widths.len() + 1);
+    while widths.iter().sum::<usize>() > budget {
+        let widest = widths
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| **w > MIN_COLUMN)
+            .max_by_key(|(i, w)| (**w, std::cmp::Reverse(*i)))
+            .map(|(i, _)| i);
+        let Some(i) = widest else {
+            break;
+        };
+        widths[i] -= 1;
+    }
+    widths
+}
+
+/// A table's rule in a terminal across columns `widths` Cells wide, each
+/// padded a Cell on both sides: `ends[0]`, `ends[1]` between two columns,
+/// `ends[2]`.
+fn table_rule(widths: &[usize], ends: [char; 3]) -> String {
+    let mut line = String::from(ends[0]);
+    for (i, w) in widths.iter().enumerate() {
+        if i > 0 {
+            line.push(ends[1]);
+        }
+        line.extend(std::iter::repeat_n('─', w + 2));
+    }
+    line.push(ends[2]);
+    line
+}
+
+/// `content` in a terminal's band: a Cell of padding each side, no rows,
+/// as wide as `content` up to the text's width, from the text's left
+/// edge (not stretched, so it does not reach across the padding of a card
+/// around the document, as a band of its own would).
+fn terminal_band(content: impl IntoElement) -> View {
+    view()
+        .flex_none()
+        .max_w(relative(1.0))
+        .px(crate::terminal::cell_width())
+        .child(content)
+}
+
+/// The last of `blocks` (those before one) that shows: in a terminal, not
+/// one it leaves out ([`blank_in_terminal`]).
+fn shown_before<'a>(blocks: impl DoubleEndedIterator<Item = &'a Block>) -> Option<&'a Block> {
+    let terminal = is_terminal();
+    blocks.rev().find(|b| !terminal || !blank_in_terminal(b))
+}
+
+/// Whether a terminal leaves `block` out, its row and the blank row
+/// before it with it: a rule (the blank row between the blocks around it
+/// is the break) and a paragraph of images with no alt text (a terminal
+/// draws no images; one with alt text reads as `[alt]`).
+fn blank_in_terminal(block: &Block) -> bool {
+    match block {
+        Block::Rule => true,
+        Block::Paragraph { content } => only_images(content)
+            .is_some_and(|images| images.iter().all(|(i, _)| i.alt.trim().is_empty())),
+        _ => false,
+    }
+}
+
+/// A browser's list markers by depth: disc, circle, square.
+fn bullet(depth: u8) -> &'static str {
+    match depth {
+        0 => "•",
+        1 => "◦",
+        _ => "▪",
+    }
+}
+
 /// The size of footnotes' text.
 const SMALL_SIZE: f32 = 13.0;
 /// The size of tables' text.
@@ -1664,6 +2117,8 @@ enum Before {
     Heading,
     /// Another block.
     Block,
+    /// An alert (another block).
+    Alert,
 }
 
 impl Before {
@@ -1671,6 +2126,7 @@ impl Before {
         match block {
             None => Self::Nothing,
             Some(Block::Heading { .. }) => Self::Heading,
+            Some(Block::Blockquote { alert: Some(_), .. }) => Self::Alert,
             Some(_) => Self::Block,
         }
     }
@@ -1723,7 +2179,7 @@ impl Heading {
         let above = match before {
             Before::Nothing => return 0.0,
             Before::Heading => 0.6,
-            Before::Block => self.above,
+            Before::Block | Before::Alert => self.above,
         };
         (self.size * above - BLOCK_GAP).max(0.0)
     }
@@ -1861,6 +2317,22 @@ mod tests {
 
     fn image(src: &str) -> Inline {
         Inline::Image(Image::new(src))
+    }
+
+    #[test]
+    fn a_terminals_table_columns_are_their_widest_cells_and_spans_widen_the_last() {
+        let cell = |t: &str| super::super::TableCell::new(vec![Inline::Text { text: t.into() }]);
+        let mut wide = cell("A cell spanning both");
+        wide.colspan = Some(2);
+        let table = Table {
+            head: vec![cell("Platform"), cell("Views")],
+            rows: vec![vec![cell("iOS"), cell("UIKit")], vec![wide]],
+            ..Table::default()
+        };
+        let widths = column_cells(&table, |l| l.chars().count());
+        // "Platform" 8; "Views" 5, widened so the span's 20 fit 8 + 3 + 9.
+        assert_eq!(widths, vec![8, 9]);
+        assert_eq!(table_rule(&[2, 1], ['┌', '┬', '┐']), "┌────┬───┐");
     }
 
     #[test]

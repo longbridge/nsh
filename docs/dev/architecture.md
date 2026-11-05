@@ -29,6 +29,12 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 - One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so NSH can be embedded in
   existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
+- Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
+  order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
+  nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.
+- Anchored overlays include their resolved anchor bounds, optional anchor node and final placement side in
+  `ViewProps::overlay_anchor`. The terminal uses this to keep a popup outside the anchor's occupied Cells;
+  other native backends continue using the core's point frames.
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is encoded once and handed to
   `Mounter.java` on the UI thread (`crates/nsh-platform-android/src/encode.rs`).
   Display-density changes update the shared text density and remount the existing views. Sticky ranges are replayed

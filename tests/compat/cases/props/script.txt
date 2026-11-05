@@ -328,6 +328,9 @@ prop id:hint accessibilityHint Opens the settings
 noprop id:plain accessibilityHint
 prop id:state accessibilityState disabled=true checked=mixed expanded=false
 prop id:plain accessibilityState {}
+# A popup's trigger: `hasPopup` beside `expanded` (nsh-compat's values.rs
+# shows `hasPopup` once it reads the field).
+prop id:popup-state accessibilityState expanded=false hasPopup=true
 prop id:value accessibilityValue min=0 max=10 now=4 text=four
 noprop id:plain accessibilityValue
 prop id:hidden accessibilityElementsHidden true

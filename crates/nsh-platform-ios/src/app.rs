@@ -92,6 +92,17 @@ define_class!(
     unsafe impl NSObjectProtocol for AppDelegate {}
 
     unsafe impl UIApplicationDelegate for AppDelegate {
+        // Before launching finishes, or a press that starts the app is lost.
+        #[unsafe(method(application:willFinishLaunchingWithOptions:))]
+        fn will_finish_launching(
+            &self,
+            _application: &UIApplication,
+            _options: Option<&objc2::runtime::AnyObject>,
+        ) -> bool {
+            crate::notifications::install();
+            true
+        }
+
         #[unsafe(method_id(application:configurationForConnectingSceneSession:options:))]
         fn configuration_for_scene(
             &self,

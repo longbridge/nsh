@@ -34,11 +34,11 @@ function App() {
         testID="menu"
         onPress={() => {
           Menu.setApplicationMenu([
-            { label: "File", submenu: [{ label: "New", shortcut: "mod+n", onSelect: () => {} }, { type: "separator" }, { role: "quit" }] },
+            { label: "File", submenu: [{ label: "New", shortcut: "mod+n", icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", onSelect: () => {} }, { type: "separator" }, { role: "quit" }] },
             { label: "Edit", submenu: [{ role: "copy" }, { role: "paste" }, false, { label: "Checked", checked: true, disabled: true }] },
           ]);
           Menu.setApplicationMenu(null);
-          const shown = Menu.popup([{ label: "Rename", onSelect: () => {} }], { x: 10, y: 20 });
+          const shown = Menu.popup([{ label: "Rename", icon: { url: "asset:/rename.svg", size: { width: 16, height: 16 } }, onSelect: () => {} }], { x: 10, y: 20 });
           popup.set(typeof shown.then === "function" ? "a promise" : "no promise");
           shown.then(() => popup.set("closed"));
           calls.set("menu done");

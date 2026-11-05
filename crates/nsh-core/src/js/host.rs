@@ -950,6 +950,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::ScreenColor,
     EventKind::FileRequest,
     EventKind::Speech,
+    EventKind::Notification,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

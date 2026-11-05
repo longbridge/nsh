@@ -122,6 +122,8 @@ struct Item {
     layout: TextLayout,
     /// The content box, in the area's coordinates.
     frame: Bounds<Points>,
+    /// Whether it continues the text before it (`ViewProps::continues_text`).
+    continues: bool,
 }
 
 impl SelectionTexts for Texts {
@@ -141,6 +143,10 @@ impl SelectionTexts for Texts {
         // The text view's node: the selection follows it when texts come
         // or go before it.
         u64::from(self.items[i].view.id())
+    }
+
+    fn continues(&self, i: usize) -> bool {
+        self.items[i].continues
     }
 
     fn offset_at(&self, i: usize, point: Point<Points>) -> u32 {
@@ -175,6 +181,7 @@ fn collect(area: &NshView) -> Texts {
                     text: drawn.text.clone(),
                     layout: drawn.layout.clone(),
                     frame: Bounds::new(at, drawn.content.size),
+                    continues: s.props.continues_text,
                 });
             }
         }

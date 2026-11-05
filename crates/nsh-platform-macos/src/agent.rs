@@ -18,7 +18,7 @@ use nsh_testing::agent::{Key, Native};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSApplication, NSEventType, NSView, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSEventType, NSView, NSWindow,
 };
 use objc2_foundation::{NSRect, NSSize};
 
@@ -73,12 +73,16 @@ impl MacNative {
 
     /// Makes the app active, as presses into web views need (in another
     /// app, a click into a page only activates it): waits for it a second
-    /// at most.
+    /// at most. An app run in the background (`AppOptions::background`)
+    /// cannot be activated, and is not asked to.
     fn activate(&self) {
         let deadline = Instant::now() + ACTIVATION;
         while Instant::now() < deadline {
             let active = self.on_main(|_, window| {
                 let app = NSApplication::sharedApplication(MainThreadMarker::from(window));
+                if app.activationPolicy() == NSApplicationActivationPolicy::Prohibited {
+                    return true;
+                }
                 if !app.isActive() {
                     #[allow(deprecated)]
                     app.activateIgnoringOtherApps(true);

@@ -2141,7 +2141,7 @@ tap id:case-base-date-picker
 # The trigger is a combobox named by `accessibilityLabel`, collapsed;
 # screen readers hear the app's value in its `dateFormat`.
 prop label:Due role combobox
-prop label:Due accessibilityState expanded=false
+prop label:Due accessibilityState expanded=false hasPopup=true
 prop label:Due accessibilityValue text=09.10.2026
 # A press opens the calendar, a sheet on a phone: every item the app's
 # (`renderItem`), the selected day marked and selected for screen
@@ -2149,7 +2149,7 @@ prop label:Due accessibilityValue text=09.10.2026
 # Monday, first in its row), each item as wide as `itemStyle` says.
 tap id:due
 expect Open: true triggerPress
-prop label:Due accessibilityState expanded=true
+prop label:Due accessibilityState expanded=true hasPopup=true
 expect M10
 expect Y2026
 expect D10.9
@@ -2297,7 +2297,7 @@ absent OpenAtStart
 expect Fruit: none
 prop label:Fruit role combobox
 prop label:Fruit accessibilityLabel Fruit
-prop label:Fruit accessibilityState expanded=false
+prop label:Fruit accessibilityState expanded=false hasPopup=true
 noprop label:Fruit accessibilityValue
 # A press opens the list, a sheet over a backdrop on a phone: the listbox
 # of the items' options under their sections' headers (the app's rows and
@@ -2308,7 +2308,7 @@ expect Life: open
 expect [Fruits]
 expect [Vegetables]
 expect Apple
-prop label:Fruit accessibilityState expanded=true
+prop label:Fruit accessibilityState expanded=true hasPopup=true
 prop scroll:label:Apple role listbox
 prop label:Apple role option
 prop label:Banana accessibilityState disabled=true
@@ -2332,7 +2332,7 @@ expect Life: closed
 absent Apple
 expect Fruit: Cherry
 prop label:Fruit accessibilityValue text=Cherry
-prop label:Fruit accessibilityState expanded=false
+prop label:Fruit accessibilityState expanded=false hasPopup=true
 # Opening again highlights the chosen item (`focus:`, 40 high; its
 # content's `group-focus:` color: `renderItem` draws what the item is, the
 # row's state its classes), which is selected for screen readers.
@@ -2423,7 +2423,7 @@ covers [props] Select.clearButtonStyle
 covers [props] Select.clearButton
 covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
-prop label:Locked accessibilityState disabled=true expanded=false
+prop label:Locked accessibilityState disabled=true expanded=false hasPopup=true
 covers [props] disabled
 # `searchable`: a field above the items (its placeholder, name for screen
 # readers and look the app's; on a phone the keyboard comes when it is

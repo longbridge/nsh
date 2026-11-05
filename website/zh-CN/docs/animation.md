@@ -842,6 +842,10 @@ view()
 
 ## 减少动态效果
 
+在终端目标（`--target tui`）上，宿主逐帧推进动画值和组合动画，并调用完成回调。透明度、颜色和二维
+变换映射到 Cell 网格；文字保持直立的终端字形，画布路径使用盲文点阵。终端报告减少动态效果：动效、
+导航、模态框、布局和样式过渡立即落在终点，显式动画值驱动器和 `Animated` 组合动画按原样播放。
+
 当用户要求减少动态效果时（iOS 的"减弱动态效果"、Android 的"移除动画"），Rust 中的 `reduce_motion()` 和 TSX 中 `nsh` 的 `reduceMotion()` 为 `true`，Tailwind 的 `motion-reduce:` / `motion-safe:` 变体随之生效。
 
 [动效](#动效)会自动遵循这一设置：`play` 和 `enter` 会立即落在动效的终点，不产生移动，结果与正常播放完一样是已完成（`true`）。退场依然以隐藏结束，入场依然以静止结束。对承载用户所需信息的动效（例如表示进度的旋转指示器），传入 `ignoreReduceMotion: true`（Rust 中用 `play_ignoring_reduce_motion`）。

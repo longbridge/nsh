@@ -34,7 +34,7 @@ final class SelectableView implements SelectionHandle.Owner {
 
     private static native void nativeDestroy(long handle);
 
-    private static native boolean nativeSetTexts(long handle, SelectableView area, String[] contents, int[] keys, float[] frames);
+    private static native boolean nativeSetTexts(long handle, SelectableView area, String[] contents, int[] keys, boolean[] continues, float[] frames);
 
     private static native boolean nativeGesture(long handle, SelectableView area, float[] frames, int kind, float x, float y);
 
@@ -146,7 +146,7 @@ final class SelectableView implements SelectionHandle.Owner {
         collect();
         if (texts.isEmpty()) return false;
         if (handle == 0) handle = nativeCreate();
-        nativeSetTexts(handle, this, contents(), keys(), frames());
+        nativeSetTexts(handle, this, contents(), keys(), continues(), frames());
         if (mounter.selectedText != null) mounter.selectedText.clearSelection();
         if (mounter.selectedArea != null && mounter.selectedArea != this) mounter.selectedArea.clear();
         mounter.selectedArea = this;
@@ -213,7 +213,7 @@ final class SelectableView implements SelectionHandle.Owner {
             clear();
             return;
         }
-        nativeSetTexts(handle, this, contents(), keys(), frames());
+        nativeSetTexts(handle, this, contents(), keys(), continues(), frames());
         update();
         if (empty() && !extending) clear();
     }
@@ -273,6 +273,13 @@ final class SelectableView implements SelectionHandle.Owner {
     private int[] keys() {
         int[] out = new int[texts.size()];
         for (int i = 0; i < out.length; i++) out[i] = texts.get(i).id;
+        return out;
+    }
+
+    /** Which texts continue the one before them (a wrapped line's later parts): a copy joins them. */
+    private boolean[] continues() {
+        boolean[] out = new boolean[texts.size()];
+        for (int i = 0; i < out.length; i++) out[i] = texts.get(i).continuesText;
         return out;
     }
 

@@ -321,7 +321,8 @@ blocks can fade in with the app's animations.
 Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with `{ url }`; the app decides what it opens (a page of its own, a
 [`WebView`](./web-view.md), a scroll to a heading). Headings have anchors (GitHub's: `## Getting started` is
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
-`#footnote-<label>`.
+`#footnote-<label>`. In a terminal Tab reaches each link and footnote reference in turn, and Return presses the focused
+one: `onLinkPress` hears it as it hears a press.
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};

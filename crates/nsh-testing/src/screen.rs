@@ -125,7 +125,7 @@ pub struct Screen {
     image_infos: Vec<u32>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
-    picks: Vec<(u32, nsh_core::picker::PickRequest)>,
+    picks: Vec<(u32, nsh_core::picker::Pick)>,
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
@@ -520,7 +520,12 @@ impl Screen {
             // Headless runs load no images: the size is answered as a
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
-            Command::PickImages { id, request } => self.picks.push((*id, *request)),
+            Command::PickImages { id, request } => self
+                .picks
+                .push((*id, nsh_core::picker::Pick::Images(*request))),
+            Command::PickFiles { id, request } => self
+                .picks
+                .push((*id, nsh_core::picker::Pick::Files(request.clone()))),
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
@@ -594,6 +599,7 @@ impl Screen {
                 View {
                     parent: Some(parent),
                     events: link.events,
+                    focusable: Some(link.focus_stop),
                     span: Some(Span {
                         view: id,
                         text: utf16_slice(&text.text, link.start, link.end),
@@ -952,15 +958,19 @@ impl Screen {
         self.answered = (self.answered + 1).min(self.dialogs.len());
     }
 
-    /// The picks the app asked for so far, in order (`Picker.pickImages`).
-    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
-        self.picks.iter().map(|(_, request)| *request).collect()
+    /// The picks the app asked for so far, in order (`Picker.pickImages`,
+    /// `Picker.pickFiles`).
+    pub fn picks(&self) -> Vec<nsh_core::picker::Pick> {
+        self.picks
+            .iter()
+            .map(|(_, request)| request.clone())
+            .collect()
     }
 
     /// The oldest pick not answered yet: its request's id and what it
     /// asks.
-    pub(crate) fn pending_pick(&self) -> Option<(u32, nsh_core::picker::PickRequest)> {
-        self.picks.get(self.picks_answered).copied()
+    pub(crate) fn pending_pick(&self) -> Option<(u32, nsh_core::picker::Pick)> {
+        self.picks.get(self.picks_answered).cloned()
     }
 
     /// The oldest pick was answered.
@@ -1811,16 +1821,40 @@ impl Screen {
                 if let Some(input) = &v.input {
                     return input.config.editable && !self.disabled_from(id, None);
                 }
+                // A link in a text view is a stop after it, in text order
+                // (`TextLink::focus_stop`).
+                if v.span.is_some() {
+                    return v.focusable == Some(true) && !self.disabled_from(id, None);
+                }
                 // Disabled is the ancestors' too here (`disabled_from`).
                 let props = nsh_core::ViewProps {
                     focusable: v.focusable,
                     ..Default::default()
                 };
-                v.span.is_none()
-                    && props.focus_stop(v.events.contains(EventKind::Press))
+                props.focus_stop(v.events.contains(EventKind::Press))
                     && !self.disabled_from(id, None)
             })
             .collect()
+    }
+
+    /// The stop a press on `id` gives the focus to in a terminal: `id` or
+    /// its nearest ancestor that Tab stops at (`tab_stops`), else the
+    /// topmost stop over the press's point (a table's hit layer over its
+    /// rows), as a terminal finds what is under the pointer.
+    pub(crate) fn stop_around(&self, id: NodeId) -> Option<NodeId> {
+        let stops = self.tab_stops();
+        let mut at = Some(id);
+        while let Some(id) = at {
+            if stops.contains(&id) {
+                return Some(id);
+            }
+            at = self.nodes.get(&id).and_then(|v| v.parent);
+        }
+        let point = self.bounds_in_root(id)?.center();
+        stops.iter().rev().copied().find(|&stop| {
+            self.bounds_in_root(stop)
+                .is_some_and(|bounds| bounds.contains(&point))
+        })
     }
 
     pub(crate) fn scroll(&self, id: NodeId) -> Option<&Scroll> {
@@ -2175,6 +2209,7 @@ mod tests {
             end,
             node,
             events,
+            focus_stop: true,
         };
         let linked = |links: Vec<nsh_core::TextLink>| MountItem::Text {
             id: 4,

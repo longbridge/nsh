@@ -118,8 +118,13 @@ impl SelectionTexts for AreaTexts {
             .and_then(|(x, y)| crate::text::caret_at(&t.view.state(), x, y))
             .unwrap_or(0)
     }
+
     fn key(&self, i: usize) -> u64 {
         u64::from(self.texts[i].view.id())
+    }
+
+    fn continues(&self, i: usize) -> bool {
+        self.texts[i].view.state().props.continues_text
     }
 }
 

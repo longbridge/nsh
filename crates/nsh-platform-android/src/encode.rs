@@ -128,6 +128,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
     };
     for item in batch.items {
         match item {
+            MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
             MountItem::Create { id, kind } => {
                 e.int(CREATE);
                 e.int(id as i32);
@@ -668,6 +669,16 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.float(request.quality.map_or(-1.0, |q| q.0));
                         e.bool(request.format == nsh_core::picker::PickFormat::Current);
                     }
+                    // `Picker.java`: the request, the limit, the extensions
+                    // offered (comma-separated; empty: any file) and the
+                    // largest file read.
+                    Command::PickFiles { id, request } => {
+                        e.int(44);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
+                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                    }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
@@ -690,6 +701,34 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_) => e.int(-1),
+                    Command::Notification(command) => {
+                        use nsh_core::notifications::NotificationCommand as N;
+                        e.int(44);
+                        match command {
+                            N::Permission { id, ask } => {
+                                e.int(0);
+                                e.int(id as i32);
+                                e.bool(ask);
+                            }
+                            N::Show { id, notification } => {
+                                e.int(1);
+                                e.int(id as i32);
+                                e.string(notification.id);
+                                e.string(notification.title);
+                                e.string(notification.body);
+                            }
+                            N::Close(id) => {
+                                e.int(2);
+                                e.string(id);
+                            }
+                            N::Listen => e.int(3),
+                            N::SetBadge(count) => {
+                                e.int(4);
+                                e.int(count as i32);
+                            }
+                            _ => e.int(-1),
+                        }
+                    }
                     // `SystemUi.dialog` draws alerts and action sheets in
                     // them: each of `DIALOG_TOKENS`, light then dark (0: the
                     // system's). An app without a theme of its own (its
@@ -781,24 +820,13 @@ fn degrees(a: nsh_core::geometry::Radians) -> f32 {
     (a.to_degrees() * 1e4).round() / 1e4
 }
 
-/// The effects of `Mounter.java` `style`: shadows, gradients, filters,
-/// blend mode, outline, visibility, cursor, transition, animation.
-fn effects(e: &mut Encoded, s: &ViewStyle) {
+/// A list of gradients, as `Effects.java`'s `gradients` reads it.
+fn gradients(e: &mut Encoded, gradients: &[nsh_core::Gradient]) {
     use nsh_core::{
-        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes,
+        GradientKind, GradientSize,
         geometry::{DefiniteLength, REM_SIZE, Size},
     };
-    let fx = s.effects.as_deref();
-    let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
-    e.int(shadows.len() as i32);
-    for sh in shadows {
-        for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
-            e.float(v.0);
-        }
-        e.int(argb(sh.color));
-        e.bool(sh.inset);
-    }
-    let gradients = fx.map_or(&[][..], |f| &f.background_images[..]);
+
     e.int(gradients.len() as i32);
     for g in gradients {
         match g.kind {
@@ -861,6 +889,24 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
             }
         }
     }
+}
+
+/// The effects of `Mounter.java` `style`: shadows, gradients, filters,
+/// blend mode, outline, visibility, cursor, transition, animation.
+fn effects(e: &mut Encoded, s: &ViewStyle) {
+    use nsh_core::{BlendMode, Cursor, Filter, Keyframes};
+    let fx = s.effects.as_deref();
+    let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
+    e.int(shadows.len() as i32);
+    for sh in shadows {
+        for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
+            e.float(v.0);
+        }
+        e.int(argb(sh.color));
+        e.bool(sh.inset);
+    }
+    gradients(e, fx.map_or(&[][..], |f| &f.background_images[..]));
+    gradients(e, fx.map_or(&[][..], |f| &f.mask_images[..]));
     let filter_list = |e: &mut Encoded, list: &[Filter]| {
         // Color filters as one composed matrix, then blur, then the drop
         // shadow (what Android's render effects take): the widest of the
@@ -1174,6 +1220,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         None => e.int(0),
     }
     e.bool(p.selectable_view);
+    e.bool(p.continues_text);
 }
 
 /// Index of `role` in `A11y.java`'s class name table.

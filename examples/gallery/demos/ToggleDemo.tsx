@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, Toggle as Switch } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
@@ -27,8 +27,12 @@ const transition = (): ViewStyle => ({
   transitionTimingFunction: "ease-out",
 });
 
-/** What a toggle shows: a Lucide icon, a glyph drawn here, and a label after it. */
-type Content = { icon?: LucideIconName; glyph?: (tint: string, size: number) => JSX.Element; text?: string };
+/**
+ * What a toggle shows: a Lucide icon, a glyph drawn here, and a label after
+ * it. A terminal draws no icons: an icon-only toggle shows `short` there (its
+ * label when unset), as text.
+ */
+type Content = { icon?: LucideIconName; glyph?: (tint: string, size: number) => JSX.Element; text?: string; short?: string };
 
 /**
  * A toolbar toggle in the gallery's look: bare (`ghost`) or on a field's
@@ -47,6 +51,7 @@ function Tool(props: Content & {
   const s = () => SIZES[props.size ?? "regular"];
   const tint = () => (props.pressed ? colors.text : colors.muted);
   const outline = () => props.variant === "outline";
+  const text = () => props.text ?? (terminal ? (props.short ?? props.label) : undefined);
   return (
     <View tooltip={props.text ? undefined : props.label}>
       <Toggle
@@ -55,8 +60,11 @@ function Tool(props: Content & {
         accessibilityLabel={props.label}
         onChange={({ pressed }) => props.onChange(pressed)}
         style={{
-          minWidth: s().side,
-          height: s().side,
+          // The terminal sizes it to its label, which it never breaks: a
+          // track too narrow for its tools wraps them instead.
+          minWidth: terminal ? undefined : s().side,
+          height: terminal ? undefined : s().side,
+          flexShrink: terminal ? 0 : undefined,
           paddingHorizontal: props.text ? s().pad : 0,
           flexDirection: "row",
           alignItems: "center",
@@ -74,12 +82,12 @@ function Tool(props: Content & {
         focusStyle={focusRing(1)}
         disabledStyle={{ opacity: 0.4 }}
       >
-        <If when={props.icon}>
+        <If when={!terminal && props.icon}>
           <LucideIcon name={props.icon!} size={s().icon} tint={tint()} />
         </If>
-        <If when={props.glyph}>{props.glyph!(tint(), s().icon)}</If>
-        <If when={props.text}>
-          <Text style={{ fontSize: s().text, fontWeight: "500", color: tint() }}>{props.text}</Text>
+        <If when={!terminal && props.glyph}>{props.glyph!(tint(), s().icon)}</If>
+        <If when={text()}>
+          <Text style={{ fontSize: s().text, fontWeight: "500", color: tint() }}>{text()}</Text>
         </If>
       </Toggle>
     </View>
@@ -155,16 +163,16 @@ function StarGlyph(props: { filled: boolean; size: number }) {
   );
 }
 
-const MARKS: { value: string; icon: LucideIconName; label: string }[] = [
+const MARKS: { value: string; icon: LucideIconName; label: string; short?: string }[] = [
   { value: "bold", icon: "bold", label: "Bold" },
   { value: "italic", icon: "italic", label: "Italic" },
   { value: "underline", icon: "underline", label: "Underline" },
-  { value: "strike", icon: "strikethrough", label: "Strikethrough" },
+  { value: "strike", icon: "strikethrough", label: "Strikethrough", short: "Strike" },
 ];
-const ALIGNS: { value: Align; label: string }[] = [
-  { value: "left", label: "Align left" },
-  { value: "center", label: "Align center" },
-  { value: "right", label: "Align right" },
+const ALIGNS: { value: Align; label: string; short?: string }[] = [
+  { value: "left", label: "Align left", short: "Left" },
+  { value: "center", label: "Align center", short: "Center" },
+  { value: "right", label: "Align right", short: "Right" },
   { value: "justify", label: "Justify" },
 ];
 
@@ -190,7 +198,8 @@ export function ToggleDemo() {
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
-    gap: 2,
+    gap: terminal ? TERMINAL_GAP : 2,
+    flexWrap: terminal ? "wrap" : undefined,
     padding: 3,
     borderRadius: 10,
     borderCurve: "continuous",
@@ -213,6 +222,7 @@ export function ToggleDemo() {
               <Tool
                 icon={m().icon}
                 label={m().label}
+                short={m().short}
                 pressed={has(m().value)}
                 onChange={(on) => {
                   marks.set(on ? [...marks(), m().value] : marks().filter((v) => v !== m().value));
@@ -227,6 +237,7 @@ export function ToggleDemo() {
               <Tool
                 glyph={(tint, size) => <AlignGlyph align={a().value} tint={tint} size={size} />}
                 label={a().label}
+                short={a().short}
                 pressed={align() === a().value}
                 onChange={(on) => {
                   // Exactly one: the pressed one stays pressed.
@@ -278,7 +289,7 @@ export function ToggleDemo() {
         pressed={view() === value}
         accessibilityLabel={label}
         onChange={({ pressed }) => choose(value, pressed)}
-        style={{ width: seg, height: seg - 2 * inset, alignItems: "center", justifyContent: "center", borderRadius: 7, ...transition() }}
+        style={{ width: terminal ? undefined : seg, height: terminal ? undefined : seg - 2 * inset, alignItems: "center", justifyContent: "center", borderRadius: 7, ...transition() }}
         hoverStyle={view() === value ? undefined : hovered()}
         activeStyle={{ transform: [{ scale: 0.9 }] }}
         focusStyle={focusRing(1)}
@@ -287,6 +298,31 @@ export function ToggleDemo() {
       </Toggle>
     );
     const grid = () => view() === "grid";
+    /** A file: a tile in the grid, a row in the list. */
+    const tile = (f: () => (typeof FILES)[number], i: () => number) => (
+      <View
+        style={
+          grid()
+            ? { flexGrow: 1, flexBasis: "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
+            : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
+        }
+      >
+        <View
+          style={{
+            display: terminal ? "none" : "flex",
+            width: grid() ? 22 : 20,
+            height: grid() ? 22 : 20,
+            borderRadius: 6,
+            backgroundColor: alpha(f().tone(), 0.22),
+            borderWidth: 1,
+            borderColor: alpha(f().tone(), 0.5),
+            ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}),
+          }}
+        />
+        <Text style={{ flex: grid() ? undefined : 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text, numberOfLines: 1 }}>{f().name}</Text>
+        <Text style={{ fontSize: pointer ? 11 : 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grid() ? f().kind : `${f().kind} · ${f().size}`}</Text>
+      </View>
+    );
     return (
       <Card title="View switcher" subtitle="A segmented group: the thumb springs to the one shown" right={<Badge label={`${FILES.length} items`} />}>
         <ToggleGroup
@@ -302,50 +338,29 @@ export function ToggleDemo() {
             boxShadow: finish.track.boxShadow,
           }}
         >
-          <View
-            style={{
-              pointerEvents: "none",
-              position: "absolute",
-              top: inset,
-              bottom: inset,
-              left: inset,
-              width: seg,
-              borderRadius: 7,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              ...finish.raised,
-              transform: [{ translateX: x }],
-            }}
-          />
+          {/* The thumb, in points: a terminal's Cells show the selected toggle as its own band instead. */}
+          <If when={!terminal}>
+            <View
+              style={{
+                pointerEvents: "none",
+                position: "absolute",
+                top: inset,
+                bottom: inset,
+                left: inset,
+                width: seg,
+                borderRadius: 7,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                ...finish.raised,
+                transform: [{ translateX: x }],
+              }}
+            />
+          </If>
           {segment("grid", "Grid view", (tint) => <GridGlyph tint={tint} size={pointer ? 15 : 17} />)}
           {segment("list", "List view", (tint) => <LucideIcon name="list" size={pointer ? 15 : 17} tint={tint} />)}
         </ToggleGroup>
-        <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? 8 : 0 }}>
-          <Each of={FILES}>
-            {(f, i) => (
-              <View
-                style={
-                  grid()
-                    ? { flexGrow: 1, flexBasis: "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
-                    : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
-                }
-              >
-                <View
-                  style={{
-                    width: grid() ? 22 : 20,
-                    height: grid() ? 22 : 20,
-                    borderRadius: 6,
-                    backgroundColor: alpha(f().tone(), 0.22),
-                    borderWidth: 1,
-                    borderColor: alpha(f().tone(), 0.5),
-                    ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}),
-                  }}
-                />
-                <Text style={{ flex: grid() ? undefined : 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text, numberOfLines: 1 }}>{f().name}</Text>
-                <Text style={{ fontSize: pointer ? 11 : 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grid() ? f().kind : `${f().kind} · ${f().size}`}</Text>
-              </View>
-            )}
-          </Each>
+        <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? (terminal ? TERMINAL_GAP : 8) : 0 }}>
+          <Each of={FILES}>{(f, i) => tile(f, i)}</Each>
         </View>
       </Card>
     );
@@ -373,12 +388,16 @@ export function ToggleDemo() {
             pop.spring(1, motion.press);
           }
         }}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6, height: pointer ? 28 : 36, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent", ...transition() }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, height: terminal ? undefined : pointer ? 28 : 36, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent", ...transition() }}
         pressedStyle={{ backgroundColor: alpha(colors.accent, 0.12), borderColor: alpha(colors.accent, 0.3) }}
         hoverStyle={props.on ? undefined : hovered()}
         focusStyle={focusRing(1)}
       >
-        <View style={{ width: side, height: side, alignItems: "center", justifyContent: "center" }}>
+        {/* A terminal's star is a glyph, filled when on. */}
+        <If when={terminal}>
+          <Text style={{ color: props.on ? colors.accent : colors.muted }}>{props.on ? "★" : "☆"}</Text>
+        </If>
+        <View style={{ display: terminal ? "none" : "flex", width: side, height: side, alignItems: "center", justifyContent: "center" }}>
           <View
             style={{
               pointerEvents: "none",
@@ -448,13 +467,13 @@ export function ToggleDemo() {
     const caption = (s: Size) => s[0].toUpperCase() + s.slice(1);
     return (
       <Card title="Sizes and looks" subtitle="Bare until pressed, or on a field's edge">
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
           <Text style={{ width: 60, fontSize: pointer ? 12 : 13, color: colors.faint }}>Ghost</Text>
           <Each of={sizes}>
-            {(s) => <Tool icon="star" size={s()} label={`${caption(s())} star`} pressed={on().includes(s())} onChange={(next) => flip(s(), `${caption(s())} star`, next)} />}
+            {(s) => <Tool icon="star" size={s()} short={caption(s())} label={`${caption(s())} star`} pressed={on().includes(s())} onChange={(next) => flip(s(), `${caption(s())} star`, next)} />}
           </Each>
         </View>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
           <Text style={{ width: 60, fontSize: pointer ? 12 : 13, color: colors.faint }}>Outline</Text>
           <Each of={sizes}>
             {(s) => (
@@ -484,7 +503,7 @@ export function ToggleDemo() {
     ];
     return (
       <Card title="Disabled" subtitle="A group the app locks, and one toggle on its own" right={<Switch value={locked()} onChange={(v) => locked.set(v)} label="Lock toolbar" />}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12 }}>
           <ToggleGroup disabled={locked()} style={track()}>
             <Each of={tools}>
               {(t) => (

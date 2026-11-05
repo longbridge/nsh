@@ -8,8 +8,9 @@
 //! binding's action decides on the spot whether it fires (where the focus
 //! is: `KeyBinding::in_text`), reports it to JS with the root's
 //! `KeyCommand` event and stops the key; JS runs the handler afterwards.
-//! A binding that does not fire lets GTK try the next shortcut and then the
-//! focus widget.
+//! A binding that does not fire, or fires and passes the key through
+//! (`KeyBinding::pass_through`), lets GTK try the next shortcut and then
+//! the focus widget.
 
 use std::{
     cell::{Cell, RefCell},
@@ -31,7 +32,8 @@ use crate::surface::Surface;
 pub(crate) struct KeymapState {
     controller: RefCell<Option<gtk::ShortcutController>>,
     /// Each binding's trigger and whether it fires in a text field
-    /// (`KeyBinding::in_text`), for [`claims`].
+    /// (`KeyBinding::in_text`), for [`claims`]; a binding passing its key
+    /// through claims none.
     triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool)>>,
     /// The binding whose key is held down (GDK does not mark auto-repeats):
     /// it does not fire again until a key is released.
@@ -71,6 +73,7 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
         };
         let weak = Rc::downgrade(surface);
         let (id, in_text, repeat) = (binding.id, binding.in_text, binding.repeat);
+        let pass_through = binding.pass_through;
         let action = gtk::CallbackAction::new(move |_, _| match weak.upgrade() {
             Some(surface) if fires(&surface, in_text) => {
                 watch_releases(&surface);
@@ -83,18 +86,24 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
                         EventPayload::Value(PayloadValue::Number(id as f64)),
                     );
                 }
-                glib::Propagation::Stop
+                if pass_through {
+                    glib::Propagation::Proceed
+                } else {
+                    glib::Propagation::Stop
+                }
             }
             _ => glib::Propagation::Proceed,
         });
         let Some(trigger) = gtk::ShortcutTrigger::parse_string(&trigger) else {
             continue;
         };
-        surface
-            .keymap
-            .triggers
-            .borrow_mut()
-            .push((trigger.clone(), in_text));
+        if !pass_through {
+            surface
+                .keymap
+                .triggers
+                .borrow_mut()
+                .push((trigger.clone(), in_text));
+        }
         controller.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
     }
     surface.root.add_controller(controller.clone());
@@ -119,7 +128,8 @@ pub(crate) fn clear(surface: &Surface) {
 
 /// A key pressed without a GDK event (GTK takes no made-up ones; `nsh test
 /// --target linux`): the newest binding of `stroke` that fires where the
-/// focus is reports it, as its shortcut's action would. False if none.
+/// focus is reports it, as its shortcut's action would. Whether it took
+/// the key: false if none fired or the one that did passes it through.
 #[cfg(feature = "dev")]
 pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
     let keymap = surface.keymap.keymap.borrow().clone();
@@ -138,7 +148,7 @@ pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
             EventPayload::Value(PayloadValue::Number(binding.id as f64)),
         );
     }
-    fired.is_some()
+    fired.is_some_and(|b| !b.pass_through)
 }
 
 /// Whether a binding fires for `event` where the focus is: the application

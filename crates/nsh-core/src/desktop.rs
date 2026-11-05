@@ -7,10 +7,14 @@
 use std::sync::Arc;
 
 use crate::{
+    ImageSource,
     element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod menu_icon;
 
 /// How the window's title bar looks (`Window.setTitleBar`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -648,6 +652,8 @@ pub struct MenuAction {
     /// When its shortcut chooses it while a text field has the keyboard
     /// focus (`when`); [`When::Always`] unless the app says otherwise.
     pub when: When,
+    /// What it shows beside its label, the app's own image ([`menu_icon`]).
+    pub icon: Option<ImageSource>,
 }
 
 impl MenuAction {
@@ -679,10 +685,27 @@ pub enum MenuItem {
         enabled: bool,
         /// Its items.
         items: Vec<MenuItem>,
+        /// What it shows beside its label ([`menu_icon`]), but for the
+        /// top-level menus of a menu bar, which show their titles alone.
+        icon: Option<ImageSource>,
     },
 }
 
 impl MenuItem {
+    /// Calls `f` with the icon of every item of `items`, submenus' too.
+    pub fn each_icon<'a>(items: &'a [MenuItem], f: &mut impl FnMut(&'a ImageSource)) {
+        for item in items {
+            match item {
+                MenuItem::Action(action) => action.icon.iter().for_each(&mut *f),
+                MenuItem::Submenu { items, icon, .. } => {
+                    icon.iter().for_each(&mut *f);
+                    MenuItem::each_icon(items, f);
+                }
+                MenuItem::Separator => {}
+            }
+        }
+    }
+
     /// Calls `f` with every action of `items`, submenus' too.
     pub fn each_action<'a>(items: &'a [MenuItem], f: &mut impl FnMut(&'a MenuAction)) {
         for item in items {
@@ -888,6 +911,7 @@ mod tests {
                 checked: None,
                 role,
                 when: When::Always,
+                icon: None,
             })
         };
         let menu = vec![MenuItem::Submenu {
@@ -898,6 +922,7 @@ mod tests {
                 MenuItem::Separator,
                 action(0, copy, Some(MenuRole::Copy)),
             ],
+            icon: None,
         }];
         assert_eq!(MenuItem::find_shortcut(&menu, &new).map(|a| a.id), Some(1));
         // Text fields keep their own shortcuts.
@@ -914,6 +939,7 @@ mod tests {
             checked: None,
             role: None,
             when,
+            icon: None,
         };
         let fires = |shortcut, when| item(shortcut, when).fires_while_editing();
         assert!(fires("ctrl+z", When::Always));

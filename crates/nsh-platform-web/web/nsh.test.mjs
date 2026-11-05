@@ -668,7 +668,7 @@ test("a plain Shader uploads the whole built-ins block, progress and overflow at
   const gl = new Proxy(
     {
       UNIFORM_BUFFER: "uniform",
-      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      canvas: { width: 0, height: 0 },
       bufferData: (target, data) => uploads.push([target, Array.from(data)]),
     },
     { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
@@ -681,7 +681,7 @@ test("a plain Shader uploads the whole built-ins block, progress and overflow at
   const el = {
     _frame: [0, 0, 100, 50],
     _shader: { layer: { role: 0, overflow: 0 }, words: new Uint32Array(0), kept: 1500, since: null, progress: 0 },
-    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ drawImage() {} }) },
   };
   const saved = globalThis.devicePixelRatio;
   globalThis.devicePixelRatio = 2;
@@ -1067,7 +1067,7 @@ test("a shader's frames upload the built-ins from one buffer", () => {
   const gl = new Proxy(
     {
       UNIFORM_BUFFER: "uniform",
-      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      canvas: { width: 0, height: 0 },
       bufferData: (_target, data) => uploads.push(data),
     },
     { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
@@ -1080,12 +1080,114 @@ test("a shader's frames upload the built-ins from one buffer", () => {
   const el = {
     _frame: [0, 0, 100, 50],
     _shader: { layer: { role: 0, overflow: 0 }, words: new Uint32Array(0), kept: 0, since: null, progress: 0 },
-    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ drawImage() {} }) },
   };
   player.renderShader(el, 0);
   player.renderShader(el, 16);
   assert.equal(uploads.length, 2);
   assert.equal(uploads[0], uploads[1]);
+});
+
+/** A context whose canvas records the sizes it is given (`resized`) and whose viewports go to `viewports`. */
+function sizedGl() {
+  const resized = [];
+  const viewports = [];
+  const size = { width: 0, height: 0 };
+  const canvas = {};
+  for (const side of ["width", "height"]) {
+    Object.defineProperty(canvas, side, {
+      get: () => size[side],
+      set: (v) => {
+        resized.push([side, v]);
+        size[side] = v;
+      },
+    });
+  }
+  const gl = new Proxy(
+    { isContextLost: () => false, canvas, viewport: (...rect) => viewports.push(rect) },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  return { gl, resized, viewports };
+}
+
+/** An animated shader view `w` × `h` points of `role`; what its frames copy from the shared canvas goes to `copies`. */
+function sizedView(w, h, role, copies = []) {
+  return {
+    isConnected: true,
+    _frame: [0, 0, w, h],
+    _shaderVisible: true,
+    _shader: { layer: { ...shaderLayer(role), animated: true }, words: new Uint32Array(0), kept: 0, since: 0, progress: 0, dirty: true, stale: 0, pictures: [], textures: [] },
+    _shaderCanvas: { width: 0, height: 0, style: {}, getContext: () => ({ clearRect() {}, drawImage: (_canvas, ...rects) => copies.push(rects) }) },
+  };
+}
+
+const drawingProgram = () => ({ program: {}, vao: {}, samplers: [] });
+
+test("shader views of different sizes draw into one canvas without resizing it on every frame", () => {
+  const { gl, resized, viewports } = sizedGl();
+  const { player } = shaderPlayer({ gl, program: drawingProgram });
+  const copies = [];
+  const small = sizedView(100, 50, 0, copies);
+  const large = sizedView(300, 200, 0);
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 1;
+  try {
+    for (const t of [0, 16, 32]) {
+      player.renderShader(small, t);
+      player.renderShader(large, t);
+      player.fitSharedCanvas(t);
+    }
+    assert.deepEqual(resized, [["width", 100], ["height", 50], ["width", 300], ["height", 200]], "grown to the largest, once");
+    // Each in its top-left corner (GL's y goes up), copied from there.
+    assert.deepEqual(viewports.slice(2, 4), [[0, 150, 100, 50], [0, 0, 300, 200]]);
+    assert.deepEqual(copies.at(-1), [0, 0, 100, 50, 0, 0, 100, 50]);
+    // Only the small one draws now: the canvas keeps its size a second.
+    resized.length = 0;
+    for (const t of [100, 600]) {
+      player.renderShader(small, t);
+      player.fitSharedCanvas(t);
+    }
+    assert.deepEqual(resized, []);
+    player.renderShader(small, 1200);
+    player.fitSharedCanvas(1200);
+    assert.deepEqual(resized, [["width", 100], ["height", 50]], "then fits it");
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+});
+
+test("a screen effect over an animated shader asks for one shader frame at a time", () => {
+  const { gl } = sizedGl();
+  const { player } = shaderPlayer({ gl, program: drawingProgram });
+  // The real one, which the screen effect's marks go through.
+  delete player.shaderDirty;
+  let pictures = 0;
+  player.paintInputs = (el) => {
+    el._shader.stale = 0;
+    pictures++;
+  };
+  player.size = [200, 100];
+  const fill = sizedView(100, 50, 0);
+  const screen = sizedView(0, 0, 3);
+  screen._shader.layer.animated = false;
+  player.shaderViews = new Set([fill, screen]);
+  const frames = [];
+  const saved = [globalThis.requestAnimationFrame, globalThis.devicePixelRatio];
+  globalThis.requestAnimationFrame = (f) => frames.push(f);
+  globalThis.devicePixelRatio = 1;
+  try {
+    player.shaderFrame(0);
+    for (let n = 1; n <= 5; n++) {
+      assert.equal(frames.length, 1, `one callback queued after frame ${n}`);
+      frames.shift()(n * 16);
+    }
+    // Each frame after the first, the screen effect pictures what the fill
+    // drew.
+    assert.equal(pictures, 5);
+    assert.equal(frames.length, 1);
+  } finally {
+    [globalThis.requestAnimationFrame, globalThis.devicePixelRatio] = saved;
+  }
 });
 
 test("a picture taken again reads the styles of what changed only", () => {

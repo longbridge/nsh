@@ -59,6 +59,7 @@ jobs:
               - "crates/nsh-js/**"
               - "crates/nsh-macros/**"
               - "crates/nsh-package/**"
+              - "crates/nsh-updater/**"
               - "crates/nsh-testing/**"
               - "tests/compat/**"
               - "examples/counter/**"
@@ -109,10 +110,11 @@ jobs:
         working-directory: nsh
         run: cargo build -p nsh-cli
 
-      # The checkout's versions, so the cache serves both.
+      # The checkout's versions, so the cache serves both. The cases compile
+      # shaders, which nsh-core leaves out without its `shader` feature.
       - name: Check
         if: steps.run.outputs.check == 'true'
         working-directory: nsh-compat
         run: |
           cp ../nsh/Cargo.lock .
-          cargo test --target-dir ../nsh/target
+          cargo test --target-dir ../nsh/target --features nsh-core/shader

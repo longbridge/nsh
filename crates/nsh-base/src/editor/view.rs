@@ -251,8 +251,10 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                 },
             )),
             // A press on a number reports its line; the markers take
-            // presses of their own.
+            // presses of their own. The pointer's only: Tab goes into the
+            // text.
             Layer::Hit => inner
+                .focusable(false)
                 .on(EventKind::Press, move |p: &EventPayload| {
                     let EventPayload::Press(e) = p else { return };
                     let x = e.position.x - strip_width();
@@ -526,6 +528,9 @@ fn fold_hit(
                     let line = ed.st.borrow().display.row(row()).line;
                     ed.fold(line, None);
                 })
+                // The gutter's buttons are the pointer's: the keyboard folds
+                // with the editor's own keys, and Tab goes into the text.
+                .focusable(false)
         },
     )
 }
@@ -599,7 +604,8 @@ fn gutter_row(
                         .on_press({
                             let ed = ed.clone();
                             move || ed.line_number_press(row())
-                        });
+                        })
+                        .focusable(false);
                     if active {
                         parts(
                             el,
@@ -654,6 +660,7 @@ fn gutter_row(
                                         let line = ed.st.borrow().display.row(row()).line;
                                         ed.fold(line, None);
                                     })
+                                    .focusable(false)
                                     .child(chevron(size, folded)),
                             )
                         });
@@ -887,7 +894,10 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> 
             }),
         Layer::Paint => el,
     };
+    // The rows take the pointer's presses; the keyboard's focus is the
+    // editor's text input, so the rows are no Tab stop of their own.
     let mut el = el
+        .focusable(false)
         .on(EventKind::PressDown, move |p: &EventPayload| {
             if let (true, EventPayload::Press(e)) = (desktop, p) {
                 // A Mod-click on the definition link keeps the caret where
@@ -1283,7 +1293,8 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
             .on_press(move || {
                 let line = ed.st.borrow().display.row(slot.get_untracked().1).line;
                 ed.fold(line, Some(false));
-            });
+            })
+            .focusable(false);
         out.push(part(placeholder, props, EditorPart::FoldPlaceholder).into_element());
     }
     out
@@ -1395,6 +1406,12 @@ fn carets(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        // A terminal's caret is the terminal's cursor, at the sink the
+        // editor keeps at the caret (`nsh-platform-tui`'s
+        // `Keyboard::cursor`): a 2-point bar has no Cells.
+        if crate::terminal::is_terminal() {
+            return Vec::new();
+        }
         let rows = ed.visible_rows();
         let (points, composing) = {
             let st = ed.st.borrow();
