@@ -138,7 +138,9 @@ semver = "1"
 # UI Automation. Features per area, like the Apple bindings below.
 windows = { version = "0.62", features = [
   "std",
+  "Data_Xml_Dom",
   "Foundation_Numerics",
+  "UI_Notifications",
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_Graphics_Direct2D",
@@ -175,6 +177,7 @@ windows = { version = "0.62", features = [
   "Win32_UI_Input_Ime",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Input_Pointer",
+  "Win32_UI_Notifications",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",

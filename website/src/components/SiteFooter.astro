@@ -27,6 +27,7 @@ const copy = isZh
     <a href={isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases'}>{isZh ? '版本发布' : 'Releases'}</a>
     <a href={REPO_URL} target="_blank" rel="noopener noreferrer">{copy.source}</a>
     <a href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">{copy.issues}</a>
+    <a href={url(isZh ? 'zh-CN/brand' : 'brand')}>{isZh ? '品牌' : 'Brand'}</a>
     <a href={url('llms.txt')}>llms.txt</a>
   </nav>
 </footer>

@@ -73,8 +73,12 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={abs('/icon-512.png')} />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={abs('/og-image.png')} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={`${SITE_TITLE}: Build once, native everywhere`} />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="alternate" type="text/plain" title="llms.txt" href={`${BASE}llms.txt`} />
 
   </head>

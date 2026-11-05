@@ -690,6 +690,123 @@ fn text_out_of_the_layout_shows_no_glyphs() {
     assert_eq!(text_of(&c.commit().unwrap()), Some(("–".to_owned(), 0)));
 }
 
+/// A column styled `column` whose width comes from its content, in a parent
+/// that does not stretch it, around a row or column with text: the frames of
+/// the column and of the text.
+fn max_width_column(
+    column: &[(&str, StyleValue<'_>)],
+    row: bool,
+    chars: usize,
+) -> (Option<Bounds<Points>>, Option<Bounds<Points>>) {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 7,
+            tag: Tag::View,
+        },
+        style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        style_op(2, column),
+        Op::Create {
+            id: 3,
+            tag: Tag::View,
+        },
+        style_op(
+            3,
+            &[(
+                "flexDirection",
+                StyleValue::Str(if row { "row" } else { "column" }),
+            )],
+        ),
+        Op::Create {
+            id: 6,
+            tag: Tag::View,
+        },
+        style_op(
+            6,
+            &[("width", StyleValue::Number(if row { 40.0 } else { 0.0 }))],
+        ),
+        Op::Create {
+            id: 4,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 5,
+            text: "x".repeat(chars),
+        },
+    ];
+    if row {
+        ops.push(style_op(4, &[("flex", StyleValue::Number(1.0))]));
+    }
+    for (parent, child) in [(4, 5), (3, 6), (3, 4), (2, 3), (7, 2), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    (frame_of(&batch, 2), frame_of(&batch, 4))
+}
+
+#[test]
+fn a_clamped_column_is_as_tall_as_its_wrapped_text() {
+    let max = [("maxWidth", StyleValue::Number(200.0))];
+    // `flex: 1` text beside 40pt: 400pt in 160pt is three lines.
+    let (column, text) = max_width_column(&max, true, 50);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    assert_eq!(
+        text.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 48.0))
+    );
+    // Text alone: 400pt in 200pt is two lines.
+    let (column, _) = max_width_column(&max, false, 50);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 32.0))
+    );
+    // With a minimum, and padding inside the limit: 400pt in 140pt.
+    let (column, _) = max_width_column(
+        &[
+            ("minWidth", StyleValue::Number(100.0)),
+            ("maxWidth", StyleValue::Number(200.0)),
+            ("padding", StyleValue::Number(10.0)),
+        ],
+        true,
+        50,
+    );
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 68.0))
+    );
+    // Out of flow, where nothing clamps the space it is measured in.
+    let (column, _) = max_width_column(
+        &[
+            ("position", StyleValue::Str("absolute")),
+            ("maxWidth", StyleValue::Number(200.0)),
+        ],
+        true,
+        50,
+    );
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    // A limit nothing reaches changes nothing.
+    let (column, _) = max_width_column(&max, false, 10);
+    assert_eq!(
+        column.map(|f| (f.size.width.0, f.size.height.0)),
+        Some((80.0, 16.0))
+    );
+}
+
 #[test]
 fn flex_text_in_a_row_shrinks_and_wraps() {
     // Yoga has no automatic minimum size: `flex: 1` text takes the space
@@ -2986,6 +3103,81 @@ fn input_values_from_js_and_native_edits() {
     })
     .unwrap();
     assert!(c.commit().is_none());
+}
+
+/// An input with `style`, in a row with `flex: 1` when `flex`, or alone, in a
+/// view its content sizes.
+fn hugged_input(style: &[(&str, StyleValue<'_>)], flex: bool) -> Core<FakeEngine> {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 7,
+            tag: Tag::View,
+        },
+        style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::View,
+        },
+        style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+        Op::Create {
+            id: 2,
+            tag: Tag::Input,
+        },
+        style_op(2, style),
+    ];
+    if flex {
+        ops.push(style_op(2, &[("flex", StyleValue::Number(1.0))]));
+    }
+    for (parent, child) in [(3, 2), (7, 3), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c
+}
+
+#[test]
+fn an_inputs_width_does_not_come_from_its_text() {
+    for flex in [false, true] {
+        let mut c = hugged_input(&[], flex);
+        // Twenty digits at 8pt, whatever it holds.
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(160.0));
+        c.input_changed(2, "x", 1);
+        // Typing does not move it, if its frame is sent at all.
+        let width = |batch: Option<MountBatch>| {
+            batch
+                .and_then(|b| frame_of(&b, 3))
+                .map_or(160.0, |f| f.size.width.0)
+        };
+        assert_eq!(width(c.commit()), 160.0);
+        c.input_changed(2, &"x".repeat(30), 2);
+        assert_eq!(width(c.commit()), 160.0);
+    }
+    // A multiline one wraps at that width: 30
+    // characters at 8pt in 160pt is two lines.
+    let mut c = hugged_input(&[], false);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    c.input_changed(2, &"x".repeat(30), 1);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 32.0))
+    );
+    // A width of its own stays.
+    let batch = hugged_input(&[("width", StyleValue::Number(90.0))], false)
+        .commit()
+        .unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(90.0));
 }
 
 #[test]

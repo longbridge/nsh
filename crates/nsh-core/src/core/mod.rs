@@ -901,6 +901,9 @@ struct TextContext<P> {
     prepared: Option<P>,
     /// Natural width of the widest UAX #14 unbreakable segment.
     min_content: Option<Points>,
+    /// An input's [`FIELD_SAMPLE`] in its style: what its width comes from
+    /// when nothing else gives it one.
+    field: Option<Box<TextContext<P>>>,
     /// Last measurement: `(max_width, size)`.
     cache: Option<(Option<f32>, Size<Points>)>,
     /// Last final layout sent to the platform and the content box it was
@@ -925,6 +928,7 @@ impl<P> TextContext<P> {
             text,
             prepared: None,
             min_content: None,
+            field: None,
             cache: None,
             laid_out: None,
             metadata_changed: false,
@@ -951,6 +955,10 @@ impl<P> TextContext<P> {
         Some((text, laid.layout.clone()))
     }
 }
+
+/// What an input is as wide as when nothing gives it a width, whatever it
+/// holds: as CSS's `<input size="20">`, twenty digits.
+const FIELD_SAMPLE: &str = "00000000000000000000";
 
 /// Measured leaves: text blocks and images with a known natural size.
 enum LeafContext<P> {
@@ -1752,6 +1760,10 @@ impl<M: TextEngine> Core<M> {
             cx.min_content = None;
             cx.cache = None;
             cx.laid_out = None;
+            if let Some(field) = &mut cx.field {
+                field.prepared = None;
+                field.cache = None;
+            }
             self.layout.mark_dirty(layout);
             self.needs_layout = true;
             if self.nodes[key as usize].kind == Kind::Text {
@@ -2795,20 +2807,28 @@ impl<M: TextEngine> Core<M> {
                 &input.value
             },
         );
+        let field = self.input_text(key, FIELD_SAMPLE);
         let cx = self.text_cx(layout);
         let same = cx.text.layout_eq(&text);
+        let same_field = cx.field.as_ref().is_some_and(|f| f.text.layout_eq(&field));
         let input = self.nodes[key as usize]
             .input
             .as_mut()
             .expect("input state");
         // A value that reads as the placeholder measures the same, but
         // its content size is the value's: laid out again to report it.
-        if same && input.placeholder_measured == placeholder {
+        if same && same_field && input.placeholder_measured == placeholder {
             return;
         }
         input.placeholder_measured = placeholder;
+        let cx = self.text_cx(layout);
         if !same {
-            *self.text_cx(layout) = TextContext::new(Arc::new(text));
+            let kept = cx.field.take();
+            *cx = TextContext::new(Arc::new(text));
+            cx.field = kept;
+        }
+        if !same_field {
+            cx.field = Some(Box::new(TextContext::new(Arc::new(field))));
         }
         self.layout.mark_dirty(layout);
         self.needs_layout = true;
@@ -8137,18 +8157,31 @@ fn measure_leaf<M: TextEngine>(
         |_, _| 0.0,
         |known, available| match cx {
             Some(LeafContext::Text(cx)) => {
+                // An input's text scrolls in it (or wraps at its width):
+                // the input's width does not come from the text.
+                let field = cx
+                    .field
+                    .as_deref_mut()
+                    .map(|field| measure_text(engine, cache, field, None).width.0);
                 let max_width = if cx.text.no_wrap {
                     None
                 } else {
-                    known.width.or(match available.width {
-                        AvailableSpace::Definite(w) => Some(w),
-                        AvailableSpace::MinContent => Some(min_content_width(engine, cache, cx).0),
-                        AvailableSpace::MaxContent => None,
+                    known.width.or(match (available.width, field) {
+                        (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
+                        (AvailableSpace::Definite(w), None) => Some(w),
+                        (_, Some(field)) => Some(field),
+                        (AvailableSpace::MinContent, None) => {
+                            Some(min_content_width(engine, cache, cx).0)
+                        }
+                        (AvailableSpace::MaxContent, None) => None,
                     })
                 };
                 let measured = measure_text(engine, cache, cx, max_width);
                 taffy::Size {
-                    width: known.width.unwrap_or(measured.width.0),
+                    width: known
+                        .width
+                        .or(field.and(max_width))
+                        .unwrap_or(measured.width.0),
                     height: known.height.unwrap_or(measured.height.0),
                 }
             }

@@ -81,7 +81,8 @@ impl Notifications {
     /// macOS, an installed web app's icon, the home screen on iOS, which
     /// needs the permission (`requestPermission`). Android has no count to
     /// set: launchers mark an app that has notifications showing, and
-    /// `count` goes with those shown after this. Elsewhere nothing happens.
+    /// `count` goes with those shown after this. On Windows, the taskbar
+    /// button. Elsewhere nothing happens.
     /// Rejects with `ERR_ACCESS_DENIED` when the
     /// `notifications` capability is not granted, and with a `RangeError`
     /// for a count that is not a whole number from 0.
