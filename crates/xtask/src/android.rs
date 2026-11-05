@@ -257,14 +257,19 @@ fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
         .env(
             format!("CARGO_TARGET_{}_LINKER", env_triple.to_uppercase()),
             &clang,
-        )
-        // The C dependencies' bindgen runs against the NDK's own libclang,
-        // rather than against whichever libclang the machine answers with
-        // first.
-        .env("LIBCLANG_PATH", &bin)
-        // bindgen splits this variable like a shell: quoted, with forward slashes,
-        // so that the backslashes and spaces of a Windows path survive.
-        .env(format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"), extra);
+        );
+    // The C dependencies' bindgen runs against the NDK's own libclang,
+    // rather than against whichever libclang the machine answers with
+    // first — but newer NDKs ship no libclang at all (r27 dropped it),
+    // and setting LIBCLANG_PATH cuts clang-sys's own discovery off. Only
+    // point it here when this NDK actually carries the library.
+    let ndk_libclang = bin.join(if cfg!(windows) { "libclang.dll" } else { "libclang.so" });
+    if ndk_libclang.exists() {
+        cmd.env("LIBCLANG_PATH", &bin);
+    }
+    // bindgen splits this variable like a shell: quoted, with forward slashes,
+    // so that the backslashes and spaces of a Windows path survive.
+    cmd.env(format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"), extra);
     cmd
 }
 

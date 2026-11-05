@@ -695,7 +695,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                             e.int(id as i32);
                             e.string(path.to_string_lossy().into_owned());
                         }
-                        _ => e.int(-1),
+                        // Every other file request has no Android
+                        // implementation. The environment says file
+                        // requests exist, so the core waits for an answer:
+                        // fail it now (op 30), or the call would hang.
+                        _ => {
+                            e.int(30);
+                            e.int(id as i32);
+                        }
                     },
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
