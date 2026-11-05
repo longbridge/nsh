@@ -385,7 +385,8 @@ impl RootView {
             speech: true,
             // The notification center.
             notifications: true,
-            audio: false,
+            // AVAudioEngine and AVPlayer.
+            audio: true,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
