@@ -2,10 +2,10 @@
 
 Status: approved and implemented. Run: the core, `nsh test`'s fake speaker,
 macOS (`nsh test --target macos`), Windows (`--target windows` on a test
-machine) and the web (`--target web`, headless Chrome). Built, not run: iOS
-(shares the macOS file; Catalyst clippy) and Android (Rust for three ABIs and
-the Java runtime; no device). Written, not compiled: Linux (no Linux machine
-at hand). The GPUI backend reports `Environment::audio` off: sounds and
+machine), the web (`--target web`, headless Chrome) and Android (a phone).
+Built, not run: iOS (shares the macOS file; Catalyst clippy). Linux:
+type-checked on macOS against the gtk4 and gstreamer crates, built and its
+sound tests run by CI (no Linux machine with sound at hand). The GPUI backend reports `Environment::audio` off: sounds and
 players fail there with `unavailable`. Covers `Sound` (short sound
 effects) and `AudioPlayer` (long audio) of `nsh`, their Rust faces, the
 platforms' engines and what `nsh.json` grants.
@@ -300,7 +300,7 @@ The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
 | iOS, macOS | `AVAudioEngine` with one `AVAudioPlayerNode` per playback over a shared mixer; `AVAudioFile` / `AVAudioPCMBuffer` decoded once at `Load` | `AVPlayer`, the class `Video` uses in `native.rs`, with no layer | one `AVAudioEngine` per NSH engine (`AppView` / `NshAppView`), started lazily, stopped with it; `AVAudioSession` `.ambient` (mixes with others, honours the silent switch) set once on iOS when the first sound or player starts; a player pauses on `UIApplication.didEnterBackground` |
 | Android | `SoundPool` (one per NSH engine, max 32 streams), `load` from a temp file or an `AssetFileDescriptor`; the duration read from the container with `MediaExtractor` before `load` (`SoundPool` reports none) — under the 5 s cap its own decoded-size limit (about 1.5 MiB) is never hit | `MediaPlayer`, the class `VideoBox.java` uses, with its `AudioFocusRequest` handling repeated | `Audio.java` next to `VideoBox.java`; events through the same JNI event map (`Native.java`'s key list updated) |
 | Windows | `XAudio2` (one engine per NSH engine; `IXAudio2SourceVoice` per playback over a mastering voice), Media Foundation's `IMFSourceReader` decodes to PCM at `Load` | `IMFMediaEngine`, the class `native/video.rs` uses, audio-only (no video output) | |
-| Linux | `gtk::MediaFile` (GStreamer underneath, as the video's) per play over a temporary file of the bytes written at `Load`, probed once for its duration; GTK media streams have no rate, so `rate` is ignored there | `gtk::MediaFile`, as `native.rs`'s video | no new dependency; GTK has no buffering signal, so `buffer` is reported only while a play waits for its load |
+| Linux | GStreamer (`sound.rs`): decoded once off the main thread (`decodebin` into 48 kHz stereo floats, cut at the length allowed), played from memory by one live pipeline per engine, an `appsrc` per voice into an `audiomixer` pad (its volume; another rate resamples the samples once) | `gtk::MediaFile`, as `native.rs`'s video; GTK media streams have no rate, so a player's `rate` is ignored there | the `gstreamer`, `gstreamer-app` and `gstreamer-audio` crates (GTK already plays media through GStreamer; the review of #955 showed a stream per play could not keep `Sound`'s promise of decoding once and starting within a frame); GTK has no buffering signal, so `buffer` is reported only while a play waits for its load |
 | GPUI | not yet: `Environment::audio` off | not yet | |
 | Web | the core sends `AudioCommand::LoadUrl` (the browser fetches; the image loader has no threads there), checking the source first; `AudioContext` (one per NSH engine) + `decodeAudioData` at `Load`, an `AudioBufferSourceNode` per playback | an `HTMLAudioElement` as the `<video>` path in `nsh.js` | the `AudioContext` is created and resumed on the page's first user gesture the engine observes; `play` before it is `not-allowed` |
 
@@ -400,8 +400,9 @@ My calls (change them if wrong):
    choice yet. The option slot for it is named `session` and left out.
 6. **Progress events at ~4 Hz** while playing, none while paused: enough for
    a scrubber, cheap enough for the batch.
-7. **Platform engines**: the ones in the table. On Linux the sound path's
-   pipeline shape is the builder's choice as long as `play` opens no file.
+7. **Platform engines**: the ones in the table. On Linux sounds take
+   GStreamer's crates (the user's call, after review): a play opens no file
+   and decodes nothing.
 8. **iOS, Android and the web get a loader `Transport` in this change**, so
    `Sound.load` is core-driven everywhere instead of fetched natively on some
    platforms and handed back. It is work `image-loading-design.md` wants

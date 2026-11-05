@@ -1996,7 +1996,7 @@ play it in the handler. An `AudioPlayer` streams long audio (a voice message, mu
 it plays, with a player's state: position, duration, pause, seek, rate and loop. macOS and iOS play with AVFoundation
 (`AVAudioEngine` for sounds, `AVPlayer` for players; on iOS the audio session is `ambient`, mixing with other apps'
 audio and following the silent switch), Windows with XAudio2 and Media Foundation, Android with `SoundPool` and
-`MediaPlayer`, Linux with GTK's media streams (which keep the rate at 1), and the web with the Web Audio API and an
+`MediaPlayer`, Linux with GStreamer for sounds and GTK's media streams for players (which keep a player's rate at 1), and the web with the Web Audio API and an
 audio element (sound starts after the user's first gesture on the page). Check `Sound.available()` where the platform may have no sound; there `load`
 and `play()` fail with `"unavailable"`. Rust code calls `load_sound` and `audio_player` of `nsh_core::prelude`; TSX
 imports `Sound` and `AudioPlayer` from `nsh`.

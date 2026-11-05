@@ -2,95 +2,64 @@
 //! through GTK's media support (`gtk::MediaFile`, which GTK backs with
 //! GStreamer), as the video does: no other media crate is linked.
 //!
-//! - **Sounds** keep their encoded bytes in a temporary file written at
-//!   [`AudioCommand::Load`]. Loading prepares a `MediaFile` on it once (so
-//!   GStreamer proves the bytes decode and tells the duration), then drops
-//!   it; every [`AudioCommand::Play`] is a new `MediaFile` of that local
-//!   file, a voice of its own, so plays overlap, open nothing from the
-//!   network and start as fast as GStreamer prepares a local file. The
-//!   decoded size reported is an estimate (duration at 48 kHz, stereo,
-//!   `f32`). A sound longer than the `max_duration` asked for is reported
-//!   `truncated`, and its voices are stopped at that length of playback:
-//!   timed from the moment the stream prepared and started, so the time
-//!   GStreamer takes to prepare never shortens a sound.
+//! - **Sounds** are [`crate::sound`]'s: decoded once into memory with
+//!   GStreamer off the main thread at [`AudioCommand::Load`], and played
+//!   from there through one mixing pipeline per engine, overlapping, at
+//!   their volume and rate.
 //! - **Players** are one `MediaFile` each, made at the first preload or
 //!   resume, which streams its source (a file, an `http(s)` URL).
-//! - GTK streams have no playback rate: `rate` is ignored (warned once).
-//!   They report no buffering either: a player waiting for its load
+//! - GTK streams have no playback rate: a player's `rate` is ignored
+//!   (warned once). They report no buffering either: a player waiting for its load
 //!   reports `Buffer` from the resume to the load.
-//! - Everything runs on the GTK main loop. An output or a decoder that is
-//!   missing makes a sound silence and a player `Failed`, never a panic.
+//! - Everything but the decoding runs on the GTK main loop. An output or a
+//!   decoder that is missing makes a sound silence and a player `Failed`,
+//!   never a panic.
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
-    path::PathBuf,
-    rc::{Rc, Weak},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
 use gtk4::{self as gtk, gio, glib, prelude::*};
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    audio::{AudioCommand, AudioError, AudioEvent, MAX_VOICES, PROGRESS_INTERVAL, PlayerSettings},
+    audio::{AudioCommand, AudioError, AudioEvent, PROGRESS_INTERVAL, PlayerSettings},
 };
 use nsh_engine::EngineControl;
 
-use crate::image::AssetBase;
+use crate::{image::AssetBase, sound};
 
-/// How long a sound or a player has to prepare before it is called failed.
+/// How long a player's stream has to prepare, six times over, before it
+/// is called failed.
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One engine's sounds and players.
 #[derive(Default)]
 pub(crate) struct Speaker {
-    /// Shared with the sounds still preparing, which land in it.
+    /// Shared with the decodes in flight, which find it again (or not:
+    /// the surface closed) when they finish.
     inner: Rc<RefCell<Inner>>,
 }
 
 #[derive(Default)]
 struct Inner {
-    sounds: HashMap<u32, Sound>,
-    voices: Vec<Voice>,
+    sounds: HashMap<u32, sound::Pcm>,
+    /// The sounds decoding; an unload before the decode finished takes
+    /// the id out, and the decoded sound is dropped.
+    loading: HashSet<u32>,
+    /// Made at the first play, again after the output failed.
+    mixer: Option<sound::Mixer>,
     players: HashMap<u32, Rc<Player>>,
-}
-
-/// A sound: its file, and where its voices stop when it was truncated.
-struct Sound {
-    path: PathBuf,
-    /// How long a voice plays at most: `Some` only for a sound longer than
-    /// the core allows (the others end by themselves).
-    cut: Option<Duration>,
-}
-
-/// A sound playing.
-struct Voice {
-    sound: u32,
-    stream: gtk::MediaFile,
-    started: Instant,
-    /// Set when the stream ended.
-    done: Rc<Cell<bool>>,
-}
-
-impl Voice {
-    fn end(self) {
-        self.stream.set_playing(false);
-        self.stream.clear();
-    }
 }
 
 impl Drop for Speaker {
     fn drop(&mut self) {
-        let mut inner = self.inner.borrow_mut();
+        let inner = self.inner.borrow();
         for player in inner.players.values() {
             player.close();
-        }
-        for voice in inner.voices.drain(..) {
-            voice.end();
-        }
-        for sound in inner.sounds.values() {
-            let _ = std::fs::remove_file(&sound.path);
         }
     }
 }
@@ -107,10 +76,9 @@ pub(crate) fn command(
     match command {
         AudioCommand::Load {
             bytes,
-            hint,
             max_duration,
             ..
-        } => load(speaker, control, id, bytes, hint, *max_duration),
+        } => speaker.load(control, id, bytes.to_vec(), *max_duration),
         AudioCommand::LoadUrl { .. } => report(
             control,
             id,
@@ -123,9 +91,9 @@ pub(crate) fn command(
         AudioCommand::Stop { .. } => speaker.stop(id),
         AudioCommand::Unload { .. } => {
             speaker.stop(id);
-            if let Some(sound) = speaker.inner.borrow_mut().sounds.remove(&id) {
-                let _ = std::fs::remove_file(&sound.path);
-            }
+            let mut inner = speaker.inner.borrow_mut();
+            inner.sounds.remove(&id);
+            inner.loading.remove(&id);
         }
         AudioCommand::Open { src, settings, .. } => {
             let player = Player::new(id, src, *settings, base, control.clone());
@@ -157,30 +125,11 @@ fn failed(error: AudioError, message: &str) -> AudioEvent {
     }
 }
 
-/// GStreamer does not do rates through GTK: said once.
+/// GTK's media streams have no rate: said once.
 fn warn_rate(rate: f32) {
     static WARNED: AtomicBool = AtomicBool::new(false);
     if (rate - 1.0).abs() > f32::EPSILON && !WARNED.swap(true, Ordering::Relaxed) {
-        log::warn!(target: "js", "audio `rate` is not supported on Linux: it plays at 1×");
-    }
-}
-
-/// The file extension `hint` (a file name, a URL or a `data:` URI) names,
-/// which GStreamer's typefinding can use.
-fn extension(hint: &str) -> &'static str {
-    let hint = hint.to_ascii_lowercase();
-    let mime = hint
-        .strip_prefix("data:")
-        .map(|rest| rest.split([';', ',']).next().unwrap_or_default());
-    let name = hint.split(['?', '#']).next().unwrap_or_default();
-    let ext = name.rsplit_once('.').map_or("", |(_, ext)| ext);
-    match (mime, ext) {
-        (Some("audio/mpeg" | "audio/mp3"), _) | (None, "mp3") => "mp3",
-        (Some("audio/aac" | "audio/mp4" | "audio/x-m4a" | "audio/m4a"), _)
-        | (None, "m4a" | "aac" | "mp4") => "m4a",
-        (Some("audio/ogg" | "audio/opus"), _) | (None, "ogg" | "opus" | "oga") => "ogg",
-        (Some("audio/flac"), _) | (None, "flac") => "flac",
-        _ => "wav",
+        log::warn!(target: "js", "an AudioPlayer's `rate` is not supported on Linux: it plays at 1×");
     }
 }
 
@@ -189,244 +138,74 @@ fn micros(us: i64) -> Option<Duration> {
     (us > 0).then(|| Duration::from_micros(us as u64))
 }
 
-/// Writes `bytes` to a temporary file, prepares a stream on it to learn
-/// that it decodes and how long it is, and reports `Loaded` or `Failed`.
-fn load(
-    speaker: &Speaker,
-    control: &EngineControl,
-    id: u32,
-    bytes: &[u8],
-    hint: &str,
-    max: Duration,
-) {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "nsh-sound-{}-{n}.{}",
-        std::process::id(),
-        extension(hint)
-    ));
-    if let Err(e) = std::fs::write(&path, bytes) {
-        report(
-            control,
-            id,
-            failed(AudioError::Failed, &format!("cannot write the sound: {e}")),
-        );
-        return;
-    }
-    let stream = gtk::MediaFile::for_file(&gio::File::for_path(&path));
-    let probe = Rc::new(Probe {
-        stream: RefCell::new(Some(stream.clone())),
-        handlers: RefCell::default(),
-        timeout: RefCell::default(),
-        path,
-        max,
-        control: control.clone(),
-        id,
-        // Where the sound goes once it decoded.
-        speaker: Rc::downgrade(&speaker.inner),
-    });
-    PROBES.with(|p| p.borrow_mut().push(probe.clone()));
-    let weak = Rc::downgrade(&probe);
-    let mut handlers = Vec::new();
-    {
-        let weak = weak.clone();
-        handlers.push(stream.connect_prepared_notify(move |_| {
-            if let Some(probe) = weak.upgrade() {
-                probe.check();
-            }
-        }));
-    }
-    {
-        let weak = weak.clone();
-        handlers.push(stream.connect_error_notify(move |stream| {
-            let Some(probe) = weak.upgrade() else { return };
-            if let Some(err) = stream.error() {
-                probe.finish(Err(media_error(err.message())));
-            }
-        }));
-    }
-    *probe.handlers.borrow_mut() = handlers;
-    *probe.timeout.borrow_mut() = Some(glib::timeout_add_local(PREPARE_TIMEOUT, move || {
-        if let Some(probe) = weak.upgrade() {
-            // This source ends by returning `Break`: it must not be
-            // removed again.
-            let _ = probe.timeout.borrow_mut().take();
-            probe.finish(Err("the sound did not prepare in time".into()));
-        }
-        glib::ControlFlow::Break
-    }));
-    probe.check();
-}
-
-thread_local! {
-    /// Sounds preparing: kept alive until they finish.
-    static PROBES: RefCell<Vec<Rc<Probe>>> = const { RefCell::new(Vec::new()) };
-}
-
-/// A sound being prepared.
-struct Probe {
-    stream: RefCell<Option<gtk::MediaFile>>,
-    handlers: RefCell<Vec<glib::SignalHandlerId>>,
-    timeout: RefCell<Option<glib::SourceId>>,
-    path: PathBuf,
-    max: Duration,
-    control: EngineControl,
-    id: u32,
-    /// The speaker the sound goes to, if it still lives.
-    speaker: Weak<RefCell<Inner>>,
-}
-
-impl Probe {
-    /// Finishes when the stream is prepared with audio.
-    fn check(&self) {
-        let Some(stream) = self.stream.borrow().clone() else {
-            return;
-        };
-        if !stream.is_prepared() {
-            return;
-        }
-        if !stream.has_audio() {
-            self.finish(Err("the sound has no audio GStreamer can decode".into()));
-            return;
-        }
-        match micros(stream.duration()) {
-            Some(duration) => self.finish(Ok(duration)),
-            None => self.finish(Err("the sound is empty".into())),
-        }
-    }
-
-    /// Reports the outcome, once.
-    fn finish(&self, result: Result<Duration, String>) {
-        let Some(stream) = self.stream.borrow_mut().take() else {
-            return;
-        };
-        for handler in self.handlers.borrow_mut().drain(..) {
-            stream.disconnect(handler);
-        }
-        if let Some(timeout) = self.timeout.borrow_mut().take() {
-            timeout.remove();
-        }
-        stream.set_playing(false);
-        stream.clear();
-        let id = self.id;
-        match result {
-            Ok(duration) => {
-                let truncated = duration > self.max;
-                let length = duration.min(self.max);
-                match self.speaker.upgrade() {
-                    Some(inner) => {
-                        inner.borrow_mut().sounds.insert(
-                            id,
-                            Sound {
-                                path: self.path.clone(),
-                                cut: truncated.then_some(length),
-                            },
-                        );
-                    }
-                    // The engine went away while it prepared.
-                    None => {
-                        let _ = std::fs::remove_file(&self.path);
-                        return;
-                    }
-                }
-                report(
-                    &self.control,
-                    id,
-                    AudioEvent::Loaded {
-                        duration: length,
-                        // 48 kHz, stereo, f32: what GStreamer's sinks mix.
-                        bytes: (length.as_secs_f64() * 48_000.0 * 2.0 * 4.0) as u64,
-                        truncated,
-                    },
-                );
-            }
-            Err(message) => {
-                let _ = std::fs::remove_file(&self.path);
-                report(&self.control, id, failed(AudioError::Decode, &message));
-            }
-        }
-        let this: *const Probe = self;
-        PROBES.with(|p| {
-            p.borrow_mut()
-                .retain(|probe| !std::ptr::eq(Rc::as_ptr(probe), this))
-        });
-    }
-}
-
-/// Stops `stream` once it played `cut`, counted from where it is now.
-fn cut_at(stream: &gtk::MediaFile, cut: Duration) {
-    let played = Duration::from_micros(stream.timestamp().max(0) as u64);
-    let weak = stream.downgrade();
-    glib::timeout_add_local(
-        cut.saturating_sub(played).max(Duration::from_millis(1)),
-        move || {
-            if let Some(stream) = weak.upgrade() {
-                stream.set_playing(false);
-            }
-            glib::ControlFlow::Break
-        },
-    );
-}
-
 impl Speaker {
-    fn play(&self, id: u32, volume: f32, rate: f32) {
-        warn_rate(rate);
-        let mut inner = self.inner.borrow_mut();
-        let Some((path, cut)) = inner.sounds.get(&id).map(|s| (s.path.clone(), s.cut)) else {
-            return;
-        };
-        // Voices that ended free their streams (and their places).
-        let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut inner.voices)
-            .into_iter()
-            .partition(|v| v.done.get());
-        inner.voices = live;
-        for voice in done {
-            voice.end();
-        }
-        if inner.voices.len() >= MAX_VOICES
-            && let Some(oldest) = (0..inner.voices.len()).min_by_key(|&i| inner.voices[i].started)
-        {
-            inner.voices.remove(oldest).end();
-        }
-        let stream = gtk::MediaFile::for_file(&gio::File::for_path(path));
-        stream.set_volume(f64::from(volume.clamp(0.0, 1.0)));
-        let done = Rc::new(Cell::new(false));
-        let flag = done.clone();
-        let _ = stream.connect_ended_notify(move |stream| {
-            if stream.is_ended() {
-                flag.set(true);
+    /// Decodes `bytes` off the main thread, then keeps the sound and
+    /// reports its load, unless it was unloaded (or the surface closed) in
+    /// the meantime.
+    fn load(&self, control: &EngineControl, id: u32, bytes: Vec<u8>, max: Duration) {
+        self.inner.borrow_mut().loading.insert(id);
+        let decoding = gio::spawn_blocking(move || sound::decode(bytes, max));
+        let speaker = Rc::downgrade(&self.inner);
+        let control = control.clone();
+        glib::spawn_future_local(async move {
+            let decoded = decoding
+                .await
+                .unwrap_or_else(|_| Err("the decoder stopped".to_owned()));
+            let Some(inner) = speaker.upgrade() else {
+                return;
+            };
+            let mut inner = inner.borrow_mut();
+            if !inner.loading.remove(&id) {
+                return;
+            }
+            match decoded {
+                Ok(decoded) => {
+                    let event = AudioEvent::Loaded {
+                        duration: decoded.duration,
+                        bytes: decoded.pcm.bytes(),
+                        truncated: decoded.truncated,
+                    };
+                    inner.sounds.insert(id, decoded.pcm);
+                    drop(inner);
+                    report(&control, id, event);
+                }
+                Err(message) => {
+                    drop(inner);
+                    report(&control, id, failed(AudioError::Decode, &message));
+                }
             }
         });
-        let flag = done.clone();
-        let _ = stream.connect_error_notify(move |_| flag.set(true));
-        if let Some(cut) = cut {
-            // Timed from the start of playback, which waits for the stream
-            // to prepare.
-            let armed = Cell::new(false);
-            let _ = stream.connect_prepared_notify(move |stream| {
-                if stream.is_prepared() && !armed.replace(true) {
-                    cut_at(stream, cut);
-                }
-            });
+    }
+
+    /// Plays a sound loaded; without an output, nothing (the sound is
+    /// silence).
+    fn play(&self, id: u32, volume: f32, rate: f32) {
+        let mut inner = self.inner.borrow_mut();
+        let Some(pcm) = inner.sounds.get(&id).cloned() else {
+            return;
+        };
+        if inner.mixer.as_ref().is_some_and(sound::Mixer::is_broken) {
+            inner.mixer = None;
         }
-        stream.set_playing(true);
-        inner.voices.push(Voice {
-            sound: id,
-            stream,
-            started: Instant::now(),
-            done,
-        });
+        if inner.mixer.is_none() {
+            match sound::Mixer::new() {
+                Ok(mixer) => inner.mixer = Some(mixer),
+                Err(e) => {
+                    log::warn!("no sound output: {e}");
+                    return;
+                }
+            }
+        }
+        if let Some(mixer) = inner.mixer.as_mut()
+            && let Err(e) = mixer.play(id, &pcm, volume, rate)
+        {
+            log::warn!("a sound did not play: {e}");
+        }
     }
 
     fn stop(&self, id: u32) {
-        let mut inner = self.inner.borrow_mut();
-        let (stopped, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut inner.voices)
-            .into_iter()
-            .partition(|v| v.sound == id);
-        inner.voices = rest;
-        for voice in stopped {
-            voice.end();
+        if let Some(mixer) = self.inner.borrow_mut().mixer.as_mut() {
+            mixer.stop(id);
         }
     }
 }
@@ -764,15 +543,6 @@ fn media_error(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extensions_come_from_names_and_media_types() {
-        assert_eq!(extension("sounds/click.MP3"), "mp3");
-        assert_eq!(extension("https://a.com/x.m4a?v=2"), "m4a");
-        assert_eq!(extension("data:audio/mpeg;base64,AA"), "mp3");
-        assert_eq!(extension("data:audio/ogg,%00"), "ogg");
-        assert_eq!(extension("click"), "wav");
-    }
 
     #[test]
     fn microseconds_are_durations_when_known() {

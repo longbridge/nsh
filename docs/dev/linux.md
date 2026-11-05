@@ -9,8 +9,10 @@ view per node, the core lays everything out); the GPUI backend (`gpui.md`) is a 
 
 The crates need the GTK 4 (≥ 4.14; Pango from 1.50 on, the app's fonts going through Fontconfig) development
 packages (`libgtk-4-dev` on Debian / Ubuntu, `gtk4` on Arch, `gtk4-devel` on Fedora), for web views WebKitGTK 6.0's
-(2.40 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora) and,
-for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
+(2.40 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora),
+GStreamer's core and base plug-ins (`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian / Ubuntu,
+`gstreamer gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora; sounds decode and mix
+with them, `sound.rs`) and, for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
 Linux:
 
 ```sh

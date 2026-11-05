@@ -1946,7 +1946,7 @@ async fn dictate() -> String {
 
 ## Sound
 
-两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 用 GTK 的媒体流（速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
+两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 的音效用 GStreamer、播放器用 GTK 的媒体流（播放器的速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
 
 ```rust tabs
 use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
