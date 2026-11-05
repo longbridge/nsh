@@ -83,6 +83,8 @@ pub(crate) fn package(
     id: &str,
     built: &Built,
 ) -> anyhow::Result<()> {
+    // Before the runtime is built and the previous package removed.
+    let base = page_base(config.web.base.as_deref())?;
     let served = ui_sets();
     let missing: Vec<&str> = built
         .ui_sets
@@ -250,7 +252,6 @@ pub(crate) fn package(
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
     }
-    let base = page_base(config.web.base.as_deref())?;
     let html = page(&PageParts {
         name,
         appearance,
@@ -313,11 +314,13 @@ pub(crate) fn link(
 
 /// `nsh.json` `web.base`: a path from the host's root, ending in `/` (one
 /// is added). It goes into the page's `<base href>` as it is, so it holds
-/// only what a path can (no query, fragment, quotes or `..`).
+/// only what a path can (no query, fragment, quotes or `..`), and no empty
+/// segment (`/apps//counter/`): browsers keep one in the URLs they resolve,
+/// where [`nsh_dev::SiteServer::start_at`] and hosts collapse it.
 fn page_base(base: Option<&str>) -> anyhow::Result<Option<String>> {
     let Some(base) = base else { return Ok(None) };
     let valid = base.starts_with('/')
-        && !base.starts_with("//")
+        && !base.contains("//")
         && !base.contains(['?', '#', '\\', '"', '\'', '<', '>', '&'])
         && !base.chars().any(char::is_whitespace)
         && !base
@@ -1801,6 +1804,8 @@ mod tests {
         for base in [
             "apps/",
             "//cdn.example.com/",
+            "/apps//counter/",
+            "/apps/counter//",
             "https://example.com/",
             "/a/../b/",
             "/a b/",

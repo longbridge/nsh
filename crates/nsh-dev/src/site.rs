@@ -29,6 +29,18 @@ struct Site {
     base: String,
 }
 
+/// `base` as a path from the root ending in `/`, without empty segments:
+/// `/apps/counter/` for `apps/counter`, `/apps//counter` or
+/// `/apps/counter/`, and `/` for an empty path or `//`.
+fn mount_path(base: &str) -> String {
+    let mut path = String::from("/");
+    for segment in base.split('/').filter(|segment| !segment.is_empty()) {
+        path.push_str(segment);
+        path.push('/');
+    }
+    path
+}
+
 impl SiteServer {
     /// Serves `dir` on `addr` (`/` is `index.html`).
     pub fn start(addr: SocketAddr, dir: PathBuf) -> io::Result<SiteServer> {
@@ -37,17 +49,18 @@ impl SiteServer {
 
     /// Serves `dir` on `addr` under the path `base` (`/apps/counter/`, as a
     /// page with that `<base href>` is deployed): `<base>index.html` is
-    /// `dir/index.html`, and `/` goes there.
+    /// `dir/index.html`, and `/` goes there. The path is taken from the
+    /// root with a `/` at its end and no empty segments (`apps//counter`
+    /// is `/apps/counter/`), the form the page's `<base href>` must have.
     pub fn start_at(addr: SocketAddr, dir: PathBuf, base: &str) -> io::Result<SiteServer> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("nsh-site-server")
             .enable_all()
             .build()?;
-        let base = format!("/{}/", base.trim_matches('/')).replace("//", "/");
         let site = Arc::new(Site {
             root: dunce::canonicalize(dir)?,
-            base,
+            base: mount_path(base),
         });
         let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
         let addr = listener.local_addr()?;
@@ -212,6 +225,21 @@ mod tests {
         assert!(!super::accepts("gzip, br;q=0", "br"));
         assert!(!super::accepts("", "gzip"));
         assert!(!super::accepts("brotli", "br"));
+    }
+
+    #[test]
+    fn the_base_is_one_path_from_the_root() {
+        for (base, path) in [
+            ("/", "/"),
+            ("", "/"),
+            ("//", "/"),
+            ("/apps/counter/", "/apps/counter/"),
+            ("apps/counter", "/apps/counter/"),
+            ("/apps//counter", "/apps/counter/"),
+            ("/apps///counter//", "/apps/counter/"),
+        ] {
+            assert_eq!(super::mount_path(base), path, "{base:?}");
+        }
     }
 
     #[test]

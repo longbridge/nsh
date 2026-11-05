@@ -139,8 +139,8 @@ build to the same file) and takes `nsh.js` from the crate.
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`); the page's script resolves its `app` URLs against it as it starts (and
-  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root, a `/`
-  added at its end) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
+  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root
+  without empty segments, a `/` added at its end, the form `start_at` serves) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
   (the dev server serves its files at the root). The app ships as minified ES modules
   (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
