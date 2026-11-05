@@ -62,8 +62,9 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
-`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)) and `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)); [Project structure](./project-structure.md#nshjson) lists
+`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
+[Sandbox and capabilities](./sandbox-and-capabilities.md)) and `updater`, which makes desktop packages update themselves
+(see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
 every key. Unknown keys are an error.
 
 Every key above can be overridden on the command line, which is handy in CI:
@@ -270,6 +271,7 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 ## See also
 
 - [CLI](./cli.md): every command
+- [App Updates](./app-updates.md): packaged apps that update themselves
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app

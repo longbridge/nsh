@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）以及 `capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -231,5 +231,6 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 ## 另请参阅
 
 - [CLI](./cli.md)：所有命令
+- [应用更新](./app-updates.md)：自我更新的打包应用
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
