@@ -669,6 +669,14 @@ impl Surface {
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
+        // A batch may change what a running frame callback has left (a
+        // transition retargeted, a scroll view told to scroll) without
+        // adding one: their deadlines are of before it, so each runs again
+        // by now, without frames too, and tells its new one.
+        let now = objc2_quartz_core::CACurrentMediaTime();
+        for (_, at) in self.frame_callbacks.borrow_mut().iter_mut() {
+            *at = Some(now);
+        }
         crate::access::prepare(batch);
         for item in &batch.items {
             self.anim.borrow_mut().apply(item);
