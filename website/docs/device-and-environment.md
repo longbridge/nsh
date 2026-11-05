@@ -323,6 +323,12 @@ const weekColumns = () => Array.from({ length: 7 }, (_, i) => ((firstDayOfWeek()
 
 `Intl` writes times in the locale's own hour cycle: pass `hourCycle()` as its `hourCycle` option, as above, to write them as the user reads them. On the web, the browser tells no user settings of these: the hour cycle and the first day of the week are the browser's for its language, the units its region's. In tests, `open`'s `hourCycle`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit` set them (the locale's region's otherwise) and `app.setRegionalPreferences({ hourCycle: "h23" })` changes them ([Testing](./testing-and-trace.md#steps)).
 
+The base components show what the app passes them, in their own forms. `Calendar`'s and `DatePicker`'s
+`firstDayOfWeek` number the days from `0` for Sunday to `6` for Saturday: the user's first day is
+`firstDayOfWeek() % 7` (Rust: `first_day_of_week().number() % 7`). `TimeField`'s and `DatePicker`'s `hourCycle` is
+`"h12"` or `"h23"`: the user's is `"h12"` where `hourCycle()` is `"h11"` or `"h12"`, else `"h23"` (Rust:
+`HourCycle::H12` where `hour_cycle().twelve_hour()`).
+
 ## Time zone
 
 `time_zone()` (TSX: `timeZone()`) is the device's time zone as the system names it: an IANA name such as `Europe/Berlin` or `America/New_York`, `UTC`, or an offset zone where the system has one (`GMT+01:00` on Android). It changes when the user changes the setting or the device moves to another zone, and what read it updates: a clock that names its zone, a list of times in the user's zone, a date saved with the zone it was made in.

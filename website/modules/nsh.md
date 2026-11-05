@@ -937,7 +937,7 @@ The user's preferred languages as BCP 47 tags, most preferred first (`["de-DE", 
 const hourCycle: Accessor<"h11" | "h12" | "h23" | "h24">;
 ```
 
-Whether the user has 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"` (`12:30 PM`), `"h23"` (`00:30`), and the rarer `"h11"` (`0:30 PM`) and `"h24"` (`24:30`). The system's setting, else the region's. Reactive. Rust: `hour_cycle() -> HourCycle` (`twelve_hour()` for AM and PM). `Intl` writes times in the locale's own hour cycle: pass `hourCycle()` as its `hourCycle` option to write them as the user reads them ([Device and environment](../docs/device-and-environment.md#regional-preferences)). Headless tests have the locale's region's unless `open` sets `hourCycle`.
+Whether the user has 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"` (`12:30 PM`), `"h23"` (`00:30`), and the rarer `"h11"` (`0:30 PM`) and `"h24"` (`24:30`). The system's setting, else the region's. Reactive. Rust: `hour_cycle() -> HourCycle` (`twelve_hour()` for AM and PM). `Intl` writes times in the locale's own hour cycle: pass `hourCycle()` as its `hourCycle` option to write them as the user reads them ([Device and environment](../docs/device-and-environment.md#regional-preferences)). `TimeField`'s and `DatePicker`'s `hourCycle` is `"h12"` for `"h11"` and `"h12"`, `"h23"` for the others. Headless tests have the locale's region's unless `open` sets `hourCycle`.
 
 ### firstDayOfWeek
 
@@ -945,7 +945,7 @@ Whether the user has 12- or 24-hour time, as `Intl` names its hour cycles: `"h12
 const firstDayOfWeek: Accessor<1 | 2 | 3 | 4 | 5 | 6 | 7>;
 ```
 
-The day the user's weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A calendar's first column. The system's setting, else the region's (7 in the US, 1 in Germany, 6 in Egypt). Reactive. Rust: `first_day_of_week() -> Weekday` (`number()`). Headless tests have the locale's region's unless `open` sets `firstDayOfWeek`.
+The day the user's weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A calendar's first column. The system's setting, else the region's (7 in the US, 1 in Germany, 6 in Egypt). Reactive. Rust: `first_day_of_week() -> Weekday` (`number()`). `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for Sunday: pass `firstDayOfWeek() % 7`. Headless tests have the locale's region's unless `open` sets `firstDayOfWeek`.
 
 ### measurementSystem
 

@@ -684,7 +684,7 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         "hourCycle",
         Export::Value(|cx| accessor(cx, Part::HourCycle)),
         Ts::value(
-            "Whether the user has 12- or 24-hour time (reactive), as `Intl` names its\nhour cycles: `\"h12\"` (`12:30 PM`), `\"h23\"` (`00:30`), and the rarer\n`\"h11\"` (`0:30 PM`) and `\"h24\"` (`24:30`). The system's setting, else the\nregion's; pass it as `Intl.DateTimeFormat`'s `hourCycle` to write times as\nthe user reads them. The locale's region's in headless tests unless `open`\nsets `hourCycle`.",
+            "Whether the user has 12- or 24-hour time (reactive), as `Intl` names its\nhour cycles: `\"h12\"` (`12:30 PM`), `\"h23\"` (`00:30`), and the rarer\n`\"h11\"` (`0:30 PM`) and `\"h24\"` (`24:30`). The system's setting, else the\nregion's; pass it as `Intl.DateTimeFormat`'s `hourCycle` to write times as\nthe user reads them. `TimeField`'s and `DatePicker`'s `hourCycle` is\n`\"h12\"` for `\"h11\"` and `\"h12\"`, `\"h23\"` for the others. The locale's\nregion's in headless tests unless `open` sets `hourCycle`.",
             "Accessor<\"h11\" | \"h12\" | \"h23\" | \"h24\">",
         ),
     ),
@@ -692,7 +692,7 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         "firstDayOfWeek",
         Export::Value(|cx| accessor(cx, Part::FirstDayOfWeek)),
         Ts::value(
-            "The day the user's weeks start on (reactive), as ISO 8601 numbers days\n(and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A\ncalendar's first column. The system's setting, else the region's (7 in\nthe US, 1 in Germany). The locale's region's in headless tests unless\n`open` sets `firstDayOfWeek`.",
+            "The day the user's weeks start on (reactive), as ISO 8601 numbers days\n(and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A\ncalendar's first column. The system's setting, else the region's (7 in\nthe US, 1 in Germany). `Calendar`'s and `DatePicker`'s `firstDayOfWeek`\ncount from 0 for Sunday: pass `firstDayOfWeek() % 7`. The locale's\nregion's in headless tests unless `open` sets `firstDayOfWeek`.",
             "Accessor<1 | 2 | 3 | 4 | 5 | 6 | 7>",
         ),
     ),

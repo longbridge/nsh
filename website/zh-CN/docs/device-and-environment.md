@@ -322,6 +322,8 @@ const weekColumns = () => Array.from({ length: 7 }, (_, i) => ((firstDayOfWeek()
 
 `Intl` 按区域设置自己的小时周期书写时间：像上面那样把 `hourCycle()` 作为它的 `hourCycle` 选项传入，就能按用户的习惯书写。在 Web 上，浏览器不提供这些用户设置：小时周期和每周的第一天是浏览器按其语言给出的，单位是其地区的。测试中，`open` 的 `hourCycle`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit` 设置它们（否则是区域设置所在地区的），`app.setRegionalPreferences({ hourCycle: "h23" })` 修改它们（[测试](./testing-and-trace.md#操作步骤)）。
 
+基础组件显示应用传给它们的值，用它们自己的形式。`Calendar` 和 `DatePicker` 的 `firstDayOfWeek` 从 `0`（星期日）到 `6`（星期六）给星期编号：用户的第一天是 `firstDayOfWeek() % 7`（Rust：`first_day_of_week().number() % 7`）。`TimeField` 和 `DatePicker` 的 `hourCycle` 是 `"h12"` 或 `"h23"`：`hourCycle()` 为 `"h11"` 或 `"h12"` 时用户的是 `"h12"`，否则是 `"h23"`（Rust：`hour_cycle().twelve_hour()` 时为 `HourCycle::H12`）。
+
 ## 时区
 
 `time_zone()`（TSX：`timeZone()`）是设备的时区，即系统给它的名称：`Europe/Berlin`、`America/New_York` 这样的 IANA 名称、`UTC`，或系统使用偏移量时区时的名称（Android 上的 `GMT+01:00`）。用户修改设置或设备到了另一个时区时它会变化，读取它的地方随之更新：标出时区的时钟、按用户时区显示的时间列表、和创建时所在时区一起保存的日期。

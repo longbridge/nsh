@@ -295,13 +295,16 @@ pub fn languages() -> Languages {
 
 /// Whether the user has 12- or 24-hour time (TS: `hourCycle()`): the
 /// system's setting, else the region's. Reading it subscribes, so times
-/// follow the setting.
+/// follow the setting. `nsh_base`'s `TimeField` and `DatePicker` take
+/// their `HourCycle::H12` where [`HourCycle::twelve_hour`], else `H23`.
 pub fn hour_cycle() -> HourCycle {
     env(|e| e.hour_cycle)
 }
 
 /// The day the user's weeks start on (TS: `firstDayOfWeek()`): a calendar's
 /// first column. Reading it subscribes, so calendars follow the setting.
+/// `nsh_base`'s `Calendar` and `DatePicker` count their `first_day_of_week`
+/// from 0 for Sunday: pass `number() % 7`.
 pub fn first_day_of_week() -> Weekday {
     env(|e| e.first_day_of_week)
 }
