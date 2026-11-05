@@ -6,9 +6,11 @@
 //! change of the offset reaches [`Host::moved`], which re-places the
 //! children, pins the sticky cells and feeds the native scroll value in
 //! the same frame. Reports are coalesced to one per frame by the view's
-//! own tick callback, which also runs glides, animated scrolls, the
-//! indicator's fade and the refresh spinner, and stops when none of them
-//! is left.
+//! frame callback on its surface ([`Surface::add_frame_callback`]), which
+//! also runs glides, animated scrolls, the indicator's fade and the
+//! refresh spinner, stops when none of them is left, and tells when the
+//! motion next ends ([`shared::deadline`]), so a scroll ends and reports
+//! it on time while the window draws no frames.
 //!
 //! Here are what GTK does: drawing the indicator and the refresh spinner,
 //! the sticky cells' widgets, the keys the window gets, and finding the
@@ -26,7 +28,7 @@ use nsh_core::{
 };
 
 use crate::{
-    surface::Surface,
+    surface::{Next, Surface},
     view::{NshView, ViewState},
 };
 
@@ -107,22 +109,26 @@ impl ScrollHost for Host<'_> {
     }
 
     fn attached(&self) -> bool {
-        // No frames come while unmapped.
+        // Unmapped, nothing shows its moves: each is reported at once
+        // rather than with a frame.
         self.view.is_mapped()
     }
 
     fn start_ticking(&self) {
-        let weak = Rc::downgrade(self.surface);
-        self.view.add_tick_callback(move |view, clock| {
-            let Some(surface) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
+        // Weak: a deleted view's callback does not keep it.
+        let view = self.view.downgrade();
+        self.surface.add_frame_callback(move |surface, now| {
+            let Some(view) = view.upgrade() else {
+                return Next::Done;
             };
-            let now = clock.frame_time() as f64 / 1000.0;
-            if shared::frame(&Host::new(&surface, view), now) {
-                glib::ControlFlow::Continue
-            } else {
-                glib::ControlFlow::Break
+            let host = Host::new(surface, &view);
+            // The frame clock's time, in ms as `Host::now`'s.
+            let now = now * 1000.0;
+            if !shared::frame(&host, now) {
+                return Next::Done;
             }
+            // Only the indicator's fade or the spinner left: they only draw.
+            shared::deadline(&host, now).map_or(Next::Frame, |ms| Next::At(ms / 1000.0))
         });
     }
 

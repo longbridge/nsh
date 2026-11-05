@@ -3,9 +3,9 @@
 //! The engine decodes on the thread's Direct3D device (shared through a
 //! DXGI device manager, with Direct3D's multithread protection on, since
 //! Media Foundation's worker threads use the device too). While a video
-//! plays, a frame client of its surface ([`Surface::on_frame`]) asks the
-//! engine for a new frame at every display frame (`OnVideoStreamTick`) and
-//! copies it into a texture Direct2D draws as a bitmap
+//! plays, a frame client of its surface ([`Surface::on_draw_frame`]) asks
+//! the engine for a new frame at every display frame (`OnVideoStreamTick`)
+//! and copies it into a texture Direct2D draws as a bitmap
 //! (`TransferVideoFrame`): the picture is ordinary view content, clipped,
 //! transformed and covered like any other.
 //!
@@ -376,7 +376,7 @@ impl VideoItem {
             return;
         }
         let weak: Weak<Self> = Rc::downgrade(self);
-        surface.on_frame(move |surface, now| {
+        surface.on_draw_frame(move |surface, now| {
             let Some(item) = weak.upgrade() else {
                 return false;
             };

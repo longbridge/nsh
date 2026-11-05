@@ -432,7 +432,7 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
 the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
-after each batch and each `requestAnimationFrame` tick.
+after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
 transitions (`["sht"]`, `["shi"]`, `["shn"]`) take pictures of the DOM with a 2D canvas (`paintTree`), and pages and
@@ -446,6 +446,20 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
+- **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
+  what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
+  engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
+  ends by itself to end (`Animator::deadline`'s, in ms on `nsh_frame`'s clock) and keeps one timer at that time plus
+  `LATE_MS` (50 ms); if no animation frame ran since it came due, the timer runs `nsh_frame` at the current time,
+  which ends what ended (its `finished` reaches the app) and gives the next deadline. While frames come it does
+  nothing; nothing waits for what only draws (an endless loop, a JS frame request). The page's own motions that end
+  in an event have a timer beside their frames too: a page's slide or fade (`moveScreens`, whose Web Animation
+  finishes only as the page renders: the spec's "update animations and send events" is a step of updating the
+  rendering) and a page's or a dialog's shader (`shaderNav`) end at their duration plus `LATE_MS`, a dialog comes in
+  without its two frames after `ENTER_LATE_MS` (`present`; its `onShow` and `onDismiss` are timers already), and a
+  wheel's glide whose frames stopped ends where it was going (`scrollSmoothly`, then `onScrollEnd`). Browsers
+  throttle a hidden page's timers (to about once a second, and less after minutes), which these ends can come as
+  late as. Touch momentum, zoom and pull animations, which only input starts, go on when frames come back.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
   border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
   color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,

@@ -8,7 +8,8 @@
 //!   worker threads run closures on the main thread with [`invoke`] (a
 //!   message-only dispatcher window).
 //! - [`Ticker`] paces animation frames: a thread waits for the compositor's
-//!   next frame (`DwmFlush`) and posts [`WM_NSH_TICK`], one at a time.
+//!   next frame (`DwmFlush`) and posts [`WM_NSH_TICK`], one at a time;
+//!   while nothing composes it posts none.
 //! - Mouse, touch and pen input becomes [`crate::input::PointerEvent`]s
 //!   (with capture while a button is down, and double-click counting),
 //!   the wheel [`crate::input::WheelEvent`]s, keys
@@ -68,6 +69,10 @@ pub(crate) const WM_NSH_MENU: u32 = WM_APP + 4;
 /// The embedding app's root window was shown, hidden, minimized or
 /// restored ([`observe_root`]).
 const WM_NSH_ROOT: u32 = WM_APP + 5;
+
+/// How often the ticker asks for the compositor again while nothing
+/// composes ([`Ticker`]): frames resume within this once it does.
+const COMPOSITION_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
 
 const CLASS: PCWSTR = w!("NshWindow");
 const DISPATCH_CLASS: PCWSTR = w!("NshDispatcher");
@@ -1078,7 +1083,12 @@ struct TickerShared {
 
 /// Paces animation frames to the compositor: while running, a thread waits
 /// for each composition (`DwmFlush`) and posts [`WM_NSH_TICK`] unless the
-/// last one is still in the queue.
+/// last one is still in the queue. While nothing composes (`DwmFlush`
+/// fails: a locked or remote session) no frames are shown, so none are
+/// ticked: the thread asks again every [`COMPOSITION_RETRY`], and the
+/// surface keeps the times its animations end with a timer meanwhile
+/// (`Surface::keep_deadline`), which pauses the ticker once nothing is
+/// left.
 pub(crate) struct Ticker {
     shared: Arc<TickerShared>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -1105,10 +1115,14 @@ impl Ticker {
                         std::thread::park();
                         continue;
                     }
-                    // SAFETY: plain call; fails when composition is off
-                    // (a locked or remote session), then a timer paces.
+                    // SAFETY: plain call; fails when nothing composes (a
+                    // locked or remote session).
                     if unsafe { DwmFlush() }.is_err() {
-                        std::thread::sleep(std::time::Duration::from_millis(16));
+                        // No ticks at a rate of its own: that would be a
+                        // second clock beside the compositor's. Dropping
+                        // the ticker wakes it at once.
+                        std::thread::park_timeout(COMPOSITION_RETRY);
+                        continue;
                     }
                     if !s.pending.swap(true, Ordering::AcqRel) {
                         // SAFETY: posting is thread-safe.
