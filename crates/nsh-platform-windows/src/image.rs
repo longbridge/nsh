@@ -243,6 +243,11 @@ impl Frame {
         (self.pixels.width, self.pixels.height)
     }
 
+    /// Its pixels: premultiplied BGRA, rows packed.
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.pixels.data
+    }
+
     /// Its bitmap on `dc`'s device, made on first use and again after a
     /// device loss (main thread).
     pub(crate) fn bitmap(&self, dc: &ID2D1DeviceContext) -> Option<ID2D1Bitmap1> {
@@ -781,6 +786,39 @@ fn fetch(
     })
 }
 
+/// A menu item's icon, as decoded (at least as large as it shows).
+pub(crate) struct MenuIcon {
+    pub(crate) frame: Arc<Frame>,
+    /// An SVG: a template, painted in the menu's text color.
+    pub(crate) template: bool,
+}
+
+/// Loads a menu item's icon off the main thread, at `scale` pixels per
+/// point; `done` runs on the main thread, before this returns when the
+/// icon is in memory. Dropping the load gives up.
+pub(crate) fn load_menu_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    scale: f32,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(picture, _)| MenuIcon {
+            template: matches!(picture.natural, Natural::Vector(_)),
+            frame: picture.frame,
+        }));
+    };
+    fetch(
+        surface,
+        &source.at_pixel_ratio(surface.scale()),
+        nsh_core::desktop::menu_icon::want(scale),
+        Frames::First,
+        Priority::Visible,
+        None,
+        Box::new(done),
+    )
+}
+
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the main thread, at its natural size; `done` runs on
 /// the main thread with the image (an animation's first frame). Canvases
@@ -992,7 +1030,7 @@ thread_local! {
 
 /// Calls `f` once after `wait`, from the thread's message loop; returns
 /// the timer, to [`cancel`] it.
-fn after(wait: Duration, f: impl FnOnce() + 'static) -> Option<usize> {
+pub(crate) fn after(wait: Duration, f: impl FnOnce() + 'static) -> Option<usize> {
     let ms = wait.as_millis().clamp(1, u32::MAX as u128) as u32;
     // SAFETY: a thread timer (no window) with a callback of the right
     // signature; the message loop of this thread dispatches it.

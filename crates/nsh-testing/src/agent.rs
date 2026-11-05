@@ -650,6 +650,7 @@ impl MenuValue {
                 checked,
                 role: None,
                 when: nsh_core::keymap::When::Always,
+                icon: None,
             }),
             MenuValue::Submenu {
                 label,
@@ -659,6 +660,8 @@ impl MenuValue {
                 label,
                 enabled,
                 items: items.into_iter().map(MenuValue::into_item).collect(),
+                // A scene's answer is about what a test can ask of a menu.
+                icon: None,
             },
         }
     }
@@ -681,6 +684,7 @@ fn menu_value(items: Vec<nsh_core::desktop::MenuItem>) -> Vec<MenuValue> {
                 label,
                 enabled,
                 items,
+                ..
             } => MenuValue::Submenu {
                 label,
                 enabled,
