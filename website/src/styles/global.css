@@ -486,10 +486,22 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   .site-nav__actions > a[aria-label="GitHub"] { display: none; }
 }
 
-@media (max-width: 380px) {
+/* The name goes before the actions stop fitting, with room for a longer
+   version label. */
+@media (max-width: 460px) {
   .site-nav__inner { gap: 0.5rem; }
-  .site-nav__projects { display: none; }
+  .site-nav__projects { margin-left: 0; }
+  .site-nav__projects-menu { position: fixed; top: 3.5rem; left: 1rem; right: 1rem; width: auto; }
+  .site-nav__projects-menu a span { white-space: normal; }
   .site-nav__brand > span { display: none; }
+}
+
+@media (max-width: 380px) {
+  .site-nav__projects { display: none; }
+}
+
+@media (max-width: 340px) {
+  .site-nav__versions { display: none; }
 }
 
 /* ====================================================================
