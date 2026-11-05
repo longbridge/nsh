@@ -400,7 +400,7 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         file_requests: true,
         notifications: true,
-        audio: false,
+        audio: true,
         ..Environment::default()
     }
 }

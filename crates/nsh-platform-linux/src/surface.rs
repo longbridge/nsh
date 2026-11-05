@@ -126,6 +126,8 @@ pub(crate) struct Surface {
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
     shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
+    /// The engine's sounds and players ([`crate::audio`]).
+    pub(crate) audio: crate::audio::Speaker,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
@@ -193,6 +195,7 @@ impl Surface {
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
             shader_renderer: std::cell::OnceCell::new(),
+            audio: Default::default(),
             asset_base: RefCell::new(None),
             image_cache: RefCell::new(None),
             access: RefCell::new(Arc::default()),
