@@ -4,11 +4,9 @@
 //! that is shown (the tree), non-degenerate (the engine's geometry) and
 //! interactive (the binding) — each chip breaks one layer only.
 
-use std::path::Path;
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
-use nsh_core::Points;
-use nsh_core::geometry::point;
+use nsh_core::{Points, geometry::point};
 use nsh_testing::tsx;
 
 #[test]
