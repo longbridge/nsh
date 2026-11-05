@@ -814,23 +814,22 @@ mod os {
         type ToIana =
             unsafe extern "C" fn(*const u16, i32, *const u8, *mut u16, i32, *mut i32) -> i32;
         const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x0000_0800;
-        thread_local! {
-            static TO_IANA: Option<ToIana> = {
-                // SAFETY: system libraries by name, from System32 only; the
-                // function, if there, has the signature above (ICU's C API).
-                unsafe {
-                    ["icu.dll", "icuin.dll"]
-                        .into_iter()
-                        .map(wide)
-                        .map(|name| LoadLibraryExW(name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32))
-                        .find(|module| *module != 0)
-                        .map(|icu| GetProcAddress(icu, c"ucal_getTimeZoneIDForWindowsID".as_ptr()))
-                        .filter(|proc| !proc.is_null())
-                        .map(|proc| std::mem::transmute::<*mut c_void, ToIana>(proc))
-                }
-            };
-        }
-        let to_iana = TO_IANA.with(|f| *f)?;
+        // Looked up once for the process, not once per thread that asks.
+        static TO_IANA: std::sync::OnceLock<Option<ToIana>> = std::sync::OnceLock::new();
+        let to_iana = (*TO_IANA.get_or_init(|| {
+            // SAFETY: system libraries by name, from System32 only; the
+            // function, if there, has the signature above (ICU's C API).
+            unsafe {
+                ["icu.dll", "icuin.dll"]
+                    .into_iter()
+                    .map(wide)
+                    .map(|name| LoadLibraryExW(name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32))
+                    .find(|module| *module != 0)
+                    .map(|icu| GetProcAddress(icu, c"ucal_getTimeZoneIDForWindowsID".as_ptr()))
+                    .filter(|proc| !proc.is_null())
+                    .map(|proc| std::mem::transmute::<*mut c_void, ToIana>(proc))
+            }
+        }))?;
         let mut name = [0u16; 64];
         let mut status = 0i32;
         // SAFETY: `key` and `name` hold the lengths given; no region (ICU's
