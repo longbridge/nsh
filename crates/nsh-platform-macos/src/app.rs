@@ -147,6 +147,13 @@ pub struct AppOptions {
     /// `--keep-window-size`), so a test's window is the size it opens it at
     /// whichever display it is on.
     pub keep_size: bool,
+    /// Runs [`run_app`]'s app in the background: it never becomes the
+    /// active app (`NSApplicationActivationPolicyProhibited`), so its
+    /// window shows without taking the keyboard from the app in use, and it
+    /// has no Dock icon or menu bar. False by default; `nsh test --target
+    /// macos` sets it (the development host's `--background`) unless told
+    /// `--foreground`: the test agent's input goes to the window directly.
+    pub background: bool,
     /// Hides the standalone window on close while retaining its engine.
     /// Reopening from the Dock shows the same window. Quit still stops the app.
     /// Only used by [`run_app`]; defaults to false.
@@ -197,6 +204,7 @@ impl Default for AppOptions {
             size: (1200, 800),
             display: None,
             keep_size: false,
+            background: false,
             keep_alive_on_close: false,
             components: Default::default(),
             appearance: Appearance::System,
@@ -668,7 +676,14 @@ fn name_app(name: &str) {
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    // A background app is Prohibited: AppKit does not activate it. An
+    // Accessory app is not guaranteed to stay inactive when its window
+    // comes up.
+    app.setActivationPolicy(if options.background {
+        NSApplicationActivationPolicy::Prohibited
+    } else {
+        NSApplicationActivationPolicy::Regular
+    });
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
@@ -725,9 +740,16 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
         #[cfg(feature = "dev")]
         AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
-    window.makeKeyAndOrderFront(None);
-    window.makeFirstResponder(Some(view.surface().root.ns()));
-    app.activate();
+    if options.background {
+        // Shown without activating the app (it never is: its window is
+        // never key, and the test agent's input goes to it directly).
+        window.orderFrontRegardless();
+        window.makeFirstResponder(Some(view.surface().root.ns()));
+    } else {
+        window.makeKeyAndOrderFront(None);
+        window.makeFirstResponder(Some(view.surface().root.ns()));
+        app.activate();
+    }
     RUNNING.with(|r| {
         *r.borrow_mut() = Some(Running {
             window,

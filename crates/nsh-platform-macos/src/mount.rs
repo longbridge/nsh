@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     sight::Sights,
     surface::Surface,
-    view::{NshView, Views},
+    view::{NshView, Planned, Views},
 };
 
 /// The views of a surface.
@@ -28,9 +28,17 @@ pub(crate) struct Mounter {
     /// Views whose drawing changed while they could not be seen
     /// ([`Mounter::draw_when_shown`]).
     stale: RefCell<Vec<NshView>>,
+    /// During a window's live resize, the views out of sight whose frames
+    /// wait to be placed ([`Mounter::place_shown`]).
+    unplaced: RefCell<Vec<NshView>>,
+    /// Whether the window is in a live resize.
+    live_resize: bool,
     /// The ancestors [`Mounter::revisit`] resolved (kept for the
     /// allocations; cleared on each pass).
     sights: RefCell<Sights<NshView>>,
+    /// The same over the frames waiting to be placed
+    /// ([`Mounter::place_shown`]).
+    planned_sights: RefCell<Sights<NshView>>,
 }
 
 impl Mounter {
@@ -43,7 +51,10 @@ impl Mounter {
             layout_animation: None,
             rtl: false,
             stale: RefCell::default(),
+            unplaced: RefCell::default(),
+            live_resize: false,
             sights: RefCell::default(),
+            planned_sights: RefCell::default(),
         }
     }
 
@@ -85,6 +96,16 @@ impl Mounter {
         }
     }
 
+    /// Takes views the surface put off while a batch held the mounter
+    /// ([`crate::surface::Surface::draw_when_shown`]); whether it could.
+    pub(crate) fn adopt_stale(&self, views: &mut Vec<NshView>) -> bool {
+        let Ok(mut stale) = self.stale.try_borrow_mut() else {
+            return false;
+        };
+        stale.append(views);
+        true
+    }
+
     /// Draws the views [`Mounter::draw_when_shown`] put off that can be
     /// seen now (after scrolls, batches and frames). Views out of the tree
     /// wait (their content is drawn once they show); deleted ones are
@@ -120,6 +141,59 @@ impl Mounter {
             }
         }
         true
+    }
+
+    /// The window's live resize starts or ends. Its end places every view
+    /// still waiting, so nothing outside a drag sees a frame not applied.
+    pub(crate) fn set_live_resize(&mut self, on: bool) {
+        self.live_resize = on;
+        if !on {
+            for view in std::mem::take(self.unplaced.get_mut()) {
+                view.set_unplaced(false);
+                if self.alive(&view) {
+                    view.moved();
+                }
+            }
+        }
+    }
+
+    /// Places the views whose frames waited and that can be seen now, where
+    /// they are or where they go: left where it is, a view whose new frame is
+    /// out of sight would stay on screen over what took its place. A window's
+    /// live resize changes the frame of every view of a long page on every
+    /// size, and moving a view costs the main thread and Core Animation's
+    /// commit whether it shows or not.
+    pub(crate) fn place_shown(&self) {
+        let Ok(mut unplaced) = self.unplaced.try_borrow_mut() else {
+            return;
+        };
+        if unplaced.is_empty() {
+            return;
+        }
+        let Ok(mut sights) = self.sights.try_borrow_mut() else {
+            return;
+        };
+        let Ok(mut planned) = self.planned_sights.try_borrow_mut() else {
+            return;
+        };
+        sights.clear();
+        planned.clear();
+        let shown: Vec<NshView> = unplaced
+            .extract_if(.., |v| {
+                !self.alive(v) || planned.shows(&Planned, v) || sights.shows(&Views, v)
+            })
+            .collect();
+        sights.clear();
+        planned.clear();
+        drop(sights);
+        drop(planned);
+        drop(unplaced);
+        for view in shown {
+            view.set_unplaced(false);
+            if self.alive(&view) {
+                view.moved();
+            }
+        }
     }
 
     /// Whether `view` is still mounted (not deleted).
@@ -243,7 +317,20 @@ impl Mounter {
                     return;
                 }
                 let old = std::mem::replace(&mut view.state_mut().frame, *frame);
-                view.moved();
+                // Plain views go through `place_shown`, which needs no
+                // answer from anything they contain.
+                if self.live_resize
+                    && self.layout_animation.is_none()
+                    && matches!(view.kind(), ViewKind::View | ViewKind::Text)
+                    && view.state().live.is_none()
+                {
+                    if view.set_unplaced(true) {
+                        self.unplaced.borrow_mut().push(view.clone());
+                    }
+                    crate::sight::moved();
+                } else {
+                    view.moved();
+                }
                 crate::transition::frame_changed(
                     surface,
                     view,
@@ -273,11 +360,14 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
+                    let same = crate::text::draws_the_same(view, text, layout, *content);
                     crate::text::set(view, text, layout, *content);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
-                    self.draw_when_shown(view, Damage::All);
+                    if !same {
+                        self.draw_when_shown(view, Damage::All);
+                    }
                     crate::access::text_changed(view);
                 }
             }

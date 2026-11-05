@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/gallery-rs/native", "examples/rust-exports/native", "examples/embed-gpui/run"]
+members = ["crates/*", "examples/gallery-rs/native", "examples/rust-exports/native", "examples/tasks-rs", "examples/embed-gpui/run"]
 # The GPUI backend is a workspace of its own (`crates/gpui/Cargo.toml`).
 exclude = ["crates/gpui"]
 # `cargo run` runs the gallery (`crates/xtask/src/run.rs`).
@@ -34,6 +34,7 @@ unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
 nsh-core = { version = "0.4.0", path = "crates/nsh-core" }
 nsh-package = { version = "0.4.0", path = "crates/nsh-package" }
+nsh-updater = { version = "0.4.0", path = "crates/nsh-updater" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
 nsh-base = { version = "0.4.0", path = "crates/nsh-base", default-features = false }
 nsh-macros = { version = "0.4.0", path = "crates/nsh-macros" }
@@ -138,7 +139,9 @@ semver = "1"
 # UI Automation. Features per area, like the Apple bindings below.
 windows = { version = "0.62", features = [
   "std",
+  "Data_Xml_Dom",
   "Foundation_Numerics",
+  "UI_Notifications",
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_Graphics_Direct2D",
@@ -175,6 +178,7 @@ windows = { version = "0.62", features = [
   "Win32_UI_Input_Ime",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Input_Pointer",
+  "Win32_UI_Notifications",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",

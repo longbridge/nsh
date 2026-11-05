@@ -16,15 +16,18 @@
 //! rounded bounds for the same reason, masked only for differing corners.
 //! In-process renderings (`shot`) do not show unmasked outer shadows.
 
+use std::cell::Cell;
+
 use nsh_core::{
     BorderStyle, BoxShadow, Color, CornerRadii, Filter, GlassEffect, Gradient, GradientKind,
     GradientSize, ViewStyle,
     geometry::{Points, px},
 };
+
 use objc2::{
-    MainThreadOnly as _, msg_send,
+    DefinedClass as _, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Allocated, Retained},
-    runtime::AnyClass,
+    runtime::{AnyClass, AnyObject},
 };
 use objc2_app_kit::{
     NSUserInterfaceItemIdentification as _, NSView, NSVisualEffectBlendingMode,
@@ -32,7 +35,7 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGMutablePath;
-use objc2_foundation::{NSArray, NSNumber, ns_string};
+use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
 use objc2_quartz_core::{
     CAGradientLayer, CALayer, CAShapeLayer, kCAFillRuleEvenOdd, kCAGradientLayerAxial,
     kCAGradientLayerConic, kCAGradientLayerRadial, kCALineCapButt, kCALineCapRound,
@@ -66,6 +69,8 @@ pub(crate) struct Visual {
     outline: Option<Retained<CAShapeLayer>>,
     veil: Option<Retained<CALayer>>,
     backdrop: Option<Backdrop>,
+    /// `maskImage`'s layer, held so it is not rebuilt every frame.
+    mask_image: Option<Retained<CAGradientLayer>>,
 }
 
 /// A backdrop blur, a visual effect view that blurs what is behind it, or
@@ -73,6 +78,124 @@ pub(crate) struct Visual {
 struct Backdrop {
     view: Retained<NSView>,
     glass: bool,
+    /// A [`PlainBlur`].
+    plain: bool,
+}
+
+define_class!(
+    /// A masked `backdropFilter`: what a progressive blur stacks. AppKit's
+    /// materials blur by a radius of their own and tint, so layers of them
+    /// differ in nothing but darken what is behind; this view's backdrop
+    /// layer blurs by the view's radius and draws nothing else, as CSS.
+    ///
+    /// AppKit gives no way to say that, so it edits the layers the material
+    /// is made of, each time AppKit may have made them again, through
+    /// public `CALayer` API (`filters`, key-value coding). Where they are
+    /// not what this expects the view stays the plain material.
+    #[unsafe(super(NSVisualEffectView, NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Cell<f32>]
+    #[name = "NshPlainBlur"]
+    struct PlainBlur;
+
+    impl PlainBlur {
+        #[unsafe(method(layout))]
+        fn layout(&self) {
+            // SAFETY: NSView's `layout`, on the main thread.
+            let _: () = unsafe { msg_send![super(self), layout] };
+            self.strip();
+        }
+
+        #[unsafe(method(updateLayer))]
+        fn update_layer(&self) {
+            // SAFETY: NSView's `updateLayer`, on the main thread.
+            let _: () = unsafe { msg_send![super(self), updateLayer] };
+            self.strip();
+        }
+
+        #[unsafe(method(viewDidChangeEffectiveAppearance))]
+        fn appearance_changed(&self) {
+            // SAFETY: NSView's method of that name, on the main thread.
+            let _: () = unsafe { msg_send![super(self), viewDidChangeEffectiveAppearance] };
+            self.strip();
+        }
+
+        #[unsafe(method(viewDidMoveToWindow))]
+        fn moved_to_window(&self) {
+            // SAFETY: NSView's method of that name, on the main thread.
+            let _: () = unsafe { msg_send![super(self), viewDidMoveToWindow] };
+            self.strip();
+        }
+    }
+);
+
+impl PlainBlur {
+    fn new(frame: CGRect, radius: f32, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(Cell::new(radius));
+        // SAFETY: NSView's `initWithFrame:`, on an allocated view.
+        unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+
+    /// Blurs by `radius` from now on.
+    fn set_radius(&self, radius: f32) {
+        self.ivars().set(radius);
+        self.strip();
+    }
+
+    fn strip(&self) {
+        if let Some(layer) = self.layer() {
+            strip_material(&layer, self.ivars().get());
+        }
+    }
+}
+
+/// Leaves of a material's layers nothing but the blur of `radius`: the
+/// backdrop layer's Gaussian blur alone, its fill and tints hidden.
+fn strip_material(layer: &CALayer, radius: f32) {
+    // SAFETY: reading the sublayers on the main thread, which is all this does.
+    let Some(subs) = (unsafe { layer.sublayers() }) else {
+        return;
+    };
+    for sub in subs.iter() {
+        let backdrop = sub
+            .class()
+            .name()
+            .to_str()
+            .is_ok_and(|n| n.contains("Backdrop"));
+        if backdrop {
+            let gaussian = ns_string!("gaussianBlur");
+            // A backdrop layer's `filters` are `CAFilter`s, which have a name.
+            let kept: Vec<Retained<AnyObject>> = sub
+                .filters()
+                .map(|f| f.to_vec())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| {
+                    // SAFETY: `CAFilter`'s `name`, an `NSString`.
+                    let name: Option<Retained<NSString>> = unsafe { msg_send![&**f, name] };
+                    name.is_some_and(|n| &*n == gaussian)
+                })
+                .collect();
+            if kept.is_empty() {
+                continue;
+            }
+            // SAFETY: those filters, back on their layer, then their radius
+            // by the key path Core Animation documents for named filters.
+            unsafe {
+                sub.setFilters(Some(&NSArray::from_retained_slice(&kept)));
+                let value = NSNumber::new_f32(radius);
+                let _: () = msg_send![
+                    &*sub,
+                    setValue: &*value,
+                    forKeyPath: ns_string!("filters.gaussianBlur.inputRadius")
+                ];
+            }
+        } else if unsafe { sub.sublayers() }.is_some_and(|l| l.count() > 0) {
+            strip_material(&sub, radius);
+        } else {
+            sub.setHidden(true);
+        }
+    }
 }
 
 impl Drop for Backdrop {
@@ -235,7 +358,35 @@ impl Visual {
                 })
                 .sum::<f32>()
         });
-        self.set_backdrop(view, blur, style.glass_effect, local, radii);
+        let masked = effects.is_some_and(|e| !e.mask_images.is_empty());
+        self.set_backdrop(view, blur, style.glass_effect, masked, local, radii);
+        // Last: the mask covers everything above, the backdrop's view included.
+        self.set_mask_image(
+            layer,
+            effects.map_or(&[][..], |e| &e.mask_images[..]),
+            local,
+        );
+    }
+
+    /// `mask-image`: a gradient whose alpha decides how much of the view is
+    /// drawn. Set on the view's own layer, so it masks the content, the
+    /// background, the shadows and the backdrop's view alike.
+    ///
+    /// CSS composites several mask layers; this draws the topmost one, which
+    /// is what a fade along one edge needs (as on iOS).
+    fn set_mask_image(&mut self, layer: &CALayer, masks: &[Gradient], local: CGRect) {
+        let Some(mask) = masks.first() else {
+            if self.mask_image.take().is_some() {
+                // SAFETY: clearing the mask.
+                unsafe { layer.setMask(None) };
+            }
+            return;
+        };
+        let g = self.mask_image.get_or_insert_with(CAGradientLayer::new);
+        g.setFrame(local);
+        shape_gradient(g, mask, local.size);
+        // SAFETY: the layer owns the mask, which has no superlayer of its own.
+        unsafe { layer.setMask(Some(g)) };
     }
 
     fn set_shadows(
@@ -503,11 +654,18 @@ impl Visual {
         view: &NshView,
         radius: f32,
         glass_style: GlassEffect,
+        masked: bool,
         local: CGRect,
         radii: CornerRadii,
     ) {
         let glass = glass_style != GlassEffect::None && glass_class().is_some();
-        if (radius <= 0.0 && !glass) || self.backdrop.as_ref().is_some_and(|b| b.glass != glass) {
+        let plain = masked && !glass;
+        if (radius <= 0.0 && !glass)
+            || self
+                .backdrop
+                .as_ref()
+                .is_some_and(|b| b.glass != glass || b.plain != plain)
+        {
             self.backdrop = None;
         }
         if radius <= 0.0 && !glass {
@@ -516,6 +674,13 @@ impl Visual {
         let b = self.backdrop.get_or_insert_with(|| {
             let (v, glass) = match new_glass(glass_style, local).filter(|_| glass) {
                 Some(v) => (v, true),
+                None if plain => {
+                    let v = PlainBlur::new(local, radius, view.mtm());
+                    v.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
+                    v.setState(NSVisualEffectState::Active);
+                    v.setMaterial(NSVisualEffectMaterial::Popover);
+                    (Retained::into_super(Retained::into_super(v)), false)
+                }
                 None => {
                     let v = NSVisualEffectView::initWithFrame(
                         NSVisualEffectView::alloc(view.mtm()),
@@ -532,9 +697,16 @@ impl Visual {
             v.setIdentifier(Some(ns_string!("nsh.backdrop")));
             view.ns()
                 .addSubview_positioned_relativeTo(&v, NSWindowOrderingMode::Below, None);
-            Backdrop { view: v, glass }
+            Backdrop {
+                view: v,
+                glass,
+                plain,
+            }
         });
         b.view.setFrame(local);
+        if let Some(blur) = b.view.downcast_ref::<PlainBlur>() {
+            blur.set_radius(radius);
+        }
         if b.glass {
             // The glass draws its own rounded shape.
             let r = crate::decor::shared(&radii).unwrap_or(0.0) as CGFloat;

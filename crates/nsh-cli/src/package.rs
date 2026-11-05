@@ -109,6 +109,8 @@ pub(crate) struct AppConfig {
     /// What the web's packages add to the page (`web.rs`).
     #[serde(default)]
     pub(crate) web: WebConfig,
+    /// Where the app finds its updates (`update.rs`).
+    pub(crate) updater: Option<crate::updater::UpdaterConfig>,
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
@@ -324,7 +326,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // Web apps load what `import()` brings in when it is used; native
     // packages are one bundle. A Rust app has none: its runner mounts its
     // root (`rust_app::RustApp::runtime`).
-    let built = if crate::rust_app::is_root(&entry) {
+    let mut built = if crate::rust_app::is_root(&entry) {
         crate::build::rust_root()
     } else {
         let compile = match options.target {
@@ -335,6 +337,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
         built
     };
+    if options.target != PackageTarget::Web {
+        crate::updater::add_config(config, &id, options.out, &mut built)?;
+    }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
@@ -678,6 +683,7 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    crate::updater::copy_archive(config, name, &archive, options.out)?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -769,6 +775,7 @@ fn package_macos(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    crate::updater::archive_macos_app(config, name, &app, options.out)?;
     step.done(format!("packaged {}", ui::path(&app)));
     if options.run {
         let status = Command::new("open")

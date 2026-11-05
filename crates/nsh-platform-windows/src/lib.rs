@@ -44,6 +44,7 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
+mod notifications;
 mod picker;
 mod render;
 mod scroll;

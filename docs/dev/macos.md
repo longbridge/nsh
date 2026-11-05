@@ -91,10 +91,23 @@ belong to the app, which owns retention and its storage budget.
   resizes (zoom, the green button, a double click on the title bar) and live resizes take this path, so the window
   never grows around stale content. An engine that misses the deadline (JS busy) is not waited for again until it
   reports a resize done, so a busy app resizes as before.
+  A content layer given a new size is drawn again only once it can be seen (`NshView::content_resized`, then
+  `Mounter::revisit`), not by `needsDisplayOnBoundsChange`: Core Animation draws every marked layer, seen or not, so
+  each resize would draw again all the text a long page had ever shown.
+  During a live resize, the new frames of plain views (`View`, `Text`) out of sight wait in `Mounter::unplaced`:
+  each batch places those that can be seen where they are or where they go (`Mounter::place_shown`; where they go is
+  the frames the layout gave, `view::Planned`: left in place, a view leaving the screen would stay over what took its place) and
+  the resize's end places the rest (`viewDidEndLiveResize`). Moving a view costs the main thread and Core Animation's
+  commit whether it shows or not.
+  A text's content layer keeps its picture through another width of the same lines (`text::draws_the_same`,
+  `kCAGravityTopLeft`); a picture drawn in a layer narrower than its box, a view still waiting to be placed
+  (`DrawnText::cut`), draws again once placed.
   Where the app has not drawn yet, the surface's background shows: the app's top view's opaque background when it
   fills the root (`system.rs`), else white / neutral-950 by the scheme.
 - **Text is typeset on the engine thread** by CoreText (`text.rs`, the iOS engine with `NSFont`); the main thread
-  draws the finished `CTLine`s.
+  draws the finished `CTLine`s. A final layout is made when first read (`CoreTextLayout`), so text nothing shows is
+  not typeset twice; when that read is the main thread's, it holds the text's lock for the time of one layout. Texts
+  with attachments are made at once on the engine.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
   link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
   screen's `maximumFramesPerSecond` (set again when the link resumes). The link does not fire while the window is

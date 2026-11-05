@@ -361,7 +361,7 @@ const angle = createAnimatedValue(0);
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
-| `maskImage` | `string` | | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 |
+| `maskImage` | `string` | | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 此时模糊不带系统材质的色调。Windows 和 GPUI 上不绘制。 |
 | `glassEffect` | `"none" \| "regular" \| "clear"` | `.glass_effect(GlassEffect::Regular)` | 在 iOS 26、macOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 

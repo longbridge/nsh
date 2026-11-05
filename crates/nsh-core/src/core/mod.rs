@@ -8,6 +8,7 @@ mod measure;
 mod overlay;
 mod parent_viewport;
 mod renders;
+mod resize_anchor;
 mod scrollbars;
 mod services;
 mod slots;
@@ -901,14 +902,42 @@ struct TextContext<P> {
     prepared: Option<P>,
     /// Natural width of the widest UAX #14 unbreakable segment.
     min_content: Option<Points>,
+    /// An input's [`FIELD_SAMPLE`] in its style: what its width comes from
+    /// when nothing else gives it one.
+    field: Option<Box<TextContext<P>>>,
     /// Last measurement: `(max_width, size)`.
     cache: Option<(Option<f32>, Size<Points>)>,
+    /// The widths known to break its lines as the last measurement did
+    /// ([`TextEngine::breaks_lines_greedily`]).
+    same_lines: Option<SameLines>,
+    /// Measuring ahead found a line taking another word: a long text finds
+    /// one nearly every time, and would be typeset twice per width.
+    no_ahead: bool,
+    /// The commit of a resize that last found it near the screen
+    /// ([`Core::mark_near_screen`]).
+    near_screen: u32,
+    /// Its size or layout waits for the resize to end.
+    held: bool,
     /// Last final layout sent to the platform and the content box it was
     /// made for (where in the view the text goes).
     laid_out: Option<LaidText>,
     /// New test metadata must be mounted even when the glyphs are unchanged.
     metadata_changed: bool,
 }
+
+/// A text measures `size` at every maximum width from `narrowest` to
+/// `widest`: a width that holds its widest line and is not above the one
+/// measured breaks the lines at the same places.
+#[derive(Clone, Copy)]
+struct SameLines {
+    narrowest: f32,
+    widest: f32,
+    size: Size<Points>,
+}
+
+/// How far past a growing width a text is measured, so that the next widths
+/// of a window's resize need no typesetting ([`measure_text`]).
+const SAME_LINES_AHEAD: f32 = 8.0;
 
 /// The final text can have fitted font sizes, so retain it with its layout.
 struct LaidText {
@@ -924,7 +953,12 @@ impl<P> TextContext<P> {
             alignments: Default::default(),
             text,
             prepared: None,
+            same_lines: None,
+            no_ahead: false,
+            near_screen: 0,
+            held: false,
             min_content: None,
+            field: None,
             cache: None,
             laid_out: None,
             metadata_changed: false,
@@ -951,6 +985,10 @@ impl<P> TextContext<P> {
         Some((text, laid.layout.clone()))
     }
 }
+
+/// What an input is as wide as when nothing gives it a width, whatever it
+/// holds: as CSS's `<input size="20">`, twenty digits.
+const FIELD_SAMPLE: &str = "00000000000000000000";
 
 /// Measured leaves: text blocks and images with a known natural size.
 enum LeafContext<P> {
@@ -1014,6 +1052,12 @@ pub struct Core<M: TextEngine> {
     layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
     measure_cache: MeasureCache,
+    /// Counts the commits of resizes ([`Core::mark_near_screen`]).
+    resizing_commit: u32,
+    /// The next layout follows a change of the viewport, or the text that
+    /// waited through a burst of resizes: scroll views keep their place
+    /// through it (`resize_anchor`).
+    resize_settling: bool,
     /// Text blocks whose final layout must be (re)made after layout.
     pending_text: Vec<Key>,
     /// Text blocks with attachments (checked for attachments laid out
@@ -1249,6 +1293,8 @@ impl<M: TextEngine> Core<M> {
             layout,
             text_engine: Rc::new(text_engine),
             measure_cache: MeasureCache::default(),
+            resizing_commit: 0,
+            resize_settling: false,
             pending_text: Vec::new(),
             attachment_blocks: Vec::new(),
             max_nodes: usize::MAX,
@@ -1503,10 +1549,87 @@ impl<M: TextEngine> Core<M> {
         self.max_nodes = max.max(1);
     }
 
+    /// A burst of resizes began (`true`) or ended. Meanwhile only text near
+    /// the screen is measured and laid out at new widths: what is far from
+    /// it keeps its height, and catches up in the commit after the end. A
+    /// window's drag gets its frames from what the user sees; a long page
+    /// has far more text than the screen shows.
+    pub fn set_resizing(&mut self, resizing: bool) {
+        if resizing == self.measure_cache.resizing.is_some() {
+            return;
+        }
+        if resizing {
+            self.resizing_commit = self.resizing_commit.wrapping_add(1).max(1);
+            self.measure_cache.resizing = Some(self.resizing_commit);
+            return;
+        }
+        self.measure_cache.resizing = None;
+        let keys: Vec<(Key, LayoutId)> = self
+            .nodes
+            .iter()
+            .filter_map(|(key, node)| Some((key as Key, node.layout?)))
+            .collect();
+        for (key, layout) in keys {
+            let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
+                continue;
+            };
+            if std::mem::take(&mut cx.held) {
+                self.layout.mark_dirty(layout);
+                self.needs_layout = true;
+                self.resize_settling = true;
+                self.queue_text(key);
+            }
+        }
+    }
+
+    /// Marks the text within a screen's height of the screen, from where
+    /// the last commit put the views, for this commit of a resize. A text
+    /// it finds after waiting catches up now.
+    fn mark_near_screen(&mut self) {
+        self.resizing_commit = self.resizing_commit.wrapping_add(1).max(1);
+        self.measure_cache.resizing = Some(self.resizing_commit);
+        let (width, height) = (self.viewport.width.0, self.viewport.height.0);
+        let mut stack = vec![(self.root, 0.0f32, 0.0f32)];
+        while let Some((key, x, y)) = stack.pop() {
+            let node = &self.nodes[key as usize];
+            let frame = node.frame;
+            let (mut x, mut y) = (x, y);
+            // Not placed yet, or of no size around what overflows it: no
+            // telling, so it counts as near.
+            // (`Bounds::UNSET` is NaN.)
+            if !frame.origin.x.0.is_nan() {
+                x += frame.origin.x.0;
+                y += frame.origin.y.0;
+                let (w, h) = (frame.size.width.0, frame.size.height.0);
+                let sized = w > 0.0 && h > 0.0;
+                if sized
+                    && (x + w < -width || x > 2.0 * width || y + h < -height || y > 2.0 * height)
+                {
+                    continue;
+                }
+            }
+            if let Some(scroll) = node.scroll.as_deref() {
+                x -= scroll.offset.0;
+                y -= scroll.offset.1;
+            }
+            stack.extend(node.children.iter().map(|&child| (child, x, y)));
+            if let Some(layout) = node.layout
+                && let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout)
+            {
+                cx.near_screen = self.resizing_commit;
+                if std::mem::take(&mut cx.held) {
+                    self.layout.mark_dirty(layout);
+                    self.queue_text(key);
+                }
+            }
+        }
+    }
+
     /// Changes the size of the root view.
     pub fn set_viewport(&mut self, viewport: Size<Points>) {
         if viewport != self.viewport {
             self.viewport = viewport;
+            self.resize_settling = true;
             let root = self.nodes[self.root as usize].layout.expect("root layout");
             self.layout.set_style(root, root_style(viewport));
             self.needs_layout = true;
@@ -1751,7 +1874,13 @@ impl<M: TextEngine> Core<M> {
             cx.prepared = None;
             cx.min_content = None;
             cx.cache = None;
+            cx.same_lines = None;
+            cx.no_ahead = false;
             cx.laid_out = None;
+            if let Some(field) = &mut cx.field {
+                field.prepared = None;
+                field.cache = None;
+            }
             self.layout.mark_dirty(layout);
             self.needs_layout = true;
             if self.nodes[key as usize].kind == Kind::Text {
@@ -2201,6 +2330,15 @@ impl<M: TextEngine> Core<M> {
         let relayout = self.needs_layout;
         if relayout {
             self.needs_layout = false;
+            let settling = std::mem::take(&mut self.resize_settling);
+            let anchors = if settling || self.measure_cache.resizing.is_some() {
+                self.resize_anchors()
+            } else {
+                Vec::new()
+            };
+            if self.measure_cache.resizing.is_some() {
+                self.mark_near_screen();
+            }
             // Boundaries first: what they give back may dirty what is
             // around them, laid out next.
             let relaid = self.relayout_boundaries();
@@ -2222,6 +2360,7 @@ impl<M: TextEngine> Core<M> {
             for key in relaid {
                 self.emit_frames(key);
             }
+            self.keep_resize_anchors(anchors);
         }
         self.update_lists(relayout);
         // After every frame of the round: what followers follow is placed.
@@ -2795,20 +2934,28 @@ impl<M: TextEngine> Core<M> {
                 &input.value
             },
         );
+        let field = self.input_text(key, FIELD_SAMPLE);
         let cx = self.text_cx(layout);
         let same = cx.text.layout_eq(&text);
+        let same_field = cx.field.as_ref().is_some_and(|f| f.text.layout_eq(&field));
         let input = self.nodes[key as usize]
             .input
             .as_mut()
             .expect("input state");
         // A value that reads as the placeholder measures the same, but
         // its content size is the value's: laid out again to report it.
-        if same && input.placeholder_measured == placeholder {
+        if same && same_field && input.placeholder_measured == placeholder {
             return;
         }
         input.placeholder_measured = placeholder;
+        let cx = self.text_cx(layout);
         if !same {
-            *self.text_cx(layout) = TextContext::new(Arc::new(text));
+            let kept = cx.field.take();
+            *cx = TextContext::new(Arc::new(text));
+            cx.field = kept;
+        }
+        if !same_field {
+            cx.field = Some(Box::new(TextContext::new(Arc::new(field))));
         }
         self.layout.mark_dirty(layout);
         self.needs_layout = true;
@@ -5966,6 +6113,8 @@ impl<M: TextEngine> Core<M> {
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
+            cx.same_lines = None;
+            cx.no_ahead = false;
             // A text that measures as before leaves every layout standing:
             // only the text is mounted again. Attachments are placed by its
             // final layout, laid out again with the rest.
@@ -6783,6 +6932,17 @@ impl<M: TextEngine> Core<M> {
             if !created {
                 continue;
             }
+            if let Some(commit) = self.measure_cache.resizing
+                && let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout)
+                && cx.near_screen != commit
+                && cx
+                    .laid_out
+                    .as_ref()
+                    .is_some_and(|l| Arc::ptr_eq(&l.text, &cx.text))
+            {
+                cx.held = true;
+                continue;
+            }
             // Whatever Taffy keeps for it (`emit_frames_in`).
             let hidden = self.displays_none(key);
             let mut content = if hidden {
@@ -6889,6 +7049,9 @@ impl<M: TextEngine> Core<M> {
                 Some(l) if l.content == content => continue,
                 // Only moved (padding, vertical alignment): the same layout.
                 Some(l) if l.content.size == size => l.layout.clone(),
+                // Another width with the same lines in the same places: what
+                // a window's resize does to most text, typeset for nothing.
+                Some(l) if keeps_lines(cx, l, size) => l.layout.clone(),
                 _ => {
                     let prepared = cx
                         .prepared
@@ -8137,18 +8300,31 @@ fn measure_leaf<M: TextEngine>(
         |_, _| 0.0,
         |known, available| match cx {
             Some(LeafContext::Text(cx)) => {
+                // An input's text scrolls in it (or wraps at its width):
+                // the input's width does not come from the text.
+                let field = cx
+                    .field
+                    .as_deref_mut()
+                    .map(|field| measure_text(engine, cache, field, None).width.0);
                 let max_width = if cx.text.no_wrap {
                     None
                 } else {
-                    known.width.or(match available.width {
-                        AvailableSpace::Definite(w) => Some(w),
-                        AvailableSpace::MinContent => Some(min_content_width(engine, cache, cx).0),
-                        AvailableSpace::MaxContent => None,
+                    known.width.or(match (available.width, field) {
+                        (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
+                        (AvailableSpace::Definite(w), None) => Some(w),
+                        (_, Some(field)) => Some(field),
+                        (AvailableSpace::MinContent, None) => {
+                            Some(min_content_width(engine, cache, cx).0)
+                        }
+                        (AvailableSpace::MaxContent, None) => None,
                     })
                 };
                 let measured = measure_text(engine, cache, cx, max_width);
                 taffy::Size {
-                    width: known.width.unwrap_or(measured.width.0),
+                    width: known
+                        .width
+                        .or(field.and(max_width))
+                        .unwrap_or(measured.width.0),
                     height: known.height.unwrap_or(measured.height.0),
                 }
             }
@@ -8175,27 +8351,110 @@ fn measure_text<M: TextEngine>(
     {
         return size;
     }
+    if let (Some(width), Some(same)) = (max_width, cx.same_lines)
+        && (same.narrowest..=same.widest).contains(&width)
+    {
+        cx.cache = Some((max_width, same.size));
+        return same.size;
+    }
     let typed = max_width.map(Points);
+    // A limit on lines cuts the last one to the width.
+    let greedy = engine.breaks_lines_greedily() && cx.text.max_lines == 0;
     let size = match cache.get(cx.layout_hash, typed) {
         Some(size) => size,
         None => {
+            // Far from the screen during a resize: it keeps its height for
+            // now ([`Core::set_resizing`]).
+            if let (Some(commit), Some((_, last))) = (cache.resizing, cx.cache)
+                && cx.near_screen != commit
+            {
+                cx.held = true;
+                return Size::new(
+                    max_width.map_or(last.width, |w| last.width.min(Points(w))),
+                    last.height,
+                );
+            }
             let prepared = cx
                 .prepared
                 .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
-            let size = engine.measure(prepared, typed);
             // Round up so rendering never truncates the last glyph, to a
             // device pixel: to a whole point the box grows past the text by
             // up to a point, all of it below the last line.
             let ratio = cache.pixel_ratio();
-            let size = cache
-                .on_cells(size)
-                .unwrap_or_else(|| size.map(|v| ceil_to_pixel(v, ratio)));
+            let on_pixels = |size: Size<Points>| {
+                cache
+                    .on_cells(size)
+                    .unwrap_or_else(|| size.map(|v| ceil_to_pixel(v, ratio)))
+            };
+            // Growing: measured a little wider, the next widths are known
+            // too, unless a line takes another word by then.
+            let ahead = max_width.filter(|width| {
+                greedy && !cx.no_ahead && cx.same_lines.is_some_and(|same| *width > same.widest)
+            });
+            let ahead = ahead.and_then(|width| {
+                let wider = Points(width + SAME_LINES_AHEAD);
+                let size = on_pixels(engine.measure(prepared, Some(wider)));
+                cx.no_ahead = size.width.0 > width;
+                (size.width.0 <= width).then_some((wider.0, size))
+            });
+            let (measured, size) = match ahead {
+                Some(found) => found,
+                None => (
+                    max_width.unwrap_or(f32::INFINITY),
+                    on_pixels(engine.measure(prepared, typed)),
+                ),
+            };
             cache.insert(cx.layout_hash, typed, size);
+            if greedy && size.width.0 <= measured {
+                cx.same_lines = Some(SameLines {
+                    narrowest: size.width.0,
+                    widest: measured,
+                    size,
+                });
+            }
             size
         }
     };
     cx.cache = Some((max_width, size));
     size
+}
+
+/// Whether `laid`, the layout of `cx`'s text, stands for a box of `size`:
+/// both widths break its lines the same ([`SameLines`]) and its lines start
+/// at the box's left, wherever its right is.
+fn keeps_lines<P>(cx: &TextContext<P>, laid: &LaidText, size: Size<Points>) -> bool {
+    let Some(same) = cx.same_lines else {
+        return false;
+    };
+    let widths = same.narrowest..=same.widest;
+    laid.content.size.height == size.height
+        && widths.contains(&laid.content.size.width.0)
+        && widths.contains(&size.width.0)
+        && Arc::ptr_eq(&laid.text, &cx.text)
+        && lines_start_left(&cx.text)
+}
+
+/// Whether every line of `text` starts at the left of its box. A paragraph's
+/// direction may come from its first strong character, so `auto` alignment
+/// with a character of a right-to-left script does not count.
+fn lines_start_left(text: &AttributedText) -> bool {
+    match text.align {
+        TextAlign::Left => !text.text.chars().any(is_right_to_left),
+        TextAlign::Auto => {
+            !text.rtl
+                && text.writing_direction != Some(true)
+                && !text.text.chars().any(is_right_to_left)
+        }
+        TextAlign::Center | TextAlign::Right | TextAlign::Justify => false,
+    }
+}
+
+/// Whether `c` is in a block of a right-to-left script.
+fn is_right_to_left(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF
+    )
 }
 
 fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {

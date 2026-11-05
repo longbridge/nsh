@@ -887,6 +887,7 @@ final class Mounter {
         if (v instanceof Box) ((Box) v).dropShader();
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
+        stopEffects(id);
         detach(v);
         if (v instanceof ImageBox) cancelImage((ImageBox) v);
         if (v instanceof WebBox) ((WebBox) v).destroy();
@@ -1032,6 +1033,7 @@ final class Mounter {
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
             decor.gradients = fx.gradients;
+            decor.masks = fx.masks;
             decor.outlineWidth = fx.outlineWidth;
             decor.outlineColor = fx.outlineColor;
             decor.outlineStyle = fx.outlineStyle;
@@ -1160,6 +1162,40 @@ final class Mounter {
             System.arraycopy(from.borderColors, 0, decor.borderColors, 0, 4);
         }
         a.start();
+    }
+
+    /**
+     * Stops the transition and keyframe animation of `id`, which is gone: an
+     * endless keyframe animation (a pulsing placeholder) would otherwise run
+     * on unseen, and the animation handler keep its view and this mounter.
+     */
+    private void stopEffects(int id) {
+        ValueAnimator transition = transitions.get(id);
+        transitions.remove(id);
+        if (transition != null) transition.cancel();
+        ValueAnimator keyframes = keyframeAnimators.get(id);
+        keyframeAnimators.remove(id);
+        motions.remove(id);
+        if (keyframes != null) keyframes.cancel();
+    }
+
+    /**
+     * The app stopped: its running animations stop too, since no
+     * {@code DELETE} follows for their views. The animation handler is the
+     * UI thread's and holds an animation until it ends, so an endless one
+     * would keep this mounter, its views and their activity forever.
+     */
+    void cancelAnimations() {
+        java.util.ArrayList<Animator> running = new java.util.ArrayList<>();
+        for (int i = 0; i < layoutAnimators.size(); i++) running.add(layoutAnimators.valueAt(i));
+        for (int i = 0; i < transitions.size(); i++) running.add(transitions.valueAt(i));
+        for (int i = 0; i < keyframeAnimators.size(); i++) running.add(keyframeAnimators.valueAt(i));
+        // Their end listeners remove them from these maps: clear first.
+        layoutAnimators.clear();
+        transitions.clear();
+        keyframeAnimators.clear();
+        motions.clear();
+        for (Animator a : running) a.cancel();
     }
 
     /** Starts (or stops) the keyframe animation of `v`. */

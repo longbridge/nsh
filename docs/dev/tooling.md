@@ -524,7 +524,21 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. Synthesized input is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
+it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+`Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
+it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
+without becoming key and the agent does not wait for activation (`MacNative::activate`). A window that is not the
+key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
+for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
+Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
+key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
+the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+An item is not checked for being enabled (AppKit validates against the key window's responders:
+with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
+checks of this are `crates/nsh-platform-macos/tests/host`
+(`nsh test crates/nsh-platform-macos/tests/host --target macos`, also with `--foreground`).
+Synthesized input is
 window-relative on macOS (posted `NSEvent`s carry the window's number and a window point; wheels a location that
 makes their window point the agent's), so the tests run the same on any display. A host whose hello says `tests` takes steps:
 `DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the

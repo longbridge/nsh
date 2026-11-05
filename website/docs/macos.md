@@ -61,7 +61,8 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 screen stays yours; `--display <n>` picks another): each app a test opens gets a window of its own, at the size the
 test asks for even on a display shorter than it, and
 the steps click, type and scroll with the system's input at the views their selectors name
-([Testing](./testing-and-trace.md#on-a-real-platform)).
+([Testing](./testing-and-trace.md#on-a-real-platform)). The apps run in the background: their windows show while the
+keyboard stays with the app you type in (`--foreground` lets them become the active app).
 
 ### Performance monitor
 

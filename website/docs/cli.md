@@ -133,7 +133,7 @@ Use `nsh dev --server-only` with an app that embeds the development SDK (`Native
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--display <N>]
+nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--display <N>] [--foreground]
 ```
 
 Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Given a directory of an app with Rust crates of its own (`nsh.json` `"rust"`: a Rust app or a TSX app with a crate), it first runs `cargo test` for each crate in the directory, in the crate's own directory, and shows and counts each Rust test with the TypeScript tests, under the file of its test target (`src/lib.rs › tests::adds`); a Rust app with only Rust tests is tested this way too. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS unless a test opens the app as Android (`open`'s `platform`): `platform.os` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
@@ -152,6 +152,7 @@ Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test file
 | `--target <TARGET>` | Runs the apps the tests open on this platform's development host instead of headless (`macos`, `linux`, `windows`, `gpui`, `tui`, `web`, `ios` and `android`; `tui` runs them in an in-memory terminal, `web` in a headless Chrome, Edge or Chromium): the steps act with the platform's own input ([Testing](./testing-and-trace.md#on-a-real-platform)), and `open` checks its options against the platform, rejecting one it cannot honor (`ERR_NSH_TEST_UNSUPPORTED`: `width` and `height` on iOS and Android, a `platform` of another kind of device). The crates' Rust tests run on this machine, in runs without `--target`. |
 | `--browser <PATH>` | The Chrome, Edge or Chromium executable `--target web` runs the apps in (default: the one installed on this machine). |
 | `--display <N>` | With `--target macos`: the display the apps' windows open on, centered: `1` is the primary display (the one with the menu bar), `2` the next, and so on; a number with no display opens them on the main one. By default they open on a secondary display (the first besides the primary one, not a mirror of it), so a test run keeps to a screen of its own, and on the primary one when it is the only one. The tests run the same on every display. |
+| `--foreground` | With `--target macos`: the apps become the active app, as they do for a user. By default they run in the background: their windows show, the keyboard stays with the app you type in, and the tests' clicks, keys and shortcuts go to the windows directly. A test that depends on the app being active (`lifecycle()` follows whether the app is active) or a measurement such as `examples/gallery/tools/perf.py` (which passes it) should run with it. |
 | `--web-host <JS>` | The web page's host module the apps opened headless get (default: `nsh.json` `web.host`; it exports `createHost(player)`): it answers their [`host`](../modules/nsh.md#host) calls and its `player.hostEvent` reaches `host.on` ([Testing](./testing-and-trace.md#the-pages-host)). Headless runs only; `--target web` runs `nsh.json`'s `web.host`. |
 
 ## nsh check
@@ -244,6 +245,14 @@ nsh keygen <NAME>
 ```
 
 Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen keys/root`). Keep a root's `.secret` offline; apps trust its `.pub`.
+
+### nsh update-manifest
+
+```sh
+nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+```
+
+Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform: see [App Updates](/docs/app-updates).
 
 ### nsh certify
 

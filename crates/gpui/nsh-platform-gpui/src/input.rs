@@ -806,6 +806,32 @@ fn collect_drag(
     });
 }
 
+/// Whether a secondary click at `(x, y)` (root coordinates) on a window
+/// drag area goes to the app instead of opening the window menu: the view
+/// under it, or one around it up to the nearest view that sets
+/// `windowDrag: true`, listens to `onContextMenu` (nearer than a text
+/// field). Listeners further out, the root's included, leave the window
+/// menu to the drag area.
+pub(crate) fn hears_context_menu(root: &NshView, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(root, x, y, true) else {
+        return false;
+    };
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if s.events.contains(EventKind::ContextMenu) {
+                return true;
+            }
+            if s.kind == ViewKind::Input || s.props.window_drag == Some(true) {
+                return false;
+            }
+        }
+        view = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
@@ -2680,6 +2706,76 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// A title bar 200 × 40 at (10, 10) that drags the window, inside
+    /// `parent`, with a text field at (100, 5) in it and a sibling view
+    /// below it at (10, 60): (bar, field, sibling).
+    fn title_bar(parent: &NshView) -> (NshView, NshView, NshView) {
+        let bar = view(parent, 2, ViewKind::View, rect(10.0, 10.0, 200.0, 40.0));
+        bar.state_mut().props.window_drag = Some(true);
+        let field = view(&bar, 4, ViewKind::Input, rect(100.0, 5.0, 80.0, 30.0));
+        let sibling = view(parent, 6, ViewKind::View, rect(10.0, 60.0, 200.0, 40.0));
+        (bar, field, sibling)
+    }
+
+    fn listens(view: &NshView) {
+        view.state_mut().events.set(EventKind::ContextMenu, true);
+    }
+
+    #[test]
+    fn a_drag_area_s_own_listener_hears_its_secondary_click() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        // So does a listener inside it.
+        let root = self::root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&view(&bar, 8, ViewKind::View, rect(0.0, 0.0, 50.0, 40.0)));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        assert!(!hears_context_menu(&root, 80.0, 30.0));
+    }
+
+    #[test]
+    fn a_listener_around_a_drag_area_leaves_it_the_window_menu() {
+        let root = root();
+        let parent = view(&root, 10, ViewKind::View, rect(0.0, 0.0, 300.0, 200.0));
+        listens(&parent);
+        title_bar(&parent);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_root_listener_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        listens(&root);
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_field_in_a_listening_drag_area_keeps_its_edit_menu() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(!hears_context_menu(&root, 130.0, 30.0));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_listening_sibling_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        let (_, _, sibling) = title_bar(&root);
+        listens(&sibling);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_drag_area_with_no_listener_keeps_the_window_menu() {
+        let root = root();
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {

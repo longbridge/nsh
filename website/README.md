@@ -25,9 +25,22 @@ on reload; changes to the Rust runtime need a restart.
 
 Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
+## Other languages
+
+This repository holds English and Chinese only, and a change updates only those.
+Every other language is machine translated in
+[huacnlee/nsh-website-translates](https://github.com/huacnlee/nsh-website-translates),
+which also lists the languages and runs the translation. The published root clones
+it to `translations/` (git-ignored); older versions, pull requests and local builds
+do without. Each translated page says it is a machine translation and links to the
+English; a page with no translation shows the English, not indexed.
+
+Translation pull requests are not accepted: a fix goes to the English page.
+
 ## Writing documentation
 
-Content is Markdown in three sections, each in English and Chinese:
+Content is Markdown in three sections, each in English and Chinese; other
+languages are machine translated ("Other languages" below):
 
 | Directory | URL | Nav label |
 | --- | --- | --- |
