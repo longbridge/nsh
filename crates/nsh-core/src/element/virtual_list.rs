@@ -92,6 +92,16 @@ pub trait ListLayout: Sized {
         })
     }
 
+    /// Where the list rests (TS: `alignment`): [`ListAlignment::Bottom`]
+    /// opens at the end and stays there as the content grows, the rows in
+    /// reading order (a chat, GPUI's `ListAlignment::Bottom`). Rows keep
+    /// their places in the content, so what is appended moves no other row.
+    /// With [`Self::follow_end`], it stays there from that far away.
+    fn alignment(mut self, alignment: crate::ListAlignment) -> Self {
+        self.config().alignment = Some(alignment);
+        self
+    }
+
     /// Whether the scroll indicator shows (default yes).
     fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
         self.layout(shows, |c, shows| c.scrollbar_visible = Some(shows))

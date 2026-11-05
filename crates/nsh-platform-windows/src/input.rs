@@ -724,6 +724,47 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     false
 }
 
+/// A context menu asked for on `view` without a pointer (UI Automation's
+/// `ShowContextMenu`): the view, or the nearest around it that listens to
+/// `onContextMenu`, hears it with no pointer at its bottom-start corner
+/// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
+/// selectable text is nearer. True when a view heard it.
+pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        let (id, listens, stop, size) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input || crate::text::selectable(&s) || s.props.selectable_view,
+                s.frame.size,
+            )
+        };
+        if listens {
+            let position = nsh_core::input::context_menu_anchor(size, rtl);
+            let (page_x, page_y) = v
+                .to_root()
+                .and_then(|m| m.map(position.x.0, position.y.0))
+                .unwrap_or((position.x.0, position.y.0));
+            let event = nsh_core::ContextMenuEvent::new(
+                position,
+                point(Points(page_x), Points(page_y)),
+                Default::default(),
+                None,
+            );
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if stop {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
@@ -746,11 +787,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         };
         if listens {
             let (location_x, location_y) = local(&v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: point(Points(location_x), Points(location_y)),
-                page_position: point(Points(x), Points(y)),
-                modifiers: modifiers.core(),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(location_x), Points(location_y)),
+                point(Points(x), Points(y)),
+                modifiers.core(),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::{
     ImageSource,
     element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
-    geometry::{Point, Points},
+    geometry::{Point, Points, Size},
     keymap::{self, Keystroke, Modifiers, When},
 };
 
@@ -154,6 +154,36 @@ pub enum WindowLevel {
     /// the current z-order (later activation can raise the window).
     #[prop(rename = "desktopIcon")]
     DesktopIcon,
+}
+
+/// A window of the app's own, besides its main one (TS: `Window.open`):
+/// the platform shows a dialog root (a `modal` node) in it instead of over
+/// the main window. Every window renders from the one JS runtime and core,
+/// so windows share state directly; there is no messaging between them.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WindowOptions {
+    /// The window's title (the app's name when `None`).
+    pub title: Option<String>,
+    /// Its content size, in points (the platform's default when `None`).
+    pub size: Option<Size<Points>>,
+    /// Its top left corner on the screen, in points (the platform places it
+    /// when `None`; GTK 4 always places windows itself).
+    pub position: Option<Point<Points>>,
+    /// How high it floats.
+    pub level: WindowLevel,
+    /// Its frame: the system's title bar and border, or none.
+    pub frame: WindowFrameStyle,
+}
+
+/// Whether a window opened with [`WindowOptions`] has the system's frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum WindowFrameStyle {
+    /// The system's title bar and border.
+    #[default]
+    Default,
+    /// No title bar or border: the app draws everything.
+    None,
 }
 
 /// A key of a [`Shortcut`].
@@ -776,6 +806,13 @@ pub enum DesktopCommand {
     OrderFront,
     /// Closes the window (the app ends with its last window).
     Close,
+    /// Hides the window; [`DesktopCommand::OrderFront`] shows it again.
+    Hide,
+    /// Shows the dialog root the command is addressed to in a window of its
+    /// own ([`WindowOptions`]), until the node is removed. Sent before the
+    /// node is inserted; a platform without windows of its own ignores it
+    /// (the runtime does not send it there).
+    OpenWindow(Box<WindowOptions>),
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.

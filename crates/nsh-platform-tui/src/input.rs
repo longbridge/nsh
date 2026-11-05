@@ -286,11 +286,12 @@ impl Pointer {
                 cx.control.dispatch_event(
                     id,
                     EventKind::ContextMenu,
-                    EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-                        position: page - origin,
-                        page_position: page,
-                        modifiers: mouse.modifiers,
-                    }),
+                    EventPayload::ContextMenu(nsh_core::ContextMenuEvent::new(
+                        page - origin,
+                        page,
+                        mouse.modifiers,
+                        Some(nsh_core::PointerType::Mouse),
+                    )),
                 );
                 return Handled::Yes;
             }
