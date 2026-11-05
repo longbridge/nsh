@@ -161,8 +161,20 @@ page and files named after their content.
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
 
 `<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
-new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
-works from any directory of any host (`https://example.com/apps/counter/`).
+new release changes only `index.html` and the files that really changed. By default everything uses relative URLs,
+so the site works from any directory of any host (`https://example.com/apps/counter/`).
+
+To serve the files from a CDN while the page is served at the app's own address, give the CDN's URL with
+`--asset-url`: the page names each of its files under it, and the page's `connect-src` allows its origin; the CDN
+answers with `Access-Control-Allow-Origin`, as the page loads modules and fetches from it. `index.html` and
+`manifest.webmanifest`, whose names carry no digest, stay at the page's address, which keeps resolving the app's own
+relative URLs (the manifest is named relatively, as without the flag: at a deeper path `web.base`, above, resolves it
+at the site's path). As the files' names are then whole URLs,
+they load the same at every path the page opens at (`/debugger/logs/3`):
+
+```sh
+nsh package --target web --asset-url https://cdn.example.com/debugger/
+```
 
 An app that is opened at its own paths ([links into the app](#links-into-the-app)) names the path its site is served
 under in `nsh.json`:
@@ -224,7 +236,7 @@ At a path with several segments (`/sports/football`), the page loads its files f
 
 An app published for the web runs like a packaged native app: as a release, with the capabilities its `nsh.json` declares
 ([Sandbox and capabilities](./sandbox-and-capabilities.md)), a TSX app on the browser's JavaScript engine. When they restrict `network`, the page also carries a
-Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin), so the browser itself
+Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin, and the origin of `--asset-url`), so the browser itself
 refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
 later errors go to the browser's console.
 
@@ -388,7 +400,7 @@ The host looks each name up as it is in a table of its functions, as above, and 
 
 Events sent before the app runs, such as from `createHost` itself, are delivered in order as soon as it starts, so the app's top-level `host.on` listeners receive them. An event sent before a listener registers is not replayed to it: an app reads the state it starts with through a call (`host.call("user.info")`) and follows its changes through events.
 
-The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
+The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the origin of `--asset-url`, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
 
 The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh run --target web` runs it on the development page, and `nsh test` runs the same module for every app its tests open, headless or in a browser (`--target web`), so the app and its host are tested together ([Testing](./testing-and-trace.md#the-pages-host)).
 

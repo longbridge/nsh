@@ -815,7 +815,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the
   runtime and runs its `createHost(player)` once the player exists, before `run`, and its `host` option forwards to
   what that returns (no callable `call`: the page's "could not be loaded" error). The host module shares the page's
-  CSP: an app restricting `network` gets a `connect-src` of `'self'`, its `capabilities.network` and `web.connect`
+  CSP: an app restricting `network` gets a `connect-src` of `'self'`, the origin of `--asset-url`, its `capabilities.network` and `web.connect`
   (`package::WebConfig::connect`, host patterns checked as `HostPattern`s, which keeps any CSP syntax out:
   `web::page_connect`). `web.connect` is the page's alone: the core checks the app's requests against its
   capabilities before `fetch` sees them, so only the redirect hops CSP guards widen with it. The module is copied as it
