@@ -929,7 +929,7 @@ The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the
 const timeZone: Accessor<string>;
 ```
 
-The device's time zone as the system names it: an IANA name (`"Europe/Berlin"`, `"America/New_York"`), `"UTC"`, or an offset zone where the system has one (`"GMT+01:00"` on Android). Reactive: it changes with the system's setting, as when the user travels. Rust: `time_zone() -> TimeZone` (`time_zone().as_str()` is the name). `Date`'s local times follow the system's zone; read the name to show it, to store it with a date or to give it to a time zone library ([Device and environment](../docs/device-and-environment.md#time-zone)). Headless tests are in `"UTC"` unless `open` sets `timeZone`.
+The device's time zone as the system names it: an IANA name (`"Europe/Berlin"`, `"America/New_York"`), `"UTC"`, or an offset zone where the system has one (`"GMT+01:00"` on Android). Reactive: it changes with the system's setting, as when the user travels. Rust: `time_zone() -> TimeZone` (`time_zone().as_str()` is the name). `Date`'s local times follow the system's zone, and `Intl` names it the same (`Intl.DateTimeFormat().resolvedOptions().timeZone`); read the name to show it, to store it with a date or to give it to a time zone library ([Device and environment](../docs/device-and-environment.md#time-zone)). Headless tests are in `"UTC"` unless `open` sets `timeZone`.
 
 ### lifecycle
 

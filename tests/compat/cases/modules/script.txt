@@ -121,6 +121,7 @@ expect Window: 390x844
 expect Scheme: light
 expect Lifecycle: active
 expect Time zone: UTC
+expect Intl time zone: UTC
 tap id:dark
 expect Scheme: dark
 absent Scheme: light

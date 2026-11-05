@@ -357,8 +357,9 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   through the engine (`nsh_core::element::fetch`: `Action::Fetch`, `Core::take_fetches` / `fetch_event`, the engine's
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
-- **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+- **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's: the
+  environment's (`timeZone`, `timeZoneName`), before the page reports it the `nsh.time_zone` import (`intl/mod.rs`
+  `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser

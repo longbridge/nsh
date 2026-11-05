@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/device`
 // as the headless runtime reports it (iOS, a phone, 1 pixel per point, the
-// script's viewport; mobile, so `platform.desktop` is false; the app in use, UTC), the color scheme an app sets and
+// script's viewport; mobile, so `platform.desktop` is false; the app in use, UTC, which `Intl` names as local time too), the color scheme an app sets and
 // `openUrl`: a promise for a URL it opens (the headless runtime answers none), one rejected with a `TypeError` for
 // a URL it never opens (it never throws). Its script checks each.
 import { Text, View, signal } from "nsh";
@@ -23,6 +23,7 @@ function App() {
       <Text>{`Scheme: ${colorScheme()}`}</Text>
       <Text>{`Lifecycle: ${lifecycle()}`}</Text>
       <Text>{`Time zone: ${timeZone()}`}</Text>
+      <Text>{`Intl time zone: ${new Intl.DateTimeFormat().resolvedOptions().timeZone}`}</Text>
       <View testID="dark" onPress={() => setColorScheme("dark")}>
         <Text>Go dark</Text>
       </View>

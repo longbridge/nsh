@@ -2230,6 +2230,47 @@ const report = (v) => text(String(v));
         assert_eq!(style.view.opacity, 0.5);
     }
 
+    /// `Intl`'s local time is named as the device's zone, the one
+    /// `timeZone()` gives, and follows it when the device moves.
+    #[test]
+    fn intl_names_local_time_as_the_devices_zone() {
+        let host = Host::new().unwrap();
+        let mut env = Environment {
+            time_zone: nsh_core::platform::TimeZone::parse("Asia/Singapore").unwrap(),
+            ..Default::default()
+        };
+        host.set_environment(&env);
+        let script = format!(
+            r#"{REPORT}
+            const local = new Intl.DateTimeFormat("en");
+            report(local.resolvedOptions().timeZone);
+            report(new Intl.DateTimeFormat("en", {{ timeZone: "asia/singapore" }}).resolvedOptions().timeZone);
+            try {{ new Intl.DateTimeFormat("en", {{ timeZone: "Asia/Tokyo" }}); }} catch (e) {{ report(e.name); }}
+            globalThis.local = local;
+            "#
+        );
+        host.eval_source(&script).unwrap();
+        env.time_zone = nsh_core::platform::TimeZone::parse("Asia/Tokyo").unwrap();
+        host.set_environment(&env);
+        host.eval_source(&format!(
+            r#"{REPORT}
+            report(new Intl.DateTimeFormat().resolvedOptions().timeZone);
+            report(globalThis.local.resolvedOptions().timeZone);
+            "#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "Asia/Singapore",
+                "Asia/Singapore",
+                "RangeError",
+                "Asia/Tokyo",
+                "Asia/Tokyo"
+            ]
+        );
+    }
+
     /// `Intl` and the `toLocaleString`s format natively, in the device's
     /// locale by default.
     #[test]

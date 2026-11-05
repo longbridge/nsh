@@ -2,6 +2,12 @@ import { mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { colorScheme, lifecycle, locale, platform, timeZone, windowSize } from "nsh";
 
+// `Intl`'s default zone, read again when the device's changes.
+const intlZone = () => {
+  timeZone();
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone;
+};
+
 function App() {
   const result = signal("none");
   const send = (path: string) =>
@@ -26,6 +32,7 @@ function App() {
       <Text>{`Size: ${windowSize().width}x${windowSize().height}`}</Text>
       <Text>{`App: ${lifecycle()}`}</Text>
       <Text>{`Zone: ${timeZone()}`}</Text>
+      <Text>{`Intl zone: ${intlZone()}`}</Text>
       {button("Echo", "echo")}
       {button("Item", "items/7")}
       {button("Down", "down")}

@@ -170,7 +170,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `clipboard` | empty | The text on the clipboard at the start. |
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
-| `timeZone` | `"UTC"` | The device's time zone, an IANA name (`timeZone()`). It names the zone: `Date`'s local times stay the machine's. |
+| `timeZone` | `"UTC"` | The device's time zone, an IANA name (`timeZone()`, `Intl`'s default `timeZone`). It names the zone: `Date`'s local times stay the machine's. |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |

@@ -13,6 +13,7 @@ test("the environment is what open asks for", async () => {
   expect(app.shows("Scheme: dark")).toBe(true);
   expect(app.shows("Locale: de-DE")).toBe(true);
   expect(app.shows("Zone: Europe/Berlin")).toBe(true);
+  expect(app.shows("Intl zone: Europe/Berlin")).toBe(true);
   expect(app.shows("Motion: reduced")).toBe(true);
   expect(app.shows("OS: android")).toBe(true);
   expect(app.shows("Size: 320x640")).toBe(true);
@@ -27,6 +28,7 @@ test("the defaults are a light iPhone in en-US", async () => {
   expect(app.shows("Size: 390x844")).toBe(true);
   expect(app.shows("App: active")).toBe(true);
   expect(app.shows("Zone: UTC")).toBe(true);
+  expect(app.shows("Intl zone: UTC")).toBe(true);
 });
 
 test("the appearance and the viewport change while the app runs", async () => {
@@ -51,6 +53,7 @@ test("the time zone follows the system's", async () => {
   const app = await open("./App.tsx");
   await app.setTimeZone("Asia/Tokyo");
   expect(app.shows("Zone: Asia/Tokyo")).toBe(true);
+  expect(app.shows("Intl zone: Asia/Tokyo")).toBe(true);
   await expect(() => app.setTimeZone("Not a zone")).rejects.toThrow("is not a time zone");
   expect(app.shows("Zone: Asia/Tokyo")).toBe(true);
 });
