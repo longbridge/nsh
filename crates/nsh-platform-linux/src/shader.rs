@@ -478,7 +478,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     if size.width.0 <= 0.0 || size.height.0 <= 0.0 {
         return;
     }
-    snapshot.push_rounded_clip(&state.rounded_bounds());
+    crate::decor::push_clip(snapshot, state);
     append(snapshot, texture, size, shader.view.overflow().0);
     snapshot.pop();
 }
