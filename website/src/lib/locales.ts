@@ -4,7 +4,7 @@ import type { Lang } from './site';
 
 /**
  * Languages beyond English and Chinese are translated by machine and kept in
- * huacnlee/nsh-website-translates: a published root's build clones it to
+ * longbridge/nsh-website-translates: a published root's build clones it to
  * `website/translations/`. Without that directory (pull requests, older
  * versions, local builds) they are simply absent.
  */
