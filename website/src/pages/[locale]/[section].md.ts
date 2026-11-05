@@ -3,9 +3,9 @@ import { markdownResponse } from '../../lib/markdown-endpoint';
 import { pages, type Page } from '../../lib/sections';
 
 export async function getStaticPaths() {
-  return (await pages('zh-CN'))
+  return (await Promise.all([pages('zh-CN'), pages('ko')])).flat()
     .filter((page) => page.slug === 'index')
-    .map((page) => ({ params: { section: page.section }, props: { page } }));
+    .map((page) => ({ params: { locale: page.lang, section: page.section }, props: { page } }));
 }
 
 export const GET: APIRoute = ({ props }) => markdownResponse((props as { page: Page }).page);

@@ -34,9 +34,12 @@ function pagesOf(dir: string): Map<string, Front | Error> {
 const english = Object.fromEntries(SECTIONS.map((s) => [s, pagesOf(join(ROOT, s))]));
 const chinese = Object.fromEntries(SECTIONS.map((s) => [s, pagesOf(join(ROOT, 'zh-CN', s))]));
 
+const korean = Object.fromEntries(SECTIONS.map((s) => [s, pagesOf(join(ROOT, 'ko', s))]));
+const locales = [['', english], ['zh-CN/', chinese], ['ko/', korean]] as const;
+
 test('frontmatter parses and has a title and description', () => {
   const problems: string[] = [];
-  for (const [locale, sections] of [['', english], ['zh-CN/', chinese]] as const) {
+  for (const [locale, sections] of locales) {
     for (const section of SECTIONS) {
       for (const [name, front] of sections[section]) {
         const file = `${locale}${section}/${name}`;
@@ -74,6 +77,17 @@ test('every English page has a Chinese counterpart with the same order, group an
   expect(problems).toEqual([]);
 });
 
+test('Korean translations match the order, group and demo of their source', () => {
+  for (const section of SECTIONS) {
+    for (const [name, ko] of korean[section]) {
+      const en = english[section].get(name);
+      expect(en, `ko/${section}/${name}`).toBeDefined();
+      if (!en || en instanceof Error || ko instanceof Error) continue;
+      expect([ko.order, ko.group, ko.demo]).toEqual([en.order, en.group, en.demo]);
+    }
+  }
+});
+
 test('every element page names a demo (README "Demos")', () => {
   const missing: string[] = [];
   for (const [name, front] of english.elements) {
@@ -85,7 +99,7 @@ test('every element page names a demo (README "Demos")', () => {
 
 test('every demo named in frontmatter exists in demos/', () => {
   const missing: string[] = [];
-  for (const [locale, sections] of [['', english], ['zh-CN/', chinese]] as const) {
+  for (const [locale, sections] of locales) {
     for (const section of SECTIONS) {
       for (const [name, front] of sections[section]) {
         if (front instanceof Error || front.demo === undefined) continue;

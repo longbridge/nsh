@@ -3,34 +3,49 @@ import DocSearch from './DocSearch.astro';
 import Logo from './Logo.astro';
 import ThemeSwitch from './ThemeSwitch.astro';
 import Button from './ui/Button.astro';
-import { BASE, GPUI_KIT_URL, REPO_URL, url, type Lang } from '../lib/site';
-import { SECTIONS, sectionHrefs } from '../lib/sections';
+import { BASE, GPUI_KIT_URL, LANGS, REPO_URL, url, type Lang } from '../lib/site';
+import { SECTIONS, alternateRoutes, sectionHrefs } from '../lib/sections';
 import { currentVersion, isLatestVersion, latestVersion, siteVersions, versionHref, versionPath } from '../lib/versions';
 
 export interface Props {
   lang?: Lang;
   /** The page's path, base included. */
   currentPath?: string;
-  /** The same page in the other locale; defaults to the other locale's home. */
-  langHref?: string;
+  alternates?: Partial<Record<Lang, string>>;
 }
 
-const { lang = 'en', currentPath = '', langHref } = Astro.props;
-const isZh = lang === 'zh-CN';
+const { lang = 'en', currentPath = '', alternates: providedAlternates } = Astro.props;
 const hrefs = await sectionHrefs(lang);
-const home = url(isZh ? 'zh-CN' : '');
-const switchHref = langHref ?? url(isZh ? '' : 'zh-CN');
-
-// The section is the path segment after the base and the optional locale.
-const rest = currentPath.startsWith(BASE) ? currentPath.slice(BASE.length) : currentPath.replace(/^\/+/, '');
-const activeSection = rest.replace(/^zh-CN(\/|$)/, '').split('/')[0];
-
-// The same page in each version. App Stories are only the latest's: the
-// catalog changes apart from releases.
+const homePath = lang === 'en' ? '/' : `/${lang}`;
+const home = url(homePath);
 const pagePath = versionPath(currentPath, BASE);
+const route = lang === 'en' ? pagePath : pagePath.slice(lang.length + 1) || '/';
+const activeSection = route.split('/')[1];
+const alternates = providedAlternates ?? await alternateRoutes(route === '/404' ? '/' : route);
+const languageNames = { en: 'English', 'zh-CN': '中文', ko: '한국어' };
+const text = {
+  en: {
+    project: 'Switch project', nsh: 'A native UI framework for every platform', gpui: 'Components and tools for GPUI desktop apps',
+    nav: 'Primary', gallery: 'Gallery', apps: 'App Stories', releases: 'Releases', version: 'Documentation version',
+    versions: 'Versions', latest: 'latest', language: 'Language', menu: 'Menu',
+  },
+  'zh-CN': {
+    project: '切换项目', nsh: '面向每个平台的 Native UI 框架', gpui: 'GPUI 桌面应用的组件与工具集',
+    nav: '主导航', gallery: '示例应用', apps: '应用案例', releases: '版本发布', version: '文档版本',
+    versions: '版本', latest: '最新', language: '语言', menu: '菜单',
+  },
+  ko: {
+    project: '프로젝트 전환', nsh: '모든 플랫폼을 위한 네이티브 UI 프레임워크', gpui: 'GPUI 데스크톱 앱을 위한 컴포넌트와 도구',
+    nav: '주 메뉴', gallery: '갤러리', apps: '앱 사례', releases: '릴리스', version: '문서 버전',
+    versions: '버전', latest: '최신', language: '언어', menu: '메뉴',
+  },
+}[lang];
+
+// The gallery, App Stories and releases have English and Chinese editions.
+const staticPrefix = lang === 'zh-CN' ? '/zh-CN' : '';
 const currentLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
-const appsHref = isLatestVersion ? url(isZh ? 'zh-CN/apps' : 'apps') : isZh ? '/zh-CN/apps' : '/apps';
-const releasesHref = isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases';
+const appsHref = isLatestVersion ? url(`${staticPrefix}/apps`) : `${staticPrefix}/apps`;
+const releasesHref = isLatestVersion ? url(`${staticPrefix}/releases`) : `${staticPrefix}/releases`;
 // App Stories and the release notes are the same in every version: the menu
 // there stays on them.
 const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
@@ -44,7 +59,7 @@ const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
     </a>
 
     <details class="site-nav__projects">
-      <summary aria-label={isZh ? '切换项目' : 'Switch project'} title={isZh ? '切换项目' : 'Switch project'}>
+      <summary aria-label={text.project} title={text.project}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </summary>
       <div class="site-nav__projects-menu">
@@ -52,7 +67,7 @@ const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
           <Logo class="site-nav__project-logo" />
           <div class="site-nav__project-copy">
             <strong>Native Shell</strong>
-            <span>{isZh ? '面向每个平台的 Native UI 框架' : 'A native UI framework for every platform'}</span>
+            <span>{text.nsh}</span>
           </div>
         </a>
         <a href={GPUI_KIT_URL} target="_blank" rel="noopener noreferrer">
@@ -62,13 +77,13 @@ const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
           </svg>
           <div class="site-nav__project-copy">
             <strong>GPUI Kit</strong>
-            <span>{isZh ? 'GPUI 桌面应用的组件与工具集' : 'Components and tools for GPUI desktop apps'}</span>
+            <span>{text.gpui}</span>
           </div>
         </a>
       </div>
     </details>
 
-    <nav class="site-nav__links" id="site-nav-links" aria-label={isZh ? '主导航' : 'Primary'}>
+    <nav class="site-nav__links" id="site-nav-links" aria-label={text.nav}>
       {SECTIONS.map((section) => (
         <a
           href={hrefs[section.id]}
@@ -79,60 +94,71 @@ const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
         </a>
       ))}
       <a
-        href={url(isZh ? 'zh-CN/gallery' : 'gallery')}
+        href={url(`${staticPrefix}/gallery`)}
         class:list={['site-nav__link', { active: activeSection === 'gallery' }]}
         aria-current={activeSection === 'gallery' ? 'true' : undefined}
       >
-        {isZh ? '示例应用' : 'Gallery'}
+        {text.gallery}
       </a>
       <a
         href={appsHref}
         class:list={['site-nav__link', { active: activeSection === 'apps' }]}
         aria-current={activeSection === 'apps' ? 'true' : undefined}
       >
-        {isZh ? '应用案例' : 'App Stories'}
+        {text.apps}
       </a>
       <a
         href={releasesHref}
         class:list={['site-nav__link', { active: activeSection === 'releases' }]}
         aria-current={activeSection === 'releases' ? 'true' : undefined}
       >
-        {isZh ? '版本发布' : 'Releases'}
+        {text.releases}
       </a>
     </nav>
 
     <div class="site-nav__actions">
       {siteVersions.length > 1 && (
         <details class="site-nav__versions">
-          <summary title={isZh ? '文档版本' : 'Documentation version'}>
+          <summary title={text.version}>
             {currentLabel}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
-          <div class="site-nav__versions-menu" aria-label={isZh ? '版本' : 'Versions'}>
+          <div class="site-nav__versions-menu" aria-label={text.versions}>
             {siteVersions.map((version) => (
               <a
                 href={onRootPage ? pagePath : versionHref(version, pagePath)}
                 data-version-link
-                data-version-home={versionHref(version, isZh ? '/zh-CN' : '/')}
+                data-version-home={versionHref(version, homePath)}
                 class:list={{ 'is-current': version.id === currentVersion }}
                 aria-current={version.id === currentVersion ? 'page' : undefined}
               >
                 {version.label}
-                {version.id === latestVersion && <span>{isZh ? '最新' : 'latest'}</span>}
+                {version.id === latestVersion && <span>{text.latest}</span>}
               </a>
             ))}
           </div>
         </details>
       )}
       <DocSearch lang={lang} />
-      <Button variant="ghost" size="sm" href={switchHref} class="site-nav__lang-btn" hreflang={isZh ? 'en' : 'zh-CN'} lang={isZh ? 'en' : 'zh-CN'} title={isZh ? 'English' : '中文'}>
-        {isZh ? 'EN' : '中文'}
-      </Button>
+      <details class="site-nav__versions">
+        <summary aria-label={text.language} title={text.language}>
+          {lang === 'en' ? 'EN' : languageNames[lang]}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <div class="site-nav__versions-menu">
+          {LANGS.filter((locale) => alternates[locale]).map((locale) => (
+            <a href={url(alternates[locale]!)} hreflang={locale} lang={locale}
+              class:list={{ 'is-current': locale === lang }} aria-current={locale === lang ? 'page' : undefined}>
+              {languageNames[locale]}
+            </a>
+          ))}
+        </div>
+      </details>
       <ThemeSwitch lang={lang} />
       <Button variant="ghost" size="icon-sm" href={REPO_URL} target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
       </Button>
-      <Button variant="ghost" size="icon-sm" id="nav-burger" class="site-nav__burger" aria-label={isZh ? '菜单' : 'Menu'} aria-expanded="false" aria-controls="site-nav-links">
+      <Button variant="ghost" size="icon-sm" id="nav-burger" class="site-nav__burger" aria-label={text.menu} aria-expanded="false" aria-controls="site-nav-links">
         <svg class="site-nav__burger-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         <svg class="site-nav__burger-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </Button>

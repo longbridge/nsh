@@ -40,9 +40,20 @@ const idsOf = (file: string) => {
 test('the site is built', () => {
   expect(built).toBe(true);
   expect(pages.length).toBeGreaterThan(3);
-  for (const file of ['index.html', 'zh-CN/index.html', '404.html', 'llms.txt', 'llms-full.txt', 'sitemap.xml', 'robots.txt']) {
+  for (const file of ['index.html', 'zh-CN/index.html', 'ko/index.html', '404.html', 'llms.txt', 'llms-full.txt', 'sitemap.xml', 'robots.txt']) {
     expect(existsSync(join(dist, file))).toBe(true);
   }
+});
+
+test('language links point to translated pages in the same version', () => {
+  const page = (route: string) => readFileSync(join(dist, route, 'index.html'), 'utf8');
+  const korean = 'ko/docs/getting-started';
+  for (const route of ['docs/getting-started', 'zh-CN/docs/getting-started']) {
+    expect(page(route)).toContain(`href="${base}${korean}" hreflang="ko"`);
+  }
+  expect(page(korean)).toContain('<html lang="ko"');
+  expect(page(korean)).toContain(`href="${base}docs/getting-started" hreflang="en"`);
+  expect(page('gallery')).not.toContain('hreflang="ko"');
 });
 
 test('internal links reach a built page and anchor', () => {
@@ -103,7 +114,7 @@ test('every content page has its Markdown twin', () => {
     // A former path's redirect (`redirects` in astro.config.mjs) has no content of its own.
     .filter((page) => !readFileSync(page, 'utf8').includes('http-equiv="refresh"'))
     .map((page) => page.slice(dist.length).replace(/\/index\.html$/, ''))
-    .filter((route) => /^\/(?:zh-CN\/)?(?:docs|elements|components|modules)(?:\/|$)/.test(route))
+    .filter((route) => /^\/(?:(?:zh-CN|ko)\/)?(?:docs|elements|components|modules)(?:\/|$)/.test(route))
     .filter((route) => !existsSync(join(dist, `${route}.md`)));
   expect(missing).toEqual([]);
 });

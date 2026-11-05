@@ -1,0 +1,17 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Nav from '../../components/Nav.astro';
+import Home from '../../components/Home.astro';
+import SiteFooter from '../../components/SiteFooter.astro';
+---
+
+<BaseLayout
+  lang="ko"
+  title="Native Shell — 하나의 코드로, 어디서나 네이티브로 | Rust UI 프레임워크"
+  description="Native Shell은 Rust 기반의 크로스 플랫폼 네이티브 UI 프레임워크입니다. iOS, Android, macOS, Windows, Linux, 웹에서 각 플랫폼 고유의 UI와 상호작용을 갖춘 앱을 하나의 코드로 만들 수 있습니다."
+  alternates={{ en: '/', 'zh-CN': '/zh-CN', ko: '/ko' }}
+>
+  <Nav lang="ko" currentPath={Astro.url.pathname} />
+  <Home lang="ko" />
+  <SiteFooter lang="ko" />
+</BaseLayout>

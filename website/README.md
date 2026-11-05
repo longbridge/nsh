@@ -27,7 +27,7 @@ Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
 ## Writing documentation
 
-Content is Markdown in three sections, each in English and Chinese:
+Content is Markdown in three sections. English and Chinese cover every page. Korean translations are added page by page.
 
 | Directory | URL | Nav label |
 | --- | --- | --- |
@@ -35,13 +35,16 @@ Content is Markdown in three sections, each in English and Chinese:
 | `elements/*.md` | `/elements/<file>` | Elements · 元素 |
 | `modules/*.md` | `/modules/<file>` | API |
 | `zh-CN/<section>/*.md` | `/zh-CN/<section>/<file>` | |
+| `ko/<section>/*.md` | `/ko/<section>/<file>` | |
 
 `index.md` is the section's own page (`/docs`). The file name is the URL;
-the Chinese page has the same file name as the English one.
+translations use the same file name as the English page.
 
 When changing a documentation page, update its English and Chinese
 counterparts together. Keep their `order`, `group` and `demo` frontmatter in sync, and
-link to pages in the same language.
+link to pages in the same language. For a Korean translation, link directly
+to the English source file when the destination has no Korean page yet
+(e.g. `../../elements/view.md` from `ko/docs/`).
 
 Name the product **Native Shell** in formal places (page titles, the home page,
 a page's first mention, the README's opening, meta descriptions) and **NSH**
@@ -143,7 +146,7 @@ release (from v0.2.0) at `/versions/<tag>`, with a menu in the header that
 opens the same page in another version. `bun run build:versions`
 (`scripts/versions.js`) builds them all into `dist/`. Every version uses this
 checkout's site (layouts, components, styles); a release takes from its tag
-only its pages (`docs`, `elements`, `modules`, `zh-CN`) and its demos, which
+only its pages (`docs`, `elements`, `modules`, `zh-CN`, `ko`) and its demos, which
 run on the player its own `cargo xtask web` builds, so a page and its demo
 always match. Releases' builds are kept in `.versions/` (cached in CI) and
 rebuilt only when the site's own files change or, for the latest, the catalog's
@@ -273,14 +276,14 @@ player, or editing a demo, invalidates Astro's content cache automatically
 
 | Path | Role |
 | --- | --- |
-| `src/content.config.ts` | The six collections (three sections × two locales) and the schema |
+| `src/content.config.ts` | The nine collections (three sections × three locales) and the schema |
 | `src/lib/sections.ts` | Section labels, page lists in sidebar order, routes |
 | `src/lib/remark-*.js`, `rehype-heading-anchors.js` | Title removal, callouts, code tabs, `.md` links, demo insertion, heading anchors |
 | `src/lib/code-tabs-client.ts` | Switches code tabs, page-wide, and remembers the choice |
 | `src/lib/demo.js` | Demo sources, the demo frame and the demo panel markup |
 | `src/lib/showcases.ts`, `showcase-browser.ts` | App Stories: the catalog, its READMEs and media; search, sorting and pages |
 | `src/lib/markdown-endpoint.ts`, `llms.ts` | `<page>.md`, `llms.txt`, `llms-full.txt` |
-| `src/pages/[section]/[...slug].astro` | Content pages (and `zh-CN/`); `[section].md.ts` / `[...slug].md.ts` the Markdown |
-| `src/components/Home.astro` | The home page in both languages |
+| `src/pages/[section]/[...slug].astro` | Content pages (and the translated `[locale]/` routes); `[section].md.ts` / `[...slug].md.ts` the Markdown |
+| `src/components/Home.astro` | The home page in each language |
 | `src/styles/global.css` | Tokens and everything shared; see `DESIGN.md` |
 | `tests/` | `content.test.ts` (frontmatter, translations, demos), `code-tabs.test.ts` (code tabs), `links.test.ts` (built site) |

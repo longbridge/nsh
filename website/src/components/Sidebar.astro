@@ -10,7 +10,7 @@ export interface Props {
 }
 
 const { title, pages, current, lang = 'en' } = Astro.props;
-const isZh = lang === 'zh-CN';
+const label = { en: 'Documentation', 'zh-CN': '文档目录', ko: '문서 목록' }[lang];
 const currentPage = pages.find((page) => page.route === current);
 // A group's label goes before the first page of each run of pages in it.
 const groupLabel = (index: number) => {
@@ -20,7 +20,7 @@ const groupLabel = (index: number) => {
 };
 ---
 
-<aside class="docs-sidebar" aria-label={isZh ? '文档目录' : 'Documentation'}>
+<aside class="docs-sidebar" aria-label={label}>
   <!-- Under 960px the list folds behind this button; it names the page you are on. -->
   <button class="docs-sidebar__toggle" type="button" aria-controls="docs-sidebar-nav" aria-expanded="false">
     <span class="docs-sidebar__toggle-label">

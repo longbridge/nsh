@@ -3,7 +3,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Nav from '../components/Nav.astro';
 import Brand from '../components/Brand.astro';
 import SiteFooter from '../components/SiteFooter.astro';
-import { url } from '../lib/site';
 ---
 
 <BaseLayout
@@ -12,7 +11,7 @@ import { url } from '../lib/site';
   description="The Native Shell logo, app icon, banners and social previews, ready to download, with its colors and typeface."
   alternates={{ en: '/brand', 'zh-CN': '/zh-CN/brand' }}
 >
-  <Nav lang="en" currentPath={Astro.url.pathname} langHref={url('zh-CN/brand')} />
+  <Nav lang="en" currentPath={Astro.url.pathname} />
   <main id="main">
     <Brand lang="en" />
   </main>

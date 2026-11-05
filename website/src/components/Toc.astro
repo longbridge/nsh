@@ -6,7 +6,7 @@ export interface Props { headings?: Heading[]; lang?: Lang }
 
 const { headings = [], lang = 'en' } = Astro.props;
 const items = headings.filter((h) => h.depth === 2 || h.depth === 3);
-const label = lang === 'zh-CN' ? '本页内容' : 'On this page';
+const label = { en: 'On this page', 'zh-CN': '本页内容', ko: '이 문서의 내용' }[lang];
 ---
 
 <nav class="toc" aria-label={label}>

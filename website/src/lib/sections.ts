@@ -1,5 +1,5 @@
 import { getCollection, type CollectionEntry } from 'astro:content';
-import { url, type Lang } from './site';
+import { localePrefix, url, type Lang } from './site';
 
 export type SectionId = 'docs' | 'elements' | 'modules';
 
@@ -13,25 +13,28 @@ export interface Section {
 export const SECTIONS: Section[] = [
   {
     id: 'docs',
-    label: { en: 'Docs', 'zh-CN': '文档' },
+    label: { en: 'Docs', ko: '문서', 'zh-CN': '文档' },
     blurb: {
       en: 'Install the toolchain, write a first app, and learn how state, layout, styles and navigation work.',
+      ko: '도구를 설치하고 첫 앱을 만든 뒤 상태, 레이아웃, 스타일, 내비게이션의 작동 방식을 살펴봅니다.',
       'zh-CN': '安装工具链、编写第一个应用，了解状态、布局、样式与导航的工作方式。',
     },
   },
   {
     id: 'elements',
-    label: { en: 'Elements', 'zh-CN': '元素' },
+    label: { en: 'Elements', ko: '요소', 'zh-CN': '元素' },
     blurb: {
       en: 'The primitives every UI is built from — View, Text, Image, scroll views, lists — and the base components of nsh/base, in Rust and TSX.',
+      ko: 'View, Text, Image, 스크롤 뷰, 목록 등 UI의 기본 요소와 nsh/base의 기본 컴포넌트를 Rust와 TSX 예제로 살펴봅니다.',
       'zh-CN': '构成所有界面的原语——View、Text、Image、滚动视图、列表——以及 nsh/base 的基础组件，均附 Rust 与 TSX 示例。',
     },
   },
   {
     id: 'modules',
-    label: { en: 'API', 'zh-CN': 'API' },
+    label: { en: 'API', ko: 'API', 'zh-CN': 'API' },
     blurb: {
       en: 'The modules apps import: nsh, nsh/base, navigation, storage, the platform modules and the global APIs.',
+      ko: '앱에서 사용하는 nsh, nsh/base, 내비게이션, 저장소, 플랫폼별 모듈 및 전역 API를 다룹니다.',
       'zh-CN': '应用导入的模块：nsh、nsh/base、导航、存储、平台模块与全局 API。',
     },
   },
@@ -45,14 +48,14 @@ export const SECTIONS: Section[] = [
  * `order`, from the simplest, the base components by name.
  */
 export const GROUPS: Record<string, Record<Lang, string>> = {
-  start: { en: 'Start here', 'zh-CN': '入门' },
-  platforms: { en: 'Platforms', 'zh-CN': '平台' },
-  delivery: { en: 'Delivery and security', 'zh-CN': '下发与安全' },
-  ui: { en: 'Building UI', 'zh-CN': '构建界面' },
-  tools: { en: 'Tools and internals', 'zh-CN': '工具与原理' },
+  start: { en: 'Start here', ko: '시작하기', 'zh-CN': '入门' },
+  platforms: { en: 'Platforms', ko: '플랫폼', 'zh-CN': '平台' },
+  delivery: { en: 'Delivery and security', ko: '배포와 보안', 'zh-CN': '下发与安全' },
+  ui: { en: 'Building UI', ko: 'UI 작성', 'zh-CN': '构建界面' },
+  tools: { en: 'Tools and internals', ko: '도구와 내부 구조', 'zh-CN': '工具与原理' },
   // Elements: the primitives of `nsh`, then the base components of `nsh/base`.
-  primitives: { en: 'Primitives', 'zh-CN': '原语' },
-  base: { en: 'Base', 'zh-CN': 'Base' },
+  primitives: { en: 'Primitives', ko: '기본 요소', 'zh-CN': '原语' },
+  base: { en: 'Base', ko: '기본 컴포넌트', 'zh-CN': 'Base' },
 };
 
 export interface Page {
@@ -76,11 +79,12 @@ export interface Page {
 }
 
 function collectionName(section: SectionId, lang: Lang) {
-  return (lang === 'zh-CN' ? `zh-${section}` : section) as any;
+  if (lang === 'en') return section;
+  return `${lang === 'zh-CN' ? 'zh' : 'ko'}-${section}` as const;
 }
 
 export function routeOf(section: SectionId, slug: string, lang: Lang): string {
-  return `/${lang === 'zh-CN' ? 'zh-CN/' : ''}${section}${slug === 'index' ? '' : `/${slug}`}`;
+  return `/${localePrefix(lang)}${section}${slug === 'index' ? '' : `/${slug}`}`;
 }
 
 const cache = new Map<Lang, Promise<Page[]>>();
@@ -89,9 +93,9 @@ async function load(lang: Lang): Promise<Page[]> {
   const all: Page[] = [];
   for (const section of SECTIONS) {
     const entries = await getCollection(collectionName(section.id, lang));
-    // A Chinese page sorts by its English counterpart, so both locales list
-    // the same pages in the same order whatever the translated titles are.
-    const english = lang === 'en' ? entries : await getCollection(collectionName(section.id, 'en'));
+    // A translation sorts by its English counterpart, preserving sidebar
+    // order regardless of the translated title.
+    const english = lang === 'en' ? entries : await getCollection(section.id);
     // Elements list their groups in the order of `GROUPS` (the primitives,
     // then the base components); within a group, and in the other sections,
     // pages sort by `order`, then by title. Base components have no `order`,
@@ -124,7 +128,7 @@ async function load(lang: Lang): Promise<Page[]> {
         demo: entry.data.demo,
         route,
         href: url(route),
-        filePath: (entry.filePath ?? `${lang === 'zh-CN' ? 'zh-CN/' : ''}${section.id}/${entry.id}.md`).replace(/^\.\//, ''),
+        filePath: (entry.filePath ?? `${localePrefix(lang)}${section.id}/${entry.id}.md`).replace(/^\.\//, ''),
         entry,
       });
     }
@@ -148,10 +152,25 @@ export async function sectionHref(section: SectionId, lang: Lang): Promise<strin
   if (own) return own.href;
   // A section not translated yet falls back to the English one.
   const english = (await pages('en')).find((page) => page.section === section);
-  return english?.href ?? url(`${lang === 'zh-CN' ? 'zh-CN/' : ''}${section}`);
+  return english?.href ?? url(`${localePrefix(lang)}${section}`);
 }
 
 export async function sectionHrefs(lang: Lang): Promise<Record<SectionId, string>> {
   const entries = await Promise.all(SECTIONS.map(async (s) => [s.id, await sectionHref(s.id, lang)] as const));
   return Object.fromEntries(entries) as Record<SectionId, string>;
+}
+
+/** Same-page translations available in this build. Korean guides are added incrementally. */
+export async function alternateRoutes(path: string): Promise<Partial<Record<Lang, string>>> {
+  const en = `/${path.replace(/^\/+|\/+$/g, '')}`;
+  const zh = en === '/' ? '/zh-CN' : `/zh-CN${en}`;
+  const ko = en === '/' ? '/ko' : `/ko${en}`;
+  return en === '/' || (await pages('ko')).some((page) => page.route === ko)
+    ? { en, 'zh-CN': zh, ko }
+    : { en, 'zh-CN': zh };
+}
+
+export async function localizedRoute(path: string, lang: Lang): Promise<string> {
+  const routes = await alternateRoutes(path);
+  return routes[lang] ?? routes.en!;
 }

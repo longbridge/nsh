@@ -21,7 +21,8 @@ export const EDIT_BASE = (import.meta.env.PUBLIC_SITE_VERSION ?? 'main') === 'ma
   ? `${REPO_URL}/edit/main/`
   : `${REPO_URL}/blob/${import.meta.env.PUBLIC_SITE_VERSION}/`;
 
-export type Lang = 'en' | 'zh-CN';
+export const LANGS = ['en', 'zh-CN', 'ko'] as const;
+export type Lang = (typeof LANGS)[number];
 
 /** `BASE_URL` with exactly one trailing slash. */
 export const BASE = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
@@ -32,7 +33,7 @@ export function url(path = ''): string {
   return joined.length > 1 ? joined.replace(/\/+$/, '') : joined;
 }
 
-/** The same route in the other locale. */
+/** The locale's path prefix, with the default language at the root. */
 export function localePrefix(lang: Lang): string {
-  return lang === 'zh-CN' ? 'zh-CN/' : '';
+  return lang === 'en' ? '' : `${lang}/`;
 }

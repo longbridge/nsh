@@ -7,9 +7,11 @@ import ToggleGroup from './ui/ToggleGroup.astro';
 import ToggleGroupItem from './ui/ToggleGroupItem.astro';
 export interface Props { lang?: Lang }
 const { lang = 'en' } = Astro.props;
-const names = lang === 'zh-CN'
-  ? { label: '外观', system: '跟随系统', light: '浅色', dark: '深色' }
-  : { label: 'Appearance', system: 'System', light: 'Light', dark: 'Dark' };
+const names = {
+  'zh-CN': { label: '外观', system: '跟随系统', light: '浅色', dark: '深色' },
+  en: { label: 'Appearance', system: 'System', light: 'Light', dark: 'Dark' },
+  ko: { label: '테마', system: '시스템 설정', light: '라이트 모드', dark: '다크 모드' },
+}[lang];
 const icons = {
   system: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',

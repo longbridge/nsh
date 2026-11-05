@@ -3,8 +3,8 @@ import DocPage from '../../../components/DocPage.astro';
 import { pages, type Page } from '../../../lib/sections';
 
 export async function getStaticPaths() {
-  return (await pages('zh-CN')).map((page) => ({
-    params: { section: page.section, slug: page.slug === 'index' ? undefined : page.slug },
+  return (await Promise.all([pages('zh-CN'), pages('ko')])).flat().map((page) => ({
+    params: { locale: page.lang, section: page.section, slug: page.slug === 'index' ? undefined : page.slug },
     props: { page },
   }));
 }

@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar.astro';
 import Toc, { type Heading } from '../components/Toc.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import { EDIT_BASE, type Lang } from '../lib/site';
-import { SECTIONS, pages, routeOf, type Page } from '../lib/sections';
+import { SECTIONS, alternateRoutes, pages, routeOf, type Page } from '../lib/sections';
 
 export interface Props {
   page: Page;
@@ -14,7 +14,6 @@ export interface Props {
 
 const { page, headings = [] } = Astro.props;
 const lang: Lang = page.lang;
-const isZh = lang === 'zh-CN';
 const section = SECTIONS.find((s) => s.id === page.section)!;
 
 const all = await pages(lang);
@@ -23,26 +22,18 @@ const at = all.findIndex((p) => p.route === page.route);
 const prev = at > 0 ? all[at - 1] : undefined;
 const next = at >= 0 && at < all.length - 1 ? all[at + 1] : undefined;
 
-// The language switch goes to the same page when it is translated, else to
-// the other locale's section.
-const otherLang: Lang = isZh ? 'en' : 'zh-CN';
-const counterpart = (await pages(otherLang)).find((p) => p.section === page.section && p.slug === page.slug);
-const otherSection = (await pages(otherLang)).find((p) => p.section === page.section);
-const langHref = counterpart?.href ?? otherSection?.href;
-const alternates = {
-  en: isZh ? counterpart && routeOf(page.section, page.slug, 'en') : page.route,
-  'zh-CN': isZh ? page.route : counterpart && routeOf(page.section, page.slug, 'zh-CN'),
-};
-
+const alternates = await alternateRoutes(routeOf(page.section, page.slug, 'en'));
 const editUrl = `${EDIT_BASE}website/${page.filePath}`;
-const t = isZh
-  ? { prev: '上一页', next: '下一页', edit: '在 GitHub 上编辑此页', markdown: 'Markdown 原文', pager: '翻页' }
-  : { prev: 'Previous', next: 'Next', edit: 'Edit this page on GitHub', markdown: 'View as Markdown', pager: 'Pagination' };
+const t = {
+  en: { prev: 'Previous', next: 'Next', edit: 'Edit this page on GitHub', markdown: 'View as Markdown', pager: 'Pagination' },
+  'zh-CN': { prev: '上一页', next: '下一页', edit: '在 GitHub 上编辑此页', markdown: 'Markdown 原文', pager: '翻页' },
+  ko: { prev: '이전', next: '다음', edit: 'GitHub에서 이 문서 편집', markdown: 'Markdown 원문 보기', pager: '문서 간 이동' },
+}[lang];
 const sectionOf = (p: Page) => SECTIONS.find((s) => s.id === p.section)!.label[lang];
 ---
 
 <BaseLayout title={page.title} description={page.description} lang={lang} alternates={alternates}>
-  <Nav lang={lang} currentPath={Astro.url.pathname} langHref={langHref} />
+  <Nav lang={lang} currentPath={Astro.url.pathname} alternates={alternates} />
 
   <div class="docs-layout">
     <Sidebar title={section.label[lang]} pages={sidebar} current={page.route} lang={lang} />
@@ -94,14 +85,18 @@ const sectionOf = (p: Page) => SECTIONS.find((s) => s.id === p.section)!.label[l
 </BaseLayout>
 
 <script>
+  import type { Lang } from '../lib/site';
   import { initDemos } from '../lib/demo-client';
   import { initCodeTabs } from '../lib/code-tabs-client';
 
   const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
   const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
-  const isZh = document.documentElement.lang === 'zh-CN';
-  const copyLabel = isZh ? '复制代码' : 'Copy code';
-  const copiedLabel = isZh ? '已复制' : 'Copied';
+  const lang = document.documentElement.lang as Lang;
+  const [copyLabel, copiedLabel] = {
+    en: ['Copy code', 'Copied'],
+    'zh-CN': ['复制代码', '已复制'],
+    ko: ['코드 복사', '복사됨'],
+  }[lang];
 
   for (const pre of document.querySelectorAll<HTMLPreElement>('.doc-content pre')) {
     const code = pre.querySelector('code');
