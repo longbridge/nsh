@@ -436,7 +436,8 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame.
+  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
   border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
   color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,

@@ -68,11 +68,13 @@ ttf-parser.workspace = true
 unicode-bidi.workspace = true
 unicode-properties.workspace = true
 
-# The text rules (`src/text/css.rs`, `src/text/wrap.rs`) and the event
-# payloads (`src/event.rs`) depend on nothing of the browser: `tests/text`
+# The text rules (`src/text/css.rs`, `src/text/wrap.rs`), the event
+# payloads (`src/event.rs`) and the bound animated values
+# (`src/animation.rs`) depend on nothing of the browser: `tests/text`
 # builds them on the host and tests them there.
 [dev-dependencies]
 nsh-core.workspace = true
+rustc-hash.workspace = true
 serde_json.workspace = true
 unicode-bidi.workspace = true
 unicode-properties.workspace = true
