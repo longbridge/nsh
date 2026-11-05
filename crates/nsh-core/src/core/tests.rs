@@ -29778,6 +29778,115 @@ fn far_text_catches_up_when_a_resize_ends() {
     );
 }
 
+/// Text above the viewport wrapping onto more lines moves what shows: the
+/// scroll view keeps it in place through the drag and the commit after it.
+#[test]
+fn a_scroll_view_keeps_what_it_shows_through_a_resize() {
+    let mut c = Core::new(
+        WordsEngine {
+            greedy: true,
+            ..WordsEngine::default()
+        },
+        size_pt(200.0, 100.0),
+    );
+    let text = |id, content, value: &str| {
+        vec![
+            Op::Create { id, tag: Tag::Text },
+            Op::CreateText {
+                id: content,
+                text: value.into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: content,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: 1,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Far above the viewport, near it and shown.
+    ops.extend(text(3, 4, "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd"));
+    ops.extend([
+        Op::Create {
+            id: 5,
+            tag: Tag::View,
+        },
+        style_op(5, &[("height", StyleValue::Number(2000.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 5,
+            before: None,
+        },
+    ]);
+    ops.extend(text(6, 7, "eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh"));
+    ops.extend([
+        Op::Create {
+            id: 8,
+            tag: Tag::View,
+        },
+        style_op(8, &[("height", StyleValue::Number(3000.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 8,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8).unwrap().origin.y, Points(2064.0));
+    c.set_scroll_offset(2, point(Points::ZERO, Points(2100.0)), 0);
+
+    let scrolled = |batch: &MountBatch| -> f32 {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ScrollBy { id: 2, dy, .. } => Some(dy.0),
+                _ => None,
+            })
+            .sum()
+    };
+    // The text just above wraps now, the far one waits.
+    c.set_resizing(true);
+    c.set_viewport(size_pt(90.0, 100.0));
+    let batch = c.commit().unwrap();
+    let moved = frame_of(&batch, 8).unwrap().origin.y.0 - 2064.0;
+    assert_eq!(moved, 32.0);
+    assert_eq!(scrolled(&batch), moved, "follows what it shows");
+
+    // The far text catches up all at once.
+    c.set_resizing(false);
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), 32.0, "no jump at the end");
+
+    // One resize, outside any burst: wider, the texts take fewer lines.
+    c.set_viewport(size_pt(200.0, 100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), -64.0, "a single resize too");
+
+    // At the start of the content nothing scrolls.
+    c.set_scroll_offset(2, point(Points::ZERO, Points::ZERO), 3);
+    c.set_viewport(size_pt(90.0, 100.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch), 0.0);
+}
+
 /// A text whose lines change just ahead of its width stops being measured
 /// ahead: it would be typeset twice per width.
 #[test]

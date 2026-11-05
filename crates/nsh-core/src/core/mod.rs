@@ -8,6 +8,7 @@ mod measure;
 mod overlay;
 mod parent_viewport;
 mod renders;
+mod resize_anchor;
 mod scrollbars;
 mod services;
 mod slots;
@@ -1053,6 +1054,10 @@ pub struct Core<M: TextEngine> {
     measure_cache: MeasureCache,
     /// Counts the commits of resizes ([`Core::mark_near_screen`]).
     resizing_commit: u32,
+    /// The next layout follows a change of the viewport, or the text that
+    /// waited through a burst of resizes: scroll views keep their place
+    /// through it (`resize_anchor`).
+    resize_settling: bool,
     /// Text blocks whose final layout must be (re)made after layout.
     pending_text: Vec<Key>,
     /// Text blocks with attachments (checked for attachments laid out
@@ -1289,6 +1294,7 @@ impl<M: TextEngine> Core<M> {
             text_engine: Rc::new(text_engine),
             measure_cache: MeasureCache::default(),
             resizing_commit: 0,
+            resize_settling: false,
             pending_text: Vec::new(),
             attachment_blocks: Vec::new(),
             max_nodes: usize::MAX,
@@ -1570,6 +1576,7 @@ impl<M: TextEngine> Core<M> {
             if std::mem::take(&mut cx.held) {
                 self.layout.mark_dirty(layout);
                 self.needs_layout = true;
+                self.resize_settling = true;
                 self.queue_text(key);
             }
         }
@@ -1622,6 +1629,7 @@ impl<M: TextEngine> Core<M> {
     pub fn set_viewport(&mut self, viewport: Size<Points>) {
         if viewport != self.viewport {
             self.viewport = viewport;
+            self.resize_settling = true;
             let root = self.nodes[self.root as usize].layout.expect("root layout");
             self.layout.set_style(root, root_style(viewport));
             self.needs_layout = true;
@@ -2322,6 +2330,12 @@ impl<M: TextEngine> Core<M> {
         let relayout = self.needs_layout;
         if relayout {
             self.needs_layout = false;
+            let settling = std::mem::take(&mut self.resize_settling);
+            let anchors = if settling || self.measure_cache.resizing.is_some() {
+                self.resize_anchors()
+            } else {
+                Vec::new()
+            };
             if self.measure_cache.resizing.is_some() {
                 self.mark_near_screen();
             }
@@ -2346,6 +2360,7 @@ impl<M: TextEngine> Core<M> {
             for key in relaid {
                 self.emit_frames(key);
             }
+            self.keep_resize_anchors(anchors);
         }
         self.update_lists(relayout);
         // After every frame of the round: what followers follow is placed.
