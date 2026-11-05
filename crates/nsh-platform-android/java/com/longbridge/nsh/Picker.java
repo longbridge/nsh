@@ -26,7 +26,9 @@ import java.util.List;
 /**
  * {@code Picker.pickImages}: the system's Photo Picker ({@code
  * MediaStore.ACTION_PICK_IMAGES}, API 33+ or 30+ with the SDK extension), else
- * a document picker for images ({@code ACTION_GET_CONTENT}). It needs no
+ * a document picker for images ({@code ACTION_GET_CONTENT}). A pick for
+ * files ({@code request.files}) shows the document picker for any openable
+ * file instead, and comes back as the files are, read whole. It needs no
  * permission: the system hands over only what the user picks. The result
  * comes back to a headless fragment the picker adds to the view's activity,
  * so the embedding app forwards nothing. The picked images are read and
@@ -46,6 +48,9 @@ final class Picker {
         /** Negative: none given. */
         float quality;
         boolean current;
+        /** The pick is for arbitrary files, not images: a document picker
+         * shows, and the files come as they are. */
+        boolean files;
         /** The view's engine, when the pick ends. */
         NshView view;
     }
@@ -62,7 +67,13 @@ final class Picker {
             return;
         }
         Intent intent;
-        if (photoPicker()) {
+        if (request.files) {
+            // The document picker: any openable file, as it is.
+            intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.setType("*/*");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.limit > 1);
+        } else if (photoPicker()) {
             intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
             intent.setType("image/*");
             if (request.limit > 1) {
@@ -138,7 +149,7 @@ final class Picker {
             if (uris.size() > request.limit) uris = uris.subList(0, request.limit);
             ContentResolver resolver = getActivity().getContentResolver();
             List<Uri> picked = uris;
-            Log.i(TAG, "picked " + uris.size() + " image(s)");
+            Log.i(TAG, "picked " + uris.size() + " file(s)");
             new Thread(() -> answer(request, read(resolver, picked, request)), "nsh-picker").start();
         }
     }
@@ -188,6 +199,15 @@ final class Picker {
         if (bytes == null) return null;
         Picked file = new Picked();
         file.name = displayName(resolver, uri);
+        if (request.files) {
+            // A file of a pick for files: as it is, its type from the
+            // provider; no width or height to tell (`nsh_core::picker`
+            // reads both from the bytes).
+            String type = resolver.getType(uri);
+            file.type = type != null ? type.toLowerCase(java.util.Locale.ROOT) : "";
+            file.bytes = bytes;
+            return file;
+        }
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);

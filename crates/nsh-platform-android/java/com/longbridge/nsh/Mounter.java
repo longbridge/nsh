@@ -2152,6 +2152,7 @@ final class Mounter {
                 request.maxDimension = b.getInt();
                 request.quality = b.getFloat();
                 request.current = b.getInt() != 0;
+                request.files = b.getInt() != 0;
                 request.view = host;
                 Picker.show(context, request);
                 break;
