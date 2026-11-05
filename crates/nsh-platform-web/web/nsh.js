@@ -435,6 +435,13 @@ function defineClass(name, text, replace, weight = 2) {
   }
 }
 
+/** Whether the browser draws `corner-shape` (Chromium; not Safari or Firefox so far). */
+const CORNER_SHAPE = typeof CSS !== "undefined" && CSS.supports?.("corner-shape", "squircle");
+/** How far along each edge a continuous corner of radius 1 reaches, as Core Animation's. */
+const CONTINUOUS_REACH = 1.528;
+/** The `superellipse()` that at that reach passes where a circle of radius 1 does on the diagonal. */
+const CONTINUOUS_SUPERELLIPSE = 1.7;
+
 /** The class of CSS text `text` (as the engine names them), defined when
  * new; `weight` repeats it in the selector, over the views' style classes. */
 function cssClass(text, weight = 2) {
@@ -2024,6 +2031,7 @@ class Player {
     const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
     el._frame = [x, y, w, h];
     this.placeFrame(el);
+    if (resized && el._corners) this.placeCorners(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
       const box = (f) => ({ left: `${f[0]}px`, top: `${f[1]}px`, width: `${f[2]}px`, height: `${f[3]}px` });
       const a = this.animateLayout(el, [box(from), box(el._frame)], update);
@@ -2063,23 +2071,48 @@ class Player {
 
   /** Visual style: its class replaces the previous one; the frame and
    * animated properties are inline. */
-  op_s([, id, css, border, tint]) {
+  op_s([, id, css, border, tint, ...corners]) {
     const el = this.view(id);
     if (!el) return;
     swapClass(el, "_class", this.styleClass(css));
     if (border) {
       if (!el._border) el._border = document.createElement("div");
       el._border.className = `nsh-border ${this.styleClass(border)}`;
+      el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
       el.append(el._border);
     } else if (el._border) {
       el._border.remove();
       el._border = null;
     }
+    el._corners = corners.length ? corners : null;
+    this.placeCorners(el);
     if (el._kind === "image") {
       el._tint = tint;
       this.applyTint(el);
     }
+  }
+
+  /**
+   * `borderCurve: "continuous"` as CSS `corner-shape`, which shapes the view's
+   * border, shadows, clip and backdrop too. Corners reach as far along the
+   * edges as iOS's, and pass where circular corners of the radius do on the
+   * diagonal, so a radius looks as round as on the native backends. Without
+   * room to reach that far they stay circular, so a pill stays a pill, as
+   * `nsh-platform-macos`'s; so do browsers without `corner-shape`.
+   */
+  placeCorners(el) {
+    const r = el._corners;
+    const f = el._frame;
+    const fits = CORNER_SHAPE && r && f && Math.max(...r) * CONTINUOUS_REACH <= Math.min(f[2], f[3]) / 2;
+    const name = fits
+      ? cssClass(
+          `border-radius:${r.map((v) => `${v * CONTINUOUS_REACH}px`).join(" ")};corner-shape:superellipse(${CONTINUOUS_SUPERELLIPSE});`,
+          3,
+        )
+      : null;
+    swapClass(el, "_cornerClass", name);
+    if (el._border) swapClass(el._border, "_cornerClass", name);
   }
 
   op_a([, id, prop, value]) {

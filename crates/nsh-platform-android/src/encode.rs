@@ -810,24 +810,13 @@ fn degrees(a: nsh_core::geometry::Radians) -> f32 {
     (a.to_degrees() * 1e4).round() / 1e4
 }
 
-/// The effects of `Mounter.java` `style`: shadows, gradients, filters,
-/// blend mode, outline, visibility, cursor, transition, animation.
-fn effects(e: &mut Encoded, s: &ViewStyle) {
+/// A list of gradients, as `Effects.java`'s `gradients` reads it.
+fn gradients(e: &mut Encoded, gradients: &[nsh_core::Gradient]) {
     use nsh_core::{
-        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes,
+        GradientKind, GradientSize,
         geometry::{DefiniteLength, REM_SIZE, Size},
     };
-    let fx = s.effects.as_deref();
-    let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
-    e.int(shadows.len() as i32);
-    for sh in shadows {
-        for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
-            e.float(v.0);
-        }
-        e.int(argb(sh.color));
-        e.bool(sh.inset);
-    }
-    let gradients = fx.map_or(&[][..], |f| &f.background_images[..]);
+
     e.int(gradients.len() as i32);
     for g in gradients {
         match g.kind {
@@ -890,6 +879,24 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
             }
         }
     }
+}
+
+/// The effects of `Mounter.java` `style`: shadows, gradients, filters,
+/// blend mode, outline, visibility, cursor, transition, animation.
+fn effects(e: &mut Encoded, s: &ViewStyle) {
+    use nsh_core::{BlendMode, Cursor, Filter, Keyframes};
+    let fx = s.effects.as_deref();
+    let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
+    e.int(shadows.len() as i32);
+    for sh in shadows {
+        for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
+            e.float(v.0);
+        }
+        e.int(argb(sh.color));
+        e.bool(sh.inset);
+    }
+    gradients(e, fx.map_or(&[][..], |f| &f.background_images[..]));
+    gradients(e, fx.map_or(&[][..], |f| &f.mask_images[..]));
     let filter_list = |e: &mut Encoded, list: &[Filter]| {
         // Color filters as one composed matrix, then blur, then the drop
         // shadow (what Android's render effects take): the widest of the

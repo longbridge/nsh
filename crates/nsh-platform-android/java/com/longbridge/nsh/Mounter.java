@@ -1032,6 +1032,7 @@ final class Mounter {
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
             decor.gradients = fx.gradients;
+            decor.masks = fx.masks;
             decor.outlineWidth = fx.outlineWidth;
             decor.outlineColor = fx.outlineColor;
             decor.outlineStyle = fx.outlineStyle;
