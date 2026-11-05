@@ -26,8 +26,8 @@ Rust 组件、嵌入 NSH 的原生应用），以及在 `nsh/base` 之上构建�
 3. 在 `nsh/base` 之上封装、组合应用自己的风格控件，覆盖可见部件、变体和交互状态。在支持的目标上验证有代表性的组合，再铺开到页面。
 4. 用这一层组合页面。缺少 token 或共享变体时，先在所属层补充，再由页面使用；共享控件的修改应一致地作用于所有使用处。
 
-NSH 提供无样式的 `nsh-base` crate（TSX 中为 `nsh/base`），对应 `gpui-base`；应用或社区组件库拥有对应
-`gpui-component` 的风格层，`nsh-core` 则对应底层的 GPUI。普通界面应该导入应用自己的风格控件，把基础组件的组装与样式
+NSH 提供无样式的 `nsh-base` crate（TSX 中为 `nsh/base`），对应 [`gpui-base`](https://gpui-kit.com/base)；应用或社区组件库拥有对应
+[`gpui-component`](https://gpui-kit.com/component) 的风格层，`nsh-core` 则对应底层的 GPUI。普通界面应该导入应用自己的风格控件，把基础组件的组装与样式
 保留在共享层中。适配各目标平台的外观时，保留基础组件的行为、焦点与无障碍能力。
 
 主题颜色必须通过语义 token 读取：Rust 使用 `theme().primary` 或 `theme().color("warning")`，TSX 使用 `bg-primary`、
@@ -889,7 +889,7 @@ const liked = signal<Set<number>>(new Set());
 ### 词汇是 API 的一部分
 
 在各个组件中，同一概念使用同一个词。在给 prop 或事件命名之前，先在 NSH 自己的 API 中寻找这个术语，然后是 GPUI Kit 的
-`gpui-base`、GPUI 和 `gpui-component`，再然后是各平台的控件。原语所显示的内容和全局 API 的名称取自 HTML、DOM 和 CSS
+[`gpui-base`](https://gpui-kit.com/base)、GPUI 和 [`gpui-component`](https://gpui-kit.com/component)，再然后是各平台的控件。原语所显示的内容和全局 API 的名称取自 HTML、DOM 和 CSS
 （`src`、`html`、`placeholder`）。Rust 名称是 `snake_case`，在 TSX 中转换为 `camelCase`（`on_open_change` 即
 `onOpenChange`）；一个词保持一个词（`readonly`、`multiline`）。
 

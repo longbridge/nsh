@@ -21,7 +21,7 @@ styled component library before screens. For an existing app, inspect and extend
 those foundations first. Theme colors in presentation code must come from tokens;
 raw color values belong in theme definitions. Style the parts and states of
 `nsh/base` in app-owned reusable controls, then compose pages from them. This is
-the layer corresponding to `gpui-component` above `gpui-base`. Plan for the app's
+the layer corresponding to [`gpui-component`](https://gpui-kit.com/component) above [`gpui-base`](https://gpui-kit.com/base). Plan for the app's
 Desktop, Mobile, Web and TUI targets, adapting input, density, navigation and
 popups while sharing semantics and tokens.
 

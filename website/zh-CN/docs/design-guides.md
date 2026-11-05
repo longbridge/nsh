@@ -39,8 +39,8 @@ token。十六进制、RGBA、HSLA 等颜色字面量集中在 token 定义中�
 反馈组件及其部件。统一变体、尺寸、密度，以及悬停、按下、焦点、选中、禁用、加载和校验状态。页面组合这些组件，各页面不再
 独立给基础控件设计一套样式。组件库随应用的实际需要扩展；一个功能用到的控件应该完整，而不必预先实现无关的组件目录。
 
-NSH 的分层与 GPUI Kit 对应：`nsh-core` 对应 GPUI，`nsh-base` 对应 `gpui-base`，提供行为、状态、焦点和无障碍。
-对应 `gpui-component` 的风格组件层由应用或社区组件库提供。默认主题提供起始 token，应用自己的风格组件把它们组织成完整的
+NSH 的分层与 GPUI Kit 对应：`nsh-core` 对应 GPUI，`nsh-base` 对应 [`gpui-base`](https://gpui-kit.com/base)，提供行为、状态、焦点和无障碍。
+对应 [`gpui-component`](https://gpui-kit.com/component) 的风格组件层由应用或社区组件库提供。默认主题提供起始 token，应用自己的风格组件把它们组织成完整的
 视觉系统。见[编码指南](./coding-guides.md#先建立应用的界面基础再编写页面)。
 
 ### 为应用的目标平台设计

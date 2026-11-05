@@ -61,8 +61,8 @@ variants, sizes, density and hover, pressed, focus, selected, disabled, loading 
 these components; they should not restyle base controls independently. Grow this library with the app's actual
 needs, keeping every control used in a feature complete rather than prebuilding an unrelated catalog.
 
-NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to `gpui-base`, providing behavior,
-state, focus and accessibility. The styled layer corresponding to `gpui-component` belongs to the app or a community
+NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to [`gpui-base`](https://gpui-kit.com/base), providing behavior,
+state, focus and accessibility. The styled layer corresponding to [`gpui-component`](https://gpui-kit.com/component) belongs to the app or a community
 library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
 system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
 
