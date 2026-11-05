@@ -521,3 +521,31 @@ fn a_packaged_site_serves_its_page_at_the_apps_paths() {
     drop(server);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_site_deployed_under_a_path_is_served_there() {
+    let dir = std::env::temp_dir().join(format!("nsh-site-base-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("index.html"), "<p>site</p>").unwrap();
+    std::fs::write(dir.join("nsh.0123456789.js"), "js").unwrap();
+    let server = nsh_dev::SiteServer::start_at(
+        "127.0.0.1:0".parse().unwrap(),
+        dir.clone(),
+        "/apps/counter/",
+    )
+    .unwrap();
+    let addr = server.local_addr();
+    assert_eq!(get(addr, "/apps/counter/", BROWSER).1, "<p>site</p>");
+    assert_eq!(get(addr, "/apps/counter/nsh.0123456789.js", "*/*").1, "js");
+    assert_eq!(
+        get(addr, "/apps/counter/sports/football", BROWSER).1,
+        "<p>site</p>"
+    );
+    for path in ["/", "/apps/counter"] {
+        let (status, _) = get(addr, path, BROWSER);
+        assert!(status.contains("307"), "{path}: {status}");
+    }
+    assert!(get(addr, "/nsh.0123456789.js", "*/*").0.contains("404"));
+    drop(server);
+    let _ = std::fs::remove_dir_all(dir);
+}

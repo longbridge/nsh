@@ -186,6 +186,11 @@ pub(crate) struct WebConfig {
     /// `capabilities`.
     #[serde(default)]
     pub(crate) connect: Vec<String>,
+    /// The path the site is served under (`/`, `/apps/counter/`): the page
+    /// gets a `<base href>`, so it loads at any of the app's own paths
+    /// (`/apps/counter/sports/football`). Without it the page's URLs are
+    /// relative to the page.
+    pub(crate) base: Option<String>,
 }
 
 /// Options of `nsh package`.

@@ -3456,6 +3456,7 @@ dependencies = [
  "tar",
  "tungstenite 0.30.0",
  "ureq",
+ "url",
  "wasmparser",
  "windows-sys 0.61.2",
  "zip",

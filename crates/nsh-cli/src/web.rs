@@ -250,9 +250,11 @@ pub(crate) fn package(
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
     }
+    let base = page_base(config.web.base.as_deref())?;
     let html = page(&PageParts {
         name,
         appearance,
+        base: base.as_deref(),
         icons: &icons,
         runtime: &js,
         wasm: &wasm,
@@ -278,7 +280,7 @@ pub(crate) fn package(
         ui::dim(format!(", {}", ui::bytes(dir_size(&dir))))
     ));
     if options.run {
-        serve(&dir)?;
+        serve(&dir, base.as_deref().unwrap_or("/"))?;
     }
     Ok(())
 }
@@ -307,6 +309,30 @@ pub(crate) fn link(
         });
     }
     split::split(linkable, keep, lazy)
+}
+
+/// `nsh.json` `web.base`: a path from the host's root, ending in `/` (one
+/// is added). It goes into the page's `<base href>` as it is, so it holds
+/// only what a path can (no query, fragment, quotes or `..`).
+fn page_base(base: Option<&str>) -> anyhow::Result<Option<String>> {
+    let Some(base) = base else { return Ok(None) };
+    let valid = base.starts_with('/')
+        && !base.starts_with("//")
+        && !base.contains(['?', '#', '\\', '"', '\'', '<', '>', '&'])
+        && !base.chars().any(char::is_whitespace)
+        && !base
+            .split('/')
+            .any(|segment| segment == "." || segment == "..");
+    if !valid {
+        bail!(
+            "nsh.json web.base: {base:?} is not a path from the host's root, as \"/apps/counter/\""
+        );
+    }
+    Ok(Some(if base.ends_with('/') {
+        base.to_owned()
+    } else {
+        format!("{base}/")
+    }))
 }
 
 /// Whether `name` is the export of a part of `nsh/base`, of a standard
@@ -583,20 +609,22 @@ fn core_exports() -> &'static BTreeSet<String> {
     })
 }
 
-/// Serves the site `dir` on this machine, as a CDN would (`nsh_dev::SiteServer`),
-/// until stopped; prints its address.
-fn serve(dir: &Path) -> anyhow::Result<()> {
+/// Serves the site `dir` on this machine under `base` (`web.base`), as a
+/// CDN would (`nsh_dev::SiteServer`), until stopped; prints its address.
+fn serve(dir: &Path, base: &str) -> anyhow::Result<()> {
     let mut server = None;
     for port in (PORT..PORT + 10).chain([0]) {
-        if let Ok(s) =
-            nsh_dev::SiteServer::start(SocketAddr::from(([127, 0, 0, 1], port)), dir.into())
-        {
+        if let Ok(s) = nsh_dev::SiteServer::start_at(
+            SocketAddr::from(([127, 0, 0, 1], port)),
+            dir.into(),
+            base,
+        ) {
             server = Some(s);
             break;
         }
     }
     let server = server.context("no free port to serve the site on")?;
-    let url = format!("http://127.0.0.1:{}/", server.local_addr().port());
+    let url = format!("http://127.0.0.1:{}{base}", server.local_addr().port());
     ui::note(format!("serving {} at {url}", ui::path(dir)));
     let _stoppable = ui::Stoppable::new();
     while !ui::stop_requested() {
@@ -1099,6 +1127,8 @@ fn connect_src(
 struct PageParts<'a> {
     name: &'a str,
     appearance: Appearance,
+    /// The page's `<base href>` ([`page_base`]).
+    base: Option<&'a str>,
     icons: &'a Icons,
     /// URL of `nsh.js`.
     runtime: &'a str,
@@ -1118,6 +1148,10 @@ struct PageParts<'a> {
 fn page(parts: &PageParts<'_>) -> String {
     let (light, dark) = parts.appearance.colors();
     let mut head = String::new();
+    // First: every relative URL after it resolves against it.
+    if let Some(base) = parts.base {
+        let _ = writeln!(head, "<base href=\"{base}\">");
+    }
     if let Some(sources) = parts.connect {
         let _ = writeln!(
             head,
@@ -1177,7 +1211,7 @@ fn page(parts: &PageParts<'_>) -> String {
     let urls = serde_json::json!(urls).to_string().replace("</", "<\\/");
     let _ = writeln!(
         head,
-        "<script>const fetches = new Map({urls}.map((url) => {{ const response = fetch(url); response.catch(() => {{}}); return [url, response]; }}));</script>"
+        "<script>const fetches = new Map({urls}.map((path) => {{ const url = new URL(path, document.baseURI).href; const response = fetch(url); response.catch(() => {{}}); return [url, response]; }}));</script>"
     );
     // JSON in a script: `</script>` in a string must not end it.
     let app = parts.app.to_string().replace("</", "<\\/");
@@ -1724,6 +1758,7 @@ mod tests {
         let parts = |glue| PageParts {
             name: "App",
             appearance: Appearance::System,
+            base: None,
             icons: &icons,
             runtime: "nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
@@ -1752,11 +1787,53 @@ mod tests {
     }
 
     #[test]
+    fn the_base_is_a_path_from_the_root() {
+        assert_eq!(page_base(None).unwrap(), None);
+        assert_eq!(page_base(Some("/")).unwrap().as_deref(), Some("/"));
+        assert_eq!(
+            page_base(Some("/apps/counter")).unwrap().as_deref(),
+            Some("/apps/counter/")
+        );
+        assert_eq!(
+            page_base(Some("/apps/counter/")).unwrap().as_deref(),
+            Some("/apps/counter/")
+        );
+        for base in [
+            "apps/",
+            "//cdn.example.com/",
+            "https://example.com/",
+            "/a/../b/",
+            "/a b/",
+            "/a?x/",
+            "/a\"><script>/",
+        ] {
+            assert!(page_base(Some(base)).is_err(), "{base}");
+        }
+        let html = page(&PageParts {
+            name: "A",
+            appearance: Appearance::Light,
+            base: Some("/apps/counter/"),
+            icons: &Icons::default(),
+            runtime: "nsh.0123456789.js",
+            wasm: "nsh.0123456789.wasm",
+            glue: None,
+            code: "app.1.js",
+            fonts: &[],
+            app: &serde_json::json!({}),
+            connect: None,
+        });
+        // Before the first relative URL (the manifest's).
+        let base = html.find("<base href=\"/apps/counter/\">").unwrap();
+        assert!(base < html.find("manifest.webmanifest").unwrap());
+    }
+
+    #[test]
     fn the_page_names_the_files_and_cannot_be_broken_out_of() {
         let app = serde_json::json!({ "code": "app.1.js", "x": "</script><b>" });
         let html = page(&PageParts {
             name: "A <b> & \"c\"",
             appearance: Appearance::System,
+            base: None,
             icons: &Icons::default(),
             runtime: "nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
@@ -1895,5 +1972,348 @@ mod tests {
         assert_eq!(json["background_color"], "#000000");
         assert_eq!(json["display"], "standalone");
         assert_eq!(json["icons"][0]["sizes"], "192x192");
+    }
+
+    /// The `Accept` header of a browser loading a page.
+    const BROWSER: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+    /// The strings after each `prefix` in `text`, up to the quote that
+    /// opened them (the prefix's).
+    fn quoted_after(text: &str, prefix: &str) -> Vec<String> {
+        let quote = prefix
+            .chars()
+            .find(|c| matches!(c, '"' | '\''))
+            .expect("a prefix with a quote");
+        text.split(prefix)
+            .skip(1)
+            .filter_map(|rest| rest.split_once(quote).map(|(s, _)| s.to_owned()))
+            .collect()
+    }
+
+    /// The relative URLs of the modules a module imports (`from "./x.js"`,
+    /// `import("./x.js")`) and of the scripts it loads by its own URL
+    /// (`new URL("./realm.js", import.meta.url)`), which the browser
+    /// resolves against the module's URL; bare specifiers go through the
+    /// import map.
+    fn module_imports(js: &str) -> Vec<String> {
+        let mut specifiers = Vec::new();
+        for prefix in [
+            "from \"",
+            "from '",
+            "import(\"",
+            "import('",
+            "new URL(\"",
+            "new URL('",
+        ] {
+            specifiers.extend(quoted_after(js, prefix));
+        }
+        specifiers.retain(|s| {
+            (s.starts_with("./") || s.starts_with("../") || s.starts_with('/')) && !s.contains("${")
+        });
+        specifiers
+    }
+
+    /// The URLs a page names for the browser to load: its tags' `href` and
+    /// `src` (but `<base>`'s), and in its scripts the modules they import,
+    /// the relative URLs they hold (`"./nsh.wasm"`), the files the head
+    /// requests (`fetches`) and the packaged app's files (`const app`).
+    fn page_references(html: &str) -> Vec<String> {
+        let mut urls = Vec::new();
+        for tag in html.split('<').skip(1) {
+            let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
+            if ["link ", "script ", "img "]
+                .iter()
+                .any(|t| tag.starts_with(t))
+            {
+                urls.extend(quoted_after(tag, " href=\""));
+                urls.extend(quoted_after(tag, " src=\""));
+            }
+        }
+        for script in html.split("<script").skip(1) {
+            let script = &script[script.find('>').unwrap() + 1..script.find("</script>").unwrap()];
+            // The packaged app's files, read by their keys: its chunk ids
+            // (`"./chunk.js"`) are not URLs.
+            let (code, app) = match script.split_once("const app = ") {
+                Some((before, rest)) => {
+                    let end = rest.find(";\n").unwrap();
+                    (
+                        format!("{before}{}", &rest[end..]),
+                        Some(serde_json::from_str::<serde_json::Value>(&rest[..end]).unwrap()),
+                    )
+                }
+                None => (script.to_owned(), None),
+            };
+            urls.extend(module_imports(&code));
+            urls.extend(
+                quoted_after(&code, "\"./")
+                    .into_iter()
+                    .filter(|s| !s.ends_with('/'))
+                    .map(|s| format!("./{s}")),
+            );
+            if let Some((_, list)) = code.split_once("const fetches = new Map(") {
+                let list = &list[..list.find("].map(").unwrap() + 1];
+                urls.extend(serde_json::from_str::<Vec<String>>(list).unwrap());
+            }
+            if let Some(app) = app {
+                let strings = |value: &serde_json::Value| value.as_str().map(str::to_owned);
+                for key in ["wasm", "glue", "code", "host"] {
+                    urls.extend(strings(&app[key]).filter(|url| !url.is_empty()));
+                }
+                for key in ["assets", "data", "chunks"] {
+                    urls.extend(
+                        app[key]
+                            .as_object()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|(_, url)| strings(url)),
+                    );
+                }
+                urls.extend(
+                    app["sides"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(_, side)| strings(&side["url"])),
+                );
+            }
+        }
+        urls
+    }
+
+    /// What a browser fetches to start the page at `url`: the page, asked
+    /// for as a browser asks for one, every file it names
+    /// ([`page_references`]), resolved as the browser resolves them
+    /// (against its `<base href>`, else its own URL), and every module
+    /// those import, against the module's URL. Each URL with its status.
+    fn load_page(url: &str) -> Vec<(String, u16)> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        let get = |url: &url::Url, accept: &str| {
+            let mut response = agent
+                .get(url.as_str())
+                .header("Accept", accept)
+                .call()
+                .unwrap();
+            let body = response
+                .body_mut()
+                .with_config()
+                .limit(64 << 20)
+                .read_to_vec()
+                .unwrap();
+            (
+                response.status().as_u16(),
+                String::from_utf8_lossy(&body).into_owned(),
+            )
+        };
+        let url = url::Url::parse(url).unwrap();
+        let (status, html) = get(&url, BROWSER);
+        assert_eq!(status, 200, "{url}");
+        assert!(html.starts_with("<!doctype html>"), "{url}: {html}");
+        let base = match quoted_after(&html, "<base href=\"").first() {
+            Some(href) => url.join(href).unwrap(),
+            None => url.clone(),
+        };
+        let mut queue: std::collections::VecDeque<url::Url> = page_references(&html)
+            .iter()
+            .map(|reference| base.join(reference).unwrap())
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut loaded = Vec::new();
+        while let Some(url) = queue.pop_front() {
+            if !seen.insert(url.to_string()) {
+                continue;
+            }
+            let (status, body) = get(&url, "*/*");
+            if status == 200 && url.path().ends_with(".js") {
+                queue.extend(module_imports(&body).iter().map(|s| url.join(s).unwrap()));
+            }
+            loaded.push((url.to_string(), status));
+        }
+        loaded
+    }
+
+    #[test]
+    fn the_dev_page_loads_its_files_at_the_apps_paths() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-dev-paths-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // The runtime's own modules, with its browser host's, and a glue
+        // importing a snippet.
+        let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../nsh-platform-web/web");
+        let glue = dir.join("nsh-dev-bindgen.js");
+        fs::write(
+            &glue,
+            "import { a } from './snippets/app-1/inline0.js';\nexport { a };",
+        )
+        .unwrap();
+        let snippet = crate::bindgen::output_dir(&glue).join("snippets/app-1/inline0.js");
+        fs::create_dir_all(snippet.parent().unwrap()).unwrap();
+        fs::write(&snippet, "export const a = 1;").unwrap();
+        let runtime = WebRuntime {
+            wasm: dir.join("nsh-dev.wasm"),
+            js: web.join("nsh.js"),
+            glue: Some(glue),
+            syntaxes: None,
+        };
+        fs::write(&runtime.wasm, "wasm").unwrap();
+        // The app's page host (`web.host`).
+        fs::write(dir.join("host.js"), "export function createHost() {}").unwrap();
+        fs::write(dir.join("nsh.json"), r#"{ "web": { "host": "host.js" } }"#).unwrap();
+        let (page, files) =
+            with_page_host(dev_host(&runtime, false).unwrap(), &dir.join("App.tsx")).unwrap();
+        let server =
+            nsh_dev::DevServer::start("127.0.0.1:0".parse().unwrap(), "", None, |_| {}).unwrap();
+        server.serve_web(page, files);
+        let origin = format!("http://{}", server.local_addr());
+        for path in [
+            "/",
+            "/football",
+            "/sports/football",
+            "/sports/football/?tab=live",
+        ] {
+            let loaded = load_page(&format!("{origin}{path}"));
+            let missing: Vec<_> = loaded.iter().filter(|(_, status)| *status != 200).collect();
+            assert!(missing.is_empty(), "{path}: {missing:?}");
+            for file in [
+                "/nsh.js",
+                "/nsh.wasm",
+                "/nsh.version",
+                "/nsh-bindgen.js",
+                "/snippets/app-1/inline0.js",
+                "/nsh-host.js",
+                "/browser/runtime.js",
+                "/browser/dom.js",
+            ] {
+                let file = format!("{origin}{file}");
+                assert!(
+                    loaded.iter().any(|(url, _)| *url == file),
+                    "{path}: {file} is not among {loaded:?}"
+                );
+            }
+        }
+        drop(server);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_packaged_page_loads_its_files_at_the_apps_paths() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-site-paths-{}", std::process::id()));
+        // A site as `package` writes it: the page and the files it names,
+        // the runtime importing its browser host, the app importing a chunk.
+        let files = [
+            (
+                "nsh.0123456789.js",
+                "import(\"./browser.0123456789/runtime.js\");",
+            ),
+            (
+                "browser.0123456789/runtime.js",
+                "import { a } from \"./dom.js\";",
+            ),
+            ("browser.0123456789/dom.js", "export const a = 1;"),
+            ("nsh.1111111111.wasm", "wasm"),
+            ("nsh-bindgen.2222222222.js", "export {};"),
+            ("app.3333333333.js", "import(\"./chunk-a.aaaaaaaaaa.js\");"),
+            ("chunk-a.aaaaaaaaaa.js", "export {};"),
+            ("host.7777777777.js", "export function createHost() {}"),
+            ("assets/fonts/Inter.4444444444.ttf", "ttf"),
+            ("assets/img/logo.8888888888.png", "png"),
+            ("nsh-syntaxes.9999999999.bin", "syntaxes"),
+            ("nsh-side-plot.bbbbbbbbbb.wasm", "wasm"),
+            ("icons/32.5555555555.png", "png"),
+            ("icons/180.6666666666.png", "png"),
+            ("manifest.webmanifest", "{}"),
+        ];
+        let app = serde_json::json!({
+            "wasm": "nsh.1111111111.wasm",
+            "glue": "nsh-bindgen.2222222222.js",
+            "code": "app.3333333333.js",
+            "host": "host.7777777777.js",
+            "assets": {
+                "fonts/Inter.ttf": "assets/fonts/Inter.4444444444.ttf",
+                "img/logo.png": "assets/img/logo.8888888888.png",
+            },
+            "data": { "syntaxes": "nsh-syntaxes.9999999999.bin" },
+            "fonts": ["fonts/Inter.ttf"],
+            "chunkFonts": {},
+            "chunks": { "./chunk-a.js": "chunk-a.aaaaaaaaaa.js" },
+            "sides": { "plot": { "url": "nsh-side-plot.bbbbbbbbbb.wasm", "needs": [] } },
+        });
+        let icons = Icons {
+            favicon: Some("icons/32.5555555555.png".to_owned()),
+            touch: Some("icons/180.6666666666.png".to_owned()),
+            manifest: Vec::new(),
+        };
+        let write = |base: Option<&str>| {
+            let _ = fs::remove_dir_all(&dir);
+            for (path, content) in files {
+                let path = dir.join(path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, content).unwrap();
+            }
+            let page = page(&PageParts {
+                name: "Sports",
+                appearance: Appearance::System,
+                base,
+                icons: &icons,
+                runtime: "nsh.0123456789.js",
+                wasm: "nsh.1111111111.wasm",
+                glue: Some("nsh-bindgen.2222222222.js"),
+                code: "app.3333333333.js",
+                fonts: &["assets/fonts/Inter.4444444444.ttf".to_owned()],
+                app: &app,
+                connect: None,
+            });
+            fs::write(dir.join("index.html"), page).unwrap();
+        };
+        // What the page at `path` loads: every file of the site, at `base`.
+        let loads_the_site = |origin: &str, base: &str, path: &str| {
+            let loaded = load_page(&format!("{origin}{path}"));
+            let mut expected: Vec<_> = files
+                .iter()
+                .map(|(file, _)| format!("{origin}{base}{file}"))
+                .collect();
+            expected.sort();
+            let mut urls: Vec<_> = loaded.iter().map(|(url, _)| url.clone()).collect();
+            urls.sort();
+            assert_eq!(urls, expected, "{path}");
+            let missing: Vec<_> = loaded.iter().filter(|(_, status)| *status != 200).collect();
+            assert!(missing.is_empty(), "{path}: {missing:?}");
+        };
+        // `web.base`, at the host's root and under a path.
+        for base in ["/", "/apps/counter/"] {
+            write(Some(base));
+            let server =
+                nsh_dev::SiteServer::start_at("127.0.0.1:0".parse().unwrap(), dir.clone(), base)
+                    .unwrap();
+            let origin = format!("http://{}", server.local_addr());
+            for path in [
+                "",
+                "football",
+                "sports/football",
+                "sports/football/?tab=live",
+            ] {
+                loads_the_site(&origin, base, &format!("{base}{path}"));
+            }
+        }
+        // Without one, the page's files are relative to it: it loads where
+        // it is and one segment below, and at deeper paths it misses them.
+        write(None);
+        let server =
+            nsh_dev::SiteServer::start("127.0.0.1:0".parse().unwrap(), dir.clone()).unwrap();
+        let origin = format!("http://{}", server.local_addr());
+        loads_the_site(&origin, "/", "/");
+        loads_the_site(&origin, "/", "/football");
+        let nested = load_page(&format!("{origin}/sports/football"));
+        assert!(
+            nested
+                .iter()
+                .any(|(url, status)| url.ends_with("/sports/nsh.0123456789.js") && *status == 404),
+            "{nested:?}"
+        );
+        drop(server);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
