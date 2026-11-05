@@ -1439,6 +1439,20 @@ pub struct ListContentStyle {
     pub column_gap: Points,
 }
 
+/// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ListAlignment {
+    /// At the start of its content (default).
+    #[default]
+    Top,
+    /// At the end, like a chat log: the list opens there, stays there while
+    /// the content grows and content shorter than the viewport lies at its
+    /// bottom. Scrolled up, what is visible stays where it is; scrolled back
+    /// to the end, the list stays there again.
+    Bottom,
+}
+
 /// What a list scrolls in (`viewport`), fixed when the list is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 #[non_exhaustive]
@@ -2258,6 +2272,10 @@ pub enum Prop {
     /// content where it is. Items inserted above the visible ones never move them.
     #[prop(js = "maintainVisibleContentPosition", with = crate::js::host_values::visible_content, reset = Prop::FollowEnd(None), ts = "{ autoscrollToBottomThreshold?: number }", on = LIST)]
     FollowEnd(Option<Points>),
+    /// `alignment`: where the list rests; `bottom` for a chat in reading order
+    /// (an inverted list ignores it).
+    #[prop(js = "alignment", on = LIST)]
+    ListAlignment(ListAlignment),
     /// `stickyHeaderIndices`: items that stick to the start while scrolled past
     /// (one column, not inverted).
     #[prop(js = "stickyHeaderIndices", with = crate::js::host_values::sticky, reset = Prop::StickyIndices(Vec::new()), on = LIST)]

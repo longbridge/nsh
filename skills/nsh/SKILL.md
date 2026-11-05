@@ -138,8 +138,11 @@ A floor, not a substitute for the guides.
   switch, and a test still passes. Style every part, and look at the result.
 - **Use the semantic component.** Button, Menu, Popover, Sheet, Dialog and Select bring
   focus, keyboard, dismissal and accessibility. Do not rebuild them from a view.
-- **Long data goes in a virtualized list,** with per-item state in data keyed by id,
-  never in a signal created in a row: cells are reused for other rows.
+- **Use a virtualized list by default for collections that can grow,** including chat,
+  feeds and history: `List` in TSX, `virtual_list` in Rust. Use `Scroll` and `Each`
+  for small, bounded content. Keep per-item state in data keyed by id, never in a
+  signal created in a row: cells are reused for other rows. Test recycling and
+  off-screen jumps, and preserve the visible position as data changes.
 - **A decision the system needs at once is a prop**, set beforehand (`pop_on_back`,
   `close_on_escape`, `disabled`), never a callback returning a boolean.
 - **Do not change NSH to fit an app.** Solve it in the app first: its own components, a
