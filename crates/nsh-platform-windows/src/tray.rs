@@ -8,7 +8,7 @@
 //!   taskbar, black on the light one: Settings > Personalization > Colors,
 //!   "Windows mode"), and painted again when that changes. Without an icon
 //!   the tray shows the app's (the executable's first icon resource, else
-//!   Windows' default application icon). The old icon stays until a new
+//!   its window's, else Windows' default application icon). The old icon stays until a new
 //!   one has loaded.
 //! - `NOTIFYICON_VERSION_4`: a primary click is `NIN_SELECT`, Enter or Space
 //!   on the focused icon `NIN_KEYSELECT`, a secondary click or Shift+F10
@@ -45,8 +45,8 @@ use windows::{
             },
             WindowsAndMessaging::{
                 CreateIconIndirect, DestroyIcon, GA_ROOT, GetAncestor, GetWindowTextW, HICON,
-                ICONINFO, IDI_APPLICATION, LoadIconW, RegisterWindowMessageW, SM_CXSMICON,
-                WM_CONTEXTMENU,
+                ICON_SMALL, ICONINFO, IDI_APPLICATION, LoadIconW, RegisterWindowMessageW,
+                SM_CXSMICON, SendMessageW, WM_CONTEXTMENU, WM_GETICON,
             },
         },
     },
@@ -135,7 +135,7 @@ pub(crate) fn set(surface: &Rc<Surface>, tray: Option<&Tray>) {
             hwnd,
             surface: Rc::downgrade(surface),
             tray: tray.clone(),
-            icon: app_icon(),
+            icon: app_icon(hwnd),
             source: None,
             loaded: None,
             load: None,
@@ -164,7 +164,7 @@ fn load_icon(surface: &Surface, hwnd: HWND, source: Option<ImageSource>) {
                 item.loaded = None;
                 item.source = Some(None);
                 item.icon.release();
-                item.icon = app_icon();
+                item.icon = app_icon(hwnd);
             }
         });
         return;
@@ -349,12 +349,19 @@ fn icon_size(hwnd: HWND) -> (u32, f32) {
 }
 
 /// The app's icon: the executable's first icon resource, which packaging
-/// writes, else Windows' application icon. Shared, never destroyed.
-fn app_icon() -> Icon {
-    // SAFETY: plain calls; resource 1 is the icon packaging writes.
+/// writes, else the window's small icon (the app's `.ico`), else Windows'
+/// application icon. Shared, never destroyed here.
+fn app_icon(hwnd: HWND) -> Icon {
+    // SAFETY: plain calls; resource 1 is the icon packaging writes, and the
+    // window's icon is kept by whoever set it while the window lives.
     let handle = unsafe {
         LoadIconW(Some(crate::window::instance()), PCWSTR(1 as _))
-            .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+            .ok()
+            .or_else(|| {
+                let icon = SendMessageW(hwnd, WM_GETICON, Some(WPARAM(ICON_SMALL as usize)), None);
+                (icon.0 != 0).then_some(HICON(icon.0 as _))
+            })
+            .or_else(|| LoadIconW(None, IDI_APPLICATION).ok())
             .unwrap_or_default()
     };
     Icon {
