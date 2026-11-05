@@ -61,7 +61,11 @@ belong to the app, which owns retention and its storage budget.
 - **Why not `drawRect:`**: `drawRect:` views are redrawn by AppKit's display pass whenever a scroll moves their
   container; plain content layers are not, and are drawn again only when their content or size changes. A canvas
   that paints often draws asynchronously (`canvas.rs` `Cadence`), one with a long static part keeps it as a
-  `CGLayer`. Contents stay in the screen's format.
+  `CGLayer`. Shorter drawings with a small source-over animated suffix can instead keep that suffix in a small
+  sibling content layer (`canvas.rs` `layer_split`, `NshView::update_canvas_overlay`). Animated values redraw only
+  that surface; a new drawing redraws both. The geometry scan includes every suffix paint, including constant
+  shapes after animated ones. Complex compositing, unbounded or large suffixes, and long prefixes use the existing
+  path. Both surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
 - **No masks on what scrolls, where avoidable** (`visual.rs`): the window server pays for a mask on every frame its
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a

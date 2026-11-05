@@ -69,6 +69,7 @@ canvas::Num::get ->                                              # a generic num
 canvas::Num::get(slot)                                           # a generic number (a JS value, a recorded slot)
 canvas::ViewBoxFit::transform ->                                 # a transform matrix (scales, and offsets in points)
 canvas::damage::DamageScan::damage(value)                        # a generic number (a JS value, a recorded slot)
+canvas::damage::DamageScan::painted_after(value)                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_path(slot)                                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)

@@ -325,6 +325,8 @@ pub(crate) struct Ivars {
     /// Text and canvas views: the layer their content is drawn in
     /// ([`NshView::redraw`]), and its delegate.
     content: RefCell<Option<(Retained<CALayer>, Retained<Drawer>)>>,
+    /// A canvas's small animated suffix, above its static content.
+    overlay: RefCell<Option<(Retained<CALayer>, Retained<Drawer>)>>,
     /// Its content changed while it could not be seen
     /// ([`crate::mount::Mounter::draw_when_shown`]).
     stale: Cell<bool>,
@@ -369,26 +371,38 @@ define_class!(
                 CGContext::scale_ctm(c, 1.0, -1.0);
                 base.d = -1.0;
             }
-            crate::text::draw(cx, &state);
+            let asynchronous = layer.drawsAsynchronously();
+            let overlay = view.ivars().overlay.borrow();
+            let part = match overlay.as_ref() {
+                Some((top, _)) if std::ptr::eq(&**top, layer) => crate::canvas::LayerPart::Suffix,
+                Some(_) => crate::canvas::LayerPart::Prefix,
+                None => crate::canvas::LayerPart::Whole { asynchronous },
+            };
+            if part == crate::canvas::LayerPart::Suffix {
+                let origin = layer.frame().origin;
+                CGContext::translate_ctm(c, -origin.x, -origin.y);
+            } else {
+                crate::text::draw(cx, &state);
+            }
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
             let dirty = CGContext::clip_bounding_box(c);
             let (size, scale) = (layer.bounds().size, layer.contentsScale());
-            let asynchronous = layer.drawsAsynchronously();
             if crate::fps::measuring() && state.canvas.is_some() {
                 let start = std::time::Instant::now();
-                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous, base);
+                crate::canvas::draw(cx, &state, dirty, size, scale, base, part);
                 crate::fps::drew_canvas(start.elapsed());
             } else {
-                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous, base);
+                crate::canvas::draw(cx, &state, dirty, size, scale, base, part);
             }
             CGContext::restore_g_state(c);
             // Where the next paint happens (`canvas.rs`): Core Animation's
             // threads for a canvas painting often, at once for the rest.
-            if let Some(canvas) = &state.canvas
-                && canvas.draws_asynchronously() != asynchronous
-            {
-                layer.setDrawsAsynchronously(!asynchronous);
+            if let Some(canvas) = &state.canvas {
+                let desired = part != crate::canvas::LayerPart::Suffix && canvas.draws_asynchronously();
+                if desired != asynchronous {
+                    layer.setDrawsAsynchronously(desired);
+                }
             }
         }
 
@@ -1125,6 +1139,7 @@ impl NshView {
             surface: RefCell::new(Weak::new()),
             tracking: Cell::new(false),
             content: RefCell::new(None),
+            overlay: RefCell::new(None),
             stale: Cell::new(false),
             unplaced: Cell::new(false),
         });
@@ -1326,8 +1341,52 @@ impl NshView {
             return;
         }
         if let Some(layer) = self.content_layer() {
+            self.update_canvas_overlay();
             layer.setNeedsDisplay();
         }
+    }
+
+    /// Updates the small animated surface and reports a partition change.
+    fn update_canvas_overlay(&self) -> bool {
+        let bounds = self
+            .state()
+            .canvas
+            .as_ref()
+            .and_then(|canvas| canvas.layer_bounds(self.ns().frame().size));
+        let mut overlay = self.ivars().overlay.borrow_mut();
+        let Some(bounds) = bounds else {
+            if let Some((layer, _)) = overlay.take() {
+                layer.removeFromSuperlayer();
+                return true;
+            }
+            return false;
+        };
+        let changed = overlay.is_none();
+        if changed {
+            let Some(host) = self.ns().layer() else {
+                return false;
+            };
+            let mtm = MainThreadMarker::from(&*self.0);
+            let drawer = mtm
+                .alloc::<Drawer>()
+                .set_ivars(objc2::rc::Weak::from_retained(&self.0));
+            // SAFETY: NSObject's initializer.
+            let drawer: Retained<Drawer> = unsafe { msg_send![super(drawer), init] };
+            let layer = CALayer::new();
+            layer.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*drawer)));
+            layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
+            layer.setContentsScale(self.backing_scale());
+            layer.setZPosition(crate::decor::BEHIND / 4.0);
+            host.addSublayer(&layer);
+            *overlay = Some((layer, drawer));
+        }
+        if let Some((layer, _)) = &*overlay {
+            if layer.frame() != bounds {
+                layer.setFrame(bounds);
+            }
+            layer.setNeedsDisplay();
+        }
+        changed
     }
 
     /// The layer its content is drawn in (made on first use).
@@ -1398,11 +1457,13 @@ impl NshView {
     /// Its window or screen changed: the content layer draws at the new
     /// scale.
     fn rescale(&self) {
-        if let Some((layer, _)) = &*self.ivars().content.borrow() {
-            let scale = self.backing_scale();
-            if layer.contentsScale() != scale {
-                layer.setContentsScale(scale);
-                layer.setNeedsDisplay();
+        for surface in [&self.ivars().content, &self.ivars().overlay] {
+            if let Some((layer, _)) = &*surface.borrow() {
+                let scale = self.backing_scale();
+                if layer.contentsScale() != scale {
+                    layer.setContentsScale(scale);
+                    layer.setNeedsDisplay();
+                }
             }
         }
     }
@@ -1414,6 +1475,13 @@ impl NshView {
         let Some(layer) = self.content_layer() else {
             return;
         };
+        let changed = self.update_canvas_overlay();
+        if changed {
+            layer.setNeedsDisplay();
+        }
+        if self.ivars().overlay.borrow().is_some() || changed {
+            return;
+        }
         // Layer space is y up unless its contents are flipped
         // (`drawLayer:inContext:` flips the drawing the same way).
         let y = if layer.contentsAreFlipped() {
