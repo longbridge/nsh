@@ -194,6 +194,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(window) = window(surface) {
                 window.present();

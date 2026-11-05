@@ -281,7 +281,21 @@ non-client area; points are scaled by the surface's current DPI. Changes are
 immediate. `Window.setLevel` uses `HWND_TOPMOST`, `HWND_NOTOPMOST` or `HWND_BOTTOM`;
 the last moves to the bottom of the current z-order, and later activation can
 raise the window. The top-level guard keeps these commands out of embedded child
-windows.
+windows. `Window.setSkipTaskbar` (and `AppOptions::skip_taskbar`) calls
+`ITaskbarList::DeleteTab` / `AddTab`; the taskbar adds a tab again whenever a
+window is shown, so the choice is kept in the chrome and applied again by
+`AppView::show`.
+
+### Transparent windows
+
+`AppOptions::transparent` makes a borderless top-level window (`WS_POPUP`, no
+system frame or shadow) with `WS_EX_NOREDIRECTIONBITMAP`, so nothing but
+DirectComposition shows. The surface makes its `Composition` with the window and
+keeps it (`Surface::base`); the window's own swap chain is then a composition
+swap chain with premultiplied alpha (`DXGI_ALPHA_MODE_PREMULTIPLIED`), the
+bottom visual of the tree, below web views and their layers, and frames clear
+to transparent instead of the window background. Web views reuse that
+composition. Example: `cargo run -p nsh-platform-windows --example transparent`.
 
 ## Local file drops
 

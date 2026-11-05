@@ -130,6 +130,18 @@ pub struct AppOptions {
     pub title: String,
     /// The initial window size in points.
     pub size: (i32, i32),
+    /// A see-through window (Electron's, Tauri's and winit's
+    /// `transparent`): where the app draws nothing (no root background),
+    /// the desktop shows, and translucent colors blend with it. The
+    /// window has no system frame (title bar, borders, shadow): the app
+    /// draws what it wants of one and moves the window with
+    /// `desktop={{ windowDrag: true }}`. Top-level windows only; set when
+    /// the window is made.
+    pub transparent: bool,
+    /// Keeps the window out of the taskbar from the start (Electron's and
+    /// Tauri's `skipTaskbar`); the app changes it with
+    /// `Window.setSkipTaskbar`.
+    pub skip_taskbar: bool,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
     pub components: crate::native::Components,
@@ -171,6 +183,8 @@ impl Default for AppOptions {
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
             size: (1200, 800),
+            transparent: false,
+            skip_taskbar: false,
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
@@ -226,7 +240,15 @@ impl AppView {
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);
-        let hwnd = crate::window::create(&surface, &options.title, options.size, parent)?;
+        let transparent = options.transparent && parent.is_none();
+        let hwnd =
+            crate::window::create(&surface, &options.title, options.size, parent, transparent)?;
+        if transparent {
+            *surface.base.borrow_mut() = Some(crate::compose::Composition::new(hwnd)?);
+        }
+        if options.skip_taskbar && parent.is_none() {
+            surface.chrome.skip_taskbar.set(true);
+        }
         let view = Rc::new(AppView {
             surface,
             hwnd,
@@ -249,6 +271,8 @@ impl AppView {
     /// Shows a top-level view's window.
     pub fn show(&self) {
         crate::window::show(self.hwnd);
+        // The taskbar adds a tab for a window being shown.
+        crate::chrome::reapply_skip_taskbar(&self.surface);
     }
 
     /// The channel with the apps this view runs (`nsh/host`;
@@ -509,5 +533,73 @@ pub fn fatal_error(message: &str) {
             &HSTRING::from("nsh"),
             MB_OK | MB_ICONERROR,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, WS_CAPTION,
+        WS_EX_NOREDIRECTIONBITMAP, WS_THICKFRAME,
+    };
+
+    use super::*;
+
+    fn styles(hwnd: HWND) -> (u32, u32) {
+        // SAFETY: plain reads on a live window.
+        unsafe {
+            (
+                GetWindowLongPtrW(hwnd, GWL_STYLE) as u32,
+                GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32,
+            )
+        }
+    }
+
+    #[test]
+    fn transparent_window_is_borderless_and_composed() {
+        let view = AppView::new(
+            None,
+            AppOptions {
+                size: (200, 120),
+                transparent: true,
+                skip_taskbar: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (style, ex) = styles(view.hwnd());
+        assert_eq!(
+            style & (WS_CAPTION.0 | WS_THICKFRAME.0),
+            0,
+            "no system frame"
+        );
+        assert_ne!(ex & WS_EX_NOREDIRECTIONBITMAP.0, 0, "no redirection bitmap");
+        let surface = view.surface();
+        assert!(surface.transparent());
+        assert!(surface.chrome.skip_taskbar.get());
+        assert_eq!(
+            crate::system::window_background(surface),
+            nsh_core::Color::TRANSPARENT
+        );
+        crate::render::frame(surface);
+        if crate::gfx::get().is_ok() {
+            let swap = surface.swap.borrow();
+            assert!(swap.as_ref().is_some_and(|s| s.premultiplied()));
+            assert!(surface.base.borrow().as_ref().is_some_and(|c| c.has_base()));
+        }
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(view.hwnd()) };
+    }
+
+    #[test]
+    fn opaque_window_keeps_its_frame() {
+        let view = AppView::new(None, AppOptions::default()).unwrap();
+        let (style, ex) = styles(view.hwnd());
+        assert_ne!(style & WS_CAPTION.0, 0);
+        assert_eq!(ex & WS_EX_NOREDIRECTIONBITMAP.0, 0);
+        assert!(!view.surface().transparent());
+        assert!(!view.surface().chrome.skip_taskbar.get());
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(view.hwnd()) };
     }
 }
