@@ -1,6 +1,6 @@
 import { cleanup, signal } from "nsh";
 import { GlobalShortcut, isAvailable, Tray } from "nsh/desktop";
-import mark from "../mark.svg";
+import star from "../star.svg";
 import { Badge, Button, Caption, Card, DemoPage, Row } from "../ui";
 
 /**
@@ -17,7 +17,7 @@ export function TrayDemo() {
   const showTray = () => {
     shown.set(true);
     Tray.set({
-      icon: mark,
+      icon: star,
       tooltip: "NSH Gallery",
       onClick: () => last.set("Clicked the icon"),
       menu: [
