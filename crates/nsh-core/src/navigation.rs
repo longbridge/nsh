@@ -97,10 +97,14 @@ struct Transition<M> {
 }
 
 impl<M> Transition<M> {
+    /// Its length in milliseconds, at least one.
+    fn ms(&self) -> f64 {
+        (self.duration.as_micros() as f64 / 1000.0).max(1.0)
+    }
+
     /// Its progress at `now` (0 to 1 and beyond, not eased).
     fn progress(&self, now: f64) -> f64 {
-        let ms = self.duration.as_micros() as f64 / 1000.0;
-        self.start.map_or(0.0, |s| (now - s) * 1000.0 / ms.max(1.0))
+        self.start.map_or(0.0, |s| (now - s) * 1000.0 / self.ms())
     }
 }
 
@@ -159,6 +163,21 @@ impl<M> Transitions<M> {
             }
         }
         taken
+    }
+
+    /// When the next transition ends (seconds, the clock
+    /// [`Transitions::tick`] is given), or `now` when one has to be ticked
+    /// to start: what a surface that draws no frames (a hidden window)
+    /// ticks them at, so screens settle and report it on time without
+    /// frames. `None` when none runs.
+    pub fn deadline(&self, now: f64) -> Option<f64> {
+        self.list
+            .iter()
+            .map(|t| t.start.map_or(now, |s| s + t.ms() / 1000.0))
+            .reduce(f64::min)
+            // A millisecond past it: a tick there finds it ended whatever
+            // the rounding.
+            .map(|t| t + 0.001)
     }
 
     /// A frame at `now` (seconds): the transitions that end are taken out,
@@ -359,6 +378,27 @@ mod tests {
         assert_eq!(t.progress(2.0), 0.0);
         assert!((t.progress(2.15) - 0.5).abs() < 1e-9);
         assert!(t.progress(2.3) >= 1.0 - 1e-9);
+    }
+
+    #[test]
+    fn transitions_end_at_their_deadlines() {
+        let mut t = Transitions::default();
+        assert_eq!(t.deadline(5.0), None);
+        t.push(SLIDE, 'a');
+        t.push(FADE, 'b');
+        // Not started: tick now.
+        assert_eq!(t.deadline(5.0), Some(5.001));
+        t.tick(5.0);
+        let first = t.deadline(5.0).expect("two run");
+        assert!((first - 5.201).abs() < 1e-9, "{first}");
+        assert!(matches!(
+            t.tick(first)[..],
+            [Tick::At(0, _), Tick::Ended('b')]
+        ));
+        let last = t.deadline(first).expect("one runs");
+        assert!((last - 5.301).abs() < 1e-9, "{last}");
+        assert!(matches!(t.tick(last)[..], [Tick::Ended('a')]));
+        assert_eq!(t.deadline(last), None);
     }
 
     #[test]
