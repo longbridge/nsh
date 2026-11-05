@@ -6455,7 +6455,7 @@ class Player {
    * menu); true when a view took it. The browser raises `contextmenu` for
    * right clicks, Control-clicks on macOS, the keyboard's Menu key and
    * Shift+F10 (on the focused element), and screen readers' "show menu"
-   * action. Those come with no pointer (the DOM's `pointerType` `""`): the
+   * action. Those come with no pointer (an empty `pointerType` or no button): the
    * event names none (`pointerType: null`) and is placed at the view's
    * bottom-start corner, where a menu opened below it starts.
    */
@@ -6466,8 +6466,9 @@ class Player {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
         const r = el.getBoundingClientRect();
-        // A `MouseEvent` (no `pointerType`) is a browser's older mouse one.
-        const pointerType = e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        // Chromium can name a mouse for keyboard context menus, but no
+        // button (-1). Older MouseEvents without pointerType are mouse input.
+        const pointerType = e.button === -1 ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
         let at = e;
         if (pointerType === null) {
           const rtl = getComputedStyle(el).direction === "rtl";

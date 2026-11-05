@@ -53,6 +53,43 @@ const failing = () => {
 const events = (sent) =>
   sent.filter(([name, p]) => name === "onHost" && p.type === "event").map(([, p]) => p.event);
 
+test("keyboard context menus have no pointer even when Chromium names a mouse", () => {
+  const { player } = fakePlayer();
+  const el = {
+    _id: 2,
+    _events: new Set(["onContextMenu"]),
+    getBoundingClientRect: () => ({ left: 10, right: 90, top: 20, bottom: 60 }),
+  };
+  player.viewOf = () => el;
+  player.ancestors = () => [el];
+  player.point = (at) => [at.clientX, at.clientY];
+  let payload;
+  player.event = (_, name, value) => { assert.equal(name, "onContextMenu"); payload = value; };
+  const saved = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = () => ({ direction: "ltr" });
+  try {
+    for (const [pointerType, button, keyboard] of [
+      ["mouse", -1, true],
+      ["", -1, true],
+      ["", 0, true],
+      ["mouse", 2, false],
+      [undefined, 2, false],
+      ["mouse", 0, false],
+    ]) {
+      let prevented = false;
+      assert.equal(player.contextMenu({
+        target: el, pointerType, button, clientX: 40, clientY: 30,
+        preventDefault() { prevented = true; },
+      }), true);
+      assert.equal(prevented, true);
+      assert.equal(payload.pointerType, keyboard ? null : "mouse");
+      assert.deepEqual(payload.pagePosition, keyboard ? { x: 10, y: 60 } : { x: 40, y: 30 });
+    }
+  } finally {
+    globalThis.getComputedStyle = saved;
+  }
+});
+
 test("input autofill hints are set, changed and cleared on both field kinds", () => {
   const { player } = fakePlayer();
   const attrs = new Map();
