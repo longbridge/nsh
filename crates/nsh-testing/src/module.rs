@@ -284,6 +284,7 @@ impl Testing {
                 first_day_of_week: options.first_day_of_week,
                 measurement_system: options.measurement_system,
                 temperature_unit: options.temperature_unit,
+                ..RegionalPreferences::default()
             },
             reduced_motion: options.reduced_motion,
             platform: options.platform,

@@ -699,6 +699,7 @@ impl std::fmt::Display for TimeZone {
 /// settings). Where the user set none, they are the region's
 /// ([`RegionalPreferences::of`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct RegionalPreferences {
     /// 12- or 24-hour time.
     pub hour_cycle: HourCycle,
@@ -773,6 +774,7 @@ impl RegionalPreferences {
                 .measurement_system
                 .unwrap_or(own.measurement_system),
             temperature_unit: keywords.temperature_unit.unwrap_or(own.temperature_unit),
+            ..own
         }
     }
 
@@ -805,6 +807,7 @@ impl RegionalPreferences {
                 "BS" | "BZ" | "KY" | "PR" | "PW" | "US" => TemperatureUnit::Fahrenheit,
                 _ => TemperatureUnit::Celsius,
             },
+            ..Self::default()
         }
     }
 }
@@ -1355,6 +1358,7 @@ mod tests {
             first_day_of_week: Weekday::Monday,
             measurement_system: MeasurementSystem::Metric,
             temperature_unit: TemperatureUnit::Celsius,
+            ..RegionalPreferences::default()
         };
         assert_eq!(of("en-US"), RegionalPreferences::EN_US);
         assert_eq!(RegionalPreferences::default(), RegionalPreferences::EN_US);

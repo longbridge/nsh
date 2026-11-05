@@ -444,10 +444,8 @@ fn Forecast() -> impl IntoElement {
 fn components_follow_the_regional_preferences() {
     let (engine, rx, _) = start::<Forecast>(Environment::default());
     until(&rx, "3 PM, 68 °F, weeks from 7, us units, clock ran 1");
-    let celsius = RegionalPreferences {
-        temperature_unit: TemperatureUnit::Celsius,
-        ..RegionalPreferences::EN_US
-    };
+    let mut celsius = RegionalPreferences::EN_US;
+    celsius.temperature_unit = TemperatureUnit::Celsius;
     let germany = RegionalPreferences::of(Locale::parse("de-DE").unwrap());
     for (regional, shown) in [
         // Only the unit changes: the clock's effect does not run again.

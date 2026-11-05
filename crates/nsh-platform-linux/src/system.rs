@@ -495,11 +495,10 @@ fn posix_regional(var: impl Fn(&str) -> Option<String>, locale: Locale) -> Regio
             )
     };
     let units = of("LC_MEASUREMENT");
-    RegionalPreferences {
-        measurement_system: units.measurement_system,
-        temperature_unit: units.temperature_unit,
-        ..of("LC_TIME")
-    }
+    let mut regional = of("LC_TIME");
+    regional.measurement_system = units.measurement_system;
+    regional.temperature_unit = units.temperature_unit;
+    regional
 }
 
 /// The user's regional preferences now: the POSIX locales', with GNOME's
