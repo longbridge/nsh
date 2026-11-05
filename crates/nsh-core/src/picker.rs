@@ -50,6 +50,10 @@ pub struct PickRequest {
     pub quality: Option<Percentage>,
     /// Which formats the images come in.
     pub format: PickFormat,
+    /// The pick is for arbitrary files (a document picker on Android),
+    /// not images: the fields above that shape images (`max_dimension`,
+    /// `quality`, `format`) do not apply to it.
+    pub files: bool,
 }
 
 impl Default for PickRequest {
@@ -59,6 +63,7 @@ impl Default for PickRequest {
             max_dimension: None,
             quality: None,
             format: PickFormat::Compatible,
+            files: false,
         }
     }
 }

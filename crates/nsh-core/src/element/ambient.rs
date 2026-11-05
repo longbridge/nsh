@@ -639,6 +639,18 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
     answer
 }
 
+/// Shows the system's picker for arbitrary files and gives the ones the
+/// user picked as they are, none when cancelled (a document picker;
+/// Android's `ACTION_OPEN_DOCUMENT`), to await in a task. Only the
+/// request's `limit` applies.
+pub fn pick_files(request: crate::picker::PickRequest) -> Answer<Vec<crate::picker::PickedFile>> {
+    let mut request = request;
+    request.files = true;
+    let (answer, action) = super::services::pick_images(request);
+    act(action);
+    answer
+}
+
 /// Whether speech can be recognized here (TS: `Speech.available()`): the
 /// platform recognizes speech (macOS, iOS), or the embedding app gave the
 /// core its own recognizer. To await in a task.
