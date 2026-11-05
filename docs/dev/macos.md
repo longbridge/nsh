@@ -110,7 +110,11 @@ belong to the app, which owns retention and its storage budget.
   with attachments are made at once on the engine.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
   link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
-  screen's `maximumFramesPerSecond` (set again when the link resumes). The link does not fire while the window is
+  screen's `maximumFramesPerSecond`, or less while everything that wants frames asked for a lower rate (`frameRate`,
+  `animationFrameRate`: `animation.md` "Frame rate"): `Surface::frame_rate` folds the graph's rate with the frame
+  callbacks that report one (`Surface::cap_frame`, a view's keyframes alone); anything else (a JS frame request, a
+  batch waiting, a transition, a scroll glide) wants the screen's highest. The range (`frame_rate_range`) is set when
+  the link starts or resumes and again whenever the folded rate changes. The link does not fire while the window is
   occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
   only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
   waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so

@@ -233,6 +233,12 @@ pub(crate) struct Surface {
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The display link, while it runs.
     link: RefCell<Option<Retained<CADisplayLink>>>,
+    /// The rate the display link was last asked for
+    /// ([`Surface::frame_rate`]; `None`: the screen's highest).
+    link_rate: Cell<Option<f32>>,
+    /// The frame callbacks that asked for a rate in the last frame
+    /// ([`Surface::cap_frame`]): how many, and the highest rate.
+    capped_frames: Cell<(usize, f32)>,
     /// The performance monitor ([`Surface::set_perf_monitor`]), and whether
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
@@ -326,6 +332,8 @@ impl Surface {
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
             link: RefCell::new(None),
+            link_rate: Cell::new(None),
+            capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
             last_tick: Cell::new(0.0),
@@ -811,8 +819,14 @@ impl Surface {
         if let Some(link) = &*self.link.borrow() {
             if link.isPaused() {
                 // The window may have moved to another screen meanwhile.
+                self.capped_frames.set((0, 0.0));
+                self.link_rate.set(self.frame_rate());
                 link.setPreferredFrameRateRange(self.frame_rate_range());
                 link.setPaused(false);
+            } else {
+                // What starts now may want more frames than what runs;
+                // only a full frame lowers the rate (`ticked`).
+                self.update_frame_rate(link, true);
             }
             return;
         }
@@ -826,6 +840,8 @@ impl Surface {
                 .ns()
                 .displayLinkWithTarget_selector(&ticker, sel!(tick:))
         };
+        self.capped_frames.set((0, 0.0));
+        self.link_rate.set(self.frame_rate());
         link.setPreferredFrameRateRange(self.frame_rate_range());
         // SAFETY: the main run loop exists while the app runs.
         unsafe {
@@ -837,9 +853,59 @@ impl Surface {
         *self.link.borrow_mut() = Some(link);
     }
 
-    /// The frame rates the display link asks for: the screen's highest
-    /// (120 Hz on ProMotion), at least 80 there. Without it the link may
-    /// settle on 60 Hz.
+    /// A frame callback that keeps running needs at most `hz` frames per
+    /// second (a keyframe animation alone on its view): it says so on each
+    /// of its frames.
+    pub(crate) fn cap_frame(&self, hz: f32) {
+        let (count, highest) = self.capped_frames.get();
+        self.capped_frames.set((count + 1, highest.max(hz)));
+    }
+
+    /// The highest frame rate what wants frames needs, in Hz: the graph's
+    /// animations ([`nsh_core::animation::Graph::frame_rate`]) and the
+    /// frame callbacks that asked for a rate. `None`, the screen's
+    /// highest, as soon as one runs uncapped or anything else wants frames:
+    /// a JS frame request, batches waiting, a frame callback without a rate
+    /// (transitions, scroll glides, gestures).
+    fn frame_rate(&self) -> Option<f32> {
+        if self.js_frame.get() || !self.queued.borrow().is_empty() {
+            return None;
+        }
+        let (capped, highest) = self.capped_frames.get();
+        if self.frame_callbacks.borrow().len() > capped {
+            return None;
+        }
+        let callbacks = (capped > 0).then_some(highest);
+        let anim = self.anim.borrow();
+        if !anim.animating() {
+            return callbacks;
+        }
+        let graph = anim.frame_rate();
+        match callbacks {
+            Some(_) => nsh_core::animation::highest_frame_rate(graph, callbacks),
+            None => graph,
+        }
+    }
+
+    /// Asks the display link for the rate what runs needs, when it changed
+    /// (`raise_only`: when it is higher).
+    fn update_frame_rate(&self, link: &CADisplayLink, raise_only: bool) {
+        let rate = self.frame_rate();
+        let old = self.link_rate.get();
+        let changed = match (old, rate) {
+            (Some(old), Some(new)) => new > old || (!raise_only && new < old),
+            (Some(_), None) => true,
+            (None, Some(_)) => !raise_only,
+            (None, None) => false,
+        };
+        if changed {
+            self.link_rate.set(rate);
+            link.setPreferredFrameRateRange(self.frame_rate_range());
+        }
+    }
+
+    /// The frame rates the display link asks for ([`frame_rate_range`]) at
+    /// the rate it was last asked for, on the window's screen.
     fn frame_rate_range(&self) -> objc2_quartz_core::CAFrameRateRange {
         let max = self
             .root
@@ -849,11 +915,7 @@ impl Surface {
             .or_else(|| objc2_app_kit::NSScreen::mainScreen(self.mtm))
             .map_or(60, |s| s.maximumFramesPerSecond())
             .max(1) as f32;
-        objc2_quartz_core::CAFrameRateRange {
-            minimum: max.min(80.0),
-            maximum: max,
-            preferred: max,
-        }
+        frame_rate_range(self.link_rate.get(), max)
     }
 
     /// When the next thing that changes the app's state comes due without
@@ -939,6 +1001,8 @@ impl Surface {
         self.frame(now, link.targetTimestamp() - link.timestamp());
         if !self.wants_frames() && self.perf.borrow().is_none() {
             link.setPaused(true);
+        } else {
+            self.update_frame_rate(link, false);
         }
     }
 
@@ -968,6 +1032,8 @@ impl Surface {
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
+        // The callbacks kept say again which rate they need.
+        self.capped_frames.set((0, 0.0));
         let mut kept: Vec<(FrameCallback, Option<f64>)> = callbacks
             .into_iter()
             .filter_map(|(mut f, _)| match f(self, now) {
@@ -1061,6 +1127,21 @@ impl Drop for Surface {
     }
 }
 
+/// The frame rates a display link asks for to run at `rate` Hz (`None`:
+/// the screen's highest) on a screen of `max` Hz: `rate` within the
+/// screen's as the preferred and the highest, and at least 80 Hz below
+/// it on a faster screen (else the link may settle on 60) or the rate
+/// itself on a slower one, so a request of 30 Hz is honored.
+fn frame_rate_range(rate: Option<f32>, max: f32) -> objc2_quartz_core::CAFrameRateRange {
+    let max = max.max(1.0);
+    let preferred = rate.map_or(max, |rate| rate.clamp(1.0, max));
+    objc2_quartz_core::CAFrameRateRange {
+        minimum: preferred.min(80.0),
+        maximum: preferred,
+        preferred,
+    }
+}
+
 /// Runs `f` on the main queue after `ms` milliseconds.
 fn after(ms: u64, f: impl FnOnce() + Send + 'static) {
     let when = dispatch2::DispatchTime::NOW.time((ms * 1_000_000) as i64);
@@ -1077,4 +1158,34 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     let r = f();
     CATransaction::commit();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_rate_range;
+
+    fn range(rate: Option<f32>, max: f32) -> [f32; 3] {
+        let r = frame_rate_range(rate, max);
+        [r.minimum, r.maximum, r.preferred]
+    }
+
+    #[test]
+    fn frame_rate_ranges_ask_for_the_rate_within_the_screens() {
+        // Nothing asked for: the screen's highest, at least 80 Hz.
+        assert_eq!(range(None, 120.0), [80.0, 120.0, 120.0]);
+        assert_eq!(range(None, 60.0), [60.0, 60.0, 60.0]);
+        // A rate below the screen's: that rate, not forced up to 80.
+        assert_eq!(range(Some(30.0), 120.0), [30.0, 30.0, 30.0]);
+        assert_eq!(range(Some(100.0), 120.0), [80.0, 100.0, 100.0]);
+        // Above the screen's: the screen's.
+        assert_eq!(range(Some(240.0), 120.0), [80.0, 120.0, 120.0]);
+        assert_eq!(range(Some(90.0), 60.0), [60.0, 60.0, 60.0]);
+        // Every range is one the display link takes.
+        for rate in [None, Some(0.5), Some(24.0), Some(48.0), Some(144.0)] {
+            for max in [0.0, 30.0, 60.0, 120.0, 144.0] {
+                let [minimum, maximum, preferred] = range(rate, max);
+                assert!(0.0 < minimum && minimum <= preferred && preferred <= maximum);
+            }
+        }
+    }
 }

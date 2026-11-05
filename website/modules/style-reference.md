@@ -410,6 +410,7 @@ Built-in keyframe animations, run natively (Tailwind's `animate-*`).
 | `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | Delay before the first iteration. |
 | `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | The easing curve. |
 | `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | How many times it runs. |
+| `animationFrameRate` | `number` | `.animation(KeyframeAnimation { … })` | The highest frame rate it needs, in Hz (default: the screen's highest); macOS and iOS lower the screen's rate for it. |
 
 For animations driven by values, gestures or springs, use [`nsh`'s animation API](./nsh.md#animation) instead.
 
