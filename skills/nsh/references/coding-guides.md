@@ -16,6 +16,39 @@ This is a normative guide. **Must** marks lifecycle, correctness, or ecosystem c
 architecture and requires a concrete reason to depart from it. Current source, the reference pages and the
 declarations in `.nsh/types` remain authoritative for exact signatures.
 
+## Build the app's UI foundations before pages
+
+For a new app, establish the design standards, theme tokens and app-owned styled components before implementing
+feature pages. For an existing app, locate and reuse these first. Keep the standards and shared UI code in the app's
+repository; the [Design Guides](./design-guides.md#establish-the-apps-design-system-first) describe their contents.
+
+Use this development order:
+
+1. Identify the app's Desktop, Mobile, Web and TUI targets and their input, navigation and density requirements.
+2. Define the app's semantic color roles and light/dark values in its theme file (`nsh.json` `"theme"`), together
+   with the typography, spacing, radius and size scales the components use.
+3. Wrap and compose `nsh/base` into the app's styled controls, including visible parts, variants and interaction
+   states. Verify a representative composition on the supported targets before replicating it across pages.
+4. Compose pages from that layer. Add a missing token or shared variant in its owning layer first, then use it in
+   pages; changes to a shared control should update all its consumers consistently.
+
+NSH provides the unstyled `nsh-base` crate (`nsh/base` in TSX), analogous to `gpui-base`. The app or a community
+library owns the styled layer analogous to `gpui-component`; `nsh-core` is the underlying GPUI counterpart. App code
+should import its own styled controls for ordinary UI, keeping base-component assembly and styling in the shared
+layer. Preserve base behavior, focus and accessibility while adapting presentation for each supported platform.
+
+Theme colors must be read through semantic tokens: `theme().primary` or `theme().color("warning")` in Rust,
+`bg-primary`, `text-warning` or `token("warning")` in TSX. Define raw hex, RGB/RGBA and HSL/HSLA values in the theme
+source, not in page or component styles, including state styles, gradients and shadows. A palette class such as
+`bg-blue-500` or an arbitrary color class also bypasses the app's semantic roles. Add the missing role instead.
+Token opacity such as `bg-primary/90` or `theme().primary.opacity(0.9)` keeps the semantic source of the color.
+User-authored colors and data values, such as an image's pixels or a color picker's selected value, remain data;
+the surrounding controls still use theme tokens.
+
+Before finishing, inspect new presentation code for raw color literals and palette classes, verify shared component
+use, and exercise the feature's states in both appearances and the platforms it targets. Record any unavailable
+platform verification rather than assuming one screenshot proves all targets.
+
 ## Make the common path inexpensive
 
 **Design principle: choose framework types and ownership so ordinary component use is inexpensive by default.**

@@ -16,6 +16,15 @@ verbatim copy of that page, so a link in it such as `./coding-guides.md` means
 `https://nsh.dev/docs/coding-guides.md` (also in the `nsh` skill), and
 `../elements/index.md` means `https://nsh.dev/elements/index.md`.
 
+For a new app, establish its own design standards, semantic Theme Tokens and
+styled component library before screens. For an existing app, inspect and extend
+those foundations first. Theme colors in presentation code must come from tokens;
+raw color values belong in theme definitions. Style the parts and states of
+`nsh/base` in app-owned reusable controls, then compose pages from them. This is
+the layer corresponding to `gpui-component` above `gpui-base`. Plan for the app's
+Desktop, Mobile, Web and TUI targets, adapting input, density, navigation and
+popups while sharing semantics and tokens.
+
 Apply the guide within the user’s requested scope and the app’s established visual
 language. For a narrow change, preserve surrounding screens and components. Use
 semantic NSH base components, style their visible parts, and inspect the actual
@@ -28,12 +37,13 @@ page from [the documentation index](https://nsh.dev/llms.txt).
 ## How to read it
 
 Read the whole guide for a new screen or a redesign. For a narrow change, read "Design
-thesis" and "Start from the task" first, then the section for the change. Sections, in
+thesis", "Establish the app's design system first" and "Start from the task" first, then the section for the change. Sections, in
 order (`grep -n '^## ' references/design-guides.md`):
 
 | Section                               | Read when                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------- |
 | Design thesis                         | Always                                                                 |
+| Establish the app's design system first | Always; app standards, token-only theme colors, styled controls and platform targets |
 | Learning from Shadcn                  | Choosing what to borrow from web component libraries                   |
 | Start from the task                   | Always; task hierarchy, what to leave out                              |
 | Visual language                       | Color, typography, spacing, radius, borders, elevation, density, icons |

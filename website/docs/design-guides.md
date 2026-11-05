@@ -42,6 +42,48 @@ decoration should support them rather than compete with them.
 7. **Feedback reflects reality.** Loading, tooltips, and motion should clarify a real state or transition, not add
    ceremony to an immediate action.
 
+## Establish the app's design system first
+
+Before implementing screens in a new app, establish its own design standards, theme tokens and styled component
+library. For an existing app, inspect and extend those foundations first; a small change uses the established system.
+Keep the standards in the app repository so people and coding agents use the same decisions.
+
+The standards should name the product's visual language, typography and spacing scales, density, radii, icons,
+interaction states and supported platforms. Define semantic tokens for surfaces, foregrounds, borders, actions,
+selection, focus and status, with light and dark values and readable foreground/background pairs. Theme colors must
+come from these tokens throughout screens, reusable components, overlays and interaction states. Literal hex,
+RGBA or HSLA values belong in the token definitions; when a role is missing, add it there before using it. A token
+named after a role such as `warning` communicates more than a palette name such as `amber-500`.
+
+Build an app-owned styled layer on `nsh/base` before composing pages. Cover the controls and their parts needed by
+the app: buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback. Give them coherent
+variants, sizes, density and hover, pressed, focus, selected, disabled, loading and validation states. Pages compose
+these components; they should not restyle base controls independently. Grow this library with the app's actual
+needs, keeping every control used in a feature complete rather than prebuilding an unrelated catalog.
+
+NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to `gpui-base`, providing behavior,
+state, focus and accessibility. The styled layer corresponding to `gpui-component` belongs to the app or a community
+library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
+system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
+
+### Design for the platforms the app targets
+
+Choose the supported targets before defining component variants. Share semantics, tokens and state while adapting
+presentation and interaction to the targets the app actually needs:
+
+| Target | Design decisions |
+| --- | --- |
+| Desktop | Compact pointer controls, keyboard shortcuts, visible focus, persistent navigation, context menus and resizable panes where useful |
+| Mobile | Touch targets, safe areas, software-keyboard space, navigation back behavior and touch-appropriate sheets and menus |
+| Web | Responsive browser viewports, browser text selection and input, and touch or pointer behavior for the device running the page |
+| TUI | Whole-cell layout, terminal colors, text labels for actions, keyboard-first navigation, visible focus, terminal mouse input and compact line-based controls |
+
+Web may run on a phone or a desktop; TUI has its own `platform.idiom === "terminal"` even though
+`platform.desktop` is true. Use device and idiom information rather than assuming every desktop has window chrome.
+A component may use a popup with a pointer, a sheet on a phone and a framed list in TUI while preserving its value,
+events and accessibility meaning. Validate the component library in the app's supported appearances, input modes
+and viewports, including terminal Cells when TUI is a target ([TUI](./tui.md)).
+
 ## Learning from Shadcn
 
 Shadcn's most useful contribution is not a particular border color. It is a way of building a system:
