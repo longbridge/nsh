@@ -67,7 +67,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     fenwick::Fenwick,
-    ops::{CellSlot, ListContentStyle, Viewability},
+    ops::{CellSlot, ListAlignment, ListContentStyle, Viewability},
 };
 
 /// How far beyond the viewport cells are kept rendered, in viewports.
@@ -191,12 +191,14 @@ pub(super) struct Outer {
 struct SetAside {
     inverted: bool,
     follow_end: Option<f32>,
+    alignment: ListAlignment,
 }
 
 /// Props a list in its parent's viewport ignores, each warned of once.
 pub(super) mod ignored {
     pub(crate) const INVERTED: u16 = 1 << 0;
     pub(crate) const FOLLOW_END: u16 = 1 << 1;
+    pub(crate) const ALIGNMENT: u16 = 1 << 2;
     pub(crate) const ON_SCROLL: u16 = 1 << 3;
     pub(crate) const SCROLL_VALUE: u16 = 1 << 4;
     pub(crate) const REFRESH: u16 = 1 << 5;
@@ -290,6 +292,8 @@ pub(super) struct ListState {
     /// a list that is not inverted follows the end of its content while
     /// it is within this distance of it.
     pub(super) follow_end: Option<f32>,
+    /// Where the list rests ([`ListAlignment`]; an inverted list ignores it).
+    pub(super) alignment: ListAlignment,
     /// `stickyHeaderIndices`, sorted.
     pub(super) sticky: Vec<u32>,
     /// Items kept rendered wherever they are (`Core::set_kept`): the ends
@@ -401,6 +405,7 @@ impl ListState {
             horizontal: false,
             inverted: false,
             follow_end: None,
+            alignment: ListAlignment::Top,
             sticky: Vec::new(),
             kept: Vec::new(),
             sticky_offset: 0.0,
@@ -456,6 +461,7 @@ impl ListState {
             let set_aside = SetAside {
                 inverted: std::mem::take(&mut self.inverted),
                 follow_end: self.follow_end.take(),
+                alignment: std::mem::take(&mut self.alignment),
             };
             if set_aside.inverted {
                 self.ignored |= ignored::INVERTED;
@@ -463,14 +469,19 @@ impl ListState {
             if set_aside.follow_end.is_some() {
                 self.ignored |= ignored::FOLLOW_END;
             }
+            if set_aside.alignment != ListAlignment::Top {
+                self.ignored |= ignored::ALIGNMENT;
+            }
             self.set_aside = Some(Box::new(set_aside));
         } else if let Some(set_aside) = self.set_aside.take() {
             let SetAside {
                 inverted,
                 follow_end,
+                alignment,
             } = *set_aside;
             self.inverted = inverted;
             self.follow_end = follow_end;
+            self.alignment = alignment;
         }
     }
 
@@ -905,7 +916,7 @@ impl ListState {
     /// scrolls).
     pub(super) fn content_len(&self) -> f32 {
         let total = self.blocks().total;
-        if self.inverted {
+        if self.inverted || self.bottom() {
             total.max(self.viewport)
         } else {
             total
@@ -918,7 +929,7 @@ impl ListState {
         if self.inverted {
             self.content_len() - at - size
         } else {
-            at
+            at + self.leading()
         }
     }
 
@@ -927,7 +938,22 @@ impl ListState {
         if self.inverted {
             self.content_len() - self.offset - self.viewport
         } else {
-            self.offset
+            self.offset - self.leading()
+        }
+    }
+
+    /// Rests at the end of its content (`alignment="bottom"`).
+    fn bottom(&self) -> bool {
+        self.alignment == ListAlignment::Bottom && !self.inverted
+    }
+
+    /// The free space before content shorter than a bottom-aligned list's
+    /// viewport, which keeps its rows at the bottom.
+    fn leading(&self) -> f32 {
+        if self.bottom() {
+            (self.viewport - self.blocks().total).max(0.0)
+        } else {
+            0.0
         }
     }
 
@@ -1109,6 +1135,22 @@ impl ListState {
         }
     }
 
+    pub(super) fn set_alignment(&mut self, alignment: ListAlignment) {
+        if self.parent {
+            self.ignored |= if alignment == ListAlignment::Top {
+                0
+            } else {
+                ignored::ALIGNMENT
+            };
+            return;
+        }
+        if alignment != self.alignment {
+            self.alignment = alignment;
+            self.anchored_end = f32::NAN;
+            self.dirty = true;
+        }
+    }
+
     /// Keeps `items` rendered outside the window (none: only the window's).
     pub(super) fn set_kept(&mut self, mut items: Vec<u32>) {
         items.sort_unstable();
@@ -1209,7 +1251,8 @@ impl ListState {
 
     /// Inverted lists keep their distance from the end of the content:
     /// returns how far to scroll after content or viewport changes (and
-    /// starts at the end). Other lists with `follow_end` stay at the end
+    /// starts at the end). Bottom-aligned lists start at the end too, and
+    /// like other lists with `follow_end` stay at the end
     /// when the end moves away while they are within the threshold of it
     /// (a growing last item, a shrinking viewport); scrolled further up,
     /// they keep what is visible (content grows below it).
@@ -1219,11 +1262,17 @@ impl ListState {
         }
         let end = (self.content_len() - self.viewport).max(0.0);
         if !self.inverted {
-            let Some(threshold) = self.follow_end else {
-                return 0.0;
+            let bottom = self.bottom();
+            let threshold = match self.follow_end {
+                Some(threshold) => threshold,
+                None if bottom => PIN_SLACK,
+                None => return 0.0,
             };
             let was = std::mem::replace(&mut self.anchored_end, end);
-            if was.is_nan() || end <= was || was - self.offset > threshold {
+            // A bottom-aligned list opens at its end, without a scroll
+            // command to pin and follow while its rows are measured.
+            let opening = bottom && was.is_nan();
+            if !opening && (was.is_nan() || end <= was || was - self.offset > threshold) {
                 return 0.0;
             }
             let delta = end - self.offset;
@@ -1782,6 +1831,64 @@ mod tests {
         l.jump(offset);
         let mut binds = Vec::new();
         assert!(l.update_window(&mut binds).start);
+    }
+
+    #[test]
+    fn bottom_aligned_lists_rest_at_their_end() {
+        let on_screen = |l: &ListState, i: u32| l.to_content(l.item_at(i), 50.0) - l.offset;
+        let mut l = list(100, 50.0, 400.0);
+        l.set_alignment(ListAlignment::Bottom);
+        // Opens at the end, its window there in the same commit.
+        assert_eq!(l.anchor_end(), 4600.0);
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        assert!(binds.iter().any(|&(_, i)| i == 99));
+        assert!(!binds.iter().any(|&(_, i)| i == 0));
+        // Appending moves no row in the content: one scroll follows.
+        let row = l.to_content(l.item_at(90), 50.0);
+        l.splice(100, 0, 1);
+        assert_eq!(l.take_splice_anchor(), 0.0);
+        assert_eq!(l.anchor_end(), 50.0);
+        assert_eq!(l.to_content(l.item_at(90), 50.0), row);
+        // So does the last row growing (a reply streaming in).
+        let anchor = l.measured(100, 80.0);
+        assert_eq!(anchor + l.anchor_end(), 30.0);
+        assert_eq!(l.to_content(l.item_at(90), 50.0), row);
+        // Older rows above the viewport leave what shows in place.
+        let before = on_screen(&l, 95);
+        l.splice(0, 0, 10);
+        let scrolled = l.take_splice_anchor();
+        assert_eq!(scrolled, 500.0);
+        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(on_screen(&l, 105), before);
+        // Scrolled up, growth below leaves it alone; back at the end, it
+        // follows again.
+        let end = l.content_len() - 400.0;
+        l.reported(end - 500.0, 0);
+        l.splice(l.count, 0, 1);
+        l.take_splice_anchor();
+        assert_eq!(l.anchor_end(), 0.0);
+        l.reported(l.content_len() - 400.0, 0);
+        l.splice(l.count, 0, 1);
+        l.take_splice_anchor();
+        assert_eq!(l.anchor_end(), 50.0);
+    }
+
+    #[test]
+    fn bottom_aligned_lists_keep_short_content_at_the_bottom() {
+        let mut l = list(2, 50.0, 400.0);
+        l.set_alignment(ListAlignment::Bottom);
+        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.content_len(), 400.0);
+        assert_eq!(l.to_content(l.item_at(0), 50.0), 300.0);
+        assert_eq!(l.to_content(l.item_at(1), 50.0), 350.0);
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        assert_eq!(binds.len(), 2);
+        // A row more: they rise, with nothing to scroll.
+        l.splice(2, 0, 1);
+        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.to_content(l.item_at(0), 50.0), 250.0);
     }
 
     #[test]

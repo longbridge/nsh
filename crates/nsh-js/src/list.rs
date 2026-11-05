@@ -48,6 +48,7 @@ const FORWARDED: &[&str] = &[
     "keyboardDismissMode",
     "numColumns",
     "inverted",
+    "alignment",
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
     "stickyHeaderOffset",

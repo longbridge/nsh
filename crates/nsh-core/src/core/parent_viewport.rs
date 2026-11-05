@@ -713,9 +713,10 @@ const AROUND: &str = "the scroll view around the list scrolls it";
 const OWN: &str = "it needs a scroll view of its own (viewport=\"own\")";
 
 /// What each [`ignored`] bit stands for, and why.
-const IGNORED: [(u16, &str, &str); 7] = [
+const IGNORED: [(u16, &str, &str); 8] = [
     (ignored::INVERTED, "`inverted`", OWN),
     (ignored::FOLLOW_END, "`maintainVisibleContentPosition`", OWN),
+    (ignored::ALIGNMENT, "`alignment`", OWN),
     (
         ignored::ON_SCROLL,
         "`onScroll` and the other scroll events",
