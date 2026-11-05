@@ -1487,7 +1487,7 @@ fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
 }
 
 /// The modifier keys of GDK's `state`.
-fn modifiers(state: gdk::ModifierType) -> nsh_core::keymap::Modifiers {
+pub(crate) fn modifiers(state: gdk::ModifierType) -> nsh_core::keymap::Modifiers {
     nsh_core::keymap::Modifiers {
         ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
         alt: state.contains(gdk::ModifierType::ALT_MASK),

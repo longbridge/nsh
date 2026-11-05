@@ -8,7 +8,7 @@
 //! last, a press none; closing it with Escape or a choice gives the focus
 //! back to its trigger. A desktop menu, on a Mac. A context menu opened
 //! from the keyboard (Shift+F10 on its focused trigger, in the browser
-//! only) focuses its first enabled item, one opened by the secondary button
+//! and on Linux) focuses its first enabled item, one opened by the secondary button
 //! none.
 
 use std::{
@@ -478,12 +478,56 @@ fn DocumentMenu() -> impl IntoElement {
 
 #[test]
 fn shift_f10_opens_a_context_menu_at_its_first_enabled_item() {
-    let mut app = start_on(Root::of::<DocumentMenu>(), Os::Web);
-    app.app.press_key("tab").unwrap();
-    app.app.press_key("shift+f10").unwrap();
-    app.app.wait_for("Rename").unwrap();
-    app.app.press_key("space").unwrap();
-    app.app.wait_for("text:chose:Rename").unwrap();
+    for os in [Os::Web, Os::Linux] {
+        let mut app = start_on(Root::of::<DocumentMenu>(), os);
+        app.app.press_key("tab").unwrap();
+        app.app.press_key("shift+f10").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_key("space").unwrap();
+        app.app.wait_for("text:chose:Rename").unwrap();
+    }
+}
+
+#[test]
+fn the_arrow_keys_move_between_enabled_items_and_wrap_around() {
+    for os in [Os::Web, Os::Linux] {
+        // Down past Delete wraps to Rename (New is disabled); Up from
+        // there goes back to Delete; Home and End go to the ends.
+        for (keys, chosen) in [
+            (&["down"][..], "Delete"),
+            (&["down", "down"][..], "Rename"),
+            (&["up"][..], "Delete"),
+            (&["end", "home"][..], "Rename"),
+            (&["end"][..], "Delete"),
+        ] {
+            let mut app = start_on(Root::of::<DocumentMenu>(), os);
+            app.app.press_key("tab").unwrap();
+            app.app.press_key("shift+f10").unwrap();
+            app.app.wait_for("Rename").unwrap();
+            for key in keys {
+                app.app.press_key(key).unwrap();
+            }
+            app.app.press_key("space").unwrap();
+            app.app.wait_for(&format!("text:chose:{chosen}")).unwrap();
+        }
+    }
+}
+
+#[test]
+fn escape_gives_the_focus_back_to_a_context_menus_trigger() {
+    for os in [Os::Web, Os::Linux] {
+        let mut app = start_on(Root::of::<DocumentMenu>(), os);
+        app.app.press_key("tab").unwrap();
+        app.app.press_key("shift+f10").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_key("escape").unwrap();
+        app.app
+            .wait_for_gone("Rename", std::time::Duration::from_secs(5))
+            .unwrap();
+        // The trigger has it again: the same key opens the menu again.
+        app.app.press_key("shift+f10").unwrap();
+        app.app.wait_for("Rename").unwrap();
+    }
 }
 
 #[test]
@@ -509,10 +553,10 @@ fn the_keyboard_asks_for_a_menu_at_the_bottom_start_corner_with_no_pointer() {
 }
 
 #[test]
-fn shift_f10_opens_context_menus_in_the_browser_only() {
-    // macOS has no such key; Windows and Linux give views no keyboard
-    // focus to start from.
-    for os in [Os::MacOs, Os::Windows, Os::Linux] {
+fn shift_f10_opens_no_context_menu_elsewhere() {
+    // macOS has no such key; Windows gives views no keyboard focus to
+    // start from.
+    for os in [Os::MacOs, Os::Windows] {
         let mut app = start_on(Root::of::<DocumentMenu>(), os);
         app.app.press_key("tab").unwrap();
         app.app.press_key("tab").unwrap();

@@ -32,6 +32,7 @@ mod fps;
 mod gtk_test;
 mod image;
 mod input;
+mod key_focus;
 mod keymap;
 mod menu_style;
 mod mount;

@@ -78,6 +78,7 @@ function Item(props: {
       indicatorClass={menuIndicator}
       indicator={props.checked === undefined ? undefined : <MenuMark kind={props.radio ? "dot" : "check"} size={item.icon} tint={colors.accent} />}
       hoverStyle={hovered()}
+      focusStyle={hovered()}
       activeStyle={pressed()}
       disabledStyle={{ opacity: 0.35 }}
       style={{ flexDirection: "row", alignItems: "center", gap: 8, height: item.height, paddingHorizontal: inset, borderRadius: item.radius }}

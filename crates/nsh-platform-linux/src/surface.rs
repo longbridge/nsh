@@ -220,6 +220,7 @@ impl Surface {
         });
         crate::input::install(&surface);
         crate::scroll::install_keyboard(&surface);
+        crate::key_focus::install(&surface);
         surface
     }
 

@@ -91,6 +91,24 @@ enum SubmenuKey {
     Leave,
 }
 
+/// Where an arrow key, Home or End moves the focus among a level's items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemStep {
+    Previous,
+    Next,
+    First,
+    Last,
+}
+
+/// The keys that move the focus between a level's items, as WAI-ARIA's
+/// menu has them: Up and Down wrap around.
+const ITEM_KEYS: &[(&str, bool, ItemStep)] = &[
+    ("up", true, ItemStep::Previous),
+    ("down", true, ItemStep::Next),
+    ("home", false, ItemStep::First),
+    ("end", false, ItemStep::Last),
+];
+
 /// An item of a menu, or a submenu's trigger among its menu's items.
 #[derive(Clone, Copy)]
 struct Entry {
@@ -163,7 +181,7 @@ impl Items {
 
     /// Adds an item of submenu `level`, which the menu forgets when the
     /// current owner (the item's component) ends.
-    fn add(&self, node: ElementRef, level: u32, disabled: Prop<bool>) {
+    fn add(&self, node: ElementRef, level: u32, disabled: Prop<bool>) -> u64 {
         let key = self.next.get() + 1;
         self.next.set(key);
         self.list.borrow_mut().push(Entry {
@@ -178,6 +196,43 @@ impl Items {
             list.borrow_mut().retain(|e| e.key != key);
             order.invalidate();
         });
+        key
+    }
+
+    /// Moves the focus from item `key` to the enabled item of its level
+    /// that `step` names.
+    fn step(&self, key: u64, step: ItemStep) {
+        let target = {
+            let list = self.list.borrow();
+            let Some(level) = list.iter().find(|e| e.key == key).map(|e| e.level) else {
+                return;
+            };
+            let enabled: Vec<&Entry> = list
+                .iter()
+                .filter(|e| e.level == level && !e.disabled.get_untracked())
+                .collect();
+            let at = enabled.iter().position(|e| e.key == key);
+            let n = enabled.len();
+            let index = match (step, at) {
+                _ if n == 0 => return,
+                (ItemStep::First, _) | (ItemStep::Next, None) => 0,
+                (ItemStep::Last, _) | (ItemStep::Previous, None) => n - 1,
+                (ItemStep::Next, Some(at)) => (at + 1) % n,
+                (ItemStep::Previous, Some(at)) => (at + n - 1) % n,
+            };
+            enabled[index].node
+        };
+        target.focus();
+    }
+
+    /// Binds the keys that move the focus from item `key` while `focused`.
+    fn bind_keys(&self, key: u64, focused: Signal<bool>) {
+        let items = self.clone();
+        crate::keys::bind_while(
+            move || focused.get(),
+            ITEM_KEYS,
+            move |step| items.step(key, step),
+        );
     }
 }
 
@@ -224,7 +279,8 @@ impl Surface {
 #[derive(Clone)]
 enum At {
     Trigger(ElementRef),
-    Pointer(Signal<Point<Points>>),
+    /// At a point, about the element a closing gives the focus back to.
+    Pointer(Signal<Point<Points>>, ElementRef),
 }
 
 /// The menu while it is open: its popup or sheet, with the context its
@@ -299,7 +355,7 @@ fn surface(
     // item chosen) goes back to the trigger once the popup is gone, as a
     // select's does: the item it was on goes with the popup.
     let trigger = match &at {
-        At::Trigger(anchor) if !sheet => Some(*anchor),
+        At::Trigger(anchor) | At::Pointer(_, anchor) if !sheet => Some(*anchor),
         _ => None,
     };
     let inside = stored(false);
@@ -383,7 +439,7 @@ fn surface(
             }
             let popup = match &at {
                 At::Trigger(anchor) => overlay().anchor_content(anchor),
-                At::Pointer(point) => {
+                At::Pointer(point, _) => {
                     let point = *point;
                     overlay().anchor_point(move || point.get())
                 }
@@ -667,7 +723,7 @@ pub struct ContextMenuProps {
     pub backdrop_style: Prop<Style>,
     /// What it is about: the secondary button on it (desktops), a finger
     /// held on it (touch screens), Shift+F10 or the Menu key while it has
-    /// the focus (the web) or a screen reader's "show menu" action (macOS,
+    /// the focus (the web, Linux) or a screen reader's "show menu" action (macOS,
     /// Windows) opens the menu.
     pub trigger: Prop<Option<Slot>>,
     /// The items, made on each opening.
@@ -679,10 +735,11 @@ pub struct ContextMenuProps {
 /// two-finger click) opens it where the pointer is on the desktops; a
 /// finger held on the trigger opens it as a sheet at the bottom of the
 /// screen on phones and tablets. Shift+F10 or the Menu key on the focused
-/// trigger (the web) and a screen reader's "show menu" action (VoiceOver's
+/// trigger (the web, Linux) and a screen reader's "show menu" action (VoiceOver's
 /// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
 /// it below the trigger with the keyboard focus on its first enabled item,
-/// as WAI-ARIA has it. Its items are those of `Menu`, and so is how it
+/// as WAI-ARIA has it, and closing it gives the focus back to the trigger.
+/// Its items are those of `Menu`, and so is how it
 /// closes and how it is styled.
 #[component]
 pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
@@ -700,6 +757,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
         open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let point = signal(Point::<Points>::default());
+    let anchor = element_ref();
     let parts = Surface {
         placement: Prop::from(Placement::Bottom),
         align: Prop::from(Align::Start),
@@ -721,6 +779,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             let on_menu = opener.clone();
             let on_hold = opener.clone();
             trigger
+                .element_ref(&anchor)
                 .on_context_menu(move |e: &ContextMenuEvent| {
                     point.set(e.page_position);
                     // No pointer: the keyboard (Shift+F10, the Menu key) or
@@ -773,7 +832,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             open,
             change,
             Rc::new(move |e| cx.emit(e)),
-            At::Pointer(point),
+            At::Pointer(point, anchor),
             parts,
             // The secondary button and a held finger open it with no item
             // focused, the keyboard with the first.
@@ -849,11 +908,12 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let sheet = menu.filter(|m| m.sheet);
     let (checked, disabled) = (props.checked, props.disabled);
     let node = element_ref();
+    let focused = signal(false);
     if let Some(m) = &hover {
-        m.items.add(node, m.level, disabled);
+        let key = m.items.add(node, m.level, disabled);
+        m.items.bind_keys(key, focused);
     }
     // In a submenu, Left on the item leaves it for its trigger.
-    let focused = signal(false);
     if let Some(leave) = hover.as_ref().and_then(|m| m.leave.clone()) {
         crate::keys::bind_while(
             move || focused.get(),
@@ -1073,7 +1133,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             ))
             .into_element();
     }
-    menu.items.add(anchor, menu.level, props.disabled);
+    let item_key = menu.items.add(anchor, menu.level, props.disabled);
     let edges = menu.popup;
     let open = move || {
         if !props.disabled.get_untracked() {
@@ -1085,6 +1145,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     // be open already, from the pointer); Left leaves the submenu the
     // trigger is in.
     let focused = signal(false);
+    menu.items.bind_keys(item_key, focused);
     {
         let (items, up) = (menu.items.clone(), menu.leave.clone());
         crate::keys::bind_while(
