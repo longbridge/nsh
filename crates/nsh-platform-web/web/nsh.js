@@ -92,6 +92,14 @@ const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
+/** How long after something animated comes due a timer makes it happen
+ * when no animation frame did (`keepDeadline`, `moveScreens`, ...): more
+ * than a frame, so that while the page shows its frames always come first. */
+const LATE_MS = 50;
+/** How long a dialog waits for the two frames before it comes in
+ * (`present`): far more than two frames, so it only waits that long while
+ * frames stop (a hidden tab). */
+const ENTER_LATE_MS = 250;
 
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
@@ -1584,6 +1592,8 @@ class Player {
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    clearTimeout(this.keeper?.timer);
+    this.keeper = null;
     this.browserHost?.stop();
     this.wasm?.nsh_stop();
     } finally { this.stopping = false; }
@@ -1640,12 +1650,63 @@ class Player {
     }
   }
 
+  /** The engine wants a frame (`request_frame`): the native animations
+   * run, or JS asked for one. */
   requestFrame() {
+    this.deadlineSoon();
     if (this.frame) return;
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
+      this.frameAt = performance.now();
       this.call((w) => w.nsh_frame(now));
     });
+  }
+
+  /** `keepDeadline` once the call into the engine that asked for a frame
+   * is over: the engine is not reentrant, and one look after however many
+   * asked in it is enough. */
+  deadlineSoon() {
+    if (this.deadlineQueued) return;
+    this.deadlineQueued = true;
+    queueMicrotask(() => {
+      this.deadlineQueued = false;
+      this.keepDeadline();
+    });
+  }
+
+  /**
+   * Makes what the native animations end happen on time while no
+   * animation frames come: browsers run no `requestAnimationFrame` in a
+   * hidden tab (nor, often, in an iframe out of view), and an animation
+   * must still end and tell the app (`finished`). A timer waits for the
+   * graph's next deadline (`nsh_deadline`) and `LATE_MS` more; if no frame
+   * ran since it came due, it runs one at the current time, which steps
+   * the graph there, ends what ended and gives the next deadline. While
+   * frames come it does nothing. Nothing waits for what only draws (an
+   * animation looping forever, a JS frame request), so a hidden page with
+   * a spinner does no work. Browsers throttle a hidden page's timers (to
+   * about once a second), which an end there can come as late as.
+   */
+  keepDeadline() {
+    if (this.trapped || !this.wasm?.nsh_deadline) return;
+    const now = performance.now();
+    const at = this.wasm.nsh_deadline(now);
+    if (at < 0) return;
+    // One timer at a time: the one waiting for an earlier deadline
+    // schedules the next when it fires.
+    if (this.keeper && this.keeper.at <= at) return;
+    clearTimeout(this.keeper?.timer);
+    const keeper = { at, timer: 0 };
+    keeper.timer = setTimeout(() => {
+      if (this.keeper !== keeper) return;
+      this.keeper = null;
+      if (!(this.frameAt >= at)) {
+        this.frameAt = performance.now();
+        this.call((w) => w.nsh_frame(this.frameAt));
+      }
+      this.keepDeadline();
+    }, Math.max(0, at + LATE_MS - now));
+    this.keeper = keeper;
   }
 
   resized() {
@@ -2883,6 +2944,10 @@ class Player {
     host._navOverlay = o;
     this.shaderViews.add(o);
     this.shaderDirty(o);
+    // Its frames end it (`shaderFrame`); without them (a hidden tab) this
+    // does, and the change is reported on time all the same.
+    const running = o._shader.running;
+    setTimeout(() => { if (o._shader.running === running) this.endTransition(o); }, running.ms + LATE_MS);
     return true;
   }
 
@@ -4783,7 +4848,16 @@ class Player {
       old.style.pointerEvents = "none";
       if (!motion.fade && top) top.animate(shift(parallax, 0), options);
     }
-    if (done) a.onfinish = done;
+    if (!done) return;
+    // Web Animations finish as the page renders, which stops with its
+    // frames (a hidden tab): a timer ends the change on time without them.
+    let finish = () => {
+      finish = null;
+      clearTimeout(timer);
+      done();
+    };
+    const timer = setTimeout(() => finish?.(), motion.duration + LATE_MS);
+    a.onfinish = () => finish?.();
   }
 
   /** The batch is applied: the stacks it changed animate to their new top
@@ -5079,13 +5153,17 @@ class Player {
     this.placeModal(el);
     el.style.transition = "none";
     this.hideModal(el, motion);
-    el._entering = true;
+    // This presentation's (truthy): a timer of an earlier one finds
+    // another.
+    const entering = el._entering = {};
     this.scopeFocus();
     this.syncHistorySoon();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // In two frames, once its starting place has been drawn, or without
+    // frames after a while (a hidden tab: its `onShow` still comes).
+    const enter = () => {
       // Dismissed before it came in (`endPresentation` reported it shown),
       // or presented again meanwhile: nothing more to do.
-      if (!el._entering) return;
+      if (el._entering !== entering) return;
       el._entering = false;
       if (el._navShader && !this.viewportDialogs) {
         // Through its `transitionShader` over the root: it shows at once under it.
@@ -5103,7 +5181,9 @@ class Player {
         el._showTimer = 0;
         this.event(el._id, "onShow");
       }, motion === "none" ? 0 : 350);
-    }));
+    };
+    requestAnimationFrame(() => requestAnimationFrame(enter));
+    setTimeout(enter, ENTER_LATE_MS);
   }
 
   /**
@@ -6778,10 +6858,27 @@ class Player {
       };
       a.frame = requestAnimationFrame(step);
     }
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there.
+    const watch = () => {
+      if (!a.frame || el._glide !== a) return;
+      if (performance.now() - a.last < 200) {
+        a.watch = setTimeout(watch, 200);
+        return;
+      }
+      cancelAnimationFrame(a.frame);
+      a.frame = 0;
+      a.at = [a.x, a.y];
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      settle();
+    };
     clearTimeout(a.timer);
     a.timer = setTimeout(() => {
       a.timer = 0;
-      settle();
+      clearTimeout(a.watch);
+      if (a.frame) watch();
+      else settle();
     }, 200);
   }
 
@@ -6796,6 +6893,7 @@ class Player {
     if (!a) return;
     cancelAnimationFrame(a.frame);
     clearTimeout(a.timer);
+    clearTimeout(a.watch);
     el._glide = null;
     this.drive(el, -1);
     // Browsers clamp the offsets of scrolls.
