@@ -417,7 +417,7 @@ export function Menus() {
             <Each of={files()} key={(f) => f.id}>
               {(file, i) => (
                 <ContextMenu margin={8} popupStyle={sheet} backdropStyle={backdrop} onOpenChange={changed(file().name)} trigger={
-                  <Row first={i() === 0}>
+                  <Row first={i() === 0} focusable>
                     <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
                     <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
                     <Menu align="end" offset={4} margin={8} popupStyle={sheet} backdropStyle={backdrop} onOpenChange={changed(`${file().name} ⋯`)} trigger={

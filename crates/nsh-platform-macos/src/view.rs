@@ -729,14 +729,31 @@ define_class!(
             })
         }
 
-        // AppKit offers `AXPress` on every view that implements it: only
-        // on the views it presses.
+        // `AXShowMenu`: what accessibility clients open a context menu
+        // with (VoiceOver's VO-Shift-M).
+        #[unsafe(method(accessibilityPerformShowMenu))]
+        fn accessibility_perform_show_menu(&self) -> bool {
+            self.keyboard_surface().is_some_and(|surface| {
+                crate::input::accessibility_show_menu(&surface, &NshView(self.retain()))
+            })
+        }
+
+        // AppKit offers `AXPress` and `AXShowMenu` on every view that
+        // implements them: only on the views they act on.
         #[unsafe(method(isAccessibilitySelectorAllowed:))]
         fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
             if selector == sel!(accessibilityPerformPress) {
                 self.ivars().state.try_borrow().is_ok()
                     && self.keyboard_surface().is_some_and(|surface| {
                         crate::input::takes_accessibility_press(&surface, &NshView(self.retain()))
+                    })
+            } else if selector == sel!(accessibilityPerformShowMenu) {
+                self.ivars().state.try_borrow().is_ok()
+                    && self.keyboard_surface().is_some_and(|surface| {
+                        crate::input::takes_accessibility_show_menu(
+                            &surface,
+                            &NshView(self.retain()),
+                        )
                     })
             } else {
                 // SAFETY: NSView's own answer.

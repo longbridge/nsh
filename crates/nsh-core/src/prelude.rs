@@ -127,6 +127,7 @@ pub use crate::element::{
     PlaybackDirection,
     Point,
     PointerEvents,
+    PointerType,
     Points,
     Position,
     PressEvent,

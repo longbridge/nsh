@@ -646,11 +646,12 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
         };
         if listens {
             let (location_x, location_y) = local(surface, &v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: point(Points(location_x), Points(location_y)),
-                page_position: point(Points(x), Points(y)),
-                modifiers: modifiers(state),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(location_x), Points(location_y)),
+                point(Points(x), Points(y)),
+                modifiers(state),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return true;
         }

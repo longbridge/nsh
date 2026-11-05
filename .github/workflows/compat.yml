@@ -86,6 +86,10 @@ jobs:
         if: steps.run.outputs.check == 'true'
         with:
           repository: longbridge/nsh-compat
+          # Its runner builds `ContextMenuEvent`, which takes `new` and a
+          # `pointer_type` here, so the change cannot land on its main first.
+          # Back to its default branch once it has merged.
+          ref: context-menu-pointer-type
           path: nsh-compat
 
       # QuickJS is C (bindgen needs libclang).

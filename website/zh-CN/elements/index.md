@@ -285,7 +285,7 @@ view()
 
 ### 上下文菜单
 
-`onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有键盘的菜单键。在这里打开应用自己的菜单；在 TSX 中，[`Menu.popup`](../modules/nsh-desktop.md) 显示系统菜单：
+`onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有获得焦点的视图上的 Shift+F10 和键盘的菜单键；在 macOS 和 Windows 上还有读屏软件的「显示菜单」操作（VoiceOver 的 VO-Shift-M、UI Automation 的对应操作）。在这里打开应用自己的菜单；在 TSX 中，[`Menu.popup`](../modules/nsh-desktop.md) 显示系统菜单：
 
 ```rust tabs
 // 应用自己的菜单，放在点击的位置。
@@ -304,9 +304,9 @@ import { Menu } from "nsh/desktop";
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 辅助按钮在视图或其内部的视图上按下。 |
+| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 在视图或其内部的视图上请求了上下文菜单。 |
 
-`ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）以及 `modifiers`；Rust 中为 `position`、`page_position` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
+`ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）、`modifiers` 以及 DOM 的 `pointerType`：指针为 `"mouse"`、`"pen"` 或 `"touch"`，键盘或读屏软件为 `null`，此时位置是视图的底部起始角，菜单放在这里就会出现在视图下方；Rust 中为 `position`、`page_position`、`modifiers` 和 `pointer_type`（`Option<PointerType>`）。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
 ### 键盘焦点
 

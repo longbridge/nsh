@@ -15,7 +15,8 @@ A menu is a list of actions its trigger opens. One structure serves every device
   sheet in place of the menu's, with a row of yours leading back.
 
 Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
-by the secondary button (a right click) at the pointer, or by a finger held on its trigger on touch screens.
+by the secondary button (a right click) at the pointer, by a finger held on its trigger on touch screens, or below its
+trigger by the keyboard in the browser and by screen readers on macOS and Windows.
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused.
@@ -121,6 +122,12 @@ import { ContextMenu, MenuItem } from "nsh/base";
 On the desktops the secondary button opens it where the pointer is. On touch screens a finger held on the trigger
 opens it as a sheet; the trigger's own presses and the scroll views around it keep working, and moving the finger
 cancels the hold.
+
+Keyboard and screen reader users open it too. In the browser, Shift+F10 and the Menu key on the focused trigger open
+it. On macOS, VoiceOver's "show menu" action (VO-Shift-M) opens it, and on Windows, a screen reader's "show context
+menu" action through UI Automation does. These openings place the menu below the trigger, starting at its start edge, with the keyboard focus on
+its first enabled item, as WAI-ARIA describes for context menus. Make the trigger `focusable` so the keyboard reaches
+it. A view's own `onContextMenu` tells these openings apart by `pointerType`, which is `null` for them.
 
 ## Checkable items
 
@@ -266,7 +273,7 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `disabled` | `.disabled(..)` | `boolean` | `false` | The secondary button and held fingers do nothing. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | Nothing opens it: not the secondary button, held fingers, the keyboard or a screen reader. |
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the pointer and the popup. |
 | `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
 

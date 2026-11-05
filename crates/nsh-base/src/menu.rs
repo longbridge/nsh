@@ -665,8 +665,10 @@ pub struct ContextMenuProps {
     /// The inline style of the backdrop, over its classes.
     #[prop(default)]
     pub backdrop_style: Prop<Style>,
-    /// What it is about: the secondary button on it (desktops) or a finger
-    /// held on it (touch screens) opens the menu.
+    /// What it is about: the secondary button on it (desktops), a finger
+    /// held on it (touch screens), Shift+F10 or the Menu key while it has
+    /// the focus (the web) or a screen reader's "show menu" action (macOS,
+    /// Windows) opens the menu.
     pub trigger: Prop<Option<Slot>>,
     /// The items, made on each opening.
     #[prop(lazy)]
@@ -676,12 +678,22 @@ pub struct ContextMenuProps {
 /// A menu about its trigger: the secondary button (a right click, a
 /// two-finger click) opens it where the pointer is on the desktops; a
 /// finger held on the trigger opens it as a sheet at the bottom of the
-/// screen on phones and tablets. Its items are those of `Menu`, and so is
-/// how it closes and how it is styled.
+/// screen on phones and tablets. Shift+F10 or the Menu key on the focused
+/// trigger (the web) and a screen reader's "show menu" action (VoiceOver's
+/// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
+/// it below the trigger with the keyboard focus on its first enabled item,
+/// as WAI-ARIA has it. Its items are those of `Menu`, and so is how it
+/// closes and how it is styled.
 #[component]
 pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, Prop::from(false));
+    // An opening from the keyboard or an assistive technology focuses the
+    // first enabled item once they are there.
+    let keyed = stored(None::<Keyed>);
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
+        if !next {
+            keyed.replace(None);
+        }
         if next && props.disabled.get_untracked() {
             return;
         }
@@ -711,6 +723,10 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             trigger
                 .on_context_menu(move |e: &ContextMenuEvent| {
                     point.set(e.page_position);
+                    // No pointer: the keyboard (Shift+F10, the Menu key) or
+                    // an assistive technology, placed at the trigger by the
+                    // platform.
+                    keyed.replace(e.pointer_type.is_none().then_some(Keyed::First));
                     on_menu(true, OpenChangeReason::ContextMenu);
                 })
                 // Observed, never claimed: the trigger's presses and the
@@ -726,6 +742,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {
                                 hold.replace(None);
+                                keyed.replace(None);
                                 point.set(page);
                                 on_hold(true, OpenChangeReason::LongPress);
                             });
@@ -759,8 +776,8 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             At::Pointer(point),
             parts,
             // The secondary button and a held finger open it with no item
-            // focused.
-            stored(None),
+            // focused, the keyboard with the first.
+            keyed,
             props.children,
         ))
 }

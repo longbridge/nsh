@@ -476,14 +476,77 @@ pub struct PressEvent {
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
 /// points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ContextMenuEvent {
-    /// Position in the view, its transforms undone.
+    /// Position in the view, its transforms undone: the pointer's, or, when
+    /// no pointer asked ([`ContextMenuEvent::pointer_type`] is `None`), the
+    /// view's bottom-start corner ([`crate::input::context_menu_anchor`]).
     pub position: Point<Points>,
     /// Position in the root view the view is in (the surface, or its
     /// modal): where `Menu.popup` opens a menu.
     pub page_position: Point<Points>,
     /// The modifier keys held.
     pub modifiers: crate::keymap::Modifiers,
+    /// The pointer that asked for the menu (the DOM's `pointerType`), or
+    /// `None` when none did: the keyboard (Shift+F10, the Menu key) or an
+    /// assistive technology's "show menu" action, which a menu answers
+    /// with the keyboard focus on its first item.
+    pub pointer_type: Option<PointerType>,
+}
+
+impl ContextMenuEvent {
+    /// A context menu asked for at `position` in the view and
+    /// `page_position` in its root view, with `modifiers` held, by
+    /// `pointer_type` (`None`: the keyboard or an assistive technology).
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        modifiers: crate::keymap::Modifiers,
+        pointer_type: Option<PointerType>,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            modifiers,
+            pointer_type,
+        }
+    }
+}
+
+/// The kind of pointer behind an event, as the DOM's `pointerType` (TS:
+/// `"mouse"`, `"pen"`, `"touch"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PointerType {
+    /// A mouse or a touchpad.
+    Mouse,
+    /// A pen or stylus.
+    Pen,
+    /// A finger on a touch screen.
+    Touch,
+}
+
+impl PointerType {
+    /// Its TS name.
+    pub fn name(self) -> &'static str {
+        match self {
+            PointerType::Mouse => "mouse",
+            PointerType::Pen => "pen",
+            PointerType::Touch => "touch",
+        }
+    }
+
+    /// The pointer type of TS name `name` (the DOM's `pointerType`), or
+    /// `None` for one NSH does not know and for the DOM's `""` (no
+    /// pointer).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "mouse" => PointerType::Mouse,
+            "pen" => PointerType::Pen,
+            "touch" => PointerType::Touch,
+            _ => return None,
+        })
+    }
 }
 
 /// Touches for the JS responder system.
