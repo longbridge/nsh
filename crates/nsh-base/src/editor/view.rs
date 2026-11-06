@@ -1446,29 +1446,45 @@ fn carets(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement
 }
 
 /// What an input method is composing, drawn at the primary caret over the
-/// text.
+/// text, with what follows it on the row moved aside (the text changes only
+/// when the composition commits).
 fn composition(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
     let props = ed.props;
     dynamic(move || {
         ed.sel_rev.get();
         ed.text_rev.get();
-        let (text_, at) = {
+        let (text_, tail, at) = {
             let st = ed.st.borrow();
             let text_ = st.composition.clone()?;
-            (text_, st.caret_point(st.primary_head()))
+            let head = st.primary_head();
+            (text_, st.row_after(head), st.caret_point(head))
         };
-        Some(part(
-            text(text_)
+        // The row it covers is the active line's.
+        let active = props.active_line.get();
+        Some(
+            view()
                 .absolute()
                 .left(Length::from(at.x))
                 .top(Length::from(at.y))
                 .h(Length::from(lh()))
                 .pointer_events(PointerEvents::None)
                 .bg(move || theme().background)
-                .underline(),
-            props,
-            EditorPart::Composition,
-        ))
+                .child(
+                    view()
+                        .flex_row()
+                        .h_full()
+                        .bg(move || match active {
+                            true => theme().muted.opacity(0.6),
+                            false => AdaptiveColor::TRANSPARENT,
+                        })
+                        .child(part(
+                            text(text_).number_of_lines(1).underline(),
+                            props,
+                            EditorPart::Composition,
+                        ))
+                        .child(text(tail).number_of_lines(1)),
+                ),
+        )
     })
 }
 
@@ -1519,6 +1535,15 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         .border(px(0.0))
         .bg(AdaptiveColor::TRANSPARENT)
         .text_color(AdaptiveColor::TRANSPARENT)
+        // UIKit draws what an input method composes whatever the text's
+        // color (a highlight, the caret's knobs). Not 0: UIKit would take
+        // the input out of accessibility. A terminal has no translucency;
+        // keep its sink visible to keyboard focus traversal.
+        .opacity(if crate::terminal::is_terminal() {
+            1.0
+        } else {
+            0.02
+        })
         .caret(false)
         .multiline(true)
         .auto_correct(false)

@@ -443,7 +443,7 @@ fn autoscroll(surface: &Rc<Surface>) {
         return;
     }
     let mut last = None;
-    surface.add_frame_callback(move |surface, now| {
+    surface.add_draw_callback(move |surface, now| {
         // Frames as long as at 60 Hz move as far whatever the display's
         // rate.
         let scale = last.map_or(1.0, |l: f64| ((now - l) * 60.0).clamp(0.25, 4.0) as f32);

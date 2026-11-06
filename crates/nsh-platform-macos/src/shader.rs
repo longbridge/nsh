@@ -900,7 +900,7 @@ fn start(surface: &Rc<Surface>) {
         return;
     }
     shaders.running.set(true);
-    surface.add_frame_callback(|surface, _| {
+    surface.add_draw_callback(|surface, _| {
         let more = frame(surface);
         if !more {
             surface.shaders.running.set(false);

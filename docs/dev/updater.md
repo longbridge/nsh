@@ -2,7 +2,7 @@
 
 `nsh/updater` lets a packaged app replace itself. The rules are in `crates/nsh-updater` (no network, no UI), the JS face
 in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh-cli/src/updater.rs`; the user guide is
-`website/docs/app-updates.md`.
+`website/docs/app-updates.md`, the API reference `website/modules/nsh-updater.md`.
 
 ## Flow
 

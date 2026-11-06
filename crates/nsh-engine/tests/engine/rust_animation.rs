@@ -354,6 +354,7 @@ fn a_release_moves_on_with_the_drags_velocity() {
             damping,
             mass,
             velocity: Some(velocity),
+            frame_rate: None,
         }
     };
     assert_eq!(started(&rx).0, [spring(300.0), spring(-400.0)]);
@@ -363,6 +364,7 @@ fn a_release_moves_on_with_the_drags_velocity() {
         deceleration: 0.998,
         clamp: None,
         bounce: 0.0,
+        frame_rate: None,
     };
     assert_eq!(started(&rx).0, [decay(300.0), decay(-400.0)]);
 }

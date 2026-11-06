@@ -115,6 +115,11 @@ impl DisplayMap {
     }
 
     /// Takes effect with the next [`Self::rebuild`].
+    /// The columns between tab stops.
+    pub(crate) fn tab_size(&self) -> u32 {
+        self.metrics.tab_size
+    }
+
     pub(crate) fn set_tab_size(&mut self, tab_size: u32) {
         if self.metrics.tab_size != tab_size {
             self.metrics.tab_size = tab_size;

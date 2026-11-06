@@ -107,6 +107,12 @@ pub fn set_level(level: WindowLevel) {
     super::desktop_command(DesktopCommand::SetLevel(level));
 }
 
+/// Keeps the window out of the taskbar (`true`) or puts it back; Windows
+/// only (TS: `Window.setSkipTaskbar`).
+pub fn set_skip_taskbar(skip: bool) {
+    super::desktop_command(DesktopCommand::SetSkipTaskbar(skip));
+}
+
 /// Brings the window to the front of its level and focuses it; the app
 /// activates (TS: `Window.orderFront`).
 pub fn order_front() {

@@ -206,9 +206,9 @@ pub use crate::{
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
     LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, Measurement,
     ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior,
-    PasteEvent, PastedFile, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
-    TouchEvent, TransformKind, TransformOrigin, Viewability,
+    PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType,
+    ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

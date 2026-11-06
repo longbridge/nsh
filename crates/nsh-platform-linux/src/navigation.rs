@@ -37,8 +37,9 @@
 //! when the app removes one it leaves as an image of its last frame, then
 //! gets `onDismiss`.
 //!
-//! Transitions run on the root's frame clock and only move views
-//! (`shift`, `fade`): nothing is laid out again while they run.
+//! Transitions run on the surface's frames ([`Surface::add_frame_callback`]:
+//! the root's frame clock, and their ends kept while it stops) and only
+//! move views (`shift`, `fade`): nothing is laid out again while they run.
 
 use std::{
     cell::{Cell, RefCell},
@@ -58,7 +59,10 @@ use nsh_core::{
 use nsh_engine::ColorScheme;
 use rustc_hash::FxHashMap;
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// The window's color (libadwaita's), under a screen's content, so a screen
 /// moving over another hides it.
@@ -765,21 +769,19 @@ impl Nav {
             return;
         }
         self.ticking = true;
-        let weak = Rc::downgrade(surface);
-        surface.root.add_tick_callback(move |_, clock| {
-            let Some(surface) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
+        // On the surface's frames, which also keep the transitions' ends
+        // while the window draws none: screens settle and report it on time.
+        surface.add_frame_callback(|surface, now| {
             let Ok(mut nav) = surface.nav.try_borrow_mut() else {
-                return glib::ControlFlow::Continue;
+                return Next::At(now);
             };
-            // Microseconds.
-            nav.tick(&surface, clock.frame_time() as f64 / 1_000_000.0);
-            if nav.transitions.is_empty() {
-                nav.ticking = false;
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
+            nav.tick(surface, now);
+            match nav.transitions.deadline(now) {
+                Some(at) => Next::At(at),
+                None => {
+                    nav.ticking = false;
+                    Next::Done
+                }
             }
         });
     }
@@ -1335,6 +1337,9 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
 
 /// `ModalConfig`.
 pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &ModalConfig) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
@@ -1362,6 +1367,9 @@ pub(crate) fn deleted(surface: &Surface, id: NodeId) {
 
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     let m = nav.modals.entry(id).or_default();
@@ -1394,8 +1402,31 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     nav.presenting.push(id);
 }
 
+/// Modal `id` is shown in a window of its own (`Window.open`) instead:
+/// it leaves the surface's modals at once, without events, and the focus
+/// it took goes back.
+pub(crate) fn release(surface: &Rc<Surface>, id: NodeId) {
+    let mut nav = surface.nav.borrow_mut();
+    nav.order.retain(|&m| m != id);
+    nav.presenting.retain(|&m| m != id);
+    let restore = nav
+        .modals
+        .remove(&id)
+        .and_then(|m| m.restore)
+        .and_then(|w| w.upgrade());
+    nav.scope_focus(surface);
+    if let Some(widget) = restore
+        && widget.is_ancestor(&surface.root)
+    {
+        widget.grab_focus();
+    }
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::removed(surface, view) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     match nav.modals.get_mut(&id) {

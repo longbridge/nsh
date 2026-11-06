@@ -467,6 +467,14 @@ mod imp {
     }
 
     impl WidgetImpl for NshView {
+        fn focus(&self, direction: gtk::DirectionType) -> bool {
+            let view = self.obj();
+            crate::key_focus::offer(&view);
+            let moved = self.parent_focus(direction);
+            crate::key_focus::offered(&view);
+            moved
+        }
+
         fn measure(&self, _orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             // The core sizes every view; GTK's own sizing never applies.
             (0, 0, -1, -1)
@@ -570,7 +578,8 @@ impl NshView {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         let view: NshView = glib::Object::new();
         *view.imp().state.borrow_mut() = ViewState::new(id, kind);
-        // Views never take keyboard focus themselves; hosted fields do.
+        // Only while Tab or `focus()` picks them (`key_focus`); hosted fields
+        // take it as usual.
         view.set_focusable(false);
         view
     }

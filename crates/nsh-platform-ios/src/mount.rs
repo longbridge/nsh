@@ -2528,11 +2528,12 @@ impl Mounter {
             return;
         };
         let (position, page_position) = self.pointer_positions(&view, in_window);
-        let event = nsh_core::ContextMenuEvent {
+        let event = nsh_core::ContextMenuEvent::new(
             position,
             page_position,
-            modifiers: key_modifiers(modifiers),
-        };
+            key_modifiers(modifiers),
+            Some(nsh_core::PointerType::Mouse),
+        );
         self.control
             .dispatch_event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     }

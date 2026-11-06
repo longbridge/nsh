@@ -48,8 +48,10 @@ const Window: {
     animated?: boolean;
   }): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  setSkipTaskbar(skip: boolean): void;
   orderFront(): void;
   close(): void;
+  open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
 };
 ```
 
@@ -65,12 +67,46 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 | `toggleFullScreen()` | `toggle_full_screen()` | Enters or leaves full screen. |
 | `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the window's top left corner, measured from the top left of the primary screen (on macOS the one with the menu bar) with `y` growing down, the same on every platform; a `height` without a `y` keeps the top edge where it is, so the window grows and shrinks at its bottom edge. `animated: true` enables macOS's resize animation (default: false). |
 | `setLevel(level)` | `set_level(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
+| `setSkipTaskbar(skip)` | `set_skip_taskbar(skip)` | On Windows, `true` keeps the window out of the taskbar (Electron's and Tauri's `skipTaskbar`), for overlays, pets and pop-ups; `false` puts it back. macOS's Dock and Linux's docks list apps rather than windows, so other platforms leave it as it is. |
 | `orderFront()` | `order_front()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | `close_window()` | Closes the window; the app ends with it. |
 
 Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. In GPUI apps, `setFrame` sets the window's size and the platform places it; GPUI's host chooses its position and level when opening the window.
 
 When sizing a window from content measured with `onLayout`, allow room for window decorations on macOS and Windows. `width` and `height` accept positive finite numbers; `x` and `y` accept finite numbers. Invalid fields keep their previous values.
+
+### Window.open
+
+`Window.open(Component, options)` opens a window of the app's own and renders `Component` in it. The window runs in
+the app's one JS runtime, as part of the same app: it reads and writes the same signals, stores and modules as the main
+window, so there is no messaging between windows. Opening an `id` that is open returns that window.
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+const unread = signal(0);
+
+function Chat() {
+  return <View><Text>{`${unread()} unread`}</Text></View>;
+}
+
+const chat = Window.open(Chat, { id: "chat", title: "Chat", size: { width: 360, height: 480 } });
+chat.focus();
+```
+
+| Option | Description |
+|---|---|
+| `id` | The window's id: opening the same id again returns the open window. |
+| `title` | Its title (the main window's when left out). |
+| `size` | Its content size in points, `{ width, height }` (480×360 by default). |
+| `position` | Its top left corner on the screen, `{ x, y }`. GTK always places windows itself. |
+| `level` | `"normal"`, `"floating"` or `"desktopIcon"`, as `setLevel`. Not on Linux. |
+| `frame` | `"none"`: no title bar or border; the app draws everything. |
+
+The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
+`close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
+it too. `Window.open` runs on Linux and Windows; on other platforms it throws.
 
 ## A title bar of your own
 
@@ -348,3 +384,64 @@ text("More").on_press(|| {
 
 > [!NOTE]
 > Menus are the system's (NSMenu, Win32 menus, GTK popover menus): they look and behave like every other app's, follow the system's (or the app's) appearance and are keyboard accessible. `examples/desktop` is an app with a title bar of its own, an application menu and context menus.
+
+## Tray
+
+```ts
+interface TrayModule {
+  set(options: TrayOptions | null): void;
+}
+```
+
+`Tray.set` shows the app's icon in the system tray, or changes it; `null` removes it. There is one per app. The tray is the notification area on Windows, the right side of the menu bar on macOS, and a StatusNotifierItem on Linux, which Plasma, Waybar and most panels show (GNOME needs the AppIndicator extension).
+
+| Option | Description |
+| --- | --- |
+| `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
+| `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
+| `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
+| `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too). |
+
+Call `set` again to change it; inside an `effect` it follows the signals it reads.
+
+```tsx
+import { Tray, Window } from "nsh/desktop";
+import icon from "./tray.svg";
+
+Tray.set({
+  icon,
+  tooltip: "Mail",
+  onClick: () => Window.orderFront(),
+  menu: [
+    { label: "New Message", onSelect: compose },
+    { type: "separator" },
+    { role: "quit" },
+  ],
+});
+```
+
+TSX only for now; Rust components have no tray yet.
+
+## GlobalShortcut
+
+```ts
+interface GlobalShortcutModule {
+  register(shortcut: string, onPress: () => void): Promise<boolean>;
+  unregister(shortcut: string): void;
+  unregisterAll(): void;
+}
+```
+
+A global shortcut reaches the app whichever app has the keyboard. `register` takes a keystroke written as a menu item's `shortcut` (`"mod+shift+k"`) and resolves with whether the system took it: `false` when another app holds it, or off desktops. Registering a keystroke again replaces its function.
+
+On macOS they ask the user for no permission. A letter is the key that types it on the keyboard layout at registration, so `k` stays `k` on Dvorak.
+
+On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
+
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+
+```tsx
+import { GlobalShortcut, Window } from "nsh/desktop";
+
+const ok = await GlobalShortcut.register("mod+shift+space", () => Window.orderFront());
+```

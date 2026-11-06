@@ -93,6 +93,14 @@ pub(crate) fn set_app(app_id: &str, app_name: &str) {
     });
 }
 
+/// The app's id and name, as [`set_app`] gave them (the tray's too).
+pub(crate) fn app() -> (String, String) {
+    STATE.with(|s| {
+        let s = s.borrow();
+        (s.app_id.clone(), s.app_name.clone())
+    })
+}
+
 /// Applies `command`, reporting through `control`. On the main thread.
 pub(crate) fn command(control: &EngineControl, root: &gtk::Widget, command: &NotificationCommand) {
     let call = match command {

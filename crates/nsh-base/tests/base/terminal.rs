@@ -560,9 +560,9 @@ fn a_terminal_reads_a_formula_as_text_not_its_tex() {
     assert!(shown.contains("16.7 ms"), "{shown:?}");
     assert!(shown.contains("t_frame = 1000/60"), "{shown:?}");
     assert!(!shown.contains("\\text"), "{shown:?}");
-    // Elsewhere the TeX as written, for want of a renderer.
+    // Elsewhere the TeX as written, for want of a renderer; `math` is one.
     let gui = start::<Formulas>(Idiom::Desktop);
-    assert!(joined(&gui).contains("\\text{ms}"));
+    assert_eq!(joined(&gui).contains("\\text{ms}"), !cfg!(feature = "math"));
 }
 
 /// A paragraph, then a heading and its paragraph.
