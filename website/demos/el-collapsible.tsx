@@ -1,28 +1,23 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { Collapsible, Switch } from "nsh/base";
-import { desktop, Log, Panel, size, Split, switchLook, ui, controlSize, Icon, listRow, RowDivider, RowLabel, sectionSurface } from "./palette";
+import { desktop, Log, Panel, Split, switchLook, ui, controlSize, listRow, RowDivider, RowLabel, sectionSurface, DisclosureChevron, disclosureTriggerLook } from "./palette";
 
 // Each section: a summary row, the app's trigger (it says whether it is
 // expanded to screen readers), and details the collapsible reveals while the
 // app has it open: its height springs open and shut (`reveal`), and the
-// sections below move with it. The chevron turns with a transition of the
-// app's. The summary is a shared row (`listRow`: the hover fill reaching
-// past the content, the keyboard's focus ring, a press that dims); its
-// chevron lane is as wide as the chevron's stroke, so it ends where the
-// values below it end. The reveal, the chevron and the switch stay still
-// with reduced motion.
+// sections below move with it. The summary is a shared row (`listRow`,
+// through `disclosureTriggerLook`: the hover fill reaching past the
+// content, the keyboard's focus ring, a press that dims); its chevron
+// (`DisclosureChevron`) turns in a lane as wide as its stroke, so it ends
+// where the values below it end. The reveal, the chevron and the switch
+// stay still with reduced motion.
 function Section(props: { label: string; detail: string; open: boolean; first?: boolean; onToggle: () => void; content: JSX.Element }) {
   return (
     <Collapsible open={props.open} reveal content={props.content}>
-      <View role="button" accessibilityState={{ expanded: props.open }} onPress={props.onToggle} {...listRow({ first: props.first })}>
+      <View role="button" accessibilityState={{ expanded: props.open }} onPress={props.onToggle} {...disclosureTriggerLook({ first: props.first })}>
         <RowDivider show={!props.first} />
         <RowLabel label={props.label} detail={props.detail} />
-        <View
-          class="transition-transform duration-150 motion-reduce:transition-none"
-          style={{ width: controlSize.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
-        >
-          <Icon name="chevron" size={controlSize.check} tint={ui().muted} />
-        </View>
+        <DisclosureChevron open={props.open} />
       </View>
     </Collapsible>
   );

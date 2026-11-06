@@ -1,6 +1,6 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, Radio, RadioGroup, Switch } from "nsh/base";
-import { Badge, Button, Card, colors, controlSize, DemoPage, finish, Icon, insetSurface, listRow, mono, RadioRing, ROW_BLEED, RowLabel, Segmented, switchLook } from "../ui";
+import { Badge, Button, Card, colors, controlSize, DemoPage, finish, Icon, insetSurface, listRow, mono, RadioRing, ROW_BLEED, RowLabel, Segmented, switchLook, DisclosureChevron, disclosurePanel, disclosureTriggerLook } from "../ui";
 
 // `nsh/base`'s `Accordion` owns which triggers report what, the headings,
 // the expanded state screen readers hear and the panels' reveal; the app
@@ -21,37 +21,29 @@ function Divider(props: { show: boolean }) {
 }
 
 /**
- * An item's heading: its trigger is the row, the title and a summary, then
- * the chevron, which turns as the item opens (`group-aria-expanded:`). The
- * open trigger's title takes the full text color; a disabled one dims.
+ * An item's heading: its trigger is the row (`disclosureTriggerLook`), the
+ * title and a summary, then the chevron, which turns as the item opens
+ * (`group-aria-expanded:`). A disabled one dims.
  */
 function Heading(props: { title: string; detail?: string; leading?: JSX.Element; disabled?: boolean; level?: number }) {
   return (
     <AccordionHeader level={props.level}>
-      <AccordionTrigger
-        class="group"
-        {...listRow({ first: true, disabled: () => props.disabled })}
-      >
+      <AccordionTrigger {...disclosureTriggerLook({ first: true, disabled: () => props.disabled })}>
         {props.leading}
         <RowLabel label={props.title} detail={props.detail} />
-        <View
-          class="transition-transform duration-200 motion-reduce:transition-none group-aria-expanded:rotate-180"
-          style={{ width: size.check, height: size.check, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon name="chevron-down" size={size.check} tint={colors.muted} />
-        </View>
+        <DisclosureChevron accordion />
       </AccordionTrigger>
     </AccordionHeader>
   );
 }
 
 /**
- * A panel's content, under its heading: indented with the title, padded at
- * the bottom. The padding is the content's, not the panel's: a revealed
- * panel is zero high while closed.
+ * A panel's content, under its heading (`disclosurePanel`): indented with
+ * the title, padded at the bottom. The padding is the content's, not the
+ * panel's: a revealed panel is zero high while closed.
  */
 function Body(props: { start?: number; gap?: number; children: JSX.Element }) {
-  return <View style={{ paddingStart: props.start ?? 0, paddingBottom: size.padding + 6, gap: props.gap ?? 6 }}>{props.children}</View>;
+  return <View style={disclosurePanel({ start: props.start, gap: props.gap })}>{props.children}</View>;
 }
 
 const FAQ: { value: string; icon: "spark" | "arrow-down" | "arrow-up" | "star" | "bell"; question: string; answer: string[]; disabled?: boolean }[] = [

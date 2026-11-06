@@ -1,36 +1,27 @@
-import { cleanup, mount, signal, Text, View } from "nsh";
-import { reduceMotion } from "nsh";
+import { mount, signal, Text, View } from "nsh";
 import { Button, Progress, Switch } from "nsh/base";
-import { button, buttonText, desktop, Log, Panel, size, Split, switchLook, ui, controlSize, listRow, plainRow, RowLabel, sectionSurface } from "./palette";
+import { button, buttonText, desktop, Log, Panel, progressLook, progressSweep, Split, switchLook, ui, controlSize, listRow, plainRow, RowLabel, sectionSurface, type ProgressSweep } from "./palette";
 
-// The parts: geometry and motion in classes, colors from the palette. The
-// label row comes first (`flex-col-reverse`: the children follow the track),
-// its value tabular and at the trailing edge. An indeterminate indicator is a
-// third of the track that sweeps from end to end (the app flips its
-// translation, a transition moves it), and rests in the middle with reduced
-// motion. A determinate one is the whole track, slid back by what is left to
-// do, so a new value glides there (the track clips it). The rows and the
-// switch's row are the shared ones (`plainRow`, `listRow`). Buttons are as
-// wide as their labels with a pointer.
-const track = "h-1.5 overflow-hidden rounded-full";
-const SWEEP = 800;
-const indicator = (indeterminate: boolean, end: boolean) =>
-  !indeterminate
-    ? "h-full w-full rounded-full transition-transform duration-180 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
-    : reduceMotion()
-      ? "h-full w-1/3 rounded-full translate-x-full"
-      : `h-full w-1/3 rounded-full transition-transform duration-700 ease-in-out ${end ? "translate-x-[200%]" : "translate-x-0"}`;
+// The parts come from the shared look (`progressLook`): the slider's sunk
+// rail and its citrus fill, which glides to each new value (the whole track,
+// slid back by what is left to do; the track clips it). An indeterminate bar
+// is a third of the track sweeping from end to end and back, looped natively
+// (`progressSweep`), and rests in the middle with reduced motion. The label
+// row comes first (`column-reverse`: the children follow the track), its
+// value tabular and at the trailing edge. The rows and the switch's row are
+// the shared ones (`plainRow`, `listRow`). Buttons are as wide as their
+// labels with a pointer.
 
-function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; end: boolean; first?: boolean }) {
+function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; sweep: ProgressSweep; first?: boolean }) {
   return (
+    // A row has no padding at its sides, so the bar's width is the track's:
+    // the sweep crosses two thirds of it.
     <Progress
       value={props.value}
       indeterminate={props.indeterminate}
+      onLayout={props.sweep.onLayout}
       style={{ ...plainRow({ first: props.first }), flexDirection: "column-reverse", alignItems: "stretch", gap: controlSize.padding }}
-      trackClass={track}
-      trackStyle={ui().inset}
-      indicatorClass={indicator(!!props.indeterminate, props.end)}
-      indicatorStyle={{ backgroundColor: ui().accent, translate: props.indeterminate ? undefined : `${props.value - 100}% 0` }}
+      {...progressLook(() => props.value, { indeterminate: () => props.indeterminate, sweep: props.sweep })}
     >
       <View class="flex-row items-center gap-3">
         <RowLabel label={props.label} detail={props.detail} />
@@ -60,12 +51,8 @@ function App() {
   const unknown = signal(false);
   const events = signal<string[]>([]);
   const log = (line: string) => events.set([line, ...events()].slice(0, 5));
-  // The sweep of the indeterminate bars: still with reduced motion.
-  const end = signal(false);
-  const sweep = setInterval(() => {
-    if (!reduceMotion()) end.set(!end());
-  }, SWEEP);
-  cleanup(() => clearInterval(sweep));
+  // The sweep of the indeterminate bars, one for all three.
+  const sweep = progressSweep();
   let timer: ReturnType<typeof setInterval> | undefined;
   const stop = () => {
     if (timer !== undefined) clearInterval(timer);
@@ -133,10 +120,10 @@ function App() {
             detail={unknown() ? "Counting what to send" : sent() >= 100 ? "Sent" : `${Math.round((sent() / 100) * 24)} of 24`}
             value={sent()}
             indeterminate={unknown()}
-            end={end()}
+            sweep={sweep}
           />
-          <Transfer label="Preparing the backup" detail="Its size is not known yet" value={0} indeterminate end={end()} />
-          <Transfer label="Library" detail="212 GB of 256 GB" value={83} end={end()} />
+          <Transfer label="Preparing the backup" detail="Its size is not known yet" value={0} indeterminate sweep={sweep} />
+          <Transfer label="Library" detail="212 GB of 256 GB" value={83} sweep={sweep} />
         </View>
       </Split>
     </View>

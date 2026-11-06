@@ -19,6 +19,13 @@ export { CheckboxMark, checkboxLook, choiceTileLook, MARK_WEIGHT, RadioRing, typ
 export { segmentedLook, TabTitle, tabsLook, underlineTabsLook, type SegmentedLookOptions, type SegmentedSize, type TabLook, type TabState } from "./look/tabs";
 export { fieldLook, fieldSize, fieldText, inputLook, numberInputClasses, numberInputSteps, numberInputText, NumberStep, otpCellLook, otpCells, timeFieldClass, type FieldLookOptions, type FieldTextOptions, type OtpCellOptions } from "./look/field";
 export { calendarLook, CalendarItem, Chevron, clearButtonLook, ComboToggle, comboboxLook, datePickerLook, ListboxEmpty, listboxFooter, ListboxHeader, listboxPopup, listboxProps, listboxSearch, OptionRow, optionClass, Picker, pickerLook, TimeSegment, type ClearButtonOptions, type ComboboxLookOptions, type DatePickerLookOptions, type ListboxPopupOptions, type PickerLookOptions } from "./look/listbox";
+export { progressFill, progressGlide, progressLook, progressRail, progressRemaining, progressSweep, type ProgressLookOptions, type ProgressSweep } from "./look/meter";
+export { DisclosureChevron, disclosurePanel, disclosureTriggerLook, type DisclosurePanelOptions, type DisclosureTriggerOptions } from "./look/disclosure";
+export { carouselArrowLook, CarouselDot, carouselDotItemLook, carouselPaginationLook, carouselSizes, linkColor, linkLook, linkSize, LinkText, paginationArrows, paginationItemClass, type CarouselArrowOptions, type LinkState } from "./look/nav";
+export { categoryColors, plotAxisText, plotBaseline, plotCrossLine, plotDotClass, plotGrid, plotHoverDot, plotReference, plotTooltip, plotTooltipTitle, plotWash, seriesColor, seriesColors } from "./look/plot";
+export { DiffHunkActions, dockClasses, DockDragPreview, DockTab, dockTabCloseClass, resizableHandle, resizableHandleLook, richEditorClasses, textViewCaretClass, textViewLinkClasses } from "./look/workspace";
+export { photoUrl, type PhotoName } from "./photos";
+export { scrollbarTheme } from "./scrollbar-theme";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
  * color over its surface, quieter than pressed and than selected. Leave it

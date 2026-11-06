@@ -97,6 +97,19 @@ test('the field and listbox looks inline with the demos that use them', () => {
   expect(inlined).not.toMatch(/^import\s.*from\s*["']\.\.?\//m);
 });
 
+test('the control families\' looks in look/ inline, their .tsx parts included', () => {
+  const source =
+    'import { progressLook, DisclosureChevron, LinkText, paginationItemClass, plotGrid, DockTab, richEditorClasses, photoUrl, scrollbarTheme } from "./palette";\nmount(() => null);';
+  const inlined = inlineGalleryUi(source, realSources);
+  expect(inlined).not.toMatch(/^import\s.*from\s*["'](?:\.\/|\.\.\/).*["']/m);
+  for (const name of ['progressLook', 'DisclosureChevron', 'LinkText', 'paginationItemClass', 'plotGrid', 'DockTab', 'richEditorClasses', 'photoUrl', 'scrollbarTheme']) {
+    expect(inlined).toMatch(new RegExp(`${name}: __nshGalleryModule\\d+\\.${name}`));
+  }
+  // Each family is its own scope: their private helpers do not collide.
+  expect(inlined).toContain('const slide =');
+  expect(inlined).toContain('const pageItem =');
+});
+
 test('a demo with only native NSH imports stays as written', () => {
   const source = 'import { mount, Text } from "nsh"; mount(() => <Text>hello</Text>);';
   expect(inlineGalleryUi(source, {})).toBe(source);

@@ -1,6 +1,6 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { Button, DataTable, type DataTableColumn, type DataTableRef, type DataTableSelection, type DataTableSort } from "nsh/base";
-import { dataTableClasses, dataTableFitPadding, Segmented, terminal } from "../ui";
+import { DataTable, type DataTableColumn, type DataTableRef, type DataTableSelection, type DataTableSort } from "nsh/base";
+import { Button as GalleryButton, dataTableClasses, dataTableFitPadding, Segmented, terminal } from "../ui";
 
 // `nsh/base`'s `DataTable` over a million stocks of sixty columns the app
 // does not hold, with live quotes as gpui-component's data table story: a
@@ -175,17 +175,9 @@ function row(id: number, n: Float64Array): (string | number)[] {
   return out;
 }
 
-/** A small button in the gallery's look. */
+/** A small secondary button of the gallery's (`buttonLook`). */
 function Tool(props: { label: string; name: string; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      accessibilityLabel={props.label}
-      class="h-8 items-center justify-center rounded-md border border-border bg-card px-3 active:opacity-70"
-    >
-      <Text class="text-[13px] font-semibold text-foreground">{props.name}</Text>
-    </Button>
-  );
+  return <GalleryButton label={props.name} accessibilityLabel={props.label} variant="secondary" size="small" onPress={props.onPress} />;
 }
 
 /**

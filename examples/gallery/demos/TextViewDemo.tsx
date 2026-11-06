@@ -1,6 +1,6 @@
 import { cleanup, signal, Text, View } from "nsh";
 import { TextView, type TextViewImage, type TextViewRef } from "nsh/base";
-import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
+import { Button, Caption, Card, colors, DemoPage, Segmented, textViewCaretClass, textViewLinkClasses } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 import { LucideIcon } from "../icons";
 
@@ -236,10 +236,6 @@ nsh package my-app --target ios-simulator --run
 
 That's it. Ping me if anything looks off.`;
 
-
-/** Links in the gallery's accent (a `TextView` draws them in the theme's `primary`). */
-const links = { link: "text-brand decoration-brand/40" };
-
 function Markdown() {
   const pressed = signal("nothing yet");
   const viewing = signal<TextViewImage | null>(null);
@@ -248,7 +244,7 @@ function Markdown() {
       <TextView
         markdown={MARKDOWN}
         selectable
-        classes={links}
+        classes={textViewLinkClasses}
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         onLinkPress={({ url }) => pressed.set(url)}
         onImagePress={({ image }) => viewing.set(image)}
@@ -263,7 +259,7 @@ function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
     <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
-      <TextView html={HTML} selectable classes={links} onImagePress={({ image }) => viewing.set(image)} />
+      <TextView html={HTML} selectable classes={textViewLinkClasses} onImagePress={({ image }) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );
@@ -373,7 +369,7 @@ function InlineChips() {
 }
 
 function Caret() {
-  return <View class="ml-0.5 h-4 w-2 animate-pulse rounded-sm bg-brand" />;
+  return <View class={textViewCaretClass} />;
 }
 
 function Streaming() {

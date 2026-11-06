@@ -331,6 +331,52 @@ test('the demos\' form controls take the shared looks', () => {
   expect(report).toEqual([]);
 });
 
+/** The other controls' shared looks: what a website demo's tag of each
+ * spreads (`needs`), and the parts it must not style in place instead
+ * (`forbids`), so the demos keep the gallery's look. */
+const looks: { tag: string; needs?: RegExp; forbids?: RegExp; look: string }[] = [
+  { tag: 'Progress', needs: /\{\.\.\.progressLook\(/, forbids: /\b(?:track|indicator)(?:Class|Style)=/, look: 'progressLook(..)' },
+  { tag: 'AccordionTrigger', needs: /\{\.\.\.disclosureTriggerLook\(/, look: 'disclosureTriggerLook(..)' },
+  { tag: 'CarouselPaginationItem', needs: /\{\.\.\.carouselDotItemLook\(/, look: 'carouselDotItemLook()' },
+  { tag: 'Link', needs: /\{\.\.\.linkLook\(/, look: 'linkLook(..)' },
+  { tag: 'Pagination', forbids: /\bitemClass=["'`]/, look: 'paginationItemClass(..)' },
+  { tag: 'Scrollbar', needs: /\bscrollbarTheme\.(?:vertical|horizontal)\b/, forbids: /\bthumbStyle=/, look: 'scrollbarTheme' },
+  { tag: 'Plot', forbids: /\bcrossLine(?:Class|Style)=/, look: 'plotCrossLine(..)' },
+  { tag: 'ResizablePanelGroup', needs: /\{\.\.\.resizableHandleLook\(/, forbids: /\bhandle(?:Thumb)?Class=/, look: 'resizableHandleLook(..)' },
+  { tag: 'DockArea', needs: /\{\.\.\.dockClasses\}/, look: 'dockClasses' },
+  { tag: 'RichEditor', needs: /\bclasses=\{richEditorClasses\}/, look: 'richEditorClasses' },
+];
+
+/** What is wrong with a tag of `rule`'s element: a part styled in place, or no shared look. */
+function lookViolations(rule: (typeof looks)[number], tag: string): string[] {
+  const found: string[] = [];
+  if (rule.forbids?.test(tag)) found.push(`styles in place what ${rule.look} owns`);
+  if (rule.needs && !rule.needs.test(tag)) found.push(`does not use ${rule.look}`);
+  return found;
+}
+
+test('the look guard finds styled parts and a missing look', () => {
+  const [progress, plot] = looks.filter((r) => r.tag === 'Progress' || r.tag === 'Plot');
+  const styled = '<Progress value={v()} indicatorStyle={{ backgroundColor: x }}>';
+  expect(lookViolations(progress, styled)).toEqual(['styles in place what progressLook(..) owns', 'does not use progressLook(..)']);
+  expect(lookViolations(progress, '<Progress value={v()} {...progressLook(() => v())}>')).toEqual([]);
+  expect(lookViolations(plot, '<Plot data={d} crossLineClass="w-px">')).toEqual(['styles in place what plotCrossLine(..) owns']);
+  expect(lookViolations(plot, '<Plot data={d} {...plotCrossLine()}>')).toEqual([]);
+});
+
+test('the demos\' other controls take the shared looks', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    const source = readFileSync(join(root, file), 'utf8');
+    for (const rule of looks) {
+      for (const tag of openingTags(source, rule.tag)) {
+        for (const what of lookViolations(rule, tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+      }
+    }
+  }
+  expect(report).toEqual([]);
+});
+
 test('every demo with inputs of its own still exists and says why', () => {
   for (const [file, reason] of Object.entries(ownInputs)) {
     expect(readFileSync(join(root, file), 'utf8')).toContain('<Input');
