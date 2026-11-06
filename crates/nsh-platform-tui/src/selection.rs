@@ -169,7 +169,7 @@ impl Selection {
         &mut self,
         tree: &Mounter,
         geometry: &[Geometry],
-    ) -> Vec<(NodeId, String)> {
+    ) -> Vec<(NodeId, String, u32)> {
         let mut out = Vec::new();
         let current = self.root.filter(|&root| {
             tree.get(root).is_some_and(|view| {
@@ -180,19 +180,20 @@ impl Selection {
             && Some(*id) != current
         {
             if !text.is_empty() && tree.get(*id).is_some() {
-                out.push((*id, String::new()));
+                out.push((*id, String::new(), 0));
             }
             self.reported = None;
         }
         if let Some(root) = current {
-            let text = if self.model.is_empty() {
-                String::new()
+            let (text, start) = if self.model.is_empty() {
+                (String::new(), 0)
             } else {
-                self.model.text(&Texts::new(tree, geometry, root))
+                let texts = Texts::new(tree, geometry, root);
+                (self.model.text(&texts), self.model.start_offset(&texts))
             };
             let last = self.reported.as_ref().map_or("", |(_, t)| t.as_str());
             if text != last {
-                out.push((root, text.clone()));
+                out.push((root, text.clone(), start));
             }
             self.reported = Some((root, text));
         }

@@ -6743,11 +6743,14 @@ class Player {
 
   /** The selected text as {@link copyText} copies it, or null when nothing
    * selectable in this player is selected; within `only` (an element)
-   * when given. */
-  selectedText(only = null) {
-    const sel = getSelection();
-    if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return null;
-    const range = sel.getRangeAt(0);
+   * when given, of `given` (a range) instead of the selection when given. */
+  selectedText(only = null, given = null) {
+    let range = given;
+    if (!range) {
+      const sel = getSelection();
+      if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return null;
+      range = sel.getRangeAt(0);
+    }
     let out = "";
     let last = null;
     let lastArea = null;
@@ -6780,7 +6783,21 @@ class Player {
       if (to === text.length && run._after) out += run._after;
     }
     if (!found) return null;
-    return out.replace(/\s+$/, "");
+    return given ? out : out.replace(/\s+$/, "");
+  }
+
+  /** Where the selection starts in the copy of all of `area` (UTF-16
+   * units): what maps it back to the document the area shows. */
+  selectionStart(area) {
+    const sel = getSelection();
+    if (!sel?.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    if (!area.contains(range.startContainer)) return 0;
+    const before = document.createRange();
+    before.setStart(area, 0);
+    before.setEnd(range.startContainer, range.startOffset);
+    if (before.collapsed) return 0;
+    return (this.selectedText(area, before) ?? "").length;
   }
 
   /** The document's selection changed: the selectable view it is in (the
@@ -6795,7 +6812,7 @@ class Player {
     if (last && last !== area) {
       this._selectedArea = null;
       if (last._selectedText && last._events?.has("onSelectionChange") && last.isConnected) {
-        this.event(last._id, "onSelectionChange", { text: "" });
+        this.event(last._id, "onSelectionChange", { text: "", start: 0 });
       }
       last._selectedText = "";
     }
@@ -6805,7 +6822,7 @@ class Player {
     const text = this.selectedText(area) ?? "";
     if (text === (area._selectedText ?? "")) return;
     area._selectedText = text;
-    this.event(area._id, "onSelectionChange", { text });
+    this.event(area._id, "onSelectionChange", { text, start: text ? this.selectionStart(area) : 0 });
   }
 
   /** Select all and Escape in selectable text with a selection: within it. */

@@ -679,6 +679,9 @@ event id:area onSelectionChange text=
 expect Area selected: nothing
 event id:own onSelectionChange text=Own
 expect Own selected: Own
+expect Own read: Own | **Own** | <p><strong>Own</strong></p>
+event id:own onSelectionChange text=
+expect Own read: nothing
 expect Area selected: nothing
 covers [events] onSelectionChange
 # base-popups

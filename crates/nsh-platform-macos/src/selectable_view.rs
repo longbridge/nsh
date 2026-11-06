@@ -275,26 +275,30 @@ fn report(surface: &Surface) {
         if !listens {
             return;
         }
-        let text = if active.model.is_empty() {
-            String::new()
+        let (text, start) = if active.model.is_empty() {
+            (String::new(), 0)
         } else {
-            active.model.text(&collect(&area))
+            let texts = collect(&area);
+            (active.model.text(&texts), active.model.start_offset(&texts))
         };
         if text == active.reported {
             return;
         }
         active.reported.clone_from(&text);
-        (id, text)
+        (id, text, start)
     };
     send(surface, change);
 }
 
 /// Sends `onSelectionChange` with `text` to view `id`.
-fn send(surface: &Surface, (id, text): (NodeId, String)) {
+fn send(surface: &Surface, (id, text, start): (NodeId, String, u32)) {
     surface.event(
         id,
         EventKind::SelectionChange,
-        EventPayload::Map(vec![("text", PayloadValue::Str(text))]),
+        EventPayload::Map(vec![
+            ("text", PayloadValue::Str(text)),
+            ("start", PayloadValue::Number(f64::from(start))),
+        ]),
     );
 }
 
@@ -317,7 +321,7 @@ impl AreaSelection {
                 && let Some(area) = active.area()
             {
                 let id = area.state().id;
-                send(surface, (id, String::new()));
+                send(surface, (id, String::new(), 0));
             }
         }
     }

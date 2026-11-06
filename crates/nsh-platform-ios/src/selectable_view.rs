@@ -863,12 +863,13 @@ impl AreaResponder {
         if !self.ivars().listens.get() {
             return;
         }
-        let text = {
+        let (text, start) = {
             let model = self.ivars().model.borrow();
             if model.is_empty() {
-                String::new()
+                (String::new(), 0)
             } else {
-                model.text(&*self.ivars().texts.borrow())
+                let texts = self.ivars().texts.borrow();
+                (model.text(&*texts), model.start_offset(&*texts))
             }
         };
         if *self.ivars().reported.borrow() == text {
@@ -881,7 +882,10 @@ impl AreaResponder {
             control.dispatch_event(
                 self.ivars().id.get(),
                 EventKind::SelectionChange,
-                EventPayload::Map(vec![("text", PayloadValue::Str(text))]),
+                EventPayload::Map(vec![
+                    ("text", PayloadValue::Str(text)),
+                    ("start", PayloadValue::Number(f64::from(start))),
+                ]),
             );
         }
     }

@@ -756,7 +756,15 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
-| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text }`，与复制得到的内容相同的选中文字；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start }`，与复制得到的内容相同的选中文字及其起始位置；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
+
+## 方法
+
+`ref` 提供 `TextViewRef`（Rust 中通过 `component_ref::<TextView>()` 取得 `TextViewApi`）。JS 中的方法返回 `Promise`。
+
+| 方法 | Rust | 说明 |
+|---|---|---|
+| `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | 读取 `selectable` 视图的选区：`format` 为 `"plain"`（默认，与复制相同）、`"markdown"` 或 `"html"`，由选中的节点重新生成；选中全部时返回原样的源文（[读取为 Markdown 或 HTML](./text-selection.md#读取为-markdown-或-html)）。没有选中内容时返回 `""`。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 
 <a id="accessibility"></a>

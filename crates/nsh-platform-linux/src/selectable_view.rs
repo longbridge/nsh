@@ -789,24 +789,27 @@ fn report(surface: &Surface, id: NodeId, area: &NshView, texts: &Texts) {
     if !area.state().events.contains(EventKind::SelectionChange) {
         return;
     }
-    let text = {
+    let (text, start) = {
         let mut areas = surface.selection.areas.borrow_mut();
         let Some(a) = areas.get_mut(&id) else { return };
-        let text = if a.model.is_empty() {
-            String::new()
+        let (text, start) = if a.model.is_empty() {
+            (String::new(), 0)
         } else {
-            a.model.text(texts)
+            (a.model.text(texts), a.model.start_offset(texts))
         };
         if text == a.reported {
             return;
         }
         a.reported.clone_from(&text);
-        text
+        (text, start)
     };
     surface.event(
         id,
         EventKind::SelectionChange,
-        EventPayload::Map(vec![("text", PayloadValue::Str(text))]),
+        EventPayload::Map(vec![
+            ("text", PayloadValue::Str(text)),
+            ("start", PayloadValue::Number(f64::from(start))),
+        ]),
     );
 }
 

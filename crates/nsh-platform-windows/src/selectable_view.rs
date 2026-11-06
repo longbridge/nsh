@@ -342,7 +342,7 @@ fn end(mut current: Current) {
     if !current.reported.is_empty() && current.area.attached() {
         let id = current.area.state().id;
         if let Some(surface) = Surface::by_key(current.surface) {
-            send(&surface, id, String::new());
+            send(&surface, id, String::new(), 0);
         }
     }
 }
@@ -360,30 +360,37 @@ fn report(surface: u64) {
     };
     let mut change = None;
     if listens {
-        let text = if current.model.is_empty() {
-            String::new()
+        let (text, start) = if current.model.is_empty() {
+            (String::new(), 0)
         } else {
-            current.model.text(&Texts::of(&current.area))
+            let texts = Texts::of(&current.area);
+            (
+                current.model.text(&texts),
+                current.model.start_offset(&texts),
+            )
         };
         if text != current.reported {
             current.reported.clone_from(&text);
-            change = Some(text);
+            change = Some((text, start));
         }
     }
     CURRENT.set(Some(current));
-    if let Some(text) = change
+    if let Some((text, start)) = change
         && let Some(surface) = Surface::by_key(surface)
     {
-        send(&surface, id, text);
+        send(&surface, id, text, start);
     }
 }
 
 /// Sends `onSelectionChange` with `text` to view `id`.
-fn send(surface: &Surface, id: NodeId, text: String) {
+fn send(surface: &Surface, id: NodeId, text: String, start: u32) {
     surface.event(
         id,
         EventKind::SelectionChange,
-        EventPayload::Map(vec![("text", PayloadValue::Str(text))]),
+        EventPayload::Map(vec![
+            ("text", PayloadValue::Str(text)),
+            ("start", PayloadValue::Number(f64::from(start))),
+        ]),
     );
 }
 

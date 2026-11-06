@@ -14,6 +14,7 @@ use super::{
     Alert, Block, CodeBlock, ColumnAlign, CustomNode, Document, Image, ImageLength, Inline,
     ListItem, MarkdownExtension, MarkdownOptions, MarkdownPlugins, Parser, Table,
     parts::{TextViewClasses, TextViewPart as Part, TextViewParts, TextViewStyles},
+    selection::{Reported, Source, TextSelectionOptions, selected},
 };
 use crate::{terminal::is_terminal, theme::theme};
 
@@ -148,6 +149,39 @@ pub enum TextViewEvent {
     SelectionChange(TextViewSelectionEvent),
 }
 
+/// The methods of a [`TextView`]'s ref.
+pub struct TextViewApi {
+    document: Memo<Document>,
+    props: TextViewProps,
+    reported: Rc<std::cell::RefCell<Reported>>,
+}
+
+#[methods]
+impl TextViewApi {
+    /// The selected part of a `selectable` view, in `options.format`: its
+    /// text as a copy gives it (`plain`, the default), or the selected
+    /// nodes as Markdown or HTML (the source as written when all of it is
+    /// selected). Empty when nothing is selected; inside another
+    /// `selectable` view, the outer view holds the selection and this
+    /// view's is empty.
+    pub fn selected_text(&self, options: Option<TextSelectionOptions>) -> String {
+        let format = options.unwrap_or_default().format;
+        let reported = self.reported.borrow();
+        if reported.text.is_empty() {
+            return String::new();
+        }
+        let source = if let Some(md) = self.props.markdown.get_untracked() {
+            Source::Markdown(md.to_string())
+        } else if let Some(html) = self.props.html.get_untracked() {
+            Source::Html(html.to_string())
+        } else {
+            Source::None
+        };
+        self.document
+            .with_untracked(|doc| selected(doc, &source, &reported, format))
+    }
+}
+
 /// The selection of a [`TextView`] changed (`onSelectionChange`).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
@@ -155,6 +189,9 @@ pub struct TextViewSelectionEvent {
     /// The selected text, as a copy gives it (blocks joined by line
     /// breaks); empty when nothing is selected.
     pub text: SharedString,
+    /// Where it starts in the view's whole text (UTF-16 units), when the
+    /// platform knows it.
+    pub start: Option<u32>,
 }
 
 /// An action of the code blocks of a [`TextView`] (`codeBlockActions`).
@@ -219,7 +256,7 @@ pub struct TextViewCodeActionEvent {
 /// actions, formulas, images. Made for replies streamed by AI models:
 /// blocks are kept by position, so only those that changed are made
 /// again, and `streaming_caret` follows the end of the text.
-#[component]
+#[component(methods = TextViewApi)]
 pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElement {
     let plugins = use_context::<MarkdownPlugins>().unwrap_or_default();
     let parser_plugins = plugins.clone();
@@ -246,6 +283,12 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
     let plugins = Rc::new(plugins);
     let row_plugins = plugins.clone();
     let math_loaded = signal(false);
+    let reported = Rc::new(std::cell::RefCell::new(Reported::default()));
+    cx.methods(TextViewApi {
+        document,
+        props,
+        reported: reported.clone(),
+    });
     view()
         .flex_col()
         .gap(px(BLOCK_GAP))
@@ -255,9 +298,14 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         // Selectable: its texts share one selection, block to block (inside
         // a `selectable` view, the outer one's).
         .selectable(props.selectable)
-        .on_text_selection_change(move |text: &str| {
+        .on_text_selection_change(move |e: &nsh_core::element::TextSelectionEvent| {
+            *reported.borrow_mut() = Reported {
+                text: e.text.clone(),
+                start: e.start,
+            };
             cx.emit(TextViewEvent::SelectionChange(TextViewSelectionEvent {
-                text: text.to_owned().into(),
+                text: e.text.clone().into(),
+                start: e.start,
             }));
         })
         .map(|mut el| {
