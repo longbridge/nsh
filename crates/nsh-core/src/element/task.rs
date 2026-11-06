@@ -112,6 +112,9 @@ pub(crate) enum Action {
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
+    /// The next URL the system opens the app with (nsh.json `schemes`),
+    /// those that came first before; it resolves the slot.
+    NextLink(AnswerSlot<String>),
     /// Whether a web view's ref gives its page trusted input here
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.

@@ -138,6 +138,8 @@ pub(crate) struct RootViewIvars {
     host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+    /// URLs opened ([`Surface::open_url`]) before the app started.
+    urls: RefCell<Vec<String>>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -308,6 +310,7 @@ impl RootView {
             host: Cell::default(),
             host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
+            urls: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -765,12 +768,23 @@ impl RootView {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);
+        let control = engine.control();
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
+        crate::linking::started(self.owner(), &control);
+        for url in std::mem::take(&mut *self.ivars().urls.borrow_mut()) {
+            crate::linking::send(&control, url);
+        }
         self.ivars().environment.set(Some(self.environment()));
+    }
+
+    /// Identifies this surface to `linking`.
+    fn owner(&self) -> usize {
+        self as *const Self as usize
     }
 
     /// Stops the engine and removes all native views.
     fn stop(&self) {
+        crate::linking::stopped(self.owner());
         let running = self.ivars().running.borrow_mut().take();
         if let Some(Running { engine, mounter }) = running {
             drop(engine);
@@ -974,6 +988,15 @@ impl Surface {
         *self.view.ivars().host_tokens.borrow_mut() = tokens.clone();
         if let Some(running) = &*self.view.ivars().running.borrow() {
             running.engine.control().set_tokens(tokens);
+        }
+    }
+
+    /// Sends `url` to the running app (`Linking.on("url")`, `nsh`), or to
+    /// the app once it starts.
+    pub fn open_url(&self, url: &str) {
+        match &*self.view.ivars().running.borrow() {
+            Some(running) => crate::linking::send(&running.engine.control(), url.to_owned()),
+            None => self.view.ivars().urls.borrow_mut().push(url.to_owned()),
         }
     }
 

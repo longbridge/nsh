@@ -577,6 +577,10 @@ pub(super) struct Components {
     speech: Option<SpeechSession>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
+    /// URLs the system opened the app with, no listener took yet.
+    links: std::collections::VecDeque<String>,
+    /// The listener waiting for a URL.
+    next_link: Option<AnswerSlot<String>>,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -698,6 +702,8 @@ impl Default for Components {
             next_pick: 1,
             speech: None,
             notifications: Notifications::default(),
+            links: Default::default(),
+            next_link: None,
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -5259,6 +5265,10 @@ impl<M: TextEngine> Core<M> {
             }
             Action::Speech(action) => self.speech_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::NextLink(answer) => match self.components.links.pop_front() {
+                Some(url) => answer.borrow_mut().deliver(url),
+                None => self.components.next_link = Some(answer),
+            },
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5613,6 +5623,22 @@ impl<M: TextEngine> Core<M> {
             }
             EventKind::Notification if id == crate::ROOT_ID => {
                 self.notification_event(payload);
+                true
+            }
+            EventKind::Link if id == crate::ROOT_ID => {
+                let EventPayload::Map(entries) = payload else {
+                    return false;
+                };
+                let Some(url) = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(url) if *k == "url" => Some(url.clone()),
+                    _ => None,
+                }) else {
+                    return false;
+                };
+                match self.components.next_link.take() {
+                    Some(answer) => answer.borrow_mut().deliver(url),
+                    None => self.components.links.push_back(url),
+                }
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

@@ -40,6 +40,8 @@ struct State {
     /// The embedding app's theme overrides.
     host_tokens: Option<nsh_engine::Tokens>,
     on_error: Option<ErrorHandler>,
+    /// URLs opened ([`AppView::open_url`]) before any app was loaded.
+    urls: Vec<String>,
     #[cfg(feature = "dev")]
     dev: Option<crate::dev::DevSession>,
     /// A test session's model of the app, for every surface from now on.
@@ -64,6 +66,7 @@ impl AppView {
                     host: nsh_engine::HostEnvironment::default(),
                     host_tokens: None,
                     on_error: None,
+                    urls: Vec::new(),
                     #[cfg(feature = "dev")]
                     dev: None,
                     #[cfg(feature = "dev")]
@@ -124,6 +127,17 @@ impl AppView {
             .options
             .components
             .register(name, factory);
+    }
+
+    /// Hands `url`, one of the embedding app's URLs, to the running app as
+    /// the system opening it would (`Linking.on("url")`, `nsh`); before an
+    /// app runs, the next one loaded gets it. On the main thread.
+    pub fn open_url(&self, url: &str) {
+        let mut state = self.inner.state.borrow_mut();
+        match &state.surface {
+            Some(surface) => surface.open_url(url),
+            None => state.urls.push(url.to_owned()),
+        }
     }
 
     /// The channel with the apps this view runs (`nsh/host`): their
@@ -193,6 +207,9 @@ impl AppView {
         state.host_tokens = tokens;
         if let Some(surface) = &state.surface {
             surface.set_host_tokens(state.host_tokens.clone());
+            for url in std::mem::take(&mut state.urls) {
+                surface.open_url(&url);
+            }
         }
         Ok(())
     }

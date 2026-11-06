@@ -172,6 +172,9 @@ pub(crate) struct Apk<'a> {
     pub(crate) dev: bool,
     /// The app may show notifications: `POST_NOTIFICATIONS` is declared.
     pub(crate) notifications: bool,
+    /// URL schemes that open the app (nsh.json `schemes`): one
+    /// `VIEW` intent filter.
+    pub(crate) schemes: &'a [String],
     /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
     /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
     pub(crate) rust: bool,
@@ -289,6 +292,25 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     } else {
         ""
     };
+    // A link opens the running app (`onNewIntent`), not another activity in
+    // the caller's task.
+    let launch_mode = if apk.schemes.is_empty() {
+        ""
+    } else {
+        r#" android:launchMode="singleTask""#
+    };
+    let schemes = if apk.schemes.is_empty() {
+        String::new()
+    } else {
+        let data: String = apk
+            .schemes
+            .iter()
+            .map(|s| format!("\n                <data android:scheme=\"{s}\" />"))
+            .collect();
+        format!(
+            "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
+        )
+    };
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
@@ -298,13 +320,13 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
-        <activity android:name="{activity}" android:exported="true"
+        <activity android:name="{activity}" android:exported="true"{launch_mode}
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            </intent-filter>{schemes}
         </activity>
     </application>
 </manifest>
@@ -539,6 +561,7 @@ mod tests {
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
             notifications,
+            schemes: &[],
             rust,
             dark: false,
             runtime: std::path::Path::new("."),

@@ -232,7 +232,6 @@ pub use crate::{
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
     tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
 };
-
 #[cfg(feature = "editor")]
 pub use crate::{
     diff::{

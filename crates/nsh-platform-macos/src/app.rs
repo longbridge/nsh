@@ -24,7 +24,7 @@ use objc2_app_kit::{
     NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
 };
 
 use crate::{
@@ -552,6 +552,30 @@ define_class!(
                 window.makeKeyAndOrderFront(None);
             }
             false
+        }
+
+        // URLs of the app's schemes (`CFBundleURLTypes`), the launch's
+        // included: AppKit sends them after `applicationWillFinishLaunching:`.
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
+            for url in urls.iter() {
+                if let Some(url) = url.absoluteString() {
+                    crate::linking::open(url.to_string());
+                }
+            }
+            app.activate();
+            let window = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .map(|running| running.window.clone())
+            });
+            if let Some(window) = window {
+                if window.isMiniaturized() {
+                    window.deminiaturize(None);
+                }
+                window.makeKeyAndOrderFront(None);
+            }
         }
 
         #[unsafe(method(applicationWillTerminate:))]

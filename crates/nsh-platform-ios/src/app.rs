@@ -135,7 +135,7 @@ define_class!(
             &self,
             scene: &UIScene,
             session: &UISceneSession,
-            _options: &UISceneConnectionOptions,
+            options: &UISceneConnectionOptions,
         ) {
             // SAFETY: reading an immutable UIKit constant.
             if *session.role() != *unsafe { UIWindowSceneSessionRoleApplication } {
@@ -145,6 +145,16 @@ define_class!(
                 return;
             };
             connect(self.mtm(), scene);
+            // The URL that launched the app; it waits for the engine.
+            // SAFETY: a documented property, an `NSSet<UIOpenURLContext>`.
+            let contexts: Retained<AnyObject> = unsafe { msg_send![options, URLContexts] };
+            open_url_contexts(&contexts);
+        }
+
+        // URLs of the app's schemes (`CFBundleURLTypes`) while it runs.
+        #[unsafe(method(scene:openURLContexts:))]
+        fn open_url_contexts(&self, _scene: &UIScene, contexts: &AnyObject) {
+            open_url_contexts(contexts);
         }
     }
 
@@ -179,6 +189,23 @@ impl RootController {
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
         // SAFETY: UIViewController's designated initializer.
         unsafe { msg_send![Self::alloc(mtm), init] }
+    }
+}
+
+/// Hands the URLs of `contexts`, an `NSSet<UIOpenURLContext>`, to the app.
+fn open_url_contexts(contexts: &AnyObject) {
+    // SAFETY: documented methods of `NSSet`, `UIOpenURLContext` and `NSURL`.
+    let urls: Vec<String> = unsafe {
+        let all: Retained<objc2_foundation::NSArray<AnyObject>> = msg_send![contexts, allObjects];
+        all.iter()
+            .filter_map(|context| {
+                let url: Retained<objc2_foundation::NSURL> = msg_send![&*context, URL];
+                url.absoluteString().map(|s| s.to_string())
+            })
+            .collect()
+    };
+    for url in urls {
+        crate::linking::open(url);
     }
 }
 

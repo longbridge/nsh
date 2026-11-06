@@ -724,6 +724,15 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next URL the system opens the app with, of a scheme nsh.json's
+/// `schemes` registers (TS: `Linking.on("url", ...)`), the one that started
+/// the app first. To await in a task.
+pub fn next_link() -> Answer<String> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextLink(slot));
+    answer
+}
+
 /// Whether a web view's ref gives its page trusted input here (TS:
 /// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
 /// the platform delivers it (macOS) and the app's capabilities grant

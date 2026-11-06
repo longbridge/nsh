@@ -1,6 +1,6 @@
 //! The executable of a packaged nsh app (`nsh package --target windows`):
 //! runs the bundle shipped next to it (`nsh\bundle.nshc`, assets in
-//! `nsh\assets`, the app's name, id and appearance in `nsh\app.json`, its
+//! `nsh\assets`, the app's name, id, appearance and URL schemes in `nsh\app.json`, its
 //! icon in `nsh\icon.ico`).
 //!
 //! A library so that an app with Rust components of its own (`nsh.json`
@@ -107,6 +107,16 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     }
     if let Some(name) = field("name") {
         options.title = name;
+    }
+    // The URL schemes it registers and opens (`EventKind::Link`).
+    if let Some(schemes) = info
+        .as_ref()
+        .and_then(|info| info.get("schemes")?.as_array().cloned())
+    {
+        options.schemes = schemes
+            .iter()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect();
     }
     // The window opens in the app's appearance (no flash of the system's).
     match field("appearance").as_deref() {

@@ -114,6 +114,47 @@ pub(crate) struct AppConfig {
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
+    /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
+    /// packages register with the system; the app hears them through
+    /// `Linking.on("url", ...)`.
+    #[serde(default)]
+    pub(crate) schemes: Vec<String>,
+}
+
+/// Checks a scheme of `nsh.json` `"schemes"`: RFC 3986's form in lower
+/// case, and none the system or a browser owns.
+pub(crate) fn check_scheme(scheme: &str) -> anyhow::Result<()> {
+    const RESERVED: &[&str] = &[
+        "http",
+        "https",
+        "file",
+        "ftp",
+        "mailto",
+        "tel",
+        "sms",
+        "data",
+        "javascript",
+        "about",
+        "blob",
+        "ws",
+        "wss",
+        "content",
+        "intent",
+        "asset",
+    ];
+    let mut chars = scheme.chars();
+    let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.".contains(c));
+    if !valid {
+        bail!(
+            "nsh.json: scheme {scheme:?} must start with a lowercase letter and hold only \
+             lowercase letters, digits, `+`, `-` and `.` (write `myapp`, not `myapp://`)"
+        );
+    }
+    if RESERVED.contains(&scheme) {
+        bail!("nsh.json: scheme {scheme:?} belongs to the system or the browser");
+    }
+    Ok(())
 }
 
 /// `nsh.json` `"tui"`.
@@ -222,6 +263,9 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
     if let Some(value) = &config.tui.points_per_cell {
         crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
+    }
+    for scheme in &config.schemes {
+        check_scheme(scheme)?;
     }
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
@@ -391,7 +435,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // The app's id, which names where it keeps its data (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
-        serde_json::json!({ "id": id }).to_string(),
+        serde_json::json!({ "id": id, "name": name, "schemes": config.schemes }).to_string(),
     )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
@@ -574,6 +618,7 @@ fn package_android(
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
             notifications: config.notifications(),
+            schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
@@ -653,7 +698,12 @@ fn package_linux(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
+    let mut info = serde_json::json!({
+        "name": name,
+        "id": id,
+        "version": version,
+        "schemes": config.schemes,
+    });
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
@@ -664,7 +714,7 @@ fn package_linux(
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(name, id, executable, config.icon.is_some()),
+        desktop_entry(name, id, executable, config.icon.is_some(), &config.schemes),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -870,6 +920,7 @@ fn macos_info_plist(
         d.insert("CFBundleIconFile".into(), s("AppIcon"));
     }
     config.usage_descriptions(&mut d);
+    url_types(&mut d, id, &config.schemes);
     d
 }
 
@@ -881,15 +932,50 @@ const MACOS_MINIMUM: &str = "14.0";
 /// name and `StartupWMClass`, which GTK sets from the application id.
 /// `Exec` names the executable on the `PATH` (install the package
 /// directory, or a link to the executable, there).
-fn desktop_entry(name: &str, id: &str, executable: &str, icon: bool) -> String {
+/// `schemes` are the URL schemes it opens (`MimeType=x-scheme-handler/…`):
+/// the URL is `Exec`'s `%u`.
+pub(crate) fn desktop_entry(
+    name: &str,
+    id: &str,
+    executable: &str,
+    icon: bool,
+    schemes: &[String],
+) -> String {
     let icon = if icon {
         format!("Icon={id}\n")
     } else {
         String::new()
     };
+    let (url, mime) = if schemes.is_empty() {
+        ("", String::new())
+    } else {
+        let types: String = schemes
+            .iter()
+            .map(|s| format!("x-scheme-handler/{s};"))
+            .collect();
+        (" %u", format!("MimeType={types}\n"))
+    };
     format!(
-        "[Desktop Entry]\nType=Application\nName={name}\nExec={executable}\n{icon}StartupWMClass={id}\nTerminal=false\nCategories=Utility;\n"
+        "[Desktop Entry]\nType=Application\nName={name}\nExec={executable}{url}\n{icon}StartupWMClass={id}\nTerminal=false\nCategories=Utility;\n{mime}"
     )
+}
+
+/// Info.plist's `CFBundleURLTypes`: the URL schemes the app opens.
+fn url_types(d: &mut plist::Dictionary, id: &str, schemes: &[String]) {
+    use plist::Value;
+    if schemes.is_empty() {
+        return;
+    }
+    let mut kind = plist::Dictionary::new();
+    kind.insert("CFBundleURLName".into(), Value::String(id.to_owned()));
+    kind.insert(
+        "CFBundleURLSchemes".into(),
+        Value::Array(schemes.iter().map(|s| Value::String(s.clone())).collect()),
+    );
+    d.insert(
+        "CFBundleURLTypes".into(),
+        Value::Array(vec![Value::Dictionary(kind)]),
+    );
 }
 
 fn info_plist(
@@ -982,6 +1068,7 @@ fn info_plist(
             s("UIInterfaceOrientationLandscapeRight"),
         ]),
     );
+    url_types(&mut d, id, &config.schemes);
     d
 }
 
@@ -1347,12 +1434,28 @@ mod tests {
     #[test]
     fn desktop_entries_match_windows_by_the_app_id() {
         assert_eq!(
-            desktop_entry("Counter", "com.example.counter", "Counter", true),
+            desktop_entry("Counter", "com.example.counter", "Counter", true, &[]),
             "[Desktop Entry]\nType=Application\nName=Counter\nExec=Counter\n\
              Icon=com.example.counter\nStartupWMClass=com.example.counter\nTerminal=false\n\
              Categories=Utility;\n"
         );
-        assert!(!desktop_entry("A", "com.example.a", "A", false).contains("Icon="));
+        assert!(!desktop_entry("A", "com.example.a", "A", false, &[]).contains("Icon="));
+    }
+
+    #[test]
+    fn desktop_entries_open_the_apps_schemes() {
+        let entry = desktop_entry("A", "com.example.a", "A", false, &["a".into(), "b2".into()]);
+        assert!(entry.contains("Exec=A %u\n"));
+        assert!(entry.contains("MimeType=x-scheme-handler/a;x-scheme-handler/b2;\n"));
+    }
+
+    #[test]
+    fn schemes_are_checked() {
+        assert!(check_scheme("myapp").is_ok());
+        assert!(check_scheme("my-app.v2+x").is_ok());
+        for bad in ["", "MyApp", "myapp://", "2app", "https", "file"] {
+            assert!(check_scheme(bad).is_err(), "{bad}");
+        }
     }
 
     // `ditto` is macOS's.

@@ -88,7 +88,10 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 args.push("--no-default-features");
                 // Without web views only: the release runner keeps the rest.
                 if package == "nsh-linux-app" {
-                    args.extend(["--features", "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto"]);
+                    args.extend([
+                        "--features",
+                        "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto",
+                    ]);
                 }
             }
             cargo(&args, what)?;

@@ -527,6 +527,30 @@ public class NshView extends FrameLayout {
         Notifications.handleIntent(intent);
     }
 
+    /**
+     * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
+     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     *
+     * @param url the URL
+     */
+    public void openUrl(String url) {
+        if (url == null || handle == 0) return;
+        mounter.eventMap(1, Native.LINK, new String[] {"url"}, new Object[] {url});
+    }
+
+    /**
+     * Hands the app the URL {@code intent} carries, if it is an {@code ACTION_VIEW} intent with one ({@link #openUrl}).
+     * The activity showing this view calls it from {@code onCreate} (with the launch intent, when it is not being
+     * recreated) and {@code onNewIntent}.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleLinkIntent(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data != null) openUrl(data.toString());
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {

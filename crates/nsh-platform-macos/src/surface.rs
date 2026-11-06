@@ -416,6 +416,7 @@ impl Surface {
                 if let Some(monitor) = &*self.perf.borrow() {
                     engine.control().set_perf_monitor(Some(monitor.clone()));
                 }
+                crate::linking::started(self.key as usize, &engine.control());
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
             }
@@ -425,6 +426,7 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        crate::linking::stopped(self.key as usize);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();

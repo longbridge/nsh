@@ -1805,6 +1805,34 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 `permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
 
+## Linking
+
+`Linking` 接收系统用 URL 打开应用时的链接。在 `nsh.json` 中列出应用的 URL scheme，浏览器中点击或其他应用打开的
+`myapp://chat/42` 这样的链接就会打开应用并交给它：
+
+```json
+{ "id": "com.example.app", "schemes": ["myapp"] }
+```
+
+```tsx
+import { Linking } from "nsh";
+
+Linking.on("url", ({ url }) => openRoute(new URL(url)));
+```
+
+链接可以启动应用：URL 会等到第一个监听器，所以请在应用启动时监听。应用运行时打开的链接会把窗口带到前台。Rust 代码
+await `nsh_core::prelude` 的 `next_link`。
+
+| 平台 | 注册方式 |
+| --- | --- |
+| macOS、iOS | `nsh package` 写入 Info.plist 的 `CFBundleURLTypes` |
+| Android | `nsh package` 写入清单的 `ACTION_VIEW` intent filter；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\Software\Classes`；第二次启动会把 URL 交给正在运行的应用 |
+| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件并设为默认处理程序；`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
+
+嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、macOS、Windows）、
+`NshAppView.openURL`（iOS）、`NshView.openUrl` 或 `NshView.handleLinkIntent`（Android）。
+
 ## Speech
 
 语音 API 把用户说的话变成文字（听写）：应用开始一个会话，平台监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的
