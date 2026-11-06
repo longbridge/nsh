@@ -87,7 +87,7 @@ define_class!(
 );
 
 /// Applies `command`, reporting through `control`. On the main thread.
-pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
+pub fn command(control: &EngineControl, command: &NotificationCommand) {
     match command {
         NotificationCommand::SetBadge(count) => set_badge(*count),
         NotificationCommand::Permission { id, ask } => match center() {
@@ -122,7 +122,7 @@ pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
 
 /// Becomes the notification center's delegate unless the app has one. On the
 /// main thread, before the app finishes launching where a press can start it.
-pub(crate) fn install() {
+pub fn install() {
     let Some(center) = center() else { return };
     // SAFETY: a documented property.
     let current: Option<Retained<AnyObject>> = unsafe { msg_send![&*center, delegate] };
