@@ -138,7 +138,8 @@ the user first, then calls it. The app quits as with `quit()`, and once its proc
 again with the arguments it was started with; the two processes never run side by side. On macOS an app inside an
 `.app` bundle comes back through Launch Services, as when the user opens it. It works in standalone apps on macOS,
 Windows and Linux, including those `nsh package` builds; a view embedded in another app (a GPUI app's `AppView`, say)
-leaves restarting to that app.
+leaves restarting to that app. Under `nsh run` the app quits, and `nsh run` ends with it: check restarting in an app
+`nsh package` builds.
 
 ```tsx
 import { Application } from "nsh/desktop";

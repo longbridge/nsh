@@ -44,6 +44,7 @@ pub mod platform;
 pub mod prelude;
 mod props;
 pub mod reactive;
+#[doc(hidden)]
 pub mod relaunch;
 pub mod resource;
 pub mod runtime;

@@ -124,7 +124,7 @@ bubble back up. What NSH adds:
 
 - **Window shortcuts** (`app.rs`, standalone apps only, not an embedded `AppView`): Ctrl+Q quits (as the `quit`
   role and `Application.quit()` do: the windows close, then the application's run ends; `Application.relaunch()` takes
-  the same path, then `run_app` starts the program again once the process has exited, `nsh_core::relaunch`), Ctrl+W closes the
+  the same path, then `run_app` starts the program again once the process has exited, `nsh_core::relaunch`; a development host, feature `dev`, only quits), Ctrl+W closes the
   window (GtkWindow's `window.close`, a bubble-phase shortcut of the window rather than an application accelerator,
   which would run before everything: the app may bind Ctrl+W), F11 toggles full screen, as GNOME apps do; the dev host's Ctrl+R (`dev.rs`) is a
   global-scope `gtk::ShortcutController`. Application accelerators and shortcut triggers also match the key of the

@@ -127,7 +127,8 @@ const Application: {
 `Application.relaunch()` 用于下次启动才生效的设置，比如应用的语言：应用先征得用户同意，再调用它。应用像 `quit()` 一样退出，
 进程结束后，同一个程序以原来的启动参数重新启动；新旧两个进程不会同时运行。在 macOS 上，`.app` 包里的应用通过
 Launch Services 重新打开，与用户打开它时相同。它在 macOS、Windows 和 Linux 的独立应用中生效，包括 `nsh package`
-构建的应用；嵌入在其他应用中的视图（比如 GPUI 应用的 `AppView`）把重启交给那个应用。
+构建的应用；嵌入在其他应用中的视图（比如 GPUI 应用的 `AppView`）把重启交给那个应用。在 `nsh run` 下应用会退出，
+`nsh run` 也随之结束：重启的效果请在 `nsh package` 构建的应用中检查。
 
 ```tsx
 import { Application } from "nsh/desktop";

@@ -539,10 +539,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     // was opened with goes to it (`open`).
     let code = app.run_with_args(&args);
     // The new process waits for this one to exit.
-    if RELAUNCH.take()
-        && let Err(err) = nsh_core::relaunch::spawn_after_exit()
-    {
-        log::error!("cannot relaunch the app: {err}");
+    if RELAUNCH.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on relaunch; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::relaunch::spawn_after_exit() {
+            log::error!("cannot relaunch the app: {err}");
+        }
     }
     code
 }

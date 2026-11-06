@@ -1,5 +1,7 @@
 //! Starting a standalone desktop app again (`Application.relaunch()`,
 //! [`crate::element::desktop::relaunch`]), what the desktop runners share.
+//! Runner plumbing, not app API: apps call `relaunch()`, and the module is
+//! hidden from the documentation.
 //!
 //! A runner quits as for `Application.quit()` and, when its run has ended,
 //! calls [`spawn_after_exit`]. The new process starts only once this one has

@@ -317,7 +317,8 @@ request; an Exit or relaunch uses `quit_app()` from the host, or the app's
 `quit()` (TS: `Application.quit()`), which takes the same path. `relaunch()` (TS: `Application.relaunch()`) takes it
 too (`app.rs` `relaunch_app`) and marks the run; once `app.run()` returns, `run_app` calls
 `nsh_core::relaunch::spawn_after_exit`, whose shell waits for the process to exit before `open -n` starts the bundle
-again (the executable itself outside a bundle).
+again (the executable itself outside a bundle). A development host (feature `dev`) only quits: `nsh run` ends with
+its host and stops the dev server, so a host started again would be cut off from both.
 
 Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while

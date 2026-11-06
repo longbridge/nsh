@@ -519,8 +519,8 @@ fn wait_for_replaced_process() {
         return;
     };
     // Programs the app starts must not wait for it too.
-    // SAFETY: Windows guards the process environment with a lock of its
-    // own, so changing it while other threads read it is sound there.
+    // SAFETY: called at the start of `run_app`, before it starts the UI
+    // thread or anything else that reads the environment.
     unsafe { std::env::remove_var(nsh_core::relaunch::WAIT_FOR_ENV) };
     // SAFETY: plain calls; the handle is closed once waited on. A process
     // that has exited already cannot be opened, and nothing waits.
@@ -573,10 +573,14 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     unsafe { windows::Win32::System::Ole::OleUninitialize() };
     STANDALONE.set(false);
     // The new process waits for this one to exit ([`wait_for_replaced_process`]).
-    if RELAUNCH.take()
-        && let Err(err) = nsh_core::relaunch::spawn_after_exit()
-    {
-        log::error!("cannot relaunch the app: {err}");
+    if RELAUNCH.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on relaunch; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::relaunch::spawn_after_exit() {
+            log::error!("cannot relaunch the app: {err}");
+        }
     }
     if code == 0 {
         std::process::ExitCode::SUCCESS
