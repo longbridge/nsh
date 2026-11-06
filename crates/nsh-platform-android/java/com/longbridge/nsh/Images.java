@@ -345,12 +345,12 @@ final class Images {
     private static Image decodeAnimated(byte[] bytes, int maxPx) throws java.io.IOException {
         if (android.os.Build.VERSION.SDK_INT < 28) return null;
         // Android 9 aborts on a GIF played as an AnimatedImageDrawable (docs/dev/pitfalls.md, "Android 9, GIFs"):
-        // a Movie decodes on the thread that draws it, so a GIF below API 30 is played from one.
+        // a Movie decodes on the thread that draws it, so a GIF below API 30 is played from a movie of its own.
         boolean gif = bytes.length > 3 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F';
         if (gif && android.os.Build.VERSION.SDK_INT < 30) {
-            android.graphics.Movie movie = android.graphics.Movie.decodeByteArray(bytes, 0, bytes.length);
-            if (movie == null || movie.width() <= 0 || movie.height() <= 0) return null;
-            return new Image(new MovieDrawable(movie), movie.width(), movie.height());
+            MovieDrawable drawable = MovieDrawable.open(bytes);
+            if (drawable == null) return null;
+            return new Image(drawable, drawable.width, drawable.height);
         }
         android.graphics.ImageDecoder.Source source =
                 android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes));
@@ -368,10 +368,12 @@ final class Images {
 
     /**
      * A GIF played from a {@link android.graphics.Movie}: each draw shows the frame at the time since the start,
-     * and a running one invalidates itself to draw the next.
+     * and a running one invalidates itself to draw the next. The encoded bytes stay with it so another view can
+     * decode a movie of its own: one movie has one clock, and one drawable has one callback.
      */
     static final class MovieDrawable extends android.graphics.drawable.Drawable
             implements android.graphics.drawable.Animatable {
+        private final byte[] gif;
         private final android.graphics.Movie movie;
         private final int width;
         private final int height;
@@ -379,10 +381,47 @@ final class Images {
         private long startedAt;
         private boolean running;
 
-        MovieDrawable(android.graphics.Movie movie) {
+        private MovieDrawable(byte[] gif, android.graphics.Movie movie) {
+            this.gif = gif;
             this.movie = movie;
             this.width = movie.width();
             this.height = movie.height();
+        }
+
+        /** A drawable for {@code gif}, or null when those bytes are not a GIF {@link android.graphics.Movie} can play. */
+        static MovieDrawable open(byte[] gif) {
+            android.graphics.Movie movie = android.graphics.Movie.decodeByteArray(gif, 0, gif.length);
+            if (movie == null || movie.width() <= 0 || movie.height() <= 0) return null;
+            return new MovieDrawable(gif, movie);
+        }
+
+        /**
+         * {@link Images#finish} copies a drawable per waiting view through this. The copy decodes its own movie
+         * from the same bytes.
+         */
+        @Override
+        public android.graphics.drawable.Drawable.ConstantState getConstantState() {
+            return new State(gif);
+        }
+
+        private static final class State extends android.graphics.drawable.Drawable.ConstantState {
+            private final byte[] gif;
+
+            State(byte[] gif) {
+                this.gif = gif;
+            }
+
+            @Override
+            public android.graphics.drawable.Drawable newDrawable() {
+                MovieDrawable copy = open(gif);
+                if (copy == null) throw new IllegalStateException("cannot copy GIF");
+                return copy;
+            }
+
+            @Override
+            public int getChangingConfigurations() {
+                return 0;
+            }
         }
 
         @Override
