@@ -87,7 +87,8 @@ complete import map precedes the realm's first module script. It also checks que
 identities, repeated start/stop, startup failures, cancellation/replacement during a held request or top-level
 await, facade-loading failures, and cleanup errors with a reentrant reset. A fetched bootstrap with a syntax
 error, a thrown exception or no initialization callback must reject startup, release its realm and allow a
-replacement to start. Each case has a fresh browser context and page; repeated
+replacement to start. A second HTTP origin serves the runtime with CORS headers to check CDN bootstrap
+loading, execution errors and recovery. Each case has a fresh browser context and page; repeated
 runs within a case reuse its Player. Request gates and explicit fixture events coordinate cancellation rather
 than fixed delays. Assertions cover public promise outcomes, cleanup and a usable replacement, independently
 of garbage-collection timing or whether a detached realm resumes its JavaScript continuation.
@@ -115,7 +116,9 @@ and its dependencies. After changing those sources, regenerate with
 `cargo run -p nsh-bundler --example browser_bootstrap`; CI runs the same command with `-- --check` to detect
 stale output. Keep the generated file with the runtime sources so the CLI, documentation server and distributed
 hosts share the same asset. Publishing minifies it and restores its strict directive after module-mode
-compression, before hashing the directory. Application modules remain ES modules.
+compression, before hashing the directory. The classic bootstrap loads with anonymous CORS, as module
+scripts do, so a CDN's execution errors retain their filename and thrown value. The CDN must allow the page's
+origin, as for the app's other module and Wasm requests. Application modules remain ES modules.
 
 `browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
 desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's

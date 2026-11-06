@@ -1425,7 +1425,7 @@ mod tests {
         // fold away the call that observes strictness in the published script.
         let source = "\"use strict\"; globalThis.bootstrapThis = function () { return this; };";
         fs::write(root.join("browser/bootstrap.js"), source).unwrap();
-        let site = Site::new(&dir.join("site")).unwrap();
+        let site = Site::new(&dir.join("site"), None).unwrap();
         let published = publish_browser_host(&site, &root).unwrap();
         let code = fs::read_to_string(site.dir.join(published).join("bootstrap.js")).unwrap();
         let host = nsh_js::Host::new().unwrap();

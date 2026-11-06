@@ -157,6 +157,9 @@ export function createBrowserHost(player) {
           };
           rejectLoad = error => finish(false, error);
           Object.defineProperty(realm, "__nsh_browser_bootstrap", { value: scope => finish(true, scope), configurable: true });
+          // Match module scripts' CORS loading so a CDN bootstrap's execution
+          // errors retain their filename and original rejection value.
+          bootstrap.crossOrigin = "anonymous";
           bootstrap.src = new URL("./bootstrap.js", import.meta.url).href;
           bootstrap.onerror = () => finish(false, new Error("could not load the browser facade"));
           bootstrap.onload = () => finish(false, new Error("the browser facade did not initialize"));

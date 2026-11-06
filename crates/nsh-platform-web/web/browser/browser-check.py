@@ -194,14 +194,28 @@ append(root,trigger);return root;});
             "cleanup(()=>{const e=new Error('fixture cleanup failed');parent.harness.expectedReports.push(e.stack??String(e));throw e;});cleanup(()=>parent.harness.events.push(`cleaned:${run}`));"))
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        page_origin = f"http://127.0.0.1:{server.server_port}"
+
+        class CorsHandler(http.server.SimpleHTTPRequestHandler):
+            def end_headers(self):
+                self.send_header("Access-Control-Allow-Origin", page_origin)
+                super().end_headers()
+
+        cdn = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+            functools.partial(CorsHandler, directory=directory))
+        (root / "cdn.html").write_text((root / "index.html").read_text().replace(
+            "from './nsh.js'", f"from 'http://127.0.0.1:{cdn.server_port}/nsh.js'"))
+        servers = [server, cdn]
+        threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in servers]
+        for thread in threads:
+            thread.start()
         try:
             yield f"http://127.0.0.1:{server.server_port}/index.html"
         finally:
-            server.shutdown()
-            server.server_close()
-            thread.join()
+            for s, thread in zip(servers, threads, strict=True):
+                s.shutdown()
+                s.server_close()
+                thread.join()
 
 
 async def check_platform_props(page):
@@ -565,8 +579,10 @@ async def check_facade_failure(page, script):
 
 async def check_bootstrap_execution_failure(page, code, expected_error=None):
     pattern = "**/browser/bootstrap.js"
+    origin = await page.evaluate("location.origin")
     await page.route(pattern, lambda route: route.fulfill(
-        status=200, content_type="text/javascript", body=code))
+        status=200, content_type="text/javascript", body=code,
+        headers={"Access-Control-Allow-Origin": origin}))
     try:
         await begin(page, "failed")
         await outcome(page, "failed", "rejected")
@@ -579,6 +595,20 @@ async def check_bootstrap_execution_failure(page, code, expected_error=None):
         await page.unroute(pattern)
     await start(page, "recovered")
     await stopped(page, ["recovered"])
+
+
+async def check_cdn_bootstrap(page):
+    await page.goto(page.url.replace("/index.html", "/cdn.html"))
+    await page.wait_for_function("window.ready")
+    await start(page, "cdn")
+    await import_map_order(page)
+    assert await page.evaluate('''()=>Array.from(
+      document.querySelector('iframe').contentDocument.scripts).filter(s=>s.src)
+      .every(s=>new URL(s.src).origin !== location.origin)''')
+    await stopped(page, ["cdn"])
+    # A successful cross-origin fetch must also retain execution errors rather
+    # than muting them to a generic missing-initialization failure.
+    await check_bootstrap_execution_failure(page, "throw 0;", expected_error="0")
 
 
 async def check_cleanup_failure(page):
@@ -597,6 +627,7 @@ async def check_cleanup_failure(page):
 def lifecycle_cases():
     return [
         ("module", check_module, ()),
+        ("cdn-bootstrap", check_cdn_bootstrap, ()),
         ("source-replaces-module", check_source, ()),
         ("native-exports", check_native_exports, ()),
         ("namespace-import", check_namespace, ()),
