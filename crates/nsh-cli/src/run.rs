@@ -278,6 +278,7 @@ pub(crate) fn run(
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
+                .args(crate::windows::host_args(entry, &work))
                 .args(window.args());
             run_local(&session, &mut command, "the Windows host")
         }

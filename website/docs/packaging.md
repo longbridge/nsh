@@ -222,7 +222,9 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 - **macOS:** converted by `sips` to `AppIcon.icns`.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
 - **Windows:** resized to 16 to 64 pixels and 256 pixels and embedded in the executable as its icon, which the window,
-  Explorer and the taskbar show.
+  Explorer and the taskbar show, and written beside the bundle as `nsh\icon.ico`, which notifications show. Packaged on
+  macOS or Linux, the executable keeps the default icon in Explorer, and the window and the taskbar show `icon.ico`.
+  `nsh run --target windows` and `nsh test --target windows` show it too.
 - **Web:** resized to 32 pixels (the favicon), 180 (`apple-touch-icon`), 192 and 512 (the web app manifest).
 
 Without an icon, the system shows its default.

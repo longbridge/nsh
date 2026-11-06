@@ -424,6 +424,76 @@ pub(crate) fn show(hwnd: HWND) {
     }
 }
 
+/// True when the executable has an icon of its own (resource 1, which
+/// `nsh package` writes on Windows), which the window class shows.
+pub(crate) fn has_own_icon() -> bool {
+    // SAFETY: a plain lookup of a shared resource icon, never destroyed.
+    unsafe { LoadIconW(Some(instance()), PCWSTR(1 as _)) }.is_ok()
+}
+
+/// Gives the top-level `hwnd` the app's icon from the `.ico` file `path`
+/// (the large one at `SM_CXICON`, the small one at `SM_CXSMICON`, at its
+/// DPI) when the executable has none of its own. The icons are loaded once
+/// per file and size and kept for the process: the windows share them.
+pub(crate) fn set_icon(hwnd: HWND, path: Option<&std::path::Path>) {
+    thread_local! {
+        static LOADED: RefCell<Vec<(std::path::PathBuf, i32, HICON)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+    let Some(path) = path.filter(|_| !has_own_icon()) else {
+        return;
+    };
+    let dpi = dpi(hwnd);
+    let load = |metric: SYSTEM_METRICS_INDEX| {
+        // SAFETY: a plain query.
+        let side = unsafe { windows::Win32::UI::HiDpi::GetSystemMetricsForDpi(metric, dpi) };
+        let cached = LOADED.with(|l| {
+            l.borrow()
+                .iter()
+                .find(|(p, s, _)| p == path && *s == side)
+                .map(|(_, _, icon)| *icon)
+        });
+        if cached.is_some() {
+            return cached;
+        }
+        // SAFETY: a NUL-terminated path; the icon is kept for the process.
+        let icon = unsafe {
+            LoadImageW(
+                None,
+                &windows::core::HSTRING::from(path.as_os_str()),
+                IMAGE_ICON,
+                side,
+                side,
+                LR_LOADFROMFILE,
+            )
+        };
+        match icon {
+            Ok(handle) => {
+                let icon = HICON(handle.0);
+                LOADED.with(|l| l.borrow_mut().push((path.to_owned(), side, icon)));
+                Some(icon)
+            }
+            Err(err) => {
+                log::warn!("the app's icon {}: {err}", path.display());
+                None
+            }
+        }
+    };
+    for (metric, which) in [(SM_CXICON, ICON_BIG), (SM_CXSMICON, ICON_SMALL)] {
+        if let Some(icon) = load(metric) {
+            // SAFETY: a window of this thread and an icon that outlives it.
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(which as usize)),
+                    Some(LPARAM(icon.0 as isize)),
+                );
+            }
+        }
+    }
+}
+
 /// The window's DPI (96 at 100%).
 pub(crate) fn dpi(hwnd: HWND) -> u32 {
     // SAFETY: plain call; 0 for an invalid window.

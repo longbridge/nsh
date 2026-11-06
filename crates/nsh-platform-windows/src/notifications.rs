@@ -9,7 +9,7 @@
 //!   own: its notifications stay the embedding app's, the permission is
 //!   `unavailable` and nothing shows;
 //! - the id's registration, `HKCU\Software\Classes\AppUserModelId\<id>`, with
-//!   the name toasts show and the COM class that hears presses. Written when
+//!   the name and icon toasts show and the COM class that hears presses. Written when
 //!   the app first asks about notifications ([`register`]), not on every
 //!   start. It needs no Start Menu shortcut;
 //! - that class's `LocalServer32`, the command that starts the app when a
@@ -30,6 +30,7 @@
 use std::{
     cell::{Cell, RefCell},
     ffi::c_void,
+    path::{Path, PathBuf},
     rc::{Rc, Weak},
     sync::OnceLock,
 };
@@ -92,6 +93,8 @@ const MAX_BADGE: u32 = 99;
 thread_local! {
     /// The app's id and name, when the process is an app of its own.
     static APP: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// The app's icon file, which toasts show.
+    static ICON: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// The id is registered ([`register`]).
     static REGISTERED: Cell<bool> = const { Cell::new(false) };
     /// The surface that listens to presses, once the app does.
@@ -105,12 +108,13 @@ thread_local! {
 /// Makes the process the app `id`, named `name`, for toasts, and starts
 /// hearing their presses. On the UI thread, in its apartment, before the
 /// message loop.
-pub(crate) fn start(id: &str, name: &str) {
+pub(crate) fn start(id: &str, name: &str, icon: Option<&Path>) {
     if id.encode_utf16().count() > MAX_APP_ID {
         log::warn!("notifications: the app id is over {MAX_APP_ID} characters: none will show");
         return;
     }
     APP.with(|app| *app.borrow_mut() = Some((id.to_owned(), name.to_owned())));
+    ICON.with(|i| *i.borrow_mut() = icon.and_then(|icon| std::path::absolute(icon).ok()));
     let factory: IClassFactory = Factory.into();
     // SAFETY: a valid class id and factory. The registration lasts as the
     // process does, so its cookie is not kept.
@@ -206,6 +210,15 @@ fn register(id: &str, name: &str) -> Result<()> {
     let app_key = format!("Software\\Classes\\AppUserModelId\\{id}");
     set_value(&app_key, Some("DisplayName"), name)?;
     set_value(&app_key, Some("CustomActivator"), &class)?;
+    // The icon toasts show by the app's name; without one, a blank one.
+    let icon = ICON.with(|i| i.borrow().clone());
+    set_value(
+        &app_key,
+        Some("IconUri"),
+        &icon
+            .map(|icon| icon.display().to_string())
+            .unwrap_or_default(),
+    )?;
     if !cfg!(feature = "dev") {
         let exe = std::env::current_exe().map_err(|_| windows::core::Error::from_thread())?;
         set_value(

@@ -199,7 +199,7 @@ nsh package --target web --run
 - **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）。
 - **macOS：** 由 `sips` 转换为 `AppIcon.icns`。
 - **Linux：** 复制为 `<id>.png`，`.desktop` 文件以它作为 `Icon`。
-- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它。
+- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它；同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
 - **Web：** 缩放为 32 像素（favicon）、180 像素（`apple-touch-icon`）以及 192 和 512 像素（Web 应用清单）。
 
 没有图标时，系统显示默认图标。
