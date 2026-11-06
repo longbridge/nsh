@@ -626,6 +626,7 @@ expect Extended: text,custom
 expect CJK emphasis: strong,text
 expect Math off: Math $x$
 expect From HTML: Hi there
+expect Unknown tag: <US tech> up
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document

@@ -555,7 +555,21 @@ impl<'a> Converter<'a> {
                 tex: math.value.clone(),
             }),
             Node::Html(h) => {
-                if self.parser.options.html {
+                if self.parser.options.html && !self.is_tag(&h.value) {
+                    // `<US tech>` alone on its line: the lines it starts are
+                    // Markdown, the tag text.
+                    if self.depth < MAX_DEPTH {
+                        out.extend(
+                            self.parser
+                                .markdown(&format!("\\{}", h.value.trim_start()))
+                                .blocks,
+                        );
+                    } else {
+                        out.push(Block::Paragraph {
+                            content: literal_lines(&h.value),
+                        });
+                    }
+                } else if self.parser.options.html {
                     out.extend(html::blocks(self.parser, &h.value));
                 } else {
                     out.push(Block::Paragraph {
@@ -681,7 +695,7 @@ impl<'a> Converter<'a> {
         let Node::Html(open) = &nodes[at] else {
             return None;
         };
-        let name = unclosed_element(&open.value)?;
+        let name = unclosed_element(&open.value).filter(|name| self.is_element(name))?;
         let close = matching_close(nodes, at, name)?;
         let Node::Html(close_node) = &nodes[close] else {
             return None;
@@ -758,7 +772,7 @@ impl<'a> Converter<'a> {
         if !self.parser.options.html {
             return None;
         }
-        let name = unclosed_element(&open.value)?;
+        let name = unclosed_element(&open.value).filter(|name| self.is_element(name))?;
         let close = matching_close(nodes, at, name)?;
         let start = nodes[at].position()?.start.offset;
         let end = nodes[close].position()?.end.offset;
@@ -881,7 +895,7 @@ impl<'a> Converter<'a> {
                 });
             }
             Node::Html(h) => {
-                if self.parser.options.html {
+                if self.parser.options.html && self.is_tag(&h.value) {
                     extend(out, html::inlines(self.parser, &h.value));
                 } else {
                     push_text(out, &h.value.replace('\n', " "));
@@ -910,6 +924,29 @@ impl<'a> Converter<'a> {
                 }
             }
         }
+    }
+
+    /// Whether `name` is an element of HTML or of a `tag` extension: a tag
+    /// of another name (`<US tech>`, `</Foo>`) is text.
+    fn is_element(&self, name: &str) -> bool {
+        html::is_element(name)
+            || self.parser.extensions.iter().any(|ext| {
+                ext.tag
+                    .as_deref()
+                    .is_some_and(|tag| tag.eq_ignore_ascii_case(name))
+            })
+    }
+
+    /// Whether HTML `html` is markup: it starts with a tag of an element
+    /// ([`Self::is_element`]), a comment, a declaration or an instruction.
+    fn is_tag(&self, html: &str) -> bool {
+        let inner = html.trim_start().strip_prefix('<').unwrap_or_default();
+        let name = inner.strip_prefix('/').unwrap_or(inner);
+        let len = name
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'-')
+            .count();
+        len == 0 || self.is_element(&name[..len])
     }
 
     /// Node `node` as the text it was written as.
