@@ -47,7 +47,7 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
-use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect, NSString};
 use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLeft};
 
 use crate::surface::{Surface, quiet};
@@ -784,21 +784,50 @@ define_class!(
             }
         }
 
-        // None while VoiceOver must not reach the children
-        // ([`crate::access::hides_children`]), else AppKit's.
+        // What VoiceOver reaches of the children ([`crate::access::reached`]).
         #[unsafe(method_id(accessibilityChildren))]
         fn accessibility_children(&self) -> Option<Retained<NSArray>> {
-            let hides = self
+            let reached = self
                 .ivars()
                 .state
                 .try_borrow()
-                .is_ok_and(|s| crate::access::hides_children(&s));
-            if hides {
-                Some(NSArray::new())
-            } else {
-                // SAFETY: NSView's own children.
+                .map_or(crate::access::Reached::All, |s| crate::access::reached(&s));
+            // SAFETY: NSView's own children.
+            let all = || -> Option<Retained<NSArray>> {
                 unsafe { msg_send![super(self), accessibilityChildren] }
+            };
+            match reached {
+                crate::access::Reached::All => all(),
+                crate::access::Reached::Controls => Some(crate::access::controls(all())),
+                crate::access::Reached::None => Some(NSArray::new()),
             }
+        }
+
+        // Its label, else for a view that folds its content the texts in
+        // it ([`crate::access::content_label`]).
+        #[unsafe(method_id(accessibilityLabel))]
+        fn accessibility_label(&self) -> Option<Retained<NSString>> {
+            // SAFETY: NSView's own label, as `setAccessibilityLabel:` set it.
+            let own: Option<Retained<NSString>> =
+                unsafe { msg_send![super(self), accessibilityLabel] };
+            own.or_else(|| {
+                crate::access::content_label(&NshView(self.retain()))
+                    .map(|name| NSString::from_str(&name))
+            })
+        }
+
+        // Its value, else for static text that folds its content (an
+        // option, a tree item) the texts in it
+        // ([`crate::access::content_value`]).
+        #[unsafe(method_id(accessibilityValue))]
+        fn accessibility_value(&self) -> Option<Retained<AnyObject>> {
+            // SAFETY: NSView's own value, as `setAccessibilityValue:` set it.
+            let own: Option<Retained<AnyObject>> =
+                unsafe { msg_send![super(self), accessibilityValue] };
+            own.or_else(|| {
+                crate::access::content_value(&NshView(self.retain()))
+                    .map(|name| Retained::into_super(Retained::into_super(NSString::from_str(&name))))
+            })
         }
 
         #[unsafe(method(viewDidMoveToSuperview))]
@@ -818,6 +847,12 @@ define_class!(
             if let Some(surface) = self.surface() {
                 self.install_tracking();
                 crate::system::window_changed(&surface);
+                // What was mounted before the view was in a window was put
+                // off: a host app may insert the view after its app's first
+                // batches, and an idle surface has no frame to revisit at.
+                if self.window().is_some() {
+                    surface.revisit();
+                }
             }
         }
 
@@ -835,6 +870,12 @@ define_class!(
             crate::sight::moved();
             // SAFETY: NSView's own handling.
             unsafe { msg_send![super(self), viewDidUnhide] }
+            // What changed while it was hidden (a host app hides a view
+            // scrolled out of sight) was put off; an idle surface has no
+            // frame to revisit at.
+            if let Some(surface) = self.surface() {
+                surface.revisit();
+            }
         }
 
         #[unsafe(method(viewDidChangeEffectiveAppearance))]
@@ -1134,6 +1175,11 @@ impl NshView {
     /// [`NshView::moved`] afterwards.
     pub(crate) fn state_mut(&self) -> RefMut<'_, ViewState> {
         self.ivars().state.borrow_mut()
+    }
+
+    /// Its state, unless it is borrowed to change.
+    pub(crate) fn try_state(&self) -> Option<Ref<'_, ViewState>> {
+        self.ivars().state.try_borrow().ok()
     }
 
     /// Its state, to change, unless it is borrowed.

@@ -138,30 +138,12 @@ impl Items {
         let order = watch_order(
             move || listed.borrow().iter().map(|e| e.node).collect(),
             move |order| {
-                let pick = {
+                {
                     let mut list = sorted.borrow_mut();
                     let mut taken: Vec<Option<Entry>> = list.drain(..).map(Some).collect();
                     list.extend(order.iter().filter_map(|&i| taken[i].take()));
-                    let Some(how) = keyed.get() else {
-                        return;
-                    };
-                    let (level, last) = match how {
-                        Keyed::First => (0, false),
-                        Keyed::Last => (0, true),
-                        Keyed::Submenu(level) => (level, false),
-                    };
-                    let mut enabled = list
-                        .iter()
-                        .filter(|e| e.level == level && !e.disabled.get_untracked());
-                    match last {
-                        false => enabled.next().copied(),
-                        true => enabled.next_back().copied(),
-                    }
-                };
-                if let Some(entry) = pick {
-                    keyed.replace(None);
-                    entry.node.focus();
                 }
+                Self::focus_pending_in(&sorted, keyed);
             },
         );
         Self {
@@ -172,11 +154,43 @@ impl Items {
         }
     }
 
+    /// Layout runs even when an order watch finds the items already in
+    /// order (and therefore does not call its change handler).
+    fn focus_pending(&self) {
+        Self::focus_pending_in(&self.list, self.keyed);
+    }
+
+    fn focus_pending_in(list: &RefCell<Vec<Entry>>, keyed: Stored<Option<Keyed>>) {
+        let Some(how) = keyed.get() else {
+            return;
+        };
+        let (level, last) = match how {
+            Keyed::First => (0, false),
+            Keyed::Last => (0, true),
+            Keyed::Submenu(level) => (level, false),
+        };
+        let pick = {
+            let list = list.borrow();
+            let mut enabled = list
+                .iter()
+                .filter(|e| e.level == level && !e.disabled.get_untracked());
+            match last {
+                false => enabled.next().copied(),
+                true => enabled.next_back().copied(),
+            }
+        };
+        if let Some(entry) = pick {
+            keyed.replace(None);
+            entry.node.focus();
+        }
+    }
+
     /// Focuses the first enabled item of submenu `level` once its items
     /// are there (now, when they already are).
     fn focus_first(&self, level: u32) {
         self.keyed.replace(Some(Keyed::Submenu(level)));
         self.order.invalidate();
+        self.focus_pending();
     }
 
     /// Adds an item of submenu `level`, which the menu forgets when the
@@ -905,6 +919,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let menu = use_context::<MenuContext>();
     let hover = menu.clone();
     let chosen = menu.clone();
+    let laid_out = menu.clone();
     let sheet = menu.filter(|m| m.sheet);
     let (checked, disabled) = (props.checked, props.disabled);
     let node = element_ref();
@@ -987,6 +1002,11 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
             ..AccessibilityState::default()
         })
         .element_ref(&node)
+        .on_layout(move |_: &Bounds<Points>| {
+            if let Some(m) = &laid_out {
+                m.items.focus_pending();
+            }
+        })
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)

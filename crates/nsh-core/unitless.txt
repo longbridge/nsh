@@ -4,6 +4,8 @@
 animation::animator::AnimValues.opacity                          # an opacity factor
 animation::animator::AnimValues.transform                        # transform operands (any of their kinds' units)
 animation::animator::Animator::pan_values ->                     # a generic animated value (any prop: opacity, a color channel, a length)
+animation::animator::Animator::deadline ->                       # time
+animation::animator::Animator::deadline(now)                     # time
 animation::animator::Animator::tick(now)                         # time
 animation::animator::Animator::transform_moved(amount)           # a gesture amount fed to a generic animated value (a pinch scale, a rotation in degrees)
 animation::driver::sample_driver ->                              # generic animated values, sampled
@@ -14,6 +16,8 @@ animation::graph::AnimationValue::Number.0                       # a generic ani
 animation::graph::AnimationValue::number ->                      # a generic animated value (any prop: opacity, a color channel, a length)
 animation::graph::Finished.value                                 # a generic animated value (any prop: opacity, a color channel, a length)
 animation::graph::Graph::set(new)                                # a generic animated value (any prop: opacity, a color channel, a length)
+animation::graph::Graph::deadline ->                             # time
+animation::graph::Graph::deadline(now)                           # time
 animation::graph::Graph::tick(now)                               # time
 animation::graph::Graph::value ->                                # a generic animated value (any prop: opacity, a color channel, a length)
 animation::motion::Keyframe.offset                               # progress through an iteration (0..1, as easing coordinates)
@@ -130,6 +134,8 @@ mount::VideoProps.progress_interval_ms                           # time
 mount::VideoProps.rate                                           # a playback rate multiplier
 mount::VideoProps.volume                                         # audio volume, 0..1
 navigation::Tick::At.1                                           # eased transition progress (easing curve coordinates, unit square)
+navigation::Transitions::deadline ->                             # time
+navigation::Transitions::deadline(now)                           # time
 navigation::Transitions::tick(now)                               # time
 navigation::dim ->                                               # an opacity, 0..1
 navigation::dim(amount)                                          # eased transition progress (easing curve coordinates, unit square)
@@ -184,6 +190,8 @@ scroll::drag_end(vx)                                             # a velocity, p
 scroll::drag_end(vy)                                             # a velocity, points per second
 scroll::ease_out ->                                              # easing curve coordinates (unit square)
 scroll::ease_out(t)                                              # easing curve coordinates (unit square)
+scroll::deadline ->                                              # time
+scroll::deadline(now)                                            # time
 scroll::frame(now)                                               # time
 scroll::indicator_alpha ->                                       # an opacity, 0..1
 scroll::indicator_alpha(since)                                   # time
@@ -234,6 +242,8 @@ transform::TransformKind::identity ->                            # a transform o
 transform::TransformOp.value                                     # a transform operand (any of its kinds' units)
 transition::Extra.scale                                          # a scale factor
 transition::Live::opacity ->                                     # an opacity factor
+transition::Live::deadline ->                                    # time
+transition::Live::deadline(now)                                  # time
 transition::Live::step(now)                                      # time
 transition::TextColor::step(now)                                 # time
 element::ambient::animated_value(value)                               # an animated value (any quantity)

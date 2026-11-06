@@ -28,6 +28,7 @@ pub mod dev;
 mod file_drop;
 mod file_requests;
 mod fps;
+mod global_shortcut;
 #[cfg(test)]
 mod gtk_test;
 mod image;
@@ -49,6 +50,7 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
 mod window;
 

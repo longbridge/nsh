@@ -111,7 +111,11 @@ belong to the app, which owns retention and its storage budget.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
   link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
   screen's `maximumFramesPerSecond` (set again when the link resumes). The link does not fire while the window is
-  occluded or minimized or the screen is locked; a main-queue timer then ticks instead, so animations still end.
+  occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
+  only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
+  waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
+  animations end and report it on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an
+  endless animation, a shader, a JS frame request) waits for the link.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view; `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
   Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
@@ -214,8 +218,8 @@ it reads is `nsh_engine::perf` (`docs/dev/performance.md`):
 - The surface measures (`Surface::measure`, `drain`, `frame`) only while a monitor is installed; then the display
   link runs on every refresh, and each refresh closes a frame: the main-thread time since the previous one (batches
   with Core Animation's commit, which is where content layers draw; ticks; wheel, drag and key handling).
-  Refreshes in which nothing changed are not frames. The fallback timer closes frames at 60 Hz while the link is
-  stopped (the screen locked).
+  Refreshes in which nothing changed are not frames. While the link is stopped (the screen locked), only the frames
+  deadlines run (`Surface::keep_deadline`) are measured.
 - Batches carry when the sink got them (only while measuring), for `HOP`.
 - The engine records its commits (`EngineControl::set_perf_monitor`).
 

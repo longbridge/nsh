@@ -121,6 +121,13 @@ impl UiAnimation {
         self.graph.is_animating()
     }
 
+    /// When the graph next has an animation that ends by itself to end
+    /// (seconds, the clock [`UiAnimation::tick`] is given): what the page
+    /// ticks it at while no animation frames come ([`Graph::deadline`]).
+    pub(crate) fn deadline(&self, now: f64) -> Option<f64> {
+        self.graph.deadline(now)
+    }
+
     /// Whether the graph runs an animation that ends by itself (not one
     /// looping forever, which no test step waits for).
     #[cfg(feature = "dev")]

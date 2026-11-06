@@ -37,8 +37,9 @@
 //! when the app removes one it leaves as an image of its last frame, then
 //! gets `onDismiss`.
 //!
-//! Transitions run on the root's frame clock and only move views
-//! (`shift`, `fade`): nothing is laid out again while they run.
+//! Transitions run on the surface's frames ([`Surface::add_frame_callback`]:
+//! the root's frame clock, and their ends kept while it stops) and only
+//! move views (`shift`, `fade`): nothing is laid out again while they run.
 
 use std::{
     cell::{Cell, RefCell},
@@ -58,7 +59,10 @@ use nsh_core::{
 use nsh_engine::ColorScheme;
 use rustc_hash::FxHashMap;
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// The window's color (libadwaita's), under a screen's content, so a screen
 /// moving over another hides it.
@@ -765,21 +769,19 @@ impl Nav {
             return;
         }
         self.ticking = true;
-        let weak = Rc::downgrade(surface);
-        surface.root.add_tick_callback(move |_, clock| {
-            let Some(surface) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
+        // On the surface's frames, which also keep the transitions' ends
+        // while the window draws none: screens settle and report it on time.
+        surface.add_frame_callback(|surface, now| {
             let Ok(mut nav) = surface.nav.try_borrow_mut() else {
-                return glib::ControlFlow::Continue;
+                return Next::At(now);
             };
-            // Microseconds.
-            nav.tick(&surface, clock.frame_time() as f64 / 1_000_000.0);
-            if nav.transitions.is_empty() {
-                nav.ticking = false;
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
+            nav.tick(surface, now);
+            match nav.transitions.deadline(now) {
+                Some(at) => Next::At(at),
+                None => {
+                    nav.ticking = false;
+                    Next::Done
+                }
             }
         });
     }
