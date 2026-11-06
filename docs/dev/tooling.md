@@ -580,7 +580,8 @@ takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down
 real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation that ends by itself ran for 100 ms (`Native::animating`:
-the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s; 2 s at most; the web's page counts its own
+the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s, and on macOS a view's
+transitions but not its keyframes repeating forever, `animate-ping`'s or `animate-spin`'s, which have no `Live::deadline`; 2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
