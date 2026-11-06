@@ -1345,3 +1345,33 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   color: var(--muted-foreground); font-size: 0.8125rem;
 }
 .doc-machine-notice a { color: var(--foreground); text-decoration: underline; }
+
+/* ====================================================================
+   Page heads: the inner pages open as the home page's sections do, a
+   Figtree title over a quiet lead, with the banner's halftone fading in
+   at the top right.
+   ==================================================================== */
+.page-head { position: relative; isolation: isolate; }
+.page-head::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -3rem;
+  right: calc(-1 * min(40vw, 32rem));
+  width: min(70vw, 52rem);
+  height: calc(100% + 5rem);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 16%, transparent) 1.1px, transparent 1.6px);
+  background-size: 15px 15px;
+  mask-image: radial-gradient(55% 65% at 70% 25%, black, transparent);
+  pointer-events: none;
+}
+html.light .page-head::before { background-image: radial-gradient(circle, rgb(52 60 78 / 20%) 1.1px, transparent 1.6px); }
+.page-head h1 { margin: 0; font-size: clamp(2.4rem, 4.6vw, 3.6rem); font-weight: 600; line-height: 1.04; letter-spacing: -0.03em; text-wrap: balance; }
+.page-head--compact h1 { font-size: clamp(1.9rem, 3vw, 2.4rem); }
+.page-head--compact::before { top: -2rem; height: calc(100% + 3rem); }
+.page-head__kicker { color: var(--muted-foreground); }
+.page-head__lead { max-width: 40rem; color: var(--muted-foreground); font-size: 1.05rem; line-height: 1.6; }
+html[lang^="zh"] .page-head h1 { letter-spacing: 0; line-height: 1.2; }
+@media (max-width: 900px) {
+  .page-head::before { right: 0; width: 100%; }
+}
