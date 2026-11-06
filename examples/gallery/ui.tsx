@@ -29,13 +29,13 @@ export function PageHeader(props: {
   right?: JSX.Element;
   /** The bar's fill (default the page's background). */
   background?: string;
-  /** The back button's color (default the accent). */
+  /** The back button's color (default the text's). */
   tint?: string;
   /** Over the content (a transparent header): no fill, no hairline. */
   transparent?: boolean;
 }) {
   const back = () => !props.left && !props.root && nav.routes().length > 1;
-  const tint = () => props.tint ?? colors.accent;
+  const tint = () => props.tint ?? colors.text;
   const goBack = () => (props.onBack ? props.onBack() : nav.pop());
   if (terminal) {
     // One row, then the rule on a row of its own.

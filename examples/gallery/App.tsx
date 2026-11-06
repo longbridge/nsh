@@ -323,7 +323,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
         ...(active() && props.focused ? focusRing() : {}),
       }}
     >
-      <Icon name={props.demo.icon} size={15} tint={active() ? colors.accent : colors.muted} />
+      <Icon name={props.demo.icon} size={15} tint={active() ? colors.text : colors.muted} />
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, fontWeight: active() ? "500" : "400", color: colors.text }}>{props.demo.name}</Text>
     </View>
   );
