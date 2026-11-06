@@ -315,6 +315,13 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Notifications.** The process's notifications (`nsh`'s `Notifications`) belong to the embedding app unless it
+  hands them to the app it embeds: `AppOptions::notifications` on macOS and Windows (off by default; `run_app` sets
+  it). Then the view's app owns them for the whole process: on macOS NSH becomes the notification center's delegate
+  (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
+  AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
+  permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
+  the app by its id either way.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),

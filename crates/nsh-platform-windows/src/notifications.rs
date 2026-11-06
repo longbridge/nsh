@@ -5,9 +5,10 @@
 //! NSH apps are not packaged, so the system knows them by nothing but what
 //! the process says. Toasts of an unpackaged app need:
 //! - an AppUserModelID: the app's id, the one the taskbar groups it by
-//!   ([`start`]). A surface embedded in another app's window has none of its
-//!   own: its notifications stay the embedding app's, the permission is
-//!   `unavailable` and nothing shows;
+//!   ([`start`]), set only for a view that owns the process's notifications
+//!   (`AppOptions::notifications`, [`start_app`]; `run_app` sets it).
+//!   Without it the notifications stay the embedding app's, the permission
+//!   is `unavailable` and nothing shows;
 //! - the id's registration, `HKCU\Software\Classes\AppUserModelId\<id>`, with
 //!   the name and icon toasts show and the COM class that hears presses. Written when
 //!   the app first asks about notifications ([`register`]), not on every
@@ -103,6 +104,19 @@ thread_local! {
     static PRESSES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The count on the taskbar button, put back when the button is made anew.
     static BADGE: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Makes the process the app `id` ([`start`]) for an [`AppView`] that owns
+/// its notifications (`AppOptions::notifications`), once per process: the
+/// first such view's app wins.
+///
+/// [`AppView`]: crate::AppView
+pub(crate) fn start_app(id: &str, name: &str, icon: Option<&Path>) {
+    if APP.with(|app| app.borrow().is_some()) {
+        return;
+    }
+    crate::system::set_app_id(id);
+    start(id, name, icon);
 }
 
 /// Makes the process the app `id`, named `name`, for toasts, and starts
