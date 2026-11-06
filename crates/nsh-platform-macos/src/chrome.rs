@@ -388,7 +388,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // lifecycle.
         DesktopCommand::Quit => crate::app::quit_app(),
         // Quits as above, then the runner starts the app again.
-        DesktopCommand::Relaunch => crate::app::relaunch_app(),
+        DesktopCommand::Restart => crate::app::restart_app(),
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
         // The menu bar is the system's.
         DesktopCommand::SetMenuBar(_) => {}

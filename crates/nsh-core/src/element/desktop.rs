@@ -6,7 +6,7 @@
 //! and reserves the left and right edges reported by [`title_bar`]. Native
 //! window controls and title-bar double-click behavior remain the platform's.
 //! The window's other functions ([`set_title`], [`minimize`], ...) are
-//! `Window`'s, [`quit`] and [`relaunch`] are `Application`'s. The application menu ([`set_application_menu`]) and context
+//! `Window`'s, [`quit`] and [`restart`] are `Application`'s. The application menu ([`set_application_menu`]) and context
 //! menus ([`popup_menu`]) are [`MenuItem`]s whose [`MenuItem::on_select`]
 //! runs when the user chooses the item, by a click or its shortcut.
 //!
@@ -201,15 +201,15 @@ pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
 
-/// Restarts the app (TS: `Application.relaunch`): it quits as [`quit`]
+/// Restarts the app (TS: `Application.restart`): it quits as [`quit`]
 /// does, and once this process has exited the platform starts the same
 /// program again with the arguments it was started with. For a setting
 /// that takes effect at the next start (the app's language, say): the app
 /// asks the user first, then calls this. Standalone apps on macOS, Windows
 /// and Linux; a view embedded in another app leaves the app's lifecycle to
 /// that app, and on other platforms this has no effect.
-pub fn relaunch() {
-    super::desktop_command(DesktopCommand::Relaunch);
+pub fn restart() {
+    super::desktop_command(DesktopCommand::Restart);
 }
 
 /// An item of a menu (TS: `nsh/desktop`'s `MenuItem`): an item that runs

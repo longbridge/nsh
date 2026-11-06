@@ -393,7 +393,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => push(surface, Op::Quit),
         // The backend for embedding: when the app restarts is the embedding
         // app's to decide.
-        DesktopCommand::Relaunch => {}
+        DesktopCommand::Restart => {}
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);

@@ -168,7 +168,7 @@ impl Application {
     /// ask the user first, then call it. Standalone apps on macOS, Windows
     /// and Linux; a view embedded in another app leaves the app's lifecycle
     /// to that app.
-    pub(crate) fn relaunch(cx: &mut ModuleCx) {
-        desktop(cx, DesktopCommand::Relaunch);
+    pub(crate) fn restart(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::Restart);
     }
 }

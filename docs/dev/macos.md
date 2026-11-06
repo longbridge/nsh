@@ -303,7 +303,7 @@ event after `stop:` so a dispatch-driven close wakes the event loop.
 This lets a Rust host perform final cleanup or execute an installed update after
 `run_app` returns. Embedded `AppView` instances continue to use their host's
 delegate and event loop. This change still needs native close, minimized-close,
-Command-Q, a test's quit, process-exit status and relaunch validation. No tests
+Command-Q, a test's quit, process-exit status and restart validation. No tests
 were run for this change at the user's request.
 
 ### Retained standalone session design
@@ -318,10 +318,10 @@ Explicit application Quit and `quit_app()` always take the stop-and-return
 path, including while the window is hidden. `quit_app()` dispatches to the main
 thread and only affects the standalone runner; an embedded host retains its own
 application lifecycle. The Rust core's `close_window()` remains a window-close
-request; an Exit or relaunch uses `quit_app()` from the host, or the app's
-`quit()` (TS: `Application.quit()`), which takes the same path. `relaunch()` (TS: `Application.relaunch()`) takes it
-too (`app.rs` `relaunch_app`) and marks the run; once `app.run()` returns, `run_app` calls
-`nsh_core::relaunch::spawn_after_exit`, whose shell waits for the process to exit before `open -n` starts the bundle
+request; an Exit or restart uses `quit_app()` from the host, or the app's
+`quit()` (TS: `Application.quit()`), which takes the same path. `restart()` (TS: `Application.restart()`) takes it
+too (`app.rs` `restart_app`) and marks the run; once `app.run()` returns, `run_app` calls
+`nsh_core::restart::spawn_after_exit`, whose shell waits for the process to exit before `open -n` starts the bundle
 again (the executable itself outside a bundle). A development host (feature `dev`) only quits: `nsh run` ends with
 its host and stops the dev server, so a host started again would be cut off from both.
 

@@ -1,6 +1,6 @@
-//! Starting a standalone desktop app again (`Application.relaunch()`,
-//! [`crate::element::desktop::relaunch`]), what the desktop runners share.
-//! Runner plumbing, not app API: apps call `relaunch()`, and the module is
+//! Starting a standalone desktop app again (`Application.restart()`,
+//! [`crate::element::desktop::restart`]), what the desktop runners share.
+//! Runner plumbing, not app API: apps call `restart()`, and the module is
 //! hidden from the documentation.
 //!
 //! A runner quits as for `Application.quit()` and, when its run has ended,
@@ -21,20 +21,20 @@ use std::{
     process::{Command, Stdio},
 };
 
-/// The environment variable that names the process a relaunched app
+/// The environment variable that names the process a restarted app
 /// replaces (its id, in decimal). Set by [`spawn_after_exit`] on Windows;
 /// the runner of the new process takes it ([`wait_for_pid`]) and waits for
 /// that process to exit before it opens its window.
-pub const WAIT_FOR_ENV: &str = "NSH_RELAUNCH_AFTER";
+pub const WAIT_FOR_ENV: &str = "NSH_RESTART_AFTER";
 
-/// How long a relaunched app waits at most for the process it replaces: a
+/// How long a restarted app waits at most for the process it replaces: a
 /// process that hangs while it exits must not keep the new one from coming
 /// up.
 pub const WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Starts this program again, with the arguments it was started with, once
 /// this process has exited. Called by a runner when its run has ended
-/// because the app asked to relaunch; the new process inherits the
+/// because the app asked to restart; the new process inherits the
 /// environment and the working directory.
 pub fn spawn_after_exit() -> io::Result<()> {
     let exe = std::env::current_exe()?;
@@ -181,7 +181,7 @@ mod tests {
     /// The new process starts only after the one it replaces has exited.
     #[test]
     fn the_program_starts_after_the_old_process_exits() {
-        let dir = std::env::temp_dir().join(format!("nsh-relaunch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nsh-restart-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("started");
         let _ = std::fs::remove_file(&marker);

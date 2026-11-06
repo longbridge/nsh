@@ -2261,13 +2261,13 @@ const QUIT: &str = r#"import { mount, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
 Application.quit();
-Application.relaunch();
-mount(() => <Text>{`quit ${typeof Application.quit} ${typeof Application.relaunch}`}</Text>);
+Application.restart();
+mount(() => <Text>{`quit ${typeof Application.quit} ${typeof Application.restart}`}</Text>);
 "#;
 
 /// `Application.quit()` reaches the platform as the root's quit command, which it
-/// carries out as its quit menu role; `Application.relaunch()` as the root's
-/// relaunch command.
+/// carries out as its quit menu role; `Application.restart()` as the root's
+/// restart command.
 #[test]
 fn app_quit_reaches_the_platform() {
     use nsh_core::desktop::DesktopCommand;
@@ -2280,7 +2280,7 @@ fn app_quit_reaches_the_platform() {
         },
     );
     let batches = until(&rx, |batch| shows(batch, "quit function function"));
-    for expected in [DesktopCommand::Quit, DesktopCommand::Relaunch] {
+    for expected in [DesktopCommand::Quit, DesktopCommand::Restart] {
         assert!(
             batches.iter().flat_map(|b| &b.items).any(|item| matches!(
                 item,

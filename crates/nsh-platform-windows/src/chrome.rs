@@ -357,8 +357,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => quit(hwnd),
         // Quits as above, then the runner starts the app again; an
         // embedding app's window is its own.
-        DesktopCommand::Relaunch => {
-            if crate::app::request_relaunch() {
+        DesktopCommand::Restart => {
+            if crate::app::request_restart() {
                 quit(hwnd);
             }
         }

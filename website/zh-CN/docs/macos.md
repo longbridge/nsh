@@ -153,7 +153,7 @@ view.load(Bundle::source(code).into());
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
 应用自己的代码用 `nsh_core::element::desktop::quit()`（TS：`Application.quit()`）以同样的方式退出，而
 `nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
-`nsh_core::element::desktop::relaunch()`（TS：`Application.relaunch()`）以同样的方式退出，进程结束后由 `run_app`
+`nsh_core::element::desktop::restart()`（TS：`Application.restart()`）以同样的方式退出，进程结束后由 `run_app`
 以相同的参数重新启动应用：`.app` 包里的应用通过 Launch Services（`open -n`）打开，与用户打开它时相同。
 
 ## macOS 上的差异

@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、窗口状态和显示器（`window_state`、`displays`、`set_window_bounds`）、`quit`、`relaunch`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、窗口状态和显示器（`window_state`、`displays`、`set_window_bounds`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -113,18 +113,18 @@ chat.focus();
 ```ts
 const Application: {
   quit(): void;
-  relaunch(): void;
+  restart(): void;
 };
 ```
 
 | 成员 | Rust | 说明 |
 |---|---|---|
 | `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
-| `relaunch()` | `relaunch()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
+| `restart()` | `restart()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
 
 `Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
-`Application.relaunch()` 用于下次启动才生效的设置，比如应用的语言：应用先征得用户同意，再调用它。应用像 `quit()` 一样退出，
+`Application.restart()` 用于下次启动才生效的设置，比如应用的语言：应用先征得用户同意，再调用它。应用像 `quit()` 一样退出，
 进程结束后，同一个程序以原来的启动参数重新启动；新旧两个进程不会同时运行。在 macOS 上，`.app` 包里的应用通过
 Launch Services 重新打开，与用户打开它时相同。它在 macOS、Windows 和 Linux 的独立应用中生效，包括 `nsh package`
 构建的应用；嵌入在其他应用中的视图（比如 GPUI 应用的 `AppView`）把重启交给那个应用。在 `nsh run` 下应用会退出，
@@ -135,7 +135,7 @@ import { Application } from "nsh/desktop";
 
 async function changeLanguage(language: string) {
   await saveLanguage(language);
-  if (await confirmRestart()) Application.relaunch();
+  if (await confirmRestart()) Application.restart();
 }
 ```
 
