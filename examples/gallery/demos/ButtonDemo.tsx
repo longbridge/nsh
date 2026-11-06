@@ -2,7 +2,7 @@ import { type AnimatedValue, cleanup, Clipboard, createAnimatedValue, Easing, ef
 import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, mono, motion, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, mono, motion, pressSink, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
 // the button role; the look is the gallery's (`buttonLook` of
@@ -93,8 +93,10 @@ function FillButton(props: {
   onPressUp?: () => void;
   onLongPress?: () => void;
 }) {
-  const press = createAnimatedValue(1);
   const glyph = follow(() => (props.busy || props.icon ? 1 : 0));
+  // The press sinks it natively (`activeStyle`); press down and up reach
+  // the app only for what a held press means (the hold's fill).
+  const press = pressSink(0.97, "background-color, border-color, box-shadow, opacity");
   return (
     <View
       testID={props.testID}
@@ -104,15 +106,10 @@ function FillButton(props: {
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       delayLongPress={props.delayLongPress}
-      onPressDown={() => {
-        press.spring(0.97, motion.press);
-        props.onPressDown?.();
-      }}
-      onPressUp={() => {
-        press.spring(1, motion.press);
-        props.onPressUp?.();
-      }}
+      onPressDown={props.onPressDown}
+      onPressUp={props.onPressUp}
       hoverStyle={props.disabled ? undefined : finish.hover}
+      activeStyle={props.disabled ? undefined : press.activeStyle}
       focusStyle={focusRing()}
       style={{
         alignSelf: "flex-start",
@@ -127,9 +124,7 @@ function FillButton(props: {
         borderWidth: 1,
         ...finish.raised,
         opacity: props.disabled ? 0.4 : 1,
-        transform: [{ scale: press }],
-        transitionProperty: "background-color, border-color, box-shadow, opacity",
-        transitionDuration: 120,
+        ...press.transition,
       }}
     >
       <View

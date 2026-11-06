@@ -1184,7 +1184,8 @@ fn focus_stop(surface: &Rc<Surface>, view: &NshView) {
     }
 }
 
-/// The Tab stops shown under `view`, in tree order: enabled text fields and
+/// The Tab stops shown under `view`, in tree order (a scroll view's
+/// content as it is on screen): enabled text fields and
 /// the native components that take the keyboard.
 fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
     {
@@ -1201,7 +1202,7 @@ fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
             out.push(view.clone());
         }
     }
-    view.with_children(|children| {
+    view.with_children_in_reading_order(|children| {
         for child in children {
             collect_stops(surface, child, out);
         }

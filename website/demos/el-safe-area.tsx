@@ -1,7 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
 import { safeArea, safeAreaInsets } from "nsh";
 import { Toggle } from "nsh/base";
-import { button, buttonText, desktop, tint, ui } from "./palette";
+import { desktop, tint, toggleLabel, toggleLook, ui } from "./palette";
 
 type Edge = "top" | "right" | "bottom" | "left";
 
@@ -64,8 +64,8 @@ function App() {
             {(edge) => {
               const on = () => edges().includes(edge());
               return (
-                <Toggle pressed={on()} onChange={() => toggle(edge())} {...button("secondary", { on })}>
-                  <Text style={buttonText("secondary")}>{edge()}</Text>
+                <Toggle pressed={on()} onChange={() => toggle(edge())} {...toggleLook({ variant: "outline", text: true })}>
+                  <Text style={toggleLabel(on, { text: true })}>{edge()}</Text>
                 </Toggle>
               );
             }}

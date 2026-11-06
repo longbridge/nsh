@@ -86,14 +86,17 @@ test('every allowed file still exists and says why', () => {
   }
 });
 
-// The demos' switches take the shared look (`switchLook`): a track and a
-// thumb styled in place would be another copy of it, as the nine inline
-// ones were (their knob ran 2 points past the track with a pointer).
+// The demos' switches and toggles take the shared looks (`switchLook`,
+// `toggleLook`): parts or an on state styled in place would be another copy
+// of them, as the inline ones were (a switch's knob ran 2 points past the
+// track with a pointer; light, a raised or sunk on state was all but the
+// color of the surface under it).
 
-/** Each `<Switch ...>` opening tag in a source: up to the `>` outside braces. */
-function switchTags(source: string): string[] {
+/** Each opening tag of the element `name` in a source (`<Toggle ...>`, not
+ * `<ToggleGroup ...>`): up to the `>` outside braces, past `//` comments. */
+function openingTags(source: string, name: string): string[] {
   const tags: string[] = [];
-  for (const match of source.matchAll(/<Switch\b/g)) {
+  for (const match of source.matchAll(new RegExp(`<${name}\\b`, 'g'))) {
     let depth = 0;
     let i = match.index + match[0].length;
     for (; i < source.length; i++) {
@@ -117,18 +120,43 @@ function switchViolations(tag: string): string[] {
 
 test('the switch guard finds styled parts and a missing look', () => {
   const styled = '<Switch checked={on()} trackClass="w-9" thumbStyle={{ x: 1 }}>\n  <Text>a</Text>\n</Switch>';
-  expect(switchTags(styled)).toHaveLength(1);
-  expect(switchViolations(switchTags(styled)[0])).toEqual(['sets trackClass', 'sets thumbStyle', 'does not spread switchLook(..)']);
+  expect(openingTags(styled, 'Switch')).toHaveLength(1);
+  expect(switchViolations(openingTags(styled, 'Switch')[0])).toEqual(['sets trackClass', 'sets thumbStyle', 'does not spread switchLook(..)']);
   const shared = '<Switch\n  onChange={({ checked }) => on.set(checked)}\n  {...switchLook(() => on())}\n  // a note > here\n  hitSlop={0}\n>';
-  expect(switchTags(shared)).toEqual([shared]);
+  expect(openingTags(shared, 'Switch')).toEqual([shared]);
   expect(switchViolations(shared)).toEqual([]);
 });
 
 test('the demos\' switches spread the shared look', () => {
   const report: string[] = [];
   for (const file of files('website/demos')) {
-    for (const tag of switchTags(readFileSync(join(root, file), 'utf8'))) {
+    for (const tag of openingTags(readFileSync(join(root, file), 'utf8'), 'Switch')) {
       for (const what of switchViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+/** What is wrong with a toggle's tag: no shared look. */
+function toggleViolations(tag: string): string[] {
+  return /\{\.\.\.toggleLook\(/.test(tag) ? [] : ['does not spread toggleLook(..)'];
+}
+
+test('the toggle guard finds a toggle without the shared look', () => {
+  const styled = '<Toggle pressed={on()} pressedStyle={ui().raised} style={{ width: 28 }}>\n  <Text>B</Text>\n</Toggle>';
+  expect(openingTags(styled, 'Toggle')).toHaveLength(1);
+  expect(toggleViolations(openingTags(styled, 'Toggle')[0])).toEqual(['does not spread toggleLook(..)']);
+  const shared = '<Toggle\n  pressed={on()}\n  onChange={({ pressed }) => on.set(pressed)}\n  // a note > here\n  {...toggleLook({ variant: "outline" })}\n>';
+  expect(openingTags(shared, 'Toggle')).toEqual([shared]);
+  expect(toggleViolations(shared)).toEqual([]);
+  expect(openingTags('<ToggleGroup style={track}>', 'Toggle')).toEqual([]);
+});
+
+test('the demos\' toggles spread the shared look', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    for (const tag of openingTags(readFileSync(join(root, file), 'utf8'), 'Toggle')) {
+      for (const what of toggleViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
     }
   }
   expect(report).toEqual([]);

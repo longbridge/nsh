@@ -175,6 +175,7 @@ windows = { version = "0.62", features = [
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
+  "Win32_System_Time",
   "Win32_System_Variant",
   "Win32_System_WinRT",
   "Win32_UI_Accessibility",
@@ -210,12 +211,12 @@ tokio = { version = "1", default-features = false }
 # The same QuickJS binding and standard modules run on every platform; the JIT
 # stays disabled on wasm, preserving the native compiler's bytecode format.
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs = { package = "quickjs-jit", version = "=0.14.1", default-features = false, features = ["std", "futures", "loader", "macro"] }
+rquickjs = { package = "quickjs-jit", version = "=0.14.2", default-features = false, features = ["std", "futures", "loader", "macro"] }
 
 # The standard modules `buffer`, `crypto`, `path`, `url` and `zlib` (all targets): LLRT d9fd873e,
 # vendored by quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
 # `crypto` and `zlib` are `nsh-js`'s features of those names.
-quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "path"] }
+quickjs-jit-stdlib = { version = "=0.14.2", default-features = false, features = ["buffer", "path"] }
 getrandom-stdlib = { package = "getrandom", version = "0.4", default-features = false }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -241,12 +242,15 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSAttributedString",
   "NSBundle",
   "NSCache",
+  "NSCalendar",
   "NSData",
   "NSDictionary",
   "NSDate",
+  "NSDateFormatter",
   "NSDistributedNotificationCenter",
   "NSEnumerator",
   "NSError",
+  "NSFormatter",
   "NSGeometry",
   "NSKeyValueObserving",
   "NSLocale",
@@ -261,6 +265,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSStream",
   "NSString",
   "NSThread",
+  "NSTimeZone",
   "NSTimer",
   "NSURL",
   "NSURLRequest",
