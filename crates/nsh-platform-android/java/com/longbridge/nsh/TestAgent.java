@@ -2,21 +2,32 @@ package com.longbridge.nsh;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.view.Choreographer;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
@@ -318,13 +329,146 @@ final class TestAgent {
         return h;
     }
 
-    /** A picture of the window (and the dialog over it), as a PNG. */
+    /** The thread PixelCopy reports on: never the main thread, which may be the one waiting. */
+    private static Handler copier;
+
+    private static synchronized Handler copier() {
+        if (copier == null) {
+            HandlerThread t = new HandlerThread("nsh-pixel-copy");
+            t.start();
+            copier = new Handler(t.getLooper());
+        }
+        return copier;
+    }
+
+    /** What a screenshot copies, gathered on the main thread. */
+    private static final class Shot {
+        View root;
+        Window window;
+        Rect rootRect;
+        Window dialog;
+        Rect dialogRect;
+        int dialogX, dialogY;
+        float dim;
+    }
+
+    /**
+     * A picture of the window (and the dialog over it), as a PNG: what the
+     * compositor shows, copied from the windows' surfaces with
+     * {@link PixelCopy}, so it holds what only the GPU draws (texture views,
+     * `RenderEffect` filters, the backdrop's blur, hardware layers). The views
+     * drawn into a bitmap stand in when a surface cannot be copied.
+     */
     static byte[] screenshot(NshView host) {
-        return onMain(() -> {
+        // One frame for the window, one for the dialog's (counted down at once without one).
+        CountDownLatch drawn = new CountDownLatch(2);
+        Shot shot = onMain(() -> {
             View root = host.getRootView();
             if (root.getWidth() == 0 || root.getHeight() == 0) return null;
-            Bitmap b = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
+            Shot s = new Shot();
+            s.root = root;
+            Window w = windowOf(host.getContext());
+            if (w != null && w.peekDecorView() == root) {
+                s.window = w;
+                int[] at = new int[2];
+                root.getLocationInWindow(at);
+                s.rootRect = new Rect(at[0], at[1], at[0] + root.getWidth(), at[1] + root.getHeight());
+            }
+            Dialog d = shownDialog;
+            if (d != null && d.isShowing() && d.getWindow() != null) {
+                Window dw = d.getWindow();
+                View dv = dw.getDecorView();
+                if (dv.getWidth() > 0 && dv.getHeight() > 0) {
+                    s.dialog = dw;
+                    s.dialogRect = new Rect(0, 0, dv.getWidth(), dv.getHeight());
+                    int[] at = new int[2];
+                    dv.getLocationOnScreen(at);
+                    int[] rootAt = new int[2];
+                    root.getLocationOnScreen(rootAt);
+                    s.dialogX = at[0] - rootAt[0];
+                    s.dialogY = at[1] - rootAt[1];
+                    WindowManager.LayoutParams a = dw.getAttributes();
+                    if ((a.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0) s.dim = a.dimAmount;
+                    dv.invalidate();
+                    awaitFrame(dv, drawn);
+                }
+            }
+            if (s.dialog == null) drawn.countDown();
+            // PixelCopy copies the last frame drawn: draw one with what is there now.
+            root.invalidate();
+            awaitFrame(root, drawn);
+            return s;
+        });
+        if (shot == null) return null;
+        try {
+            drawn.await(1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        Bitmap b = shot.window == null ? null : copy(shot.window, shot.rootRect);
+        if (b == null) return drawViews(shot.root);
+        if (shot.dialog != null) {
             Canvas c = new Canvas(b);
+            // The dim behind a dialog is the compositor's, a layer between the two windows.
+            if (shot.dim > 0) c.drawColor(Color.argb(Math.round(shot.dim * 255), 0, 0, 0));
+            Bitmap dialog = copy(shot.dialog, shot.dialogRect);
+            if (dialog != null) {
+                c.drawBitmap(dialog, shot.dialogX, shot.dialogY, null);
+                dialog.recycle();
+            } else {
+                onMain(() -> {
+                    c.translate(shot.dialogX, shot.dialogY);
+                    shot.dialog.getDecorView().draw(c);
+                    return true;
+                });
+            }
+        }
+        return png(b);
+    }
+
+    /** Counts {@code drawn} down once the window of {@code root} has drawn its next frame (main thread). */
+    private static void awaitFrame(View root, CountDownLatch drawn) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            root.getViewTreeObserver().registerFrameCommitCallback(drawn::countDown);
+        } else {
+            // The frame after the next one: the next one draws, the one after is past it.
+            Choreographer ch = Choreographer.getInstance();
+            ch.postFrameCallback(t -> ch.postFrameCallback(t2 -> MAIN.post(drawn::countDown)));
+        }
+    }
+
+    /** {@code rect} (window coordinates) of {@code window}'s surface; null when it cannot be copied. */
+    private static Bitmap copy(Window window, Rect rect) {
+        Bitmap b = Bitmap.createBitmap(rect.width(), rect.height(), Bitmap.Config.ARGB_8888);
+        CountDownLatch done = new CountDownLatch(1);
+        int[] result = {PixelCopy.ERROR_UNKNOWN};
+        Boolean asked = onMain(() -> {
+            PixelCopy.request(window, rect, b, r -> {
+                result[0] = r;
+                done.countDown();
+            }, copier());
+            return true;
+        });
+        boolean finished = false;
+        if (asked != null) {
+            try {
+                finished = done.await(2, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (finished && result[0] == PixelCopy.SUCCESS) return b;
+        android.util.Log.w("nsh", "test agent: PixelCopy failed (" + (finished ? result[0] : "timed out") + "), drawing the views instead");
+        if (finished) b.recycle();
+        return null;
+    }
+
+    /** The window's views (and the dialog's) drawn into a bitmap, as a PNG. */
+    private static byte[] drawViews(View root) {
+        Bitmap b = onMain(() -> {
+            if (root.getWidth() == 0 || root.getHeight() == 0) return null;
+            Bitmap bitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bitmap);
             root.draw(c);
             Dialog d = shownDialog;
             if (d != null && d.isShowing() && d.getWindow() != null) {
@@ -336,10 +480,24 @@ final class TestAgent {
                 c.translate(at[0] - rootAt[0], at[1] - rootAt[1]);
                 dv.draw(c);
             }
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            b.compress(Bitmap.CompressFormat.PNG, 100, out);
-            b.recycle();
-            return out.toByteArray();
+            return bitmap;
         });
+        return b == null ? null : png(b);
+    }
+
+    private static byte[] png(Bitmap b) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        b.compress(Bitmap.CompressFormat.PNG, 100, out);
+        b.recycle();
+        return out.toByteArray();
+    }
+
+    /** The activity's window {@code context} belongs to; null outside one. */
+    private static Window windowOf(Context context) {
+        while (context instanceof ContextWrapper) {
+            if (context instanceof Activity) return ((Activity) context).getWindow();
+            context = ((ContextWrapper) context).getBaseContext();
+        }
+        return null;
     }
 }

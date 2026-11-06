@@ -690,7 +690,9 @@ each on the UI thread: `MotionEvent`s dispatched to the window's views (or the d
 that rest before they lift as on iOS; typing as a keyboard's `KeyEvent`s (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
-screenshots draw the window and the dialog into a bitmap. A step waits for the native animation graph and for anything
+screenshots copy the window's surface and the dialog's with `PixelCopy` after a frame drawn with the current state,
+the dialog composited at its place over the window's dim, so they hold what the GPU draws (video, filters, the backdrop's
+blur), on an emulator without a window too; a window without a surface is drawn into a bitmap instead. A step waits for the native animation graph and for anything
 that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
 system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
 use `nsh_testing::agent::Tester`, which turns the dev client's
