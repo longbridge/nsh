@@ -8,7 +8,7 @@ group: platforms
 # 打包
 
 `nsh package` 把应用变成可以安装的产物：用于 iOS 模拟器的 `.app`、用于 iOS 真机的已签名 `.ipa`、用于 Android 的已签名
-`.apk`、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录和 `.zip`，或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
+`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录和 `.zip`，或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
 
 - **Rust 应用**（`nsh.json` 写明 `"root"`）在自己的目录里打包。`nsh` 以 release 模式为目标构建 runner，编译进你的 crate 并挂载根组件，
   不带 QuickJS：需要 Cargo、该平台的 Rust 目标（`rustup target add …`），Android 还需要 NDK。
@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）以及 `capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`，见下文“目标 API 级别”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -81,6 +81,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <password>` | Android：keystore 密码；也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
 | `--abi <abi>` | Android：APK 包含的 ABI，可重复或用逗号分隔（默认：`arm64-v8a` 和 `armeabi-v7a`）。 |
+| `--format <apk \| aab>` | Android：写出 APK（默认，直接安装）或用于 Google Play 的 Android App Bundle（见下文“Google Play：App Bundle”）。 |
 | `--run` | 构建完成后安装并启动：在 iOS 模拟器中，或在 `adb` 能看到的 Android 设备或模拟器上；macOS、Linux 和 Windows 应用在本机启动；Web 站点在本机提供服务并在浏览器中打开。不适用于 `--target ios`。 |
 
 ## iOS 模拟器
@@ -102,7 +103,7 @@ nsh package --target ios \
 写出 `.nsh/out/<Name>.ipa`，可用于 TestFlight、App Store 上传工具或直接安装（取决于描述文件）。具体过程如下：
 
 - 描述文件以 `embedded.mobileprovision` 的名称复制进应用。
-- entitlements 取自描述文件。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
+- entitlements 取自描述文件，加上 `nsh.json` `ios.entitlements` 中应用自己的项，并对照描述文件检查（见[下文](#infoplist-键与-entitlements)）。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
   `TEAMID.com.example.*` 这样的通配描述文件也可以），不覆盖则报错退出。
 - 用 `codesign` 以指定身份签名应用，再压缩成 `.ipa`（`Payload/<Name>.app`）。
 
@@ -129,7 +130,7 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35，要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
+应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
 加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
 
 ```sh
@@ -149,6 +150,31 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android \
 ```
 
 建议使用环境变量而不是 `--keystore-password`，以免密码留在 shell 历史记录中。
+
+### 目标 API 级别
+
+`nsh.json` 中的 `android.targetSdk` 设置应用的目标 API 级别（默认 35，最低 28）。应用也会针对这个级别编译，所以 SDK 中需要有对应的
+platform（`sdkmanager "platforms;android-36"`）：
+
+```json
+{
+  "android": { "targetSdk": 36 }
+}
+```
+
+### Google Play：App Bundle
+
+Google Play 接收 Android App Bundle，而不是 APK。`--format aab` 用同一个应用写出 `.nsh/out/<Name>.aab` 代替 APK，不需要 Gradle 或
+bundletool；Google Play 会据此为每台设备生成要安装的 APK（每个 ABI 一个）。bundle 使用 JDK 中的 `jarsigner` 签名，签名选项与
+`--keystore` 相同：这个密钥就是你在 Play 应用签名中登记的上传密钥。
+
+```sh
+NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
+  --keystore release.jks --key-alias upload
+```
+
+`--run` 安装的是 APK，所以不能与 `--format aab` 同时使用；要在设备上试用 bundle，请使用
+[bundletool](https://github.com/google/bundletool)（先 `build-apks`，再 `install-apks`）。
 
 ## macOS
 
@@ -191,6 +217,58 @@ nsh package --target web --run
 （Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的 ES 模块 `app.<digest>.js`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
 即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
 
+## Info.plist 键与 entitlements
+
+iOS 和 macOS 包的 `Info.plist` 由 NSH 写出，签名也由它完成。应用在 `nsh.json` 的 `ios` 和 `macos` 下添加自己的键（例如出口合规、
+App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）：
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "ITSAppUsesNonExemptEncryption": false,
+      "LSApplicationCategoryType": "public.app-category.finance",
+      "NSAppTransportSecurity": {
+        "NSExceptionDomains": { "example.com": { "NSIncludesSubdomains": true } }
+      }
+    },
+    "entitlements": {
+      "com.apple.developer.associated-domains": ["applinks:example.com"]
+    }
+  },
+  "macos": {
+    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" },
+    "entitlements": { "com.apple.security.network.client": true }
+  }
+}
+```
+
+值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）；`null` 会报错。应用设置的键会替换 NSH
+的默认值，因此应用也可以改写 NSH 添加的权限说明文字，或缩小支持的屏幕方向。
+
+NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖的键由 NSH 掌握。设置其中之一会报错，并说明应改设什么：
+
+| 键 | 来自 |
+|---|---|
+| `CFBundleIdentifier` | `id` |
+| `CFBundleName`、`CFBundleDisplayName` | `name` |
+| `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
+| `CFBundleURLTypes` | `schemes` |
+| iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
+| iOS：`UIUserInterfaceStyle` | `appearance` |
+| iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
+| `CFBundleExecutable`、`CFBundlePackageType`、`CFBundleSupportedPlatforms`；iOS：`MinimumOSVersion`、`LSRequiresIPhoneOS`、`UIApplicationSceneManifest`、`UIApplicationSupportsMultipleScenes`；macOS：`LSMinimumSystemVersion`、`NSPrincipalClass` | 包本身 |
+| entitlements：`application-identifier`、`com.apple.application-identifier`、`com.apple.developer.team-identifier` | `id` 和描述文件 |
+
+entitlements：
+
+- **iOS 真机**包用描述文件授予的 entitlements 签名，应用写的每一项替换描述文件里的值。应用列出的每个 entitlement 都必须是描述文件授予的，
+  且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）；否则 `nsh package` 停下并指出是哪一项，
+  这时为应用的标识符启用对应的 capability，再重新下载描述文件。
+- **iOS 模拟器**包直接用应用写的 entitlements 签名。
+- **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
+  `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
+
 ## 图标
 
 在 `nsh.json` 中（`"icon": "icon.png"`）或通过 `--icon` 提供一张正方形 PNG，最好是 1024×1024：
@@ -199,7 +277,7 @@ nsh package --target web --run
 - **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）。
 - **macOS：** 由 `sips` 转换为 `AppIcon.icns`。
 - **Linux：** 复制为 `<id>.png`，`.desktop` 文件以它作为 `Icon`。
-- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它。
+- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它；同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
 - **Web：** 缩放为 32 像素（favicon）、180 像素（`apple-touch-icon`）以及 192 和 512 像素（Web 应用清单）。
 
 没有图标时，系统显示默认图标。
@@ -231,5 +309,47 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 ## 另请参阅
 
 - [CLI](./cli.md)：所有命令
+- [应用更新](./app-updates.md)：自我更新的打包应用
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
+
+## 上传到 TestFlight
+
+`nsh publish ios <IPA>` 使用 App Store Connect 的
+[构建上传 API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads)
+上传经过 App Store 签名的 IPA。在 macOS 上运行，接收 `nsh package` 生成的 IPA，适用于 Rust、Rust + TSX 和 TSX 应用。
+
+先在 App Store Connect 创建应用记录，准备对应 bundle identifier 的 Apple Distribution 签名证书和
+App Store provisioning profile。在 `nsh.json` 中设置 `version`，并在打包前递增 `build`。
+在 App Store Connect 创建有构建上传权限的团队 API Key（Developer、App Manager 或 Admin），
+将 `.p8` 文件保存在仓库外。通过 shell 或 CI 的秘密环境变量提供凭据，保持 `nsh.json` 和版本控制中没有凭据。
+
+```sh
+nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
+  --profile /secure/AppStore.mobileprovision
+
+export NSH_APP_STORE_APP_ID=1234567890
+export NSH_APP_STORE_ISSUER_ID=your-issuer-id
+export NSH_APP_STORE_KEY_ID=your-key-id
+export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
+nsh publish ios .nsh/out/MyApp.ipa
+```
+
+| 参数 | 环境变量 | 含义 |
+|---|---|---|
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | 已创建的 App Store Connect 应用的数字 Apple ID。 |
+| `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | 团队 API Key 的 issuer ID。 |
+| `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API Key ID。 |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | `.p8` 私钥文件路径。 |
+
+四项均必填，命令行参数优先于环境变量。CLI 从 IPA 读取 bundle ID、版本和构建号，
+核对 bundle ID 与 App Store Connect 应用一致，然后签发短期 ES256 token、按指定分段流式上传，
+最后提交 SHA-256 校验和。完成消息包含 upload ID 和应用的 TestFlight 链接。
+
+命令成功表示 Apple 已接受上传，等待处理。在 App Store Connect 查看处理状态、填写出口合规信息、
+设置测试组并处理可能需要的 Beta 审核；App Store 提审和正式发布仍由你手动操作。
+上传中断时，先根据输出的 upload ID 在 App Store Connect 核实状态，再决定是否重试；每次运行都会创建新上传。
+Apple 在处理构建时验证签名和 provisioning profile。
+
+`nsh publish <ENTRY> --key … --cert …` 继续为嵌入场景生成签名 `.nshpkg`。
+本地入口目录名为 `ios` 时，写作 `./ios`。

@@ -24,7 +24,7 @@ use objc2_app_kit::{
     NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
 };
 
 use crate::{
@@ -147,6 +147,13 @@ pub struct AppOptions {
     /// `--keep-window-size`), so a test's window is the size it opens it at
     /// whichever display it is on.
     pub keep_size: bool,
+    /// Runs [`run_app`]'s app in the background: it never becomes the
+    /// active app (`NSApplicationActivationPolicyProhibited`), so its
+    /// window shows without taking the keyboard from the app in use, and it
+    /// has no Dock icon or menu bar. False by default; `nsh test --target
+    /// macos` sets it (the development host's `--background`) unless told
+    /// `--foreground`: the test agent's input goes to the window directly.
+    pub background: bool,
     /// Hides the standalone window on close while retaining its engine.
     /// Reopening from the Dock shows the same window. Quit still stops the app.
     /// Only used by [`run_app`]; defaults to false.
@@ -179,6 +186,12 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The app this view runs owns the process's notifications: banners
+    /// show while it is in front, presses come to it and the Dock's badge is
+    /// its (`nsh`'s `Notifications`). An embedding app that has a
+    /// notification center delegate of its own keeps it. Without it the
+    /// permission is `unavailable` and nothing shows. [`run_app`] sets it.
+    pub notifications: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -197,6 +210,7 @@ impl Default for AppOptions {
             size: (1200, 800),
             display: None,
             keep_size: false,
+            background: false,
             keep_alive_on_close: false,
             components: Default::default(),
             appearance: Appearance::System,
@@ -205,6 +219,7 @@ impl Default for AppOptions {
             data_dir: None,
             cache: Default::default(),
             storage: None,
+            notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
     }
@@ -283,6 +298,9 @@ impl AppView {
         container.addSubview(root);
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
+        if options.notifications {
+            crate::notifications::enable();
+        }
         let view = Rc::new(AppView {
             surface,
             container,
@@ -466,6 +484,7 @@ fn initial_environment() -> Environment {
         screen_color: true,
         file_requests: true,
         speech: true,
+        notifications: true,
         web_input: true,
         ..Environment::default()
     }
@@ -480,6 +499,34 @@ struct Running {
 
 thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
+    /// Links that came before the app's engine started.
+    static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Hands `url`, a link the system opened the app with, to the running
+/// app's engine, whose core keeps it until the app listens; keeps it until
+/// the engine starts.
+fn url_scheme(url: String) {
+    let mut url = Some(url);
+    RUNNING.with(|running| {
+        if let Some(running) = running.borrow().as_ref() {
+            running.view.surface().control(|control| {
+                if let Some(url) = url.take() {
+                    control.dispatch_event(
+                        nsh_core::ROOT_ID,
+                        nsh_core::EventKind::UrlScheme,
+                        nsh_core::EventPayload::Map(vec![(
+                            nsh_core::url_scheme::URL,
+                            nsh_core::PayloadValue::Str(url),
+                        )]),
+                    );
+                }
+            });
+        }
+    });
+    if let Some(url) = url {
+        URL_SCHEMES.with(|links| links.borrow_mut().push(url));
+    }
 }
 
 define_class!(
@@ -511,6 +558,37 @@ define_class!(
     unsafe impl NSObjectProtocol for Delegate {}
 
     unsafe impl NSApplicationDelegate for Delegate {
+        // Before launching finishes, or a press that starts the app is lost.
+        #[unsafe(method(applicationWillFinishLaunching:))]
+        fn will_finish_launching(&self, _notification: &NSNotification) {
+            crate::notifications::enable();
+        }
+
+        // The links of the schemes the app claims (`CFBundleURLTypes`), the
+        // one that launched it included.
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
+            for url in urls.iter() {
+                if let Some(url) = url.absoluteString() {
+                    url_scheme(url.to_string());
+                }
+            }
+            // A link opened while the app runs brings it forward.
+            app.activate();
+            let window = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .map(|running| running.window.clone())
+            });
+            if let Some(window) = window {
+                if window.isMiniaturized() {
+                    window.deminiaturize(None);
+                }
+                window.makeKeyAndOrderFront(None);
+            }
+        }
+
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn should_terminate_after_last_window_closed(&self, _app: &NSApplication) -> bool {
             false
@@ -659,10 +737,18 @@ fn name_app(name: &str) {
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
 /// The caller can finish cleanup or relaunch after this function returns.
-pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+    options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    // A background app is Prohibited: AppKit does not activate it. An
+    // Accessory app is not guaranteed to stay inactive when its window
+    // comes up.
+    app.setActivationPolicy(if options.background {
+        NSApplicationActivationPolicy::Prohibited
+    } else {
+        NSApplicationActivationPolicy::Regular
+    });
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
@@ -719,9 +805,16 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
         #[cfg(feature = "dev")]
         AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
-    window.makeKeyAndOrderFront(None);
-    window.makeFirstResponder(Some(view.surface().root.ns()));
-    app.activate();
+    if options.background {
+        // Shown without activating the app (it never is: its window is
+        // never key, and the test agent's input goes to it directly).
+        window.orderFrontRegardless();
+        window.makeFirstResponder(Some(view.surface().root.ns()));
+    } else {
+        window.makeKeyAndOrderFront(None);
+        window.makeFirstResponder(Some(view.surface().root.ns()));
+        app.activate();
+    }
     RUNNING.with(|r| {
         *r.borrow_mut() = Some(Running {
             window,
@@ -729,6 +822,9 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
+    for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
+        url_scheme(url);
+    }
     app.run();
     stop_running();
     app.setDelegate(None);

@@ -474,6 +474,34 @@ struct PendingFetch {
     answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
 }
 
+/// What notifications wait for ([`crate::notifications`]).
+#[derive(Default)]
+struct Notifications {
+    /// The next request's id.
+    next: u32,
+    /// Permission requests waiting for the platform's answer.
+    permissions: FxHashMap<u32, AnswerSlot<crate::notifications::NotificationPermission>>,
+    /// Notifications waiting for the platform's answer.
+    shows: FxHashMap<u32, AnswerSlot<bool>>,
+    /// The platform was told to report presses.
+    listening: bool,
+    /// Presses no listener took yet.
+    presses: std::collections::VecDeque<String>,
+    /// The listener waiting for a press.
+    next_press: Option<AnswerSlot<String>>,
+}
+
+/// The links that open the app ([`crate::url_scheme`]).
+#[derive(Default)]
+struct UrlScheme {
+    /// The schemes the app claims (lower case).
+    schemes: Vec<String>,
+    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
+    pending: std::collections::VecDeque<String>,
+    /// The listener waiting for a link.
+    next: Option<AnswerSlot<String>>,
+}
+
 /// The speech recognition session running ([`crate::speech`]).
 struct SpeechSession {
     id: u32,
@@ -551,13 +579,17 @@ pub(super) struct Components {
     picks: FxHashMap<
         u32,
         (
-            crate::picker::PickRequest,
+            crate::picker::Pick,
             AnswerSlot<Vec<crate::picker::PickedFile>>,
         ),
     >,
     next_pick: u32,
     /// The speech recognition session running, if any.
     speech: Option<SpeechSession>,
+    /// What notifications wait for ([`crate::notifications`]).
+    notifications: Notifications,
+    /// The links that open the app ([`crate::url_scheme`]).
+    url_schemes: UrlScheme,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -678,6 +710,8 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             speech: None,
+            notifications: Notifications::default(),
+            url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -954,6 +988,12 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
+    }
+
     /// The environment components read is now `environment`.
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
@@ -967,6 +1007,8 @@ impl<M: TextEngine> Core<M> {
         }
         // Frames and text measurements are rounded to device pixels.
         self.pixel_ratio_changed(environment.pixel_ratio);
+        // On a grid surface, lengths and frames are put on its Cells.
+        self.cell_changed(environment.cell, environment.dark);
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
@@ -4832,7 +4874,144 @@ impl<M: TextEngine> Core<M> {
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
     }
 
-    /// What a component or a task asked of the platform.
+    /// Applies what the app asks about notifications: granted and where
+    /// the platform shows them, the platform answers with
+    /// [`EventKind::Notification`]; otherwise the answer is given here.
+    fn notification_action(&mut self, action: crate::element::NotificationAction) {
+        use crate::{
+            element::NotificationAction,
+            notifications::{NotificationCommand, NotificationPermission},
+        };
+        let allowed = self.access.allows_notifications();
+        let available = allowed && self.components.environment.notifications;
+        let command = match action {
+            NotificationAction::Permission { ask, answer } => {
+                if !available {
+                    answer
+                        .borrow_mut()
+                        .deliver(NotificationPermission::Unavailable);
+                    return;
+                }
+                let state = &mut self.components.notifications;
+                let id = state.next;
+                state.next = id.wrapping_add(1);
+                state.permissions.insert(id, answer);
+                NotificationCommand::Permission { id, ask }
+            }
+            NotificationAction::Show {
+                notification,
+                answer,
+            } => {
+                if !available {
+                    answer.borrow_mut().deliver(false);
+                    return;
+                }
+                let state = &mut self.components.notifications;
+                let id = state.next;
+                state.next = id.wrapping_add(1);
+                state.shows.insert(id, answer);
+                NotificationCommand::Show { id, notification }
+            }
+            NotificationAction::Close(id) => {
+                if !available {
+                    return;
+                }
+                NotificationCommand::Close(id)
+            }
+            NotificationAction::SetBadge(count) => {
+                if !allowed {
+                    return;
+                }
+                NotificationCommand::SetBadge(count)
+            }
+            NotificationAction::NextPress(answer) => {
+                let state = &mut self.components.notifications;
+                if let Some(pressed) = state.presses.pop_front() {
+                    answer.borrow_mut().deliver(pressed);
+                    return;
+                }
+                state.next_press = Some(answer);
+                if !available || state.listening {
+                    return;
+                }
+                state.listening = true;
+                NotificationCommand::Listen
+            }
+        };
+        let _ = self.apply_op(Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Notification(command),
+        });
+    }
+
+    /// Hands `url`, a link the system gave the app, to the listener, or
+    /// keeps it for the next; drops it when the app does not claim it.
+    fn url_scheme(&mut self, url: String) {
+        let links = &mut self.components.url_schemes;
+        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+            log::warn!("link dropped: {dropped}");
+            return;
+        }
+        if let Some(answer) = links.next.take() {
+            answer.borrow_mut().deliver(url);
+            return;
+        }
+        if links.pending.len() == crate::url_scheme::MAX_PENDING {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            links.pending.pop_front();
+        }
+        links.pending.push_back(url);
+    }
+
+    /// The schemes the app claims (`nsh.json` `schemes`,
+    /// [`crate::url_scheme`]), from the app's own resources: the links the
+    /// platform reports of other schemes are dropped. None by default.
+    pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
+        self.components.url_schemes.schemes = schemes
+            .into_iter()
+            .map(|s| s.into().to_ascii_lowercase())
+            .collect();
+    }
+
+    /// Answers what waits for the platform's [`EventKind::Notification`].
+    fn notification_event(&mut self, payload: &EventPayload) {
+        use crate::notifications::{NotificationEvent as Field, NotificationPermission};
+        let EventPayload::Map(entries) = payload else {
+            return;
+        };
+        let state = &mut self.components.notifications;
+        let id = entries.iter().find_map(|(k, v)| match v {
+            crate::PayloadValue::Number(n) if *k == Field::ID => Some(*n as u32),
+            _ => None,
+        });
+        for (key, value) in entries {
+            match (*key, value) {
+                (Field::PERMISSION, crate::PayloadValue::Str(name)) => {
+                    if let Some(answer) = id.and_then(|id| state.permissions.remove(&id)) {
+                        let permission = NotificationPermission::from_name(name)
+                            .unwrap_or(NotificationPermission::Unavailable);
+                        answer.borrow_mut().deliver(permission);
+                    }
+                }
+                (Field::SHOWN, crate::PayloadValue::Bool(shown)) => {
+                    if let Some(answer) = id.and_then(|id| state.shows.remove(&id)) {
+                        answer.borrow_mut().deliver(*shown);
+                    }
+                }
+                (Field::PRESSED, crate::PayloadValue::Str(pressed)) => {
+                    match state.next_press.take() {
+                        Some(answer) => answer.borrow_mut().deliver(pressed.clone()),
+                        None => state.presses.push_back(pressed.clone()),
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Applies a speech recognition session's request: through the
     /// embedding app's recognizer when it gave one, else as commands on the
     /// root the platform answers with [`EventKind::Speech`].
@@ -4930,7 +5109,14 @@ impl<M: TextEngine> Core<M> {
 
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, command) => {
+            Action::Command(id, mut command) => {
+                // Saved bounds go onto the displays there are now, whichever
+                // side (Rust or JS) restores them.
+                if let Command::Desktop(desktop) = &mut command
+                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
+                {
+                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
+                }
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -4973,6 +5159,15 @@ impl<M: TextEngine> Core<M> {
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
+            }
+            // A terminal decodes no images: the answer is at once, and no
+            // request goes to the platform.
+            Action::ImageInfo(_, answer)
+                if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
+            {
+                answer
+                    .borrow_mut()
+                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
             }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
@@ -5018,10 +5213,43 @@ impl<M: TextEngine> Core<M> {
                 }
                 let id = self.components.next_pick;
                 self.components.next_pick += 1;
-                self.components.picks.insert(id, (request, answer));
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Images(request), answer));
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::PickImages { id, request },
+                });
+            }
+            Action::PickFiles(request, answer) => {
+                if !self.access.allows_picker() {
+                    answer.borrow_mut().deliver(Vec::new());
+                    self.deny(
+                        "the picker is not granted: add `\"picker\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(picker) = self.picker.clone() {
+                    let picked = picker.pick_files(request.clone());
+                    crate::element::task::spawn_raw(
+                        &self.components.executor,
+                        crate::ROOT_ID,
+                        Box::pin(async move {
+                            let files = crate::picker::finish_files(&request, picked.await);
+                            answer.borrow_mut().deliver(files);
+                        }),
+                    );
+                    return;
+                }
+                let id = self.components.next_pick;
+                self.components.next_pick += 1;
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Files(request.clone()), answer));
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickFiles { id, request },
                 });
             }
             Action::ReadClipboard(read) => {
@@ -5089,6 +5317,14 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::Speech(action) => self.speech_action(action),
+            Action::Notification(action) => self.notification_action(action),
+            Action::NextUrlSchemeOpen(answer) => {
+                let links = &mut self.components.url_schemes;
+                match links.pending.pop_front() {
+                    Some(url) => answer.borrow_mut().deliver(url),
+                    None => links.next = Some(answer),
+                }
+            }
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5327,7 +5563,7 @@ impl<M: TextEngine> Core<M> {
                     return false;
                 }
                 if binding == super::overlay::ESCAPE_BINDING {
-                    self.overlay_cancel();
+                    self.overlay_escape();
                     return true;
                 }
                 let found = self.components.executor.keys.borrow().handler(binding);
@@ -5436,9 +5672,27 @@ impl<M: TextEngine> Core<M> {
                     return false;
                 };
                 if let Some((asked, answer)) = self.components.picks.remove(request) {
-                    let files = crate::picker::finish(&asked, files.clone());
+                    let files = asked.finish(files.clone());
                     answer.borrow_mut().deliver(files);
                 }
+                true
+            }
+            EventKind::Notification if id == crate::ROOT_ID => {
+                self.notification_event(payload);
+                true
+            }
+            EventKind::UrlScheme if id == crate::ROOT_ID => {
+                let EventPayload::Map(entries) = payload else {
+                    return false;
+                };
+                let url = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(url) if *k == crate::url_scheme::URL => Some(url),
+                    _ => None,
+                });
+                let Some(url) = url else {
+                    return false;
+                };
+                self.url_scheme(url.clone());
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {
@@ -5584,7 +5838,10 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::KeyCommand,
-            enabled: rust || self.components.js_keys || self.overlay_state.cancel,
+            enabled: rust
+                || self.components.js_keys
+                || self.overlay_state.cancel
+                || self.overlay_state.hint_escape,
         });
     }
 

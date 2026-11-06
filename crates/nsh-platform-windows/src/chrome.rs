@@ -21,18 +21,28 @@
 //!   theme of its own). Their shortcuts are matched here before the keys
 //!   reach the app; the editing roles act on the focused text field by
 //!   sending it their keys.
+//! - **Menu icons** are `hbmpItem` bitmaps: 32-bit premultiplied DIB sections
+//!   of `SM_CXSMICON` at the window's DPI, which Windows alpha blends, set
+//!   as each icon arrives from the image loader and kept with their menu
+//!   ([`MenuIcons`]). A popup is sized when it opens, so a context menu waits
+//!   for its icons, at most [`ICON_WAIT`], before it opens (the message loop
+//!   keeps running meanwhile). Windows has no
+//!   template bitmaps: an SVG is painted in the text color of the menu's
+//!   theme when it is made, and the menu bar's are made again when the
+//!   appearance or the DPI changes.
 
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::Arc,
+    time::Duration,
 };
 
 use nsh_core::{
-    Color, EventKind, EventPayload, PayloadValue, ROOT_ID,
+    Color, EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
     desktop::{
         DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
-        WindowLevel,
+        WindowLevel, menu_icon,
     },
     geometry::{Edges, Points},
 };
@@ -42,9 +52,10 @@ use windows::{
         Graphics::{
             Direct2D::ID2D1DeviceContext,
             Gdi::{
-                CreateSolidBrush, DT_CENTER, DT_HIDEPREFIX, DT_SINGLELINE, DT_VCENTER,
-                DeleteObject, DrawTextW, FillRect, GetWindowDC, HDC, ReleaseDC, SetBkMode,
-                SetTextColor, TRANSPARENT,
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, COLOR_GRAYTEXT, COLOR_MENUTEXT,
+                CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_HIDEPREFIX,
+                DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, FillRect, GetSysColor,
+                GetWindowDC, HBITMAP, HDC, ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
             },
         },
         System::LibraryLoader::{GetProcAddress, LoadLibraryW},
@@ -126,6 +137,9 @@ struct Popup {
     /// What the items of a menu of the platform's own do, by id - 1 (the
     /// app's menus report their ids instead).
     actions: Vec<Action>,
+    /// The app's `Menu.popup` waits for it to close (the tray's menu is
+    /// not one the app awaits).
+    awaited: bool,
 }
 
 /// What an item of a menu of the platform's own does.
@@ -147,12 +161,19 @@ pub(crate) struct Chrome {
     inactive: Cell<bool>,
     /// The application menu.
     menu: RefCell<Option<Arc<[MenuItem]>>>,
+    /// The window stays out of the taskbar (`Window.setSkipTaskbar`).
+    pub(crate) skip_taskbar: Cell<bool>,
     /// The menu bar shown (`HMENU`, 0 for none).
     bar: Cell<isize>,
     /// What the menu bar's items do, by command id - 1.
     entries: RefCell<Vec<Entry>>,
+    /// The icons of the menu bar.
+    bar_icons: RefCell<MenuIcons>,
     /// The context menu to show once the batch is applied.
     popup: RefCell<Option<Popup>>,
+    /// The loads of its icons, which it opens once it has or after
+    /// [`ICON_WAIT`].
+    popup_icons: RefCell<Vec<crate::image::Load>>,
     /// The app's context menu tracking now, and the item a test chose
     /// from it (`nsh test --target windows`), carried out once it closes.
     #[cfg(feature = "dev")]
@@ -280,9 +301,17 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     if hwnd.is_invalid() {
         return;
     }
-    // The embedding app owns its window: only context menus work there.
-    if !top_level(hwnd) && !matches!(command, DesktopCommand::PopupMenu { .. }) {
-        return;
+    // The embedding app owns its window and the shell's integration: only
+    // context menus work there.
+    if !top_level(hwnd) {
+        match command {
+            DesktopCommand::PopupMenu { .. } => {}
+            DesktopCommand::RegisterGlobalShortcut { id, .. } => {
+                crate::global_shortcut::answer(surface, *id, false);
+                return;
+            }
+            _ => return,
+        }
     }
     let c = &surface.chrome;
     match command {
@@ -307,7 +336,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
+        DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
             // Restoring an already maximized or snapped window would change
             // its bounds when the caller only asked to focus it.
@@ -319,7 +351,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
+        // A window of the app's own's ([`crate::app_window`]).
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
+        DesktopCommand::Quit => quit(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);
@@ -332,8 +367,16 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 items: items.clone(),
                 at: at.map(|p| (p.x.0, p.y.0)),
                 actions: Vec::new(),
+                awaited: true,
             },
         ),
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, shortcut);
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 
@@ -394,19 +437,85 @@ fn set_level(hwnd: HWND, level: WindowLevel) {
     };
 }
 
-/// Shows `menu` from the message loop: `TrackPopupMenuEx` runs one of its
-/// own, which must not run while a batch is applied or an event handled.
-fn popup(surface: &Surface, menu: Popup) {
-    *surface.chrome.popup.borrow_mut() = Some(menu);
-    // SAFETY: posting to a window of this thread.
-    let _ = unsafe {
-        PostMessageW(
-            Some(surface.hwnd()),
-            crate::window::WM_NSH_MENU,
-            WPARAM(0),
-            LPARAM(0),
+/// Keeps the window out of the taskbar or puts it back. The taskbar
+/// forgets a deleted tab when the window is shown again (or Explorer
+/// restarts), so the choice is kept and applied again on every show
+/// ([`reapply_skip_taskbar`]).
+pub(crate) fn set_skip_taskbar(surface: &Surface, skip: bool) {
+    surface.chrome.skip_taskbar.set(skip);
+    apply_skip_taskbar(surface.hwnd(), skip);
+}
+
+/// [`set_skip_taskbar`]'s choice again, after the window was shown.
+pub(crate) fn reapply_skip_taskbar(surface: &Surface) {
+    if surface.chrome.skip_taskbar.get() {
+        apply_skip_taskbar(surface.hwnd(), true);
+    }
+}
+
+fn apply_skip_taskbar(hwnd: HWND, skip: bool) {
+    use windows::Win32::{
+        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+        UI::Shell::{ITaskbarList, TaskbarList},
+    };
+    if hwnd.is_invalid() || !top_level(hwnd) {
+        return;
+    }
+    // SAFETY: COM is initialized on the UI thread (`OleInitialize`); plain
+    // calls on a live window.
+    let result = unsafe {
+        CoCreateInstance::<_, ITaskbarList>(&TaskbarList, None, CLSCTX_INPROC_SERVER).and_then(
+            |taskbar| {
+                taskbar.HrInit()?;
+                if skip {
+                    taskbar.DeleteTab(hwnd)
+                } else {
+                    taskbar.AddTab(hwnd)
+                }
+            },
         )
     };
+    if let Err(err) = result {
+        log::warn!("skip taskbar: {err}");
+    }
+}
+
+/// Asks the message loop to show the context menu waiting; it takes the
+/// menu, so a second ask does nothing.
+fn post_popup(hwnd: HWND) {
+    // SAFETY: posting to a window of this thread.
+    let _ = unsafe { PostMessageW(Some(hwnd), crate::window::WM_NSH_MENU, WPARAM(0), LPARAM(0)) };
+}
+
+/// Shows `menu` from the message loop: `TrackPopupMenuEx` runs one of its
+/// own, which must not run while a batch is applied or an event handled.
+/// With icons not in memory, once they have loaded ([`ICON_WAIT`] at most):
+/// loaded, they are in memory when [`show_popup`] asks for them.
+fn popup(surface: &Surface, menu: Popup) {
+    let hwnd = surface.hwnd();
+    let mut sources = Vec::new();
+    MenuItem::each_icon(&menu.items, &mut |icon| sources.push(icon.clone()));
+    *surface.chrome.popup.borrow_mut() = Some(menu);
+    if sources.is_empty() {
+        post_popup(hwnd);
+        return;
+    }
+    let (_, scale) = icon_size(hwnd);
+    let waiting = Rc::new(Cell::new(sources.len()));
+    let loads = sources
+        .iter()
+        .filter_map(|source| {
+            let waiting = waiting.clone();
+            crate::image::load_menu_icon(surface, source, scale, move |_| {
+                waiting.set(waiting.get() - 1);
+                if waiting.get() == 0 {
+                    post_popup(hwnd);
+                }
+            })
+        })
+        .collect();
+    *surface.chrome.popup_icons.borrow_mut() = loads;
+    crate::image::after(ICON_WAIT, move || post_popup(hwnd));
 }
 
 /// An item of a menu of the platform's own ([`popup_actions`]).
@@ -454,6 +563,7 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
                     checked: None,
                     role: None,
                     when: nsh_core::keymap::When::Always,
+                    icon: None,
                 })
             }
         })
@@ -464,6 +574,21 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
             items: items.into(),
             at: None,
             actions,
+            awaited: false,
+        },
+    );
+}
+
+/// Shows the tray icon's menu at `at` (in the window's points): its items
+/// are reported as the app's context menus' are.
+pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f32)) {
+    popup(
+        surface,
+        Popup {
+            items,
+            at: Some(at),
+            actions: Vec::new(),
+            awaited: false,
         },
     );
 }
@@ -471,6 +596,16 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
 fn close(hwnd: HWND) {
     // SAFETY: posting to a live window.
     let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
+/// Quits the app, as its `quit` role: the window closes as [`close`] closes
+/// it, then the message loop ends, also while a window or a tray icon
+/// would keep it running.
+fn quit(hwnd: HWND) {
+    close(hwnd);
+    // SAFETY: a plain call. The loop gets `WM_QUIT` only after the posted
+    // `WM_CLOSE`: the window closes first.
+    unsafe { PostQuitMessage(0) };
 }
 
 fn toggle_maximize(surface: &Surface) {
@@ -853,9 +988,180 @@ fn unsupported(role: Option<MenuRole>) -> bool {
     )
 }
 
+/// How long a context menu waits for its icons before it opens without the
+/// ones still loading: short enough not to feel like waiting, long enough
+/// for a bundled file.
+const ICON_WAIT: Duration = Duration::from_millis(100);
+
+/// The bitmaps of a menu's icons: they must outlive the menu, which does
+/// not own them.
+#[derive(Default)]
+struct IconBitmaps(Vec<HBITMAP>);
+
+impl Drop for IconBitmaps {
+    fn drop(&mut self) {
+        for bitmap in self.0.drain(..) {
+            // SAFETY: a bitmap made here that no menu shows any more: the
+            // owner drops these after the menu (`MenuIcons`).
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+        }
+    }
+}
+
+/// What a menu's icons need while it exists: replaced or dropped once
+/// the menu is destroyed or no longer shown, which gives up the loads and
+/// frees the bitmaps.
+#[derive(Default)]
+struct MenuIcons {
+    loads: Vec<crate::image::Load>,
+    /// Held for the menu, dropped after `loads`.
+    _bitmaps: Rc<RefCell<IconBitmaps>>,
+}
+
+/// An item whose icon is to load.
+struct PendingIcon {
+    menu: HMENU,
+    /// The item's position in `menu`.
+    position: u32,
+    source: ImageSource,
+    enabled: bool,
+}
+
+/// The side of a menu icon in pixels at the DPI of `hwnd` (the small icon's,
+/// as Windows' own menus draw) and the pixels per point of that side.
+fn icon_size(hwnd: HWND) -> (u32, f32) {
+    // SAFETY: a plain query.
+    let side = unsafe { GetSystemMetricsForDpi(SM_CXSMICON, crate::window::dpi(hwnd)) };
+    let side = side.max(1) as u32;
+    (side, side as f32 / menu_icon::SIDE.0)
+}
+
+/// The color of an SVG icon: the text of a menu in the theme [`theme_menus`]
+/// sets, as Win32 draws no template. A hot item keeps its text's color in
+/// both themes.
+fn icon_color(dark: bool, enabled: bool) -> Color {
+    // `COLORREF`s: 0x00BBGGRR.
+    let color = match (dark, enabled) {
+        (true, true) => BAR_TEXT,
+        (true, false) => BAR_TEXT_DISABLED,
+        // SAFETY: plain queries.
+        (false, true) => unsafe { GetSysColor(COLOR_MENUTEXT) },
+        // SAFETY: as above.
+        (false, false) => unsafe { GetSysColor(COLOR_GRAYTEXT) },
+    };
+    let [r, g, b, _] = color.to_le_bytes();
+    Color::rgba(r, g, b, 255)
+}
+
+/// A 32-bit premultiplied ARGB bitmap of `icon`, `side` × `side`. A disabled
+/// item's is dimmed here: nothing documents Windows doing that for an alpha
+/// bitmap.
+fn icon_bitmap(
+    icon: &crate::image::MenuIcon,
+    side: u32,
+    dark: bool,
+    enabled: bool,
+) -> Option<HBITMAP> {
+    let (width, height) = icon.frame.size();
+    let mut pixels = menu_icon::canvas(icon.frame.data(), width, height, side);
+    if icon.template {
+        menu_icon::tint(&mut pixels, icon_color(dark, enabled));
+    } else if !enabled {
+        menu_icon::fade(&mut pixels, 0.4);
+    }
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: side as i32,
+            // Bottom-up, the layout Windows' sample for menu bitmaps uses.
+            biHeight: side as i32,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits = std::ptr::null_mut();
+    // SAFETY: the header describes a DIB section of `side` rows of `side`
+    // 32-bit pixels, which it allocates; `bits` is written before it is
+    // read, and the rows copied are that long.
+    unsafe {
+        let bitmap = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        if bits.is_null() {
+            let _ = DeleteObject(bitmap.into());
+            return None;
+        }
+        let stride = side as usize * 4;
+        let out = std::slice::from_raw_parts_mut(bits.cast::<u8>(), stride * side as usize);
+        for (to, from) in out
+            .chunks_exact_mut(stride)
+            .zip(pixels.chunks_exact(stride).rev())
+        {
+            to.copy_from_slice(from);
+        }
+        Some(bitmap)
+    }
+}
+
+/// Loads the icons of `pending`, setting each on its item as it arrives (at
+/// once when in memory, as [`show_popup`]'s are) and keeping its bitmap in
+/// `bitmaps`. A load never outlives its menu: its owner gives it up first.
+fn load_icons(
+    surface: &Surface,
+    pending: Vec<PendingIcon>,
+    bitmaps: &Rc<RefCell<IconBitmaps>>,
+) -> Vec<crate::image::Load> {
+    let hwnd = surface.hwnd();
+    let (side, scale) = icon_size(hwnd);
+    let dark = crate::system::dark(surface);
+    pending
+        .into_iter()
+        .filter_map(|item| {
+            let uri = item.source.uri.clone();
+            let bitmaps = bitmaps.clone();
+            crate::image::load_menu_icon(surface, &item.source, scale, move |loaded| {
+                let icon = match loaded {
+                    Ok(icon) => icon,
+                    Err(e) => {
+                        log::warn!("menu icon {uri}: {e}");
+                        return;
+                    }
+                };
+                let Some(bitmap) = icon_bitmap(&icon, side, dark, item.enabled) else {
+                    log::warn!("menu icon {uri}: cannot make a bitmap");
+                    return;
+                };
+                bitmaps.borrow_mut().0.push(bitmap);
+                let info = MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_BITMAP,
+                    hbmpItem: bitmap,
+                    ..Default::default()
+                };
+                // SAFETY: a menu of this thread that exists while the load
+                // does ([`MenuIcons`]); `bitmaps` keeps the bitmap as long.
+                unsafe {
+                    let _ = SetMenuItemInfoW(item.menu, item.position, true, &info);
+                }
+            })
+        })
+        .collect()
+}
+
 /// Appends `items` to `menu`, numbering their commands in `entries`
-/// (command id = index + 1).
-fn append(menu: HMENU, items: &[MenuItem], entries: &mut Vec<Entry>) {
+/// (command id = index + 1) and adding the items with an icon to `icons`,
+/// but for this level's without `with_icons` (a menu bar's titles are text).
+fn append(
+    menu: HMENU,
+    items: &[MenuItem],
+    entries: &mut Vec<Entry>,
+    icons: &mut Vec<PendingIcon>,
+    with_icons: bool,
+) {
+    // The position of the item just appended.
+    // SAFETY: a plain query on a live menu.
+    let last = || unsafe { GetMenuItemCount(Some(menu)) }.max(1) as u32 - 1;
     let mut last_separator = true;
     for item in items {
         // SAFETY: appending to a live menu with NUL-terminated strings; a
@@ -885,21 +1191,38 @@ fn append(menu: HMENU, items: &[MenuItem], entries: &mut Vec<Entry>) {
                     }
                     let text = item_text(action);
                     let _ = AppendMenuW(menu, flags, entries.len(), PCWSTR(text.as_ptr()));
+                    if let Some(source) = action.icon.clone().filter(|_| with_icons) {
+                        icons.push(PendingIcon {
+                            menu,
+                            position: last(),
+                            source,
+                            enabled: action.enabled,
+                        });
+                    }
                     last_separator = false;
                 }
                 MenuItem::Submenu {
                     label,
                     enabled,
                     items,
+                    icon,
                 } => {
                     let Ok(sub) = CreatePopupMenu() else { continue };
-                    append(sub, items, entries);
+                    append(sub, items, entries, icons, true);
                     let mut flags = MF_POPUP | MF_STRING;
                     if !enabled {
                         flags |= MF_GRAYED;
                     }
                     let text: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
                     let _ = AppendMenuW(menu, flags, sub.0 as usize, PCWSTR(text.as_ptr()));
+                    if let Some(source) = icon.clone().filter(|_| with_icons) {
+                        icons.push(PendingIcon {
+                            menu,
+                            position: last(),
+                            source,
+                            enabled: *enabled,
+                        });
+                    }
                     last_separator = false;
                 }
             }
@@ -917,13 +1240,16 @@ fn show_menu_bar(surface: &Surface) {
         c.style.get() == TitleBarStyle::Default && !crate::window::is_full_screen(hwnd)
     });
     let mut entries = Vec::new();
+    let mut icons = Vec::new();
+    // The old bar's loads end now: they set items of a menu about to go.
+    c.bar_icons.borrow_mut().loads.clear();
     // SAFETY: menus made, set and destroyed on this thread; the old bar is
-    // destroyed once the window no longer shows it.
+    // destroyed once the window no longer shows it, then its bitmaps freed.
     unsafe {
         let bar = match &shown {
             Some(items) => CreateMenu()
                 .ok()
-                .inspect(|bar| append(*bar, items, &mut entries)),
+                .inspect(|bar| append(*bar, items, &mut entries, &mut icons, false)),
             None => None,
         };
         theme_menus(crate::system::dark(surface));
@@ -934,6 +1260,12 @@ fn show_menu_bar(surface: &Surface) {
         }
         let _ = DrawMenuBar(hwnd);
     }
+    let bitmaps = Rc::default();
+    let loads = load_icons(surface, icons, &bitmaps);
+    *c.bar_icons.borrow_mut() = MenuIcons {
+        loads,
+        _bitmaps: bitmaps,
+    };
     // The bar's entries; the shortcuts are matched on the whole menu.
     *c.entries.borrow_mut() = entries;
 }
@@ -956,6 +1288,8 @@ pub(crate) fn menu_command(surface: &Rc<Surface>, command: u16) {
 fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     let hwnd = surface.hwnd();
     match role {
+        // An embedding app's window is its own to close or keep.
+        Some(MenuRole::Quit) if top_level(hwnd) => quit(hwnd),
         Some(MenuRole::Quit | MenuRole::Close) => close(hwnd),
         Some(MenuRole::Minimize) => {
             // SAFETY: a plain call.
@@ -1000,15 +1334,27 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
 
 /// `WM_NSH_MENU`: shows the context menu asked for.
 pub(crate) fn show_popup(surface: &Rc<Surface>) {
-    let Some(Popup { items, at, actions }) = surface.chrome.popup.borrow_mut().take() else {
+    let Some(Popup {
+        items,
+        at,
+        actions,
+        awaited,
+    }) = surface.chrome.popup.borrow_mut().take()
+    else {
         return;
     };
     let hwnd = surface.hwnd();
     let mut entries = Vec::new();
+    let mut icons = Vec::new();
+    let bitmaps: Rc<RefCell<IconBitmaps>> = Rc::default();
     // SAFETY: a menu made, tracked and destroyed on this thread.
     let chosen = unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        append(menu, &items, &mut entries);
+        append(menu, &items, &mut entries, &mut icons, true);
+        // What loaded in time is in memory, on the items now; what did not
+        // goes on them while the menu is open.
+        let loads = load_icons(surface, icons, &bitmaps);
+        surface.chrome.popup_icons.borrow_mut().clear();
         let mut p = POINT::default();
         match at {
             Some((x, y)) => {
@@ -1037,9 +1383,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
             hwnd,
             None,
         );
+        drop(loads);
         let _ = DestroyMenu(menu);
         chosen.0 as usize
     };
+    drop(bitmaps);
     #[cfg(feature = "dev")]
     {
         surface.chrome.tracked_popup.borrow_mut().take();
@@ -1054,7 +1402,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
     }
     // The app's `Menu.popup` promise settles.
-    if actions.is_empty() {
+    if awaited {
         surface.event(
             ROOT_ID,
             EventKind::Menu,
@@ -1067,7 +1415,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
 }
 
 /// The shortcut key of virtual key `vk`, if it can be one.
-fn shortcut_key(vk: u16) -> Option<Key> {
+pub(crate) fn shortcut_key(vk: u16) -> Option<Key> {
     let k = VIRTUAL_KEY(vk);
     Some(match vk {
         0x30..=0x39 | 0x41..=0x5A => Key::Char((vk as u8 as char).to_ascii_lowercase()),
@@ -1266,9 +1614,28 @@ pub(crate) fn paint_menu_bar_line(surface: &Surface, hwnd: HWND) {
     }
 }
 
+/// Makes the menu bar again if it has icons: they are drawn for one DPI and
+/// theme.
+fn refresh_icons(surface: &Surface) {
+    let has_icons = surface.chrome.menu.borrow().as_ref().is_some_and(|menu| {
+        let mut any = false;
+        MenuItem::each_icon(menu, &mut |_| any = true);
+        any
+    });
+    if has_icons && surface.chrome.bar.get() != 0 {
+        show_menu_bar(surface);
+    }
+}
+
+/// The window moved to a screen of another DPI: the bar's icons follow.
+pub(crate) fn dpi_changed(surface: &Surface) {
+    refresh_icons(surface);
+}
+
 /// The appearance changed: menus and the bar follow it.
 pub(crate) fn appearance_changed(surface: &Surface) {
     theme_menus(crate::system::dark(surface));
+    refresh_icons(surface);
     let hwnd = surface.hwnd();
     if surface.chrome.bar.get() != 0 && !hwnd.is_invalid() {
         // SAFETY: a plain call.

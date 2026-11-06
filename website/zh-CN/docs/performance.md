@@ -224,6 +224,11 @@ nsh run App.tsx --target macos --fps --release
 （Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时；
 `nsh test --target linux --fps -v`（或 `windows`）可以在测试驱动应用时采集这些读数。
 
+终端目标用 `nsh run examples/gallery --target tui --fps` 在角落显示一行读数。
+在文本输入框外，`C-h p` 切换显示。读数包括活跃时的 FPS、空闲时的 `idle`、帧耗时和 p95、
+应用批次 / 绘制 / 刷新终端的耗时、每帧写出的字节数和变化的 Cell 数。
+相同读数也出现在 `C-h e` 日志面板中；显示监视器时才开启测量。
+
 > [!TIP]
 > 单次测量主要受 CPU 时钟状态影响：刚刚休眠过的线程会在一段时间内运行得更慢。请在同一台机器上比较多次运行的最小值，
 > 计时时优先使用 release 构建。

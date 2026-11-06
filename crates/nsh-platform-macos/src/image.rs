@@ -913,6 +913,51 @@ pub(crate) fn load(
     }
 }
 
+/// A menu item's icon, as drawn for the screen.
+pub(crate) struct MenuIcon {
+    pub(crate) image: CFRetained<CGImage>,
+    /// An SVG: a template, which AppKit paints in the menu's text color.
+    pub(crate) template: bool,
+}
+
+/// Loads a menu item's icon off the main thread, at `scale` pixels per
+/// point; `done` runs on the main thread, before this returns when the
+/// icon is in memory. Dropping the load gives up.
+pub(crate) fn load_menu_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    scale: f32,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let want = nsh_core::desktop::menu_icon::want(scale);
+    load_icon(surface, source, want, done)
+}
+
+/// Loads a menu item's or the tray's icon as `want` says.
+pub(crate) fn load_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    want: Want,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(picture, _)| MenuIcon {
+            image: picture.frames[0].clone(),
+            template: matches!(picture.natural, Natural::Vector(_)),
+        }));
+    };
+    fetch(
+        surface,
+        &source.at_pixel_ratio(want.scale),
+        want,
+        Frames::First,
+        Look::default(),
+        Priority::Visible,
+        None,
+        Box::new(done),
+    )
+}
+
 /// The first frame of `picture`, loaded from `uri`, unless it is an SVG.
 fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
     match picture.natural {
@@ -1100,7 +1145,7 @@ fn wait_for_frame(surface: &Rc<Surface>, view: &NshView) {
         return;
     }
     let weak = Weak::from_retained(&Retained::from(&**view as &ViewObj));
-    surface.add_frame_callback(move |surface, _| {
+    surface.add_draw_callback(move |surface, _| {
         if let Some(view) = weak.load().and_then(|v| NshView::from_ns(&v))
             && view.state().image.as_ref().is_some_and(|i| i.pending)
         {

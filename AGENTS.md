@@ -82,6 +82,7 @@ crates/
                        feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
+  nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
@@ -119,6 +120,7 @@ crates/
                        the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
+  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer and the notification center
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
                        native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
@@ -158,6 +160,9 @@ crates/
                        `compat record <version>`: records a release there)
 tests/compat/         The apps whose scripts check the API apps use (`nsh-compat` builds and runs them): `cases/<domain>/` (one app per
                       domain, a module per case, `script.txt`), `examples/<app>.txt` (the scripts of examples)
+skills/               The skills for coding agents that build apps with NSH (`npx skills add longbridge/nsh`): `skills/nsh`, `skills/nsh-design-guides`;
+                      their guides are verbatim copies of `website/docs/`, their recipes of `examples/tasks-rs` and `examples/tasks`, and `website/tests/skills.test.ts`
+                      fails when a copy differs: after changing one, copy it (`cp website/docs/coding-guides.md skills/nsh/references/`)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
@@ -175,6 +180,13 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
 The TSX gallery and website demos share their internal styled UI in `examples/nsh-gallery-ui/`: components,
 icons, finishes, theme and table part classes. Change shared visual rules there. `examples/gallery/ui.tsx` keeps
 the gallery shell/navigation; `website/demos/palette.ts` is the documentation adapter. See that layer's README.
+
+**Gallery examples must be beautiful and refined.** A demo in `examples/gallery` or `examples/gallery-rs` is what people
+judge NSH by, so one is finished only when it looks designed: colors from the theme's tokens (up and down, too, as
+`text-up` / `text-down`), restrained gradients or real photographs instead of saturated placeholder tints, nothing clipped,
+even spacing and alignment, no leftover boxes or debug-looking labels. Photos come from the ones the gallery already
+uses, so a page does not download many images, and do not repeat within a page unless the demo compares one picture.
+Check a screenshot, in dark and light, before calling a demo done.
 
 Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ←
 `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-bundler`'s feature `bundle` depends on `nsh-js` (to check
@@ -239,6 +251,12 @@ to, put the details in nsh-docs and the summary here. Before changing an area, r
 
 ## Commands
 
+Build with [huacnlee/cargo](https://github.com/huacnlee/cargo), a drop-in Cargo fork for machines full of Git worktrees
+and agents: they share one build directory that stays under a size limit on its own, so nothing needs cleaning or
+configuring. `curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh` installs it (Windows:
+`irm https://huacnlee.github.io/cargo/install.ps1 | iex`); `cargo -V` names it. `cargo +nightly` and
+`rust-toolchain.toml` keep working.
+
 ```sh
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
 cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
@@ -282,6 +300,7 @@ cargo xtask dist                                                                
 ./target/debug/nsh keygen keys/root && ./target/debug/nsh keygen keys/release      # signing keys (.secret / .pub)
 ./target/debug/nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
 ./target/debug/nsh publish examples/counter --key keys/release.secret --cert keys/release.cert --build 2
+./target/debug/nsh publish ci.nshpkg --key keys/platform.secret --cert keys/platform.cert -o out.nshpkg   # a package signed again by another release key, contents kept
 ./target/debug/nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub     # as a device would check it
 ./target/debug/nsh revoke --root keys/root.secret --sequence 1 --package <sha256> -o revocations.json
 
@@ -372,7 +391,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until the first release recorded, which is not chosen yet (0.3.0 is not recorded). A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0 and 0.4.0 are not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.
@@ -598,21 +617,11 @@ code and its tests and report which tests to run; the main session runs builds a
 
 ## Review and parallel workspaces
 
-For PR reviews and work involving multiple agents, **consider LayerFS before creating a Git worktree**. When
-isolated workspaces are needed and the workload fits the available Linux environment, prefer separate LayerFS
-branches and mounted Workspaces from the same committed input. Give each agent its own Workspace; reuse a warm
-snapshot only when its OS, architecture, toolchain and dependencies match the task.
-
-Reuse an existing prepared LayerFS deployment first. Start with `./scripts/layerfs status` and follow
-`docs/dev/layerfs.md`; use `./scripts/layerfs prepare` when setup is needed. The script's `prepare`, `smoke` and
-`status` commands prepare and validate the deployment. Create agent
-branches and mount Workspaces through the pinned LayerFS SDK described in that guide; a smoke run is a validation
-trial, not an agent's development Workspace. Keep source changes in Git and submit them through pull requests.
-
-Use a Git worktree when a concrete constraint makes LayerFS unsuitable, such as an unavailable Docker/FUSE
-environment or a task requiring native macOS, iOS or Windows tooling. State the reason briefly and proceed without
-an extra approval checkpoint. Read-only reviews that need no isolated workspace can inspect the checkout or Git
-objects directly. Preserve the existing parallel-agent build and test limits whichever workspace mechanism is used.
+For PR reviews and work involving multiple agents, give each agent a Git worktree beside the repository
+(`git worktree add ../nsh.worktrees/<name>`); with huacnlee/cargo ("Commands") they share one build directory, so a new
+worktree rebuilds little. Read-only reviews that need no isolated workspace can inspect the checkout or Git objects
+directly. Preserve the existing parallel-agent build and test limits. Keep source changes in Git and submit them through
+pull requests.
 
 ## Verification after changes
 

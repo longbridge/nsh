@@ -859,6 +859,8 @@ final class TextLayouts {
         final int width, height, align;
         /** How far its top is above the baseline (px; negative: below), set by {@link #getSize}. */
         int ascent;
+        /** The ascent and descent of the font around it (px, as {@link Paint.FontMetricsInt}), set by {@link #getSize}. */
+        int fontAscent, fontDescent;
 
         Attachment(int width, int height, int align) {
             this.width = width;
@@ -887,8 +889,10 @@ final class TextLayouts {
                     }
                 }
             }
+            Paint.FontMetricsInt own = paint.getFontMetricsInt();
+            fontAscent = own.ascent;
+            fontDescent = own.descent;
             if (fm != null) {
-                Paint.FontMetricsInt own = paint.getFontMetricsInt();
                 fm.ascent = Math.min(own.ascent, -Math.max(0, ascent));
                 fm.top = Math.min(own.top, fm.ascent);
                 fm.descent = Math.max(own.descent, height - ascent);
@@ -1008,6 +1012,28 @@ final class TextLayouts {
                                  Paint.FontMetricsInt fm) {
             int current = fm.descent - fm.ascent;
             if (current <= 0) return;
+            Attachment[] attachments = text instanceof Spanned
+                    ? ((Spanned) text).getSpans(start, end, Attachment.class)
+                    : null;
+            if (attachments != null && attachments.length > 0) {
+                // A line holding attachments: the text's box (its font with
+                // the line height spread around it) joined with what each
+                // attachment reaches above and below the baseline, so the
+                // line grows only where one is taller (a replaced inline box
+                // in CSS) instead of being cut to the line height.
+                int ascent = 0, descent = 0;
+                for (Attachment a : attachments) {
+                    int extra = height - (a.fontDescent - a.fontAscent);
+                    int top = extra / 2;
+                    ascent = Math.min(ascent, Math.min(a.fontAscent - top, -Math.max(0, a.ascent)));
+                    descent = Math.max(descent, Math.max(a.fontDescent + extra - top, a.height - a.ascent));
+                }
+                fm.ascent = ascent;
+                fm.top = ascent;
+                fm.descent = descent;
+                fm.bottom = descent;
+                return;
+            }
             int extra = height - current;
             int top = extra / 2;
             fm.ascent -= top;

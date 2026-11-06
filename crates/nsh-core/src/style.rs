@@ -1081,6 +1081,8 @@ pub(crate) struct Pending {
     animation_easing: Option<[f32; 4]>,
     /// `animationIterationCount` (`None` inside: forever).
     animation_iterations: Option<Option<u32>>,
+    /// `animationFrameRate` (`None` inside: the screen's highest).
+    animation_frame_rate: Option<Option<f32>>,
     /// The `env()` terms of the padding and margin, added by the core to
     /// the lengths their declarations set.
     pub(crate) env: EnvEdges,
@@ -1159,6 +1161,9 @@ impl Pending {
         }
         if let Some(count) = self.animation_iterations {
             animation.iterations = count;
+        }
+        if let Some(hz) = self.animation_frame_rate {
+            animation.frame_rate = hz;
         }
         animation
     }
@@ -1581,7 +1586,7 @@ style_keys! {
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
-    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included.",
+    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. Not drawn on Windows and GPUI.",
     GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and macOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
@@ -1599,6 +1604,7 @@ style_keys! {
     AnimationDelay = "animationDelay": View "number | `${number}ms` | `${number}s`",
     AnimationTimingFunction = "animationTimingFunction": View "\"linear\" | \"ease\" | \"ease-in\" | \"ease-out\" | \"ease-in-out\" | `cubic-bezier(${string})`",
     AnimationIterationCount = "animationIterationCount": View "number | \"infinite\"",
+    AnimationFrameRate = "animationFrameRate": View "number" "The highest frame rate the keyframe animation needs, in Hz (a slow spinner: 30); unset, the screen's highest. Platforms that can lower their frame rate honor it.",
     TextDecorationStyle = "textDecorationStyle": Text "\"solid\" | \"double\" | \"dotted\" | \"dashed\" | \"wavy\"",
     TextDecorationThickness = "textDecorationThickness": Text "number | \"auto\" | \"from-font\"",
     TextUnderlineOffset = "textUnderlineOffset": Text "number | \"auto\"",
@@ -2362,6 +2368,12 @@ fn number(v: StyleValue<'_>, default: f32) -> Result<f32, StyleError> {
         StyleValue::Null => Ok(default),
         StyleValue::Str(_) => Err(StyleError::InvalidValue),
     }
+}
+
+/// A frame rate in Hz as an animation asks for one: a positive, finite
+/// number (anything else asks for none: the screen's highest).
+pub(crate) fn frame_rate(hz: Option<f32>) -> Option<f32> {
+    hz.filter(|hz| hz.is_finite() && *hz > 0.0)
 }
 
 fn opt_number(v: StyleValue<'_>) -> Result<Option<f32>, StyleError> {
@@ -3152,6 +3164,9 @@ impl StyleKey {
                 StyleValue::Str("infinite") | StyleValue::Null => None,
                 v => Some(number(v, 1.0)?.max(0.0) as u32),
             }),
+            K::AnimationFrameRate => {
+                PropertyValue::OptNumber(frame_rate(opt_number(value)?).map(of))
+            }
             K::TextDecorationStyle => PropertyValue::DecorationStyle(match keyword(value)? {
                 None => None,
                 Some("solid") => Some(DecorationStyle::Solid),
@@ -3816,6 +3831,13 @@ impl Style {
                 self.pending.animation_iterations = Some(*count);
                 if let Some(a) = self.view.animation.as_mut() {
                     a.iterations = *count;
+                }
+            }
+            (K::AnimationFrameRate, V::OptNumber(hz)) => {
+                let hz = hz.map(|n| n.0);
+                self.pending.animation_frame_rate = Some(hz);
+                if let Some(a) = self.view.animation.as_mut() {
+                    a.frame_rate = hz;
                 }
             }
             (K::TextDecorationStyle, V::DecorationStyle(v)) => self.text.decoration_style = *v,
@@ -4518,6 +4540,7 @@ mod tests {
                 ("animationName", Str("spin")),
                 ("animationDelay", Str("0.1s")),
                 ("animationTimingFunction", Str("ease-in")),
+                ("animationFrameRate", Number(30.0)),
             ],
             |s| {
                 let a = s.view.animation.unwrap();
@@ -4526,6 +4549,7 @@ mod tests {
                 assert_eq!(a.iterations, Some(2));
                 assert_eq!(a.delay, 100.0);
                 assert_eq!(a.easing, [0.42, 0.0, 1.0, 1.0]);
+                assert_eq!(a.frame_rate, Some(30.0));
             },
         );
         // Without a name nothing runs.
@@ -4538,6 +4562,26 @@ mod tests {
         s.set("animationDuration", Number(300.0)).unwrap();
         s.set("animationName", Str("spin")).unwrap();
         assert_eq!(s.view.animation.unwrap().duration, 300.0);
+    }
+
+    #[test]
+    fn animation_frame_rate_asks_for_a_positive_rate() {
+        use StyleValue::{Null, Number, Str};
+        let mut s = Style::default();
+        s.set("animationName", Str("spin")).unwrap();
+        // Unset: the screen's highest.
+        assert_eq!(s.view.animation.unwrap().frame_rate, None);
+        s.set("animationFrameRate", Number(24.0)).unwrap();
+        assert_eq!(s.view.animation.unwrap().frame_rate, Some(24.0));
+        // Not a rate: none asked for.
+        for hz in [0.0, -30.0, f32::INFINITY] {
+            s.set("animationFrameRate", Number(hz)).unwrap();
+            assert_eq!(s.view.animation.unwrap().frame_rate, None);
+        }
+        s.set("animationFrameRate", Number(30.0)).unwrap();
+        s.set("animationFrameRate", Null).unwrap();
+        assert_eq!(s.view.animation.unwrap().frame_rate, None);
+        assert!(s.set("animationFrameRate", Str("30")).is_err());
     }
 
     #[test]

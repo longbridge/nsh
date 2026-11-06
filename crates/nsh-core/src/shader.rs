@@ -59,6 +59,7 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "shader")]
 use naga::{
     AddressSpace, ArraySize, Expression, Handle, Module, ScalarKind, TypeInner, VectorSize,
     valid::{Capabilities, ModuleInfo, ValidationFlags, Validator},
@@ -76,9 +77,11 @@ pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
 /// The most bytes `struct Uniforms` may take.
 pub const MAX_UNIFORM_BYTES: u32 = 4096;
 
+#[cfg(feature = "shader")]
 /// The function an app's source defines.
 const SHADE: &str = "shade";
 
+#[cfg(feature = "shader")]
 /// What the core adds to the app's source: the built-ins and the entry
 /// points (WGSL declarations may come in any order, so the app's source
 /// goes first and its lines keep their numbers).
@@ -137,8 +140,10 @@ fn sample_to(uv: vec2f) -> vec4f {
 }
 "#;
 
+#[cfg(feature = "shader")]
 const UNIFORMS: &str = "\n@group(0) @binding(1) var<uniform> uniforms: Uniforms;\n";
 
+#[cfg(feature = "shader")]
 const ENTRY_POINTS: &str = r#"
 struct NshVarying {
     @builtin(position) position: vec4f,
@@ -164,6 +169,7 @@ fn nsh_fragment(in: NshVarying) -> @location(0) vec4f {
 }
 "#;
 
+#[cfg(feature = "shader")]
 /// The index of `time` in `struct Nsh`.
 const TIME_MEMBER: u32 = 1;
 
@@ -349,6 +355,63 @@ impl From<bool> for TransitionKey {
     }
 }
 
+/// A page's or a dialog's `transitionShader`: the program it comes and
+/// goes through, its uniforms and how long that takes.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct NavShaderSpec {
+    /// The WGSL defining `shade`, which reads the lower side as
+    /// `sample_from` and the upper as `sample_to`.
+    pub source: Arc<str>,
+    /// Its uniforms.
+    pub uniforms: ShaderUniforms,
+    /// How long it runs in milliseconds; 350 when absent, about as long as
+    /// the platforms' own push (an element's `ShaderTransition` takes 300).
+    pub duration: Option<f32>,
+}
+
+/// A page's or a dialog's transition program, built in Rust
+/// (`Screen::transition_shader`,
+/// `Modal::transition_shader`;
+/// TS: `transitionShader`): a compiled [`Shader`] defining `shade`, which
+/// reads the lower side as `sample_from` and the upper as `sample_to`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransitionShader(NavShaderSpec);
+
+impl TransitionShader {
+    /// Runs `shader`, with no uniforms, for 350 ms.
+    pub fn new(shader: Shader) -> Self {
+        Self(NavShaderSpec {
+            source: shader.source().into(),
+            uniforms: ShaderUniforms::default(),
+            duration: None,
+        })
+    }
+
+    /// Sets the member `name` of the shader's `struct Uniforms` to `value`:
+    /// a number, a color or a list (a vector, an array of `vec4f`).
+    pub fn uniform(mut self, name: &str, value: impl Into<UniformValue>) -> Self {
+        let value = value.into();
+        match self.0.uniforms.0.iter_mut().find(|(n, _)| &**n == name) {
+            Some(entry) => entry.1 = value,
+            None => self.0.uniforms.0.push((name.into(), value)),
+        }
+        self
+    }
+
+    /// How long it runs (350 ms by default).
+    pub fn duration(mut self, duration: std::time::Duration) -> Self {
+        self.0.duration = Some(duration.as_secs_f32() * 1000.0);
+        self
+    }
+}
+
+impl From<TransitionShader> for NavShaderSpec {
+    fn from(shader: TransitionShader) -> Self {
+        shader.0
+    }
+}
+
 /// The word a progress slot writes ([`ShaderLayer::slots`]): not one of the
 /// uniforms, the built-in `nsh.progress`.
 pub const PROGRESS_WORD: u32 = u32::MAX;
@@ -393,6 +456,7 @@ impl ShaderError {
         }
     }
 
+    #[cfg(feature = "shader")]
     fn at(message: impl Into<String>, source: &str, offset: Option<usize>) -> Self {
         let mut error = ShaderError::new(message);
         if let Some(offset) = offset.filter(|&o| o <= source.len()) {
@@ -489,13 +553,17 @@ pub struct GlslProgram {
 #[derive(Clone)]
 pub struct Shader(Arc<Program>);
 
+// Made only by the compiler (feature `shader`).
+#[cfg_attr(not(feature = "shader"), allow(dead_code))]
 struct Program {
     source: Arc<str>,
     hash: u64,
     wgsl: String,
     // The GLSL writer's input.
+    #[cfg(feature = "shader")]
     #[cfg_attr(not(feature = "glsl"), allow(dead_code))]
     module: Module,
+    #[cfg(feature = "shader")]
     #[cfg_attr(not(feature = "glsl"), allow(dead_code))]
     info: ModuleInfo,
     uniforms: Vec<UniformField>,
@@ -570,8 +638,17 @@ pub(crate) fn compile_source(source: &str) -> Result<Shader, ShaderError> {
 }
 
 impl Shader {
+    /// Refuses `source`: this build has no shader compiler (feature `shader`).
+    #[cfg(not(feature = "shader"))]
+    pub fn compile(_source: &str) -> Result<Shader, ShaderError> {
+        Err(ShaderError::new(
+            "this build has no shader compiler (the NSH platform crate's feature `shader` is off)",
+        ))
+    }
+
     /// Checks and compiles the app's WGSL `source`, which defines
     /// `fn shade(uv: vec2f) -> vec4f` (module docs).
+    #[cfg(feature = "shader")]
     pub fn compile(source: &str) -> Result<Shader, ShaderError> {
         if source.len() > MAX_SOURCE_BYTES {
             return Err(ShaderError::new(format!(
@@ -680,6 +757,7 @@ impl Shader {
     }
 }
 
+#[cfg(feature = "shader")]
 /// Whether `source` declares `struct Uniforms` (outside comments).
 fn declares_uniforms(source: &str) -> bool {
     let mut rest = source;
@@ -726,6 +804,7 @@ fn declares_uniforms(source: &str) -> bool {
     false
 }
 
+#[cfg(feature = "shader")]
 /// An error and its causes, innermost last ("Function 'shade' is invalid:
 /// …").
 fn error_chain(error: &dyn std::error::Error) -> String {
@@ -739,6 +818,7 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     message
 }
 
+#[cfg(feature = "shader")]
 fn parse(wgsl: &str, source: &str) -> Result<Module, ShaderError> {
     naga::front::wgsl::parse_str(wgsl).map_err(|e| {
         let offset = e
@@ -749,6 +829,7 @@ fn parse(wgsl: &str, source: &str) -> Result<Module, ShaderError> {
     })
 }
 
+#[cfg(feature = "shader")]
 /// What the app's module may hold: `shade` with its signature, no entry
 /// points, no resources of its own.
 fn check(module: &Module, source: &str, has_uniforms: bool) -> Result<(), ShaderError> {
@@ -819,6 +900,7 @@ fn check(module: &Module, source: &str, has_uniforms: bool) -> Result<(), Shader
     Ok(())
 }
 
+#[cfg(feature = "shader")]
 /// The members of `struct Uniforms` and its size.
 fn reflect_uniforms(
     module: &Module,
@@ -863,6 +945,7 @@ fn reflect_uniforms(
     Ok((fields, span.next_multiple_of(16)))
 }
 
+#[cfg(feature = "shader")]
 fn uniform_type(module: &Module, ty: Handle<naga::Type>) -> Option<UniformType> {
     Some(match module.types[ty].inner {
         TypeInner::Scalar(s) if s.width == 4 => match s.kind {
@@ -891,6 +974,7 @@ fn uniform_type(module: &Module, ty: Handle<naga::Type>) -> Option<UniformType> 
     })
 }
 
+#[cfg(feature = "shader")]
 /// The pictures the fragment stage reads: the textures `nsh_fragment` uses,
 /// through `shade` and whatever it calls (naga's analysis follows calls).
 fn reads_inputs(module: &Module, info: &ModuleInfo) -> ShaderInputs {
@@ -913,6 +997,7 @@ fn reads_inputs(module: &Module, info: &ModuleInfo) -> ShaderInputs {
         .fold(ShaderInputs::default(), ShaderInputs::with)
 }
 
+#[cfg(feature = "shader")]
 /// Whether any function reads `nsh.time`.
 fn reads_time(module: &Module) -> bool {
     let Some(nsh) = module

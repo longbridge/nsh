@@ -153,6 +153,9 @@ pub(crate) fn decode_command<'js>(name: &str, arg: Value<'js>) -> compat::Result
             Some(input) => Command::SendInput(input),
             None => return Ok(None),
         },
+        // An iframe cannot send headers with its request: `load` does
+        // nothing here rather than load the page without them.
+        "load" => return Ok(None),
         "seek" => Command::Seek(arg.as_number().unwrap_or(0.0)),
         "native" => {
             let o = arg.as_object();
@@ -405,6 +408,22 @@ pub(crate) fn decode_prop<'js>(
         style_entries(&value, &mut entries)?;
         let (style, patch) = decode_style(entries, warnings)?;
         return Ok(Some(Op::SetStyle { id, style, patch }));
+    }
+    if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
+        let patch = style_patch(&value, warnings)?;
+        let prop = prop((!patch.is_empty()).then(|| std::rc::Rc::new(patch)));
+        return Ok(Some(Op::SetProp { id, prop }));
+    }
+    if let Some(prop) = nsh_core::js::host::part_class_prop(name, tag) {
+        let names: Box<str> = value
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .into();
+        return Ok(Some(Op::SetProp {
+            id,
+            prop: prop(names),
+        }));
     }
     let mut cx = tag.map_or_else(HostCx::default, HostCx::for_element);
     let input = Js(value);
@@ -960,6 +979,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> compat::Result<Driver> {
             easing: nsh_core::js::animation::easing(&Js(c.get::<_, Value>("easing")?))
                 .unwrap_or(Easing::EaseInOut),
             delay_ms: num("delay")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         "spring" => Driver::Spring {
             to: num("to")?.unwrap_or(0.0),
@@ -967,6 +987,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> compat::Result<Driver> {
             damping: num("damping")?.unwrap_or(26.0),
             mass: num("mass")?.unwrap_or(1.0),
             velocity: num("velocity")?,
+            frame_rate: num("frameRate")?,
         },
         "decay" => Driver::Decay {
             velocity: num("velocity")?,
@@ -982,6 +1003,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> compat::Result<Driver> {
                 None => None,
             },
             bounce: num("bounce")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         other => {
             return Err(Exception::throw_type(

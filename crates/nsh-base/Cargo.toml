@@ -11,11 +11,22 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["highlight"]
+default = ["editor", "highlight", "plot", "rich-editor"]
+# `Editor` and `DiffView`, which draws with the Editor's text measure.
+editor = ["dep:ropey", "dep:imara-diff"]
+# `RichEditor` and its schema, session and plugin classes.
+rich-editor = []
+# The charts: `nsh/base/plot`.
+plot = []
 # Built-in syntax highlighting of `TextView`'s code blocks (syntect).
 highlight = ["dep:syntect", "dep:two-face"]
+# `TextView`'s formulas typeset natively (RaTeX), with the KaTeX fonts
+# embedded (about 230 kB); without it a formula shows as its TeX, or as the
+# app's `renderMath`.
+math = ["dep:ratex-parser", "dep:ratex-layout", "dep:ratex-types", "dep:ratex-font", "dep:ttf-parser", "dep:zstd"]
 
 [dependencies]
+zstd = { workspace = true, optional = true }
 nsh-core.workspace = true
 chrono.workspace = true
 rustc-hash.workspace = true
@@ -25,12 +36,17 @@ markdown.workspace = true
 html5ever.workspace = true
 markup5ever_rcdom.workspace = true
 regex.workspace = true
-ropey.workspace = true
+ropey = { workspace = true, optional = true }
 unicode-segmentation.workspace = true
-imara-diff.workspace = true
+imara-diff = { workspace = true, optional = true }
 unicode-width.workspace = true
 log.workspace = true
 syntect = { workspace = true, optional = true }
+ratex-parser = { workspace = true, optional = true }
+ratex-layout = { workspace = true, optional = true }
+ratex-types = { workspace = true, optional = true }
+ratex-font = { workspace = true, optional = true }
+ttf-parser = { workspace = true, optional = true }
 
 # The syntaxes' data: the native runtimes keep it in their binaries; the web
 # runtime leaves it out and fetches the page's copy on first use (`syntax.rs`).
@@ -49,3 +65,8 @@ nsh-core = { workspace = true, features = ["declarations"] }
 # before nsh-js is on crates.io.
 nsh-engine = { path = "../nsh-engine", default-features = false }
 nsh-testing = { path = "../nsh-testing", default-features = false }
+
+[[test]]
+name = "base"
+path = "tests/base/main.rs"
+required-features = ["editor", "plot", "rich-editor"]

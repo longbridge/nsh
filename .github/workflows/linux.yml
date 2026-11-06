@@ -17,6 +17,7 @@ on:
       - "crates/nsh-linux-host/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -40,6 +41,7 @@ on:
       - "crates/nsh-linux-host/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -106,11 +108,28 @@ jobs:
       - name: Clippy (without WebKitGTK)
         run: cargo clippy --all-targets -p nsh-platform-linux -- -D warnings
 
-      # Tests need no display: they do not start GTK.
+      # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
+      # imara-diff; no `zlib` or `crypto` module.
+      - name: Check without optional features
+        run: cargo clippy -p nsh-linux-app --no-default-features --features js -- -D warnings
+
+      # Each optional feature alone, so that none leans on another.
+      - name: Check each optional feature alone
+        run: |
+          for feature in shader editor rich-editor plot highlight math zlib crypto; do
+            cargo clippy -p nsh-linux-app --no-default-features --features "$feature" -- -D warnings
+          done
+
+      - name: Test without optional features
+        run: xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features js --lib without_the_feature
+
+      # The backend's tests that make GTK widgets (`gtk_test`) run where a
+      # display opens: the second run has a virtual one, with a session bus
+      # of its own, as the examples' tests below.
       - name: Test
         run: >
           cargo test -p nsh-platform-linux -p nsh-cli -p nsh-dev
-          && cargo test -p nsh-platform-linux --features webview
+          && dbus-run-session -- xvfb-run -a cargo test -p nsh-platform-linux --features webview
 
       # The examples' tests in GTK windows on a virtual display, with the
       # platform's input (`nsh test --target linux`): those a real platform

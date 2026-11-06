@@ -22,12 +22,14 @@
 //!
 //! WebView2 is asynchronous: the environment (one per thread and profile
 //! folder, `%LOCALAPPDATA%\<app id>\WebView2`) and then the controller are
-//! made in the background. Props and commands that come before the
-//! controller is ready wait for it ([`WebItem::ready`]). The WebView2
-//! loader is linked statically (`WebView2LoaderStatic.lib`), so apps do not
-//! ship `WebView2Loader.dll`; the WebView2 runtime itself comes with
-//! Windows 11 (and Edge's installer on Windows 10). Without it, a web view
-//! draws a neutral placeholder, as on Linux.
+//! made in the background, from the first props (`incognito` makes an
+//! InPrivate controller, whose website data stays in memory). Props and
+//! commands that come before the controller is ready wait for it
+//! ([`WebItem::ready`]). The WebView2 loader is linked statically
+//! (`WebView2LoaderStatic.lib`), so apps do not ship `WebView2Loader.dll`;
+//! the WebView2 runtime itself comes with Windows 11 (and Edge's installer
+//! on Windows 10). Without it, a web view draws a neutral placeholder, as
+//! on Linux.
 //!
 //! Pages talk to the app through `window.nsh`: the bridge script
 //! defines `window.nsh.postMessage(data)` (`onMessage`), and
@@ -81,9 +83,10 @@ use webview2_com::{
         COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOWN, COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_UP,
         COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
         COREWEBVIEW2_POINTER_EVENT_KIND, COREWEBVIEW2_WEB_ERROR_STATUS,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2, ICoreWebView2_2,
         ICoreWebView2CompositionController, ICoreWebView2Controller, ICoreWebView2Controller2,
-        ICoreWebView2Controller3, ICoreWebView2Environment, ICoreWebView2Environment3,
+        ICoreWebView2Controller3, ICoreWebView2Environment, ICoreWebView2Environment2,
+        ICoreWebView2Environment3, ICoreWebView2Environment10,
         ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
     MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
@@ -157,6 +160,8 @@ pub(crate) struct WebItem {
     webview: RefCell<Option<ICoreWebView2>>,
     /// No web view can be made (no WebView2 runtime): a placeholder.
     failed: Cell<bool>,
+    /// Its environment was asked for (with the first props).
+    started: Cell<bool>,
     /// Closed (its view was deleted and is not drawn anymore, or the app
     /// stopped).
     closed: Cell<bool>,
@@ -213,6 +218,7 @@ impl WebItem {
             controller: RefCell::new(None),
             webview: RefCell::new(None),
             failed: Cell::new(false),
+            started: Cell::new(false),
             closed: Cell::new(false),
             retired: Cell::new(false),
             props: RefCell::new(None),
@@ -234,16 +240,23 @@ impl WebItem {
         });
         if item.portal.borrow().is_none() {
             item.unavailable("the window cannot compose it");
-            return item;
+        }
+        item
+    }
+
+    /// Asks for the environment, once the first props say how to make the
+    /// controller (`incognito`).
+    fn start(self: &Rc<Self>, surface: &Surface) {
+        if self.started.replace(true) || self.failed.get() || self.closed.get() {
+            return;
         }
         let folder = profile_folder(&surface.native.app_id.borrow());
-        let weak = Rc::downgrade(&item);
+        let weak = Rc::downgrade(self);
         with_environment(&folder, move |env| {
             if let Some(item) = weak.upgrade() {
                 item.environment_ready(env);
             }
         });
-        item
     }
 
     /// No web view: the placeholder shows.
@@ -275,6 +288,18 @@ impl WebItem {
         ) else {
             return self.unavailable("the WebView2 runtime cannot host it in a visual");
         };
+        let incognito = self.props.borrow().as_ref().is_some_and(|p| p.incognito);
+        // InPrivate needs the controller options of WebView2 101 or later;
+        // an older runtime would keep the page's data on disk.
+        let private = match incognito.then(|| env.cast::<ICoreWebView2Environment10>()) {
+            None => None,
+            Some(Ok(env10)) => Some(env10),
+            Some(Err(_)) => {
+                return self.unavailable(
+                    "the WebView2 runtime cannot make an incognito web view; version 101 or later can",
+                );
+            }
+        };
         *self.env.borrow_mut() = Some(env);
         let weak = Rc::downgrade(self);
         let handler = CreateCoreWebView2CompositionControllerCompletedHandler::create(Box::new(
@@ -299,11 +324,24 @@ impl WebItem {
                 Ok(())
             },
         ));
-        // SAFETY: a call on a live environment with the live window of
-        // this thread.
-        if let Err(err) =
-            unsafe { env3.CreateCoreWebView2CompositionController(surface.hwnd(), &handler) }
-        {
+        // SAFETY: calls on a live environment with the live window of this
+        // thread.
+        let made = unsafe {
+            match &private {
+                Some(env10) => env10
+                    .CreateCoreWebView2ControllerOptions()
+                    .and_then(|options| {
+                        options.SetIsInPrivateModeEnabled(true)?;
+                        env10.CreateCoreWebView2CompositionControllerWithOptions(
+                            surface.hwnd(),
+                            &options,
+                            &handler,
+                        )
+                    }),
+                None => env3.CreateCoreWebView2CompositionController(surface.hwnd(), &handler),
+            }
+        };
+        if let Err(err) = made {
             log::warn!("web view: cannot create a controller: {err}");
             self.unavailable("cannot create a WebView2 controller");
         }
@@ -560,9 +598,11 @@ impl WebItem {
         access.is_none_or(|a: Arc<nsh_engine::Access>| a.allows_webview(url))
     }
 
-    pub(crate) fn set(&self, surface: &Rc<Surface>, view: &NshView, p: &WebProps) {
+    pub(crate) fn set(self: &Rc<Self>, surface: &Rc<Surface>, view: &NshView, p: &WebProps) {
         self.background.set(view.state().style.background_color);
         *self.props.borrow_mut() = Some(p.clone());
+        // The core keeps `incognito` from changing once it is made.
+        self.start(surface);
         if self.webview.borrow().is_some() {
             self.paint_background();
             self.apply(p);
@@ -734,7 +774,7 @@ impl WebItem {
     }
 
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-    /// `injectJavaScript()` and `postMessage()`.
+    /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &Command) {
         let Some(webview) = self.webview.borrow().clone() else {
             if !self.failed.get() {
@@ -754,9 +794,43 @@ impl WebItem {
                 Command::PostMessage(data) => {
                     webview.ExecuteScript(&HSTRING::from(post_message(data)), none)
                 }
+                Command::Load(load) => self.load(&webview, load),
                 _ => Ok(()),
             }
         };
+    }
+
+    /// `load()`: a navigation whose own request carries the app's headers
+    /// (WebView2 adds none of them to the page's subresources or later
+    /// navigations). Runtimes before `ICoreWebView2_2` cannot: an error.
+    fn load(&self, webview: &ICoreWebView2, load: &nsh_core::WebLoad) -> windows::core::Result<()> {
+        let env = self.env.borrow().clone();
+        let (Some(env2), Ok(webview2)) = (
+            env.and_then(|e| e.cast::<ICoreWebView2Environment2>().ok()),
+            webview.cast::<ICoreWebView2_2>(),
+        ) else {
+            self.emitter.emit(EventKind::Error, || {
+                error("this WebView2 runtime cannot send request headers".into())
+            });
+            return Ok(());
+        };
+        // `Name: value` lines; `WebLoad` has no CR or LF in them.
+        let headers: String = load
+            .headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect();
+        // SAFETY: WebView2 calls on the live environment and web view, on
+        // their thread.
+        unsafe {
+            let request = env2.CreateWebResourceRequest(
+                &HSTRING::from(load.src.as_str()),
+                w!("GET"),
+                None::<&windows::Win32::System::Com::IStream>,
+                &HSTRING::from(headers),
+            )?;
+            webview2.NavigateWithWebResourceRequest(&request)
+        }
     }
 
     /// The view's background behind the page until it paints (when the

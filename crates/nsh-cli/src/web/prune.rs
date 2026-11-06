@@ -29,6 +29,29 @@ pub(crate) fn exports(wasm: &[u8]) -> anyhow::Result<Vec<String>> {
     Ok(names)
 }
 
+/// `wasm` as it is, without the custom sections a linked runtime leaves
+/// out ([`dropped_custom`]): for a runtime published whole.
+pub(crate) fn unlinked(wasm: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(wasm.len());
+    for payload in Parser::new(0).parse_all(wasm) {
+        let payload = payload.context("the web runtime is not a WebAssembly module")?;
+        if let Payload::Version { range, .. } = &payload {
+            out.extend_from_slice(&wasm[range.start as usize..range.end as usize]);
+        }
+        if let Payload::CustomSection(custom) = &payload
+            && dropped_custom(custom.name())
+        {
+            continue;
+        }
+        if let Some((id, range)) = payload.as_section() {
+            out.push(id);
+            put_uleb(&mut out, range.end - range.start);
+            out.extend_from_slice(&wasm[range.start as usize..range.end as usize]);
+        }
+    }
+    Ok(out)
+}
+
 /// A symbol of the `linking` section's table, as far as pruning needs it.
 enum Symbol {
     Func(u32),

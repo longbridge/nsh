@@ -5,6 +5,12 @@
 //! writes the [`HostPropSpec`]s the element types are generated from. The
 //! decoders read JS values through [`HostInput`], which `nsh-js` implements
 //! for QuickJS values: no JSON in between.
+//!
+//! A few props are not [`HostProps`]: the state styles and a page's header
+//! style, whose values each renderer decodes with its own style decoder, and
+//! the class lists of an element's parts. [`style_patch_prop`] and
+//! [`part_class_prop`] name them for both renderers (QuickJS' and the
+//! browser runtime's).
 
 use std::sync::Arc;
 
@@ -125,6 +131,51 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
                 0
             }
         }
+}
+
+/// A prop whose value is a style over the element's own: the style patch
+/// the renderer decodes from it as from a `style` (`None` when empty).
+pub type StylePatchProp = fn(Option<std::rc::Rc<crate::StylePatch>>) -> crate::Prop;
+
+/// The prop a state style or a page's header style sets (`activeStyle`,
+/// `hoverStyle`, ..., `headerStyle`). They are not [`HostProps`]: each
+/// renderer decodes their style with its own style decoder, then makes the
+/// prop with this, so QuickJS' and the browser's take the same names.
+#[inline]
+pub fn style_patch_prop(name: &str) -> Option<StylePatchProp> {
+    use crate::Prop;
+    Some(match name {
+        "activeStyle" => Prop::ActiveStyle,
+        "hoverStyle" => Prop::HoverStyle,
+        "focusStyle" => Prop::FocusStyle,
+        "disabledStyle" => Prop::DisabledStyle,
+        "selectedStyle" => Prop::SelectedStyle,
+        "checkedStyle" => Prop::CheckedStyle,
+        "indeterminateStyle" => Prop::IndeterminateStyle,
+        "expandedStyle" => Prop::ExpandedStyle,
+        "pressedStyle" => Prop::PressedStyle,
+        "focusWithinStyle" => Prop::FocusWithinStyle,
+        "headerStyle" => Prop::HeaderStyle,
+        _ => return None,
+    })
+}
+
+/// A prop whose value is a class list of a part of an element: the class
+/// names as the renderer reads them from the JS string.
+pub type PartClassProp = fn(Box<str>) -> crate::Prop;
+
+/// The prop a class list of a part of element `tag` sets: a page's header
+/// (`headerClass`) or a list's content (`contentClass`). A scroll view's
+/// `contentClass` is not one: it styles the scroll view's content container,
+/// which a renderer makes itself rather than the core.
+#[inline]
+pub fn part_class_prop(name: &str, tag: Option<crate::Tag>) -> Option<PartClassProp> {
+    use crate::{Prop, Tag};
+    match name {
+        "headerClass" => Some(Prop::HeaderClass),
+        "contentClass" if tag != Some(Tag::Scroll) => Some(Prop::ListContentClass),
+        _ => None,
+    }
 }
 
 /// A prop's value: how it comes out of a JS value and its TypeScript type.
@@ -484,13 +535,18 @@ export interface MouseEvent {
 /** A mouse button (GPUI's `MouseButton`). */
 export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
+/** The kind of pointer behind an event (the DOM's `pointerType`). */
+export type PointerType = "mouse" | "pen" | "touch";
+
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
-  /** Position in the view (its transforms undone). */
+  /** Position in the view (its transforms undone): the pointer's, or the view's bottom-start corner when no pointer asked. */
   position: Point;
   /** Position in the root view the view is in: where `Menu.popup` opens a menu (`Menu.popup(items, e.pagePosition)`). */
   pagePosition: Point;
   modifiers: Modifiers;
+  /** The pointer that asked for the menu, or `null` when the keyboard (Shift+F10, the Menu key) or an assistive technology's "show menu" action did: a menu opened then puts the keyboard focus on its first item. */
+  pointerType: PointerType | null;
 }
 
 /** Where a scroll view is: the payload of `onScroll`. */
@@ -807,6 +863,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "",
     ),
     (
+        EventKind::SelectionChange,
+        on::VIEW,
+        "(e: { text: string; start?: number }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it. Only the outermost selectable view of an area reports it.",
+    ),
+    (
         EventKind::Paste,
         on::INPUT,
         "(e: PasteEvent) => void",
@@ -882,7 +944,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
 ];
 
 /// The events no element's props declare: the root's (`BackHandler`,
-/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events), the runtime's own (touches, insets, native
+/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events, links), the runtime's own (touches, insets, native
 /// components' events) and those whose payload a module makes
 /// (`List`'s viewable items, with the app's items).
 pub const INTERNAL_EVENTS: &[EventKind] = &[
@@ -899,6 +961,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::ScreenColor,
     EventKind::FileRequest,
     EventKind::Speech,
+    EventKind::Notification,
+    EventKind::UrlScheme,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

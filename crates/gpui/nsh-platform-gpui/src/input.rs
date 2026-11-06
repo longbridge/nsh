@@ -806,6 +806,80 @@ fn collect_drag(
     });
 }
 
+/// Whether a secondary click at `(x, y)` (root coordinates) on a window
+/// drag area goes to the app instead of opening the window menu: the view
+/// under it, or one around it up to the nearest view that sets
+/// `windowDrag: true`, listens to `onContextMenu` (nearer than a text
+/// field). Listeners further out, the root's included, leave the window
+/// menu to the drag area.
+pub(crate) fn hears_context_menu(root: &NshView, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(root, x, y, true) else {
+        return false;
+    };
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if s.events.contains(EventKind::ContextMenu) {
+                return true;
+            }
+            if s.kind == ViewKind::Input || s.props.window_drag == Some(true) {
+                return false;
+            }
+        }
+        view = v.parent_view();
+    }
+    false
+}
+
+/// Whether `view` takes a context menu asked for without a pointer: it
+/// listens to `onContextMenu` (AccessKit's `ShowContextMenu` action).
+pub(crate) fn hears_show_menu(view: &NshView) -> bool {
+    view.state().events.contains(EventKind::ContextMenu)
+}
+
+/// A context menu asked for on `view` without a pointer (AccessKit's
+/// `ShowContextMenu`): the view, or the nearest around it that listens to
+/// `onContextMenu`, hears it with no pointer at its bottom-start corner
+/// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
+/// selectable text is nearer. True when a view heard it.
+pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let area = crate::selectable_view::area_of(view);
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        let (id, listens, stop, size) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input || crate::text::selectable(&s),
+                s.frame.size,
+            )
+        };
+        if listens {
+            let position = nsh_core::input::context_menu_anchor(size, rtl);
+            let (page_x, page_y) = v
+                .to_root()
+                .and_then(|m| m.map(position.x.0, position.y.0))
+                .unwrap_or((position.x.0, position.y.0));
+            let event = nsh_core::ContextMenuEvent::new(
+                position,
+                nsh_core::geometry::point(Points(page_x), Points(page_y)),
+                Default::default(),
+                None,
+            );
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if stop || area.as_ref() == Some(&v) {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
@@ -828,11 +902,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         };
         if listens {
             let (location_x, location_y) = local(&v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
-                page_position: nsh_core::geometry::point(Points(x), Points(y)),
-                modifiers: modifiers.core(),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                nsh_core::geometry::point(Points(location_x), Points(location_y)),
+                nsh_core::geometry::point(Points(x), Points(y)),
+                modifiers.core(),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }
@@ -853,6 +928,21 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             _ => {}
         }
         view = v.parent_view();
+    }
+}
+
+/// The closest view under `(x, y)` (root points) that listens to
+/// `onFileDrop`, within its modal ([`crate::file_drop`]).
+pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let mut view = pick(&surface.root, x, y, true)?.view;
+    loop {
+        if view.state().events.contains(EventKind::FileDrop) {
+            return Some(view);
+        }
+        if view.kind() == ViewKind::Modal || view.id() == ROOT_ID {
+            return None;
+        }
+        view = view.parent_view()?;
     }
 }
 
@@ -2665,6 +2755,76 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// A title bar 200 × 40 at (10, 10) that drags the window, inside
+    /// `parent`, with a text field at (100, 5) in it and a sibling view
+    /// below it at (10, 60): (bar, field, sibling).
+    fn title_bar(parent: &NshView) -> (NshView, NshView, NshView) {
+        let bar = view(parent, 2, ViewKind::View, rect(10.0, 10.0, 200.0, 40.0));
+        bar.state_mut().props.window_drag = Some(true);
+        let field = view(&bar, 4, ViewKind::Input, rect(100.0, 5.0, 80.0, 30.0));
+        let sibling = view(parent, 6, ViewKind::View, rect(10.0, 60.0, 200.0, 40.0));
+        (bar, field, sibling)
+    }
+
+    fn listens(view: &NshView) {
+        view.state_mut().events.set(EventKind::ContextMenu, true);
+    }
+
+    #[test]
+    fn a_drag_area_s_own_listener_hears_its_secondary_click() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        // So does a listener inside it.
+        let root = self::root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&view(&bar, 8, ViewKind::View, rect(0.0, 0.0, 50.0, 40.0)));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        assert!(!hears_context_menu(&root, 80.0, 30.0));
+    }
+
+    #[test]
+    fn a_listener_around_a_drag_area_leaves_it_the_window_menu() {
+        let root = root();
+        let parent = view(&root, 10, ViewKind::View, rect(0.0, 0.0, 300.0, 200.0));
+        listens(&parent);
+        title_bar(&parent);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_root_listener_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        listens(&root);
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_field_in_a_listening_drag_area_keeps_its_edit_menu() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(!hears_context_menu(&root, 130.0, 30.0));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_listening_sibling_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        let (_, _, sibling) = title_bar(&root);
+        listens(&sibling);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_drag_area_with_no_listener_keeps_the_window_menu() {
+        let root = root();
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {

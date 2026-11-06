@@ -1,5 +1,10 @@
 # Scrolling and lists
 
+- **A resize keeps what a scroll view shows** (`core/resize_anchor.rs`): as a browser's scroll anchoring, in the layout
+  after a change of the viewport a plain vertical scroll view past its start scrolls by as much as the first view it
+  shows moved, with a `ScrollBy` in the same batch, clamped to its content. Text above the viewport wrapping onto more
+  lines moves nothing on screen, through a window's drag and when text that waited catches up (`docs/dev/text.md`).
+  Lists keep their rows themselves.
 - **Scrolling**: `pagingEnabled`, `snapToInterval` / `snapToOffsets` / `snapToAlignment`, `disableIntervalMomentum`,
   `decelerationRate`, `scrollable`, `bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`
   (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
@@ -24,8 +29,9 @@
 - **Carousels** (`nsh/base`'s `Carousel`, `docs/dev/components.md` "Carousels"): a horizontal or vertical scroll view
   whose `snapToOffsets` are its slides' laid-out starts, with `disableIntervalMomentum`; the slide is read where the
   scroll comes to rest (`onScrollEnd`) and discrete changes are `ScrollTo`s.
-- **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
-  (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
+- **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderers', each with a
+  `scroll_content` (QuickJS' in `nsh-js`'s `dom.rs`, the browser runtime's in `nsh-platform-web`'s `browser/dom.rs`;
+  a change to one goes to both): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in
   the scroll view itself, so without it nothing changes (no extra view).
 - **Zooming** (`<Scroll>`, not lists): `maximumZoomScale` above `minimumZoomScale` makes the content zoomable; `zoomScale`
@@ -37,10 +43,10 @@
   content around its top left and scrolls both ways itself (ScaleGestureDetector around the focal point, panning with any
   number of fingers, OverScroller flings, rubber bands past the edges and the zoom limits). Pinches start only after
   Android's minimum span (about 27 mm between the fingers). Zoom reports go to the core (`EngineControl::zoom`).
-- **List** props: `each`, `estimatedItemSize`, `numColumns`, `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
+- **List** props: `each`, `estimatedItemSize`, `numColumns` (both may change while the list shows: the first visible item keeps its place, `ListState::visible_anchor`; a change of columns remembers it in `columns_anchor`, so resizing back and forth does not drift), `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
-  below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
+  below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `alignment` (`bottom`, GPUI's `ListAlignment::Bottom`: rows in reading order, opens at the end with no scroll command to pin, follows it within `follow_end` or a point's rounding, `ListState::anchor_end`; it waits for an appended last row's measurement the window will reach, so one scroll lands on its real size; short content lies at the bottom, `ListState::leading`), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
   `footer` / `empty` / `separator` (a component or an element), `contentStyle`
   (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
   `onLoadMoreAtStart` + `loadMoreAtStartThreshold` (below), `onViewableItemsChange` +

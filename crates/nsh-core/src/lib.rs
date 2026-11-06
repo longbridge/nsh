@@ -34,6 +34,7 @@ pub mod keymap;
 pub mod mobile;
 mod mount;
 pub mod navigation;
+pub mod notifications;
 pub mod open_url;
 mod ops;
 pub mod overlay;
@@ -60,6 +61,7 @@ pub mod text_edit;
 pub mod time;
 mod transform;
 pub mod transition;
+pub mod url_scheme;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
@@ -81,19 +83,20 @@ pub use crate::{
     image::ImageData,
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
-        NO_NATIVE_HEADER, NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps,
-        ViewKind, WebProps,
+        NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,
+        VideoProps, ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
         DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HeaderSystemItem,
         IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ListContentStyle, ListViewport, ModalAnimation,
+        KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle, ListViewport, ModalAnimation,
         ModalPresentation, ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp,
-        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
-        ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, ScrollbarSetting, SnapAlignment,
-        StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent,
-        TouchPhase, TouchPoint, TransitionFallback, Viewability, WebInput, WebKey, WebSource,
+        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PointerType, PressEvent, Prop,
+        ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp,
+        ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
+        WebInput, WebKey, WebLoad, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

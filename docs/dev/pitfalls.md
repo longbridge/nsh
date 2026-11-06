@@ -109,6 +109,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Bundler and toolchain
 
+- **Shared target directories can reuse another worktree's older API.** Cargo can mark a path crate `Fresh`
+  when its artifact was built in another checkout and the current checkout's source mtimes are older. In ticket
+  20, `cargo check` used metadata containing the terminal performance API while `cargo test` reused an rlib
+  whose dep-info did not even list `perf.rs`; both had the requested `dev` and `run-app` features. Check verbose
+  Cargo output and the selected artifact's dep-info before changing feature gates. Validate independent worktrees
+  with their own default target directories; product code should not add build inputs to compensate for shared
+  artifacts.
+
 - **rquickjs must not enable the `full` feature.** It pulls in `dyn-load` (dlopen2), which does not compile for iOS / Catalyst. iOS targets
   have no prebuilt bindings and need the `bindgen` feature (and libclang).
 - **Use `oxc_sourcemap` 9.x** (matching rolldown / oxc 0.153): source maps are composed with rolldown's types, so never mix in
@@ -130,6 +138,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **A constant newer than the deployment target (iOS 15) stops the app before `main`**: `objc2-ui-kit` exposes it as a
+  `pub static`, so naming it is a strong import that dyld binds at launch, used or not ("Symbol not found"). Classes and
+  methods are looked up at run time and are safe to guard by version; constants are not. `input.rs` looks the iOS 17
+  text content types up with `dlsym` and leaves `textContentType` unset without them. To check a binary, compare
+  `dyld_info -imports` with the exports of the oldest runtime.
 - **An input's `pointerEvents` is UIKit's, not `NshView`'s**: inputs are a plain container around a text view, with no
   `hitTest:` of NSH's, so `none` / `box-none` turn the container's user interaction off (`set_view_props`); it can still
   become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
@@ -358,6 +371,14 @@ Things that were found the hard way. Read the section of the area you change bef
 - **AT-SPI reads widgets, not what NSH draws**: a view `snapshot` skips (`visibility: hidden`) is still presented, with
   its subtree, until its accessible state is `Hidden` (`access.rs`); GTK's AT-SPI bridge then leaves out the widget
   and its subtree (`gtk_accessible_should_present`; checked with an AT-SPI client on GTK 4.14).
+- **A text view ignores CSS `line-height`**: only labels apply it. An `Input`'s lines get their height from the view's
+  `pixels-above-lines`, `pixels-below-lines` and `pixels-inside-wrap` (`text_input.rs`'s `set_line_box`), which also keep
+  the caret at the font's height. These are added to a line's own height, so a line in a taller fallback font (CJK) comes
+  out taller than `lineHeight` by the difference. In a label a fallback font moves the line's baseline down instead, so
+  a multiline placeholder is placed by its baseline (`placeholder_lift`).
+- **A text view draws its caret with its own node's `caret-color`**, not its `text` child's: a rule that hides the caret
+  has to name `textview` as well (`nsh-composing`).
+
 - **A widget's accessible role is effectively fixed** once its AT context is realized: GTK refuses to change it (with a
   critical), and nothing tells whether it is. Roles are decided when the view is created, from the batch that creates
   it (`access::prepare`); a later change detaches the view and puts it back.
@@ -441,6 +462,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
+  shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
+  `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
+  binding and older systems no property.
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
@@ -471,8 +497,10 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked: a surface
-  that wants frames falls back to a main-queue timer after 100 ms without one (`surface.rs`), or transitions never end.
+- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
+  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
+  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+  which would add a second clock beside the link's while the window shows.
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).
@@ -519,6 +547,12 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Thread-local COM objects released inside `ExitProcess` end the process with a stray exit code**: the main thread's
   thread-local destructors run after the graphics DLLs and their driver threads are gone. `run_app` runs the window on
   a thread of its own and joins it, so the devices, font faces and bitmaps cached per thread go at a plain thread exit.
+- **GPU drivers start worker threads for every Direct3D 11 device** (about 28 on NVIDIA, 15 on AMD) unless it is made
+  with `D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS` (`gfx.rs`). NSH draws with a device from one
+  thread, so they only contend with the UI threads; with a device on each of several threads, windows missed hundreds
+  of frames a minute and CPU went up several times on NVIDIA and Intel. Microsoft calls the flag "not recommended for
+  general use": it is meant for apps that call Direct3D from a single thread, which NSH does (video decoding takes
+  Direct3D's multithread lock and stays valid; the flag changes no thread safety).
 - **Win32 timers tick at ~15.6 ms** (the default timer resolution) and wake-ups come late on a loaded machine: tests
   must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and a test's waits
   need slack.
@@ -543,6 +577,13 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Web, browsers
 
+- **WebKit takes an import map only before the document's first module script**: one added after it is ignored,
+  and the app's `import "nsh"` failed with "Module name, 'nsh' does not resolve to a valid URL" (iOS 18.3 Safari; a
+  `document.open()` in between does not reset it, a dynamic `import()` from a classic script counts as a module
+  script, and navigating the frame gives it a new realm; iOS 26.5 Safari and Chrome 152 merge the later map). The realm's import map
+  goes in before the bootstrap module, with the native modules' facades made from `nativeExports` (`runtime.js`);
+  a module the app imports whole is mapped only once the namespaces exist, which needs a browser that merges
+  import maps (Chrome 133 and later).
 - **WebKit does not hand a `<link rel=preload as=fetch>` still in flight to the `fetch` of the same URL**: the
   `fetch` downloads the file again, and only once the preload has finished does it come from the HTTP cache (iOS 26.5
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
@@ -576,6 +617,14 @@ Things that were found the hard way. Read the section of the area you change bef
   one width) keeps its `kern` pairs, so Arial (macOS) and Liberation Sans, Chrome's `sans-serif` on Linux, draw `11`
   1.48 px narrower than two `1`s at 20 px (Chrome 156: `$1,111.11` summed 89 from its characters, drawn 84.53). A
   figure's width adds each adjacent pair's kerning to its characters' (`css::figure_width`).
+- **Marking text tells an `NSTextView`'s delegate nothing but the selection** (macOS 27, `setMarkedText:`): no
+  `textDidChange:`, also for a field's editor, though `shouldChangeText` and `didChangeText` run. What follows the text
+  has to look on selection changes too (`text_input.rs`, `composition_changed`), or a label placeholder stays under the
+  composition and `onCompositionChange` never fires. Dropping marked text is the same, and so is its `editing` flag.
+- **AppKit's caret is as tall as a line fragment**, and a fragment with a minimum line height holds the extra space above
+  the text (15 pt system font, 24 pt lines: `NSTextInsertionIndicator` 24 tall, text 18 tall at the fragment's bottom). A
+  fragment of the font's height with `lineSpacing`, and half of it as the container's inset, gives a caret as tall as
+  the text and text in the middle of the same 24 pt lines (`LineBox`).
 
 ## Testing on simulators and emulators
 

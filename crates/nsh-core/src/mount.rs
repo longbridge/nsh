@@ -78,6 +78,11 @@ pub struct WebProps {
     pub javascript_enabled: bool,
     /// Swipes go back and forward (iOS).
     pub back_forward_gestures: bool,
+    /// Website data (cookies, storage, the cache) lives only as long as
+    /// the web view, apart from the app's other web views (Android: no
+    /// HTTP cache and no saved form data). Read when the platform makes the
+    /// web view: the core keeps it from changing afterwards.
+    pub incognito: bool,
 }
 
 impl Default for WebProps {
@@ -92,6 +97,7 @@ impl Default for WebProps {
             scrollable: true,
             javascript_enabled: true,
             back_forward_gestures: false,
+            incognito: false,
         }
     }
 }
@@ -655,6 +661,10 @@ pub struct ImageOptions {
 /// created by the preceding items.
 #[derive(Debug, Clone)]
 pub enum MountItem {
+    /// Mounted nodes in depth-first logical tree order, independent of native
+    /// stacking (`Insert`). Opt-in through `Core::set_tree_order_tracking`;
+    /// emitted after structural changes in the same batch as the affected views.
+    TreeOrder(Vec<NodeId>),
     /// Create a native view. It starts detached and invisible.
     Create {
         /// Node id, used to address the view in later items.
@@ -669,6 +679,17 @@ pub enum MountItem {
     /// platform keep `states & tracked`), so the two never disagree about
     /// a state the platform stopped reporting.
     TrackStates {
+        /// View id.
+        id: NodeId,
+        /// The states.
+        states: u16,
+    },
+    /// The states the view shows as a part of a control (`tailwind::state`
+    /// bits: a list's highlighted option is focused while the focus stays
+    /// on its search field), for a platform that marks them itself. Opt-in
+    /// through `Core::set_projected_state_mounting`; the platform shows
+    /// them and never reports them back.
+    ProjectStates {
         /// View id.
         id: NodeId,
         /// The states.
@@ -864,6 +885,21 @@ pub enum MountItem {
         /// How long it runs.
         duration: std::time::Duration,
     },
+    /// The shader a page or a dialog comes and goes through
+    /// (`transitionShader`; `None`: its `animation`): when it is pushed,
+    /// popped, presented or dismissed, the platform draws the change through
+    /// the layer for `duration`, the lower side's picture as `sample_from`
+    /// and the upper's as `sample_to`, whatever the page's `animation`; its
+    /// `animation` runs where it cannot and when the user asks for less
+    /// motion, and a change that starts while one runs ends that one first
+    /// (`docs/dev/shaders.md` "Pages and dialogs").
+    NavShader {
+        /// The page or dialog.
+        id: NodeId,
+        /// The layer (role [`crate::shader::ShaderRole::Transition`]) and
+        /// how long it runs.
+        shader: Option<NavShader>,
+    },
     /// What a shader's pictures show changed, as far as the core knows: a
     /// view in an effect's or a transition's subtree was in the batch, or
     /// anything for a shader that reads what is behind it and for a screen
@@ -1020,6 +1056,25 @@ impl MountItem {
             M::Insert { parent, .. } => Some(*parent),
             _ => None,
         }
+    }
+}
+
+/// A page's or a dialog's transition through a shader
+/// ([`MountItem::NavShader`]). It has no `Default`: a layer holds a
+/// compiled program, which has none; [`NavShader::new`] makes one.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct NavShader {
+    /// The program and its uniforms.
+    pub layer: Arc<crate::shader::ShaderLayer>,
+    /// How long it runs.
+    pub duration: std::time::Duration,
+}
+
+impl NavShader {
+    /// `layer` running for `duration`.
+    pub fn new(layer: Arc<crate::shader::ShaderLayer>, duration: std::time::Duration) -> Self {
+        Self { layer, duration }
     }
 }
 

@@ -243,6 +243,11 @@ impl Frame {
         (self.pixels.width, self.pixels.height)
     }
 
+    /// Its pixels: premultiplied BGRA, rows packed.
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.pixels.data
+    }
+
     /// Its bitmap on `dc`'s device, made on first use and again after a
     /// device loss (main thread).
     pub(crate) fn bitmap(&self, dc: &ID2D1DeviceContext) -> Option<ID2D1Bitmap1> {
@@ -781,6 +786,39 @@ fn fetch(
     })
 }
 
+/// A menu item's icon, as decoded (at least as large as it shows).
+pub(crate) struct MenuIcon {
+    pub(crate) frame: Arc<Frame>,
+    /// An SVG: a template, painted in the menu's text color.
+    pub(crate) template: bool,
+}
+
+/// Loads a menu item's icon off the main thread, at `scale` pixels per
+/// point; `done` runs on the main thread, before this returns when the
+/// icon is in memory. Dropping the load gives up.
+pub(crate) fn load_menu_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    scale: f32,
+    done: impl FnOnce(Result<MenuIcon, String>) + 'static,
+) -> Option<Load> {
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(picture, _)| MenuIcon {
+            template: matches!(picture.natural, Natural::Vector(_)),
+            frame: picture.frame,
+        }));
+    };
+    fetch(
+        surface,
+        &source.at_pixel_ratio(surface.scale()),
+        nsh_core::desktop::menu_icon::want(scale),
+        Frames::First,
+        Priority::Visible,
+        None,
+        Box::new(done),
+    )
+}
+
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the main thread, at its natural size; `done` runs on
 /// the main thread with the image (an animation's first frame). Canvases
@@ -992,7 +1030,7 @@ thread_local! {
 
 /// Calls `f` once after `wait`, from the thread's message loop; returns
 /// the timer, to [`cancel`] it.
-fn after(wait: Duration, f: impl FnOnce() + 'static) -> Option<usize> {
+pub(crate) fn after(wait: Duration, f: impl FnOnce() + 'static) -> Option<usize> {
     let ms = wait.as_millis().clamp(1, u32::MAX as u128) as u32;
     // SAFETY: a thread timer (no window) with a callback of the right
     // signature; the message loop of this thread dispatches it.
@@ -1458,7 +1496,7 @@ fn loaded(
         (events, id, image.fade.is_some())
     };
     if fades {
-        surface.on_frame(move |surface, now| fade_tick(surface, id, generation, now));
+        surface.on_draw_frame(move |surface, now| fade_tick(surface, id, generation, now));
     }
     view.changed();
     match &result {
@@ -1605,6 +1643,20 @@ fn with_effects<R>(dc: &ID2D1DeviceContext, f: impl FnOnce(&Effects) -> R) -> Op
     })
 }
 
+/// The world-transform scale for a bitmap drawn through Direct2D effects.
+fn effect_scale(frame: (f32, f32), bitmap: (f32, f32), dpi: f32) -> (f32, f32) {
+    (frame.0 / bitmap.0 * dpi, frame.1 / bitmap.1 * dpi)
+}
+
+/// The Gaussian blur effect's deviation for a blur radius in points, under
+/// the world-transform scale of [`effect_scale`]. A radius is twice the
+/// deviation (GSK's and CSS's reading). The effect takes DIPs and applies the
+/// context's DPI itself, which `scale`'s own DPI cancels on the way to the
+/// screen.
+fn effect_blur_sigma(radius: f32, scale: (f32, f32)) -> f32 {
+    radius / 2.0 / scale.0.min(scale.1).max(1e-6)
+}
+
 /// Draws one picture with the view's mode, tint and blur.
 fn draw_one(
     cx: &mut DrawCx<'_>,
@@ -1652,9 +1704,9 @@ fn draw_one(
         return;
     }
     let saved = cx.transform;
-    // Effects draw in the image's own pixels (one DIP each): mapped onto
-    // the rectangle by the world transform.
-    let (sx, sy) = (fw / bw, fh / bh);
+    // Effects draw in the image's own pixels, one device pixel each whatever
+    // the context's DPI: mapped onto the rectangle by the world transform.
+    let (sx, sy) = effect_scale((fw, fh), (bw, bh), cx.scale);
     cx.set_transform(Mat4::new().translate(x, y).scale(sx, sy).then(&saved));
     with_effects(cx.dc, |effects| {
         // SAFETY: COM calls on the live context and effects of its device;
@@ -1678,9 +1730,7 @@ fn draw_one(
                 }
             }
             if blur > 0.0 {
-                // A blur radius is twice the standard deviation (GSK's and
-                // CSS's reading), in points: in image pixels here.
-                let sigma = blur / 2.0 / sx.min(sy).max(1e-6);
+                let sigma = effect_blur_sigma(blur, (sx, sy));
                 let _ = effects.blur.SetValue(
                     D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0 as u32,
                     D2D1_PROPERTY_TYPE_FLOAT,
@@ -2008,6 +2058,22 @@ mod tests {
             let (w, h) = small.frame.size();
             assert!(w.max(h) <= 8);
         }
+    }
+
+    #[test]
+    fn effect_transform_accounts_for_target_dpi() {
+        let one_x = effect_scale((100.0, 50.0), (200.0, 100.0), 1.0);
+        let two_x = effect_scale((100.0, 50.0), (200.0, 100.0), 2.0);
+        assert_eq!(one_x, (0.5, 0.5));
+        assert_eq!(two_x, (1.0, 1.0));
+
+        // A radius of 10 is a deviation of 5 points at every DPI: the value
+        // times the world scale, the DPI being the effect's own to apply.
+        assert_eq!(effect_blur_sigma(10.0, one_x), 10.0);
+        assert_eq!(effect_blur_sigma(10.0, two_x), 5.0);
+
+        let stretched = effect_scale((100.0, 100.0), (200.0, 100.0), 2.0);
+        assert_eq!(effect_blur_sigma(10.0, stretched), 5.0);
     }
 
     #[test]

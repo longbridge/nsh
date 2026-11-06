@@ -8,9 +8,10 @@ import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/b
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
-import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, tints, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, finish, focusRing, ghostFill, hovered, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 
 export * from "./theme";
+export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
 export * from "./data-table";
@@ -82,6 +83,7 @@ export function Press(props: {
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
       style={[props.style ?? null, { transform: [{ scale: s }], opacity: props.disabled ? 0.4 : 1 }]}
+      focusStyle={focusRing()}
     >
       {props.children}
     </View>
@@ -134,8 +136,9 @@ export function follow(target: () => number, spring: { stiffness: number; dampin
   return v;
 }
 
-/** A rounded icon tile. */
+/** A rounded icon tile (decoration: none in the terminal). */
 export function IconTile(props: { name: IconName; tint?: string; size?: number }) {
+  if (terminal) return null;
   const size = props.size ?? 40;
   return (
     <View
@@ -175,9 +178,26 @@ export const density = pointer
  * edge (a badge, an action).
  */
 function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX.Element }) {
+  // The terminal's subtitle takes the section's width under the title row:
+  // a trailing action shares the title's row, never the subtitle's. Set in
+  // by a column, the head lines up with the frame's content under it, and
+  // its action keeps clear of the next section's title.
+  if (terminal) {
+    return (
+      <View style={{ paddingHorizontal: TERMINAL_COLUMN }}>
+        <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
+          <Text style={{ flex: 1, fontSize: density.title, fontWeight: "600", color: colors.text }}>{props.title}</Text>
+          {props.right}
+        </View>
+        <If when={props.subtitle}>
+          <Text style={{ fontSize: density.note, color: colors.muted }}>{props.subtitle}</Text>
+        </If>
+      </View>
+    );
+  }
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: pointer ? 2 : 4 }}>
-      <View style={{ flex: 1, gap: 2 }}>
+      <View style={{ flex: 1, gap: terminal ? 0 : 2 }}>
         <Text
           style={
             pointer
@@ -196,15 +216,22 @@ function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX
   );
 }
 
-/** The flat surface a section's content sits on: one hairline edge, no shadow. */
-const surface = (): ViewStyle => ({
-  backgroundColor: colors.surface,
-  borderRadius: density.surface,
-  borderCurve: "continuous",
-  borderWidth: 1,
-  borderColor: colors.border,
-  overflow: "hidden",
-});
+/**
+ * The flat surface a section's content sits on: one hairline edge, no
+ * shadow. In the terminal a border whose row and column on each side the
+ * padding fills out, so the content starts one Cell inside it.
+ */
+const surface = (): ViewStyle =>
+  terminal
+    ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
+    : {
+        backgroundColor: colors.surface,
+        borderRadius: density.surface,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: colors.border,
+        overflow: "hidden",
+      };
 
 /**
  * The one section shown, by its title in any case (null: all of them): the
@@ -217,7 +244,8 @@ export const focusedSection = signal<string | null>(null);
  * A section of a demo: its title and subtitle above, then one flat surface
  * holding the content, padded (or bare with `flush`, for rows and stages that
  * reach its edges). `icon` names what it shows for callers that list it; the
- * section itself draws none.
+ * section itself draws none. The terminal puts the title right above the box
+ * and the content one Cell inside it.
  */
 export function Card(props: {
   icon?: IconName;
@@ -230,7 +258,7 @@ export function Card(props: {
 }) {
   return (
     <If when={focusedSection() == null || focusedSection()!.toLowerCase() === props.title?.toLowerCase()}>
-    <View style={[{ gap: 8 }, props.style ?? null]}>
+    <View style={[{ gap: terminal ? 0 : 8 }, props.style ?? null]}>
       <If when={props.title}>
         <SectionHead title={props.title!} subtitle={props.subtitle} right={props.right} />
       </If>
@@ -246,16 +274,19 @@ export function Card(props: {
 
 /**
  * A section's content area: padded and spaced, on the surface it sits on
- * (no surface of its own, so sections never nest boxes).
+ * (no surface of its own, so sections never nest boxes); in the terminal
+ * only its gap, in whole rows.
  */
 export function Inset(props: { gap?: number; padding?: number; children: JSX.Element }) {
+  if (terminal) return <View style={{ gap: wholeRows(props.gap ?? density.gap) }}>{props.children}</View>;
   return <View style={{ padding: props.padding ?? density.pad, gap: props.gap ?? density.gap }}>{props.children}</View>;
 }
 
 /** A caption row: a label on the left, a quieter note on the right. */
 export function Caption(props: { label: JSX.Element; note?: JSX.Element }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+    // The terminal keeps the note two columns from the label it follows.
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: terminal ? TERMINAL_GAP : 8 }}>
       <Text style={{ flex: 1, fontSize: density.body, color: colors.muted }}>{props.label}</Text>
       <If when={props.note}>
         <Text style={{ fontSize: density.note, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
@@ -279,14 +310,14 @@ export function Figure(props: { value: string; unit?: string; note?: string; ton
   );
 }
 
-/** A small label in a tinted capsule. */
+/** A small label in a tinted capsule (a word on its row in the terminal). */
 export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) {
   const tone = () => props.tone ?? "neutral";
   return (
     <View
       style={{
-        paddingHorizontal: 10,
-        height: 26,
+        paddingHorizontal: terminal ? 0 : 10,
+        height: terminal ? TERMINAL_ROW : 26,
         borderRadius: 13,
         justifyContent: "center",
         backgroundColor: props.outline ? "transparent" : toneTint(tone()),
@@ -300,10 +331,19 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   );
 }
 
-/** A label above a value, for grids of figures. */
+/** A label above a value, for grids of figures; on one row in the terminal,
+ * the value right-aligned. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
+  // The label above its value in the terminal too: two rows, so stats set
+  // side by side keep apart and each value stays under its label.
   return (
-    <View style={{ width: props.width, gap: 3, paddingVertical: 4 }}>
+    <View
+      style={
+        terminal
+          ? { width: props.width }
+          : { width: props.width, gap: 3, paddingVertical: 4 }
+      }
+    >
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
       <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
         {props.value}
@@ -312,11 +352,14 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
   );
 }
 
-/** A colored square and a label, for chart legends. */
+/** A colored square and a label, for chart legends (the label alone in the
+ * terminal, which draws no charts). */
 export function Legend(props: { color: string; label: string; value?: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      <If when={!terminal}>
+        <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      </If>
       <Text style={{ fontSize: 13, color: colors.muted }}>
         {props.label}
         <If when={props.value}>
@@ -327,21 +370,27 @@ export function Legend(props: { color: string; label: string; value?: string }) 
   );
 }
 
-/** A row inside an inset, with a hairline above all but the first. */
-export function Row(props: { first?: boolean; onPress?: () => void; children: JSX.Element }) {
+/** A row inside an inset, with a hairline above all but the first (one row
+ * of the terminal, which keeps no hairlines between rows). */
+/** A row of a list card. `focusable` makes it a stop of the keyboard focus
+ * that shows the focus ring (a row that is a `ContextMenu`'s trigger, which
+ * Shift+F10 and the Menu key open). */
+export function Row(props: { first?: boolean; focusable?: boolean; onPress?: () => void; children: JSX.Element }) {
   return (
     <View
       onPress={props.onPress}
+      focusable={props.focusable}
+      focusStyle={props.focusable ? focusRing() : undefined}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
-        minHeight: density.row,
+        minHeight: terminal ? TERMINAL_ROW : density.row,
         // Room above and below for two-line rows (a title and a note) and
         // their icon tiles, so nothing touches the lines between rows.
-        paddingVertical: 8,
+        paddingVertical: terminal ? 0 : 8,
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        borderTopWidth: props.first ? 0 : 1,
+        gap: terminal ? TERMINAL_GAP : 12,
+        borderTopWidth: props.first || terminal ? 0 : 1,
         borderTopColor: colors.line,
       }}
     >
@@ -379,10 +428,12 @@ const buttonSizes = pointer
 
 /**
  * A button: 28 pt tall on a desktop, 40 on a touch screen (`small` 24 / 36,
- * `large` 34 / 48). `primary` and `accent` are the citrus fill (the main
+ * `large` 34 / 48); one row, its label and no glyph in the terminal, which
+ * brackets it. `primary` and `accent` are the citrus fill (the main
  * action), `secondary` a raised neutral, `ghost` bare until the pointer is
- * over it, `danger` a destructive action: the danger tone's tint, edge and
- * text on the raised finish's drop, as quiet as `secondary`. A `color`
+ * over it (in the terminal, `ghostFill`'s faint band), `danger` a
+ * destructive action: the danger tone's tint, edge and text on the raised
+ * finish's drop, as quiet as `secondary`. A `color`
  * fills it with that color instead. Under the pointer a raised button
  * lightens, pressed it sinks (an inner shade, and 3% smaller). `busy`
  * puts a spinner in the icon's place and takes no presses; a new icon or
@@ -393,6 +444,8 @@ const buttonSizes = pointer
  */
 export function Button(props: {
   label: string;
+  /** What screen readers say, when the label is shorter (default `label`). */
+  accessibilityLabel?: string;
   variant?: ButtonVariant;
   color?: string;
   icon?: IconName;
@@ -440,7 +493,7 @@ export function Button(props: {
             boxShadow: finish.raised.boxShadow,
           }
       : variant() === "ghost"
-        ? { backgroundColor: props.selected ? token("accent") : "transparent", borderColor: "transparent" }
+        ? { backgroundColor: props.selected ? token("accent") : ghostFill(), borderColor: "transparent" }
         : filled()
           ? { ...finish.accent, opacity: props.selected ? 0.88 : 1 }
           : props.selected
@@ -453,15 +506,15 @@ export function Button(props: {
       onPressDown={() => !props.busy && scale.spring(0.97, motion.press)}
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
-      accessibilityLabel={props.label}
+      accessibilityLabel={props.accessibilityLabel ?? props.label}
       selected={props.selected}
       hoverStyle={props.disabled || props.selected || props.busy ? undefined : props.color || filled() ? { opacity: 0.94 } : danger() ? { backgroundColor: alpha(colors.danger, 0.16) } : variant() === "ghost" ? hovered() : finish.hover}
       activeStyle={props.disabled || props.busy ? undefined : props.color || filled() ? { opacity: 0.88 } : danger() ? { backgroundColor: alpha(colors.danger, 0.22), boxShadow: "none" } : finish.pressed}
       focusStyle={focusRing()}
       style={{
         flex: props.flex,
-        height: height(),
-        paddingHorizontal: dims().pad,
+        height: terminal ? TERMINAL_ROW : height(),
+        paddingHorizontal: terminal ? TERMINAL_COLUMN : dims().pad,
         borderRadius: radius.control,
         borderCurve: "continuous",
         borderWidth: 1,
@@ -476,7 +529,7 @@ export function Button(props: {
         transitionDuration: 120,
       }}
     >
-      <If when={props.busy || props.icon}>
+      <If when={(props.busy || props.icon) && !terminal}>
         <View style={{ opacity: glyph, transform: [{ scale: glyph.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }] }}>
           <If when={props.busy} else={<Icon name={props.icon!} size={dims().icon} tint={fg()} />}>
             <Spinner size={dims().icon} tint={fg()} />
@@ -488,14 +541,31 @@ export function Button(props: {
   );
 }
 
+/**
+ * A round icon button; in the terminal a text button reading `title` (a
+ * word or two), else `label`.
+ */
 export function RoundButton(props: {
   icon: IconName;
   label: string;
+  /** The terminal's text in place of the icon (default `label`). */
+  title?: string;
   variant?: "primary" | "secondary";
   size?: number;
   disabled?: boolean;
   onPress: () => void;
 }) {
+  if (terminal) {
+    return (
+      <Button
+        label={props.title ?? props.label}
+        accessibilityLabel={props.label}
+        variant={props.variant ?? "primary"}
+        disabled={props.disabled}
+        onPress={props.onPress}
+      />
+    );
+  }
   const size = props.size ?? (pointer ? 28 : 40);
   const primary = () => (props.variant ?? "primary") === "primary";
   return (
@@ -563,12 +633,19 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
  * natively. The knob keeps its size on and off; on, it is white with an
  * olive edge. `on` is the value the app owns: the knob follows it, from a
  * press or from elsewhere. 28 × 16 on a desktop; on a touch screen 42 × 24
- * (`small`: 34 × 20). Read the styles in JSX, so the appearance is followed.
+ * (`small`: 34 × 20); the terminal's is one row, as wide as its glyph
+ * (`[off]`). Read the styles in JSX, so the appearance is followed.
  */
 export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
   // The track's size and inset, and the knob: it travels what is left inside
   // the border and the padding.
-  const [width, height, inset, knob] = pointer ? [28, 16, 1, 12] : size === "small" ? [34, 20, 1, 16] : [42, 24, 1, 20];
+  const [width, height, inset, knob] = terminal
+    ? [5 * TERMINAL_COLUMN, TERMINAL_ROW, 0, TERMINAL_ROW]
+    : pointer
+      ? [28, 16, 1, 12]
+      : size === "small"
+        ? [34, 20, 1, 16]
+        : [42, 24, 1, 20];
   // The knob travels as gpui-kit's does (`spring_move`), the track's color
   // with it; with reduced motion both change in place.
   const t = follow(() => (on() ? 1 : 0), motion.move);
@@ -610,14 +687,16 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
   };
 }
 
-/** A horizontal meter with an optional marker (a limit). */
+/** A horizontal meter with an optional marker (a limit); half a row in the
+ * terminal, so its fill is a solid bar rather than a rule. */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
+  const height = terminal ? TERMINAL_ROW / 2 : 6;
   return (
-    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.track, borderWidth: 1, ...finish.track }}>
+    <View style={{ height: terminal ? height : 6, borderRadius: 3, backgroundColor: colors.track, ...(terminal ? {} : { borderWidth: 1, ...finish.track }) }}>
       <View
         style={{
           width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: 4,
+          height: terminal ? height : 4,
           borderRadius: 2,
           backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill,
         }}
@@ -656,15 +735,28 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
   );
 }
 
-export { Icon, type IconName } from "./icons";
+export { Icon, IconLabel, type IconName } from "./icons";
 
 /**
  * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
  * small bubble of the theme's `popover` tokens that comes in with `popIn`
  * from its side (`placement`, default above), with the keys of a
- * `shortcut` after the text.
+ * `shortcut` after the text. In the terminal the tooltip is a line of the
+ * status line: the text and its keys, no bubble.
  */
 export function Tip(props: { label: string; shortcut?: string; placement?: PopupSide; delay?: number }) {
+  if (terminal) {
+    return (
+      <Tooltip delay={props.delay}>
+        <View style={{ flexDirection: "row", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+          <Text class="text-foreground">{props.label}</Text>
+          <If when={props.shortcut}>
+            <Text class="text-muted-foreground">{props.shortcut}</Text>
+          </If>
+        </View>
+      </Tooltip>
+    );
+  }
   const presence = createPresence(props.placement ?? "top");
   return (
     <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>

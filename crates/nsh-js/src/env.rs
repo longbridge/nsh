@@ -1,6 +1,7 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, lifecycle) written when the platform reports a
+//! reduced motion, pixel ratio, locale, lifecycle, the desktop window's
+//! state and the displays) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -15,6 +16,7 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::Display,
     element::{ThemeTokens, Token, Tokens},
     platform::{Appearance, ColorScheme, Environment, Idiom, Os},
 };
@@ -44,9 +46,11 @@ enum Part {
     TitleBar,
     Locale,
     Lifecycle,
+    WindowState,
+    Displays,
 }
 
-const PARTS: usize = 11;
+const PARTS: usize = 13;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -111,7 +115,17 @@ impl Env {
 pub(crate) fn init(cx: *mut JsContext) {
     let e = env(cx);
     for i in 0..PARTS {
-        let signal = reactive::new_signal(cx, UNDEFINED);
+        // The displays are an empty list until the platform reports any
+        // (off desktops, for good).
+        let initial = if i == Part::Displays as usize {
+            // SAFETY: a new array, borrowed by the signal and freed after.
+            unsafe { qjs::JS_NewArray(cx) }
+        } else {
+            UNDEFINED
+        };
+        let signal = reactive::new_signal(cx, initial);
+        // SAFETY: the signal holds its own reference.
+        unsafe { qjs::JS_FreeValue(cx, initial) };
         let mut data = [signal];
         // SAFETY: the function keeps a dup of the signal.
         let func = unsafe { qjs::JS_NewCFunctionData(cx, Some(read), 0, 0, 1, data.as_mut_ptr()) };
@@ -380,6 +394,9 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.lifecycle == next.lifecycle) {
         writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
+    if changed(&|p| p.window_state == next.window_state) {
+        writes.push((Part::WindowState, to_js(cx, &next.window_state)));
+    }
     // The layout direction follows the user's language.
     // SAFETY: the state's renderer, by shared reference.
     unsafe { &(*crate::state::state(cx)).dom }.set_direction(next.rtl);
@@ -397,6 +414,30 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     }
 }
 
+/// Takes in the displays the platform reports.
+pub(crate) fn set_displays(cx: *mut JsContext, displays: &[Display]) -> Result<(), ()> {
+    let value = to_js(cx, &displays.to_vec());
+    reactive::set_signal(cx, env(cx).signals[Part::Displays as usize].get(), value);
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+/// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
+/// when it fails (it does not for the environment's plain objects).
+fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
+    let host = crate::classes::host_outside_calls(cx);
+    let converted = value
+        .to_js(&host)
+        .map(|v| crate::classes::from_raw(v.into_raw()));
+    host.clear_pending();
+    converted.unwrap_or(UNDEFINED)
+}
+
 fn accessor(cx: *mut JsContext, part: Part) -> JsValue {
     // SAFETY: a dup of an accessor the environment owns.
     unsafe { qjs::JS_DupValue(cx, env(cx).accessors[part as usize].get()) }
@@ -405,6 +446,17 @@ fn accessor(cx: *mut JsContext, part: Part) -> JsValue {
 /// `titleBar()` (`nsh/desktop`): the hidden title bar's area (owned).
 pub(crate) fn title_bar(cx: *mut JsContext) -> JsValue {
     accessor(cx, Part::TitleBar)
+}
+
+/// `windowState()` (`nsh/desktop`): the window's bounds, mode and display
+/// (owned).
+pub(crate) fn window_state(cx: *mut JsContext) -> JsValue {
+    accessor(cx, Part::WindowState)
+}
+
+/// `displays()` (`nsh/desktop`): the displays (owned).
+pub(crate) fn displays(cx: *mut JsContext) -> JsValue {
+    accessor(cx, Part::Displays)
 }
 
 pub(crate) fn current(cx: *mut JsContext) -> Environment {
@@ -521,7 +573,8 @@ fn os_version(env: &Environment) -> String {
     }
 }
 
-/// `platform.idiom`: `"desktop"` exactly where desktop behavior applies
+/// `platform.idiom`: `"terminal"` in a terminal, else `"desktop"` exactly
+/// where desktop behavior applies
 /// ([`nsh_core::platform::Idiom::reported_on`]).
 fn idiom(env: &Environment) -> &'static str {
     match env.reported_idiom() {
@@ -530,6 +583,7 @@ fn idiom(env: &Environment) -> &'static str {
         Idiom::Mac => "mac",
         Idiom::Tv => "tv",
         Idiom::Desktop => "desktop",
+        Idiom::Terminal => "terminal",
     }
 }
 
@@ -658,8 +712,8 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Where `platform.desktop` is false: iOS (Mac Catalyst included),
    * Android, and browsers in the phone or tablet idiom. */
   mobile?: T;
-  /** Where `platform.desktop` is true: macOS, Windows, Linux, and browsers
-   * in the desktop idiom. */
+  /** Where `platform.desktop` is true: macOS, Windows, Linux, browsers in
+   * the desktop idiom, and terminals. */
   desktop?: T;
   /** Every platform but the web. */
   native?: T;
@@ -673,16 +727,18 @@ export interface PlatformInfo {
   /** iOS and desktops: the OS version (`"17.5"`); Android: the API level
    * (`"35"`); the web: `"0.0"`. */
   readonly version: string;
-  /** The kind of device. `"desktop"` exactly where `desktop` is true;
-   * elsewhere the idiom the system reports: `"phone"`, `"pad"`, `"tv"`, and
+  /** The kind of device. `"terminal"` in a terminal: drawn on a grid of
+   * character cells, with desktop behavior (`desktop` true; `os` is still
+   * the machine's). Elsewhere `"desktop"` exactly where `desktop` is true,
+   * else the idiom the system reports: `"phone"`, `"pad"`, `"tv"`, and
    * `"mac"`, UIKit's Mac idiom under Mac Catalyst (a mobile idiom). */
-  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   /** Desktop behavior applies, NSH's one definition of desktop: macOS,
-   * Windows, Linux, and browsers in the desktop idiom (a mouse and a wide
-   * viewport). `desktop={{…}}` props and `select({ desktop })` follow it.
-   * Mac Catalyst runs the iOS backend and is mobile. `nsh/desktop`'s
-   * `isAvailable` is narrower: its window and menu APIs work on the desktop
-   * OSes, not in browsers. */
+   * Windows, Linux, browsers in the desktop idiom (a mouse and a wide
+   * viewport), and terminals. `desktop={{…}}` props and `select({ desktop })`
+   * follow it. Mac Catalyst runs the iOS backend and is mobile.
+   * `nsh/desktop`'s `isAvailable` is narrower: its window and menu APIs work
+   * on the desktop OSes, not in browsers. */
   readonly desktop: boolean;
   /** The app runs under Mac Catalyst, in the Mac or the iPad idiom
    * (`os` is `"ios"`, `desktop` false). */

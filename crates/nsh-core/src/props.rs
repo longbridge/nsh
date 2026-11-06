@@ -183,6 +183,11 @@ pub struct AccessibilityState {
     /// The current item of a set (ARIA's `aria-current`): a pagination's
     /// page, a wizard's step.
     pub current: Option<AccessibilityCurrent>,
+    /// Opens a popup (ARIA's `aria-haspopup`): a menu's, a popover's or a
+    /// select's trigger, whose `expanded` says whether the popup is open;
+    /// an `expanded` element without it is a disclosure, which shows its
+    /// content in place (a collapsible's or an accordion's trigger).
+    pub has_popup: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).
@@ -317,6 +322,8 @@ pub struct Ripple {
 /// Non-style properties of a view that only the platform needs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewProps {
+    /// Resolved overlay placement for native grid projection; ordinary views have none.
+    pub overlay_anchor: Option<crate::overlay::PlacedAnchor>,
     /// Which touches the view and its subtree receive.
     pub pointer_events: PointerEvents,
     /// Extends the touch area beyond the view's bounds.
@@ -349,6 +356,12 @@ pub struct ViewProps {
     /// selection, from text to text ([`crate::selection`]); an area inside
     /// another is part of the outer one. Texts outside areas select alone.
     pub selectable_view: bool,
+    /// The text continues the text before it in document order, as a long
+    /// line's next wrapped part (`Element::continues_text`): in a
+    /// selectable view a copy joins the two with nothing between them,
+    /// and a double or triple click selects across them
+    /// ([`crate::selection::SelectionTexts::continues`]).
+    pub continues_text: bool,
 }
 
 impl ViewProps {

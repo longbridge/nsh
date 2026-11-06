@@ -48,6 +48,8 @@ function NameField() {
 }
 ```
 
+样式和父视图都没有给定宽度时，Input 的宽度是当前字体下 20 个数字的宽度，与 HTML 的 `<input>` 一样，不随内容变化。
+
 ## 受控与非受控
 
 - **受控**：传入 `value`，并在 `onChange` 中更新它。应用可以改写用户的输入（去掉空白、格式化）：输入框会立即显示用户的编辑，新的 `value` 到达后再被修正。每次原生编辑都带有一个计数，基于最新一次编辑的 `value` 才会被应用，因此用户更新的输入总是优先于较慢的更新。
@@ -93,6 +95,9 @@ function NameField() {
 |---|---|---|---|
 | `caret` | `.caret(..)` | `boolean` | 绘制光标（默认 `true`；`false` 隐藏光标）。 |
 | `selectedRange` | `.selected_range((start, end))` | `{ start: number; end?: number }` | 受控选区，以 UTF-16 为单位；`end` 默认等于 `start`（即光标）。 |
+
+光标在窗口显示且处于活动状态时闪烁。在 Linux 的 GPUI 窗口中，十秒内没有输入或移动光标后，光标保持显示、不再闪烁（与 GTK
+应用相同），因此无人操作的焦点输入框不再绘制帧。
 
 ### 颜色
 

@@ -568,7 +568,9 @@ const RESOURCES: { name: string; color: string; unit: string; total: number; use
   { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
   { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
-const RINGS = pointer ? 164 : 172;
+/** In a terminal the rings take more Cells, so the average and its
+ * caption fit in the innermost ring's hole, clear of its arcs. */
+const RINGS = platform.idiom === "terminal" ? 224 : pointer ? 164 : 172;
 /** Each ring's width and the gap between rings, in points. */
 const RING_WIDTH = 11;
 const RING_GAP = 5;
@@ -2766,7 +2768,9 @@ const TO = ["to-chart-2/30", "to-chart-3/30", "to-chart-1/30", "to-chart-1/30", 
 const FLOW_HEIGHT = pointer ? 196 : 220;
 /** The room left of the segments' names and right of the results'. */
 const FLOW_LEFT = 58;
-const FLOW_RIGHT = 64;
+// A terminal's names are a Cell per letter plus a Cell's padding: "Net
+// income" takes eleven.
+const FLOW_RIGHT = platform.idiom === "terminal" ? 88 : 64;
 /** Columns closer than this break two-word names over two lines, so the
  * names centered over neighbouring columns do not run into each other. */
 const FLOW_NARROW = 72;
@@ -2804,7 +2808,7 @@ function Flows() {
       </View>
       <View
         onLayout={({ bounds }) => column.set((bounds.size.width - FLOW_LEFT - FLOW_RIGHT - 3) / 4)}
-        style={{ marginTop: size.gap + 18, marginBottom: 6 }}
+        style={{ marginBottom: 6 }}
       >
         <Plot
           data={ACCOUNTS}
@@ -2814,8 +2818,10 @@ function Flows() {
           accessibilityValue={{ text: hover() == null ? undefined : `${ACCOUNTS[hover()!].name}: ${billions(through(quarter(), hover()!))}, ${margin(hover()!)} of revenue` }}
           onHoverChange={({ index }) => hover.set(index)}
           focusStyle={focusRing(4)}
-          // Room for the segments' names left of them and the results' right.
-          style={{ height: FLOW_HEIGHT, marginLeft: FLOW_LEFT, marginRight: FLOW_RIGHT }}
+          // Room for the segments' names left of them, the results' right
+          // and the rest's above: the chart's own margins, which a terminal
+          // keeps as its labels' gutters inside the card too.
+          style={{ height: FLOW_HEIGHT, marginTop: size.gap + 18, marginLeft: FLOW_LEFT, marginRight: FLOW_RIGHT }}
         >
           <Sankey
             links={income(quarter())}
@@ -3285,5 +3291,5 @@ function Allocation() {
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
+  return <DemoPage lazy cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
 }

@@ -7,7 +7,8 @@
 //! between the inputs and the views that are its stops (those that take
 //! presses, and `focusable` ones that take none) where the platform
 //! does (macOS, the web), Return and Space press the pressable it is on,
-//! the focused input takes the keys that edit it, and Escape goes back.
+//! Shift+F10 asks it for its context menu (the web, Linux), the
+//! focused input takes the keys that edit it, and Escape goes back.
 
 use nsh_core::{
     Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, ROOT_ID,
@@ -50,8 +51,8 @@ impl Headless {
     /// The step `keyboard.press(<keys>)`: presses `keys`, a keystroke as
     /// `nsh/keymap` names it (`"mod+k"`, `"shift+tab"`, `"escape"`; `mod` is
     /// the app's platform's command key). A binding of the app's keymap
-    /// that fires where the focus is hears it (`onKeyCommand`); else the
-    /// focused input takes a character, Backspace or the return key, and
+    /// that fires where the focus is hears it (`onKeyCommand`), and takes
+    /// the key unless it passes it through; else the focused input takes a character, Backspace or the return key, and
     /// Escape goes back as the desktops' back key does when there is
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
@@ -64,16 +65,36 @@ impl Headless {
             Some(keymap) => keymap.find(stroke, editing, false),
             None => KeyMatch::None,
         };
-        if let KeyMatch::Fire(id) = found {
+        if let Some(id) = found.fired() {
             self.engine.control().dispatch_event(
                 ROOT_ID,
                 EventKind::KeyCommand,
                 EventPayload::Value(PayloadValue::Number(f64::from(id))),
             );
+        }
+        // A binding passing the key through leaves it to what follows, as a
+        // platform does: on the screen as it is when the key comes.
+        if found.consumed() {
             return self.done();
         }
         let m = stroke.modifiers;
         let plain = !(m.ctrl || m.alt || m.cmd);
+        // Shift+F10 asks the focused view for its context menu where views
+        // take the keyboard focus and the key is the platform's: the web
+        // and Linux (macOS has no such key; Windows focuses fields only). The
+        // nearest view around it listening hears `onContextMenu`, with no
+        // pointer, at its bottom-start corner; a focused input keeps the
+        // key for its own edit menu.
+        if matches!(self.environment.os, Os::Web | Os::Linux)
+            && nsh_core::input::opens_context_menu(false, Some(stroke.key), m)
+        {
+            if self.screen.focused().is_none()
+                && let Some(from) = self.screen.key_focus()
+            {
+                self.keyboard_context_menu(from, m);
+            }
+            return self.done();
+        }
         if stroke.key == Key::Tab && plain && self.tabs_to_views() {
             self.tab(m.shift);
             return self.done();
@@ -114,10 +135,28 @@ impl Headless {
         self.done()
     }
 
-    /// Whether Tab stops at views (not only inputs), as on macOS and the
-    /// web (the other platforms move it between fields only).
+    /// The keyboard asked view `from` (the keyboard focus) for its context
+    /// menu: the nearest view around it listening hears `onContextMenu`
+    /// at its bottom-start corner (left to right: the screen keeps no
+    /// direction), with no pointer.
+    fn keyboard_context_menu(&mut self, from: NodeId, modifiers: nsh_core::keymap::Modifiers) {
+        let Some(id) = self.screen.context_menu_target(from) else {
+            return;
+        };
+        let Some(bounds) = self.screen.bounds_in_root(id) else {
+            return;
+        };
+        let position = nsh_core::input::context_menu_anchor(bounds.size, false);
+        let event =
+            nsh_core::ContextMenuEvent::new(position, bounds.origin + position, modifiers, None);
+        self.send(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+    }
+
+    /// Whether Tab stops at views (not only inputs), as on macOS, the web,
+    /// Linux and in a terminal (the other platforms move it between fields only).
     fn tabs_to_views(&self) -> bool {
-        matches!(self.environment.os, Os::MacOs | Os::Web)
+        matches!(self.environment.os, Os::MacOs | Os::Web | Os::Linux)
+            || self.environment.idiom == nsh_core::platform::Idiom::Terminal
     }
 
     /// Tab (`back`: Shift+Tab): the keyboard focus moves to the next stop

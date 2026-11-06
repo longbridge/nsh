@@ -54,7 +54,7 @@ use objc2_quartz_core::CALayer;
 
 use crate::{
     input::later,
-    surface::Surface,
+    surface::{Next, Surface},
     view::{NshView, ScrollState, ViewState},
 };
 
@@ -440,8 +440,14 @@ const COMMIT_MS: u64 = 140;
 /// puts AppKit's model right for the price of one walk per scroll.
 fn apply_offset(surface: &Rc<Surface>, view: &NshView) {
     let origin = bounds_origin(view);
+    // Every offset, inset and mirroring change comes through here: what
+    // shows under it changed ([`crate::sight`]).
+    crate::sight::moved();
     let committed = view.container_bounds_origin();
     view.set_layer_scroll(committed.0 - origin.0, committed.1 - origin.1);
+    // What it shows moved without a view moving: the effects around it
+    // (and a screen effect reading the surface) picture it again.
+    crate::shader::ui_changed(view);
     arm_commit(surface, view);
 }
 
@@ -765,8 +771,35 @@ fn ensure_ticking(surface: &Rc<Surface>, view: &NshView) {
         {
             s.live.ticking = false;
         }
-        left != Tick::Done
+        match left {
+            Tick::Done => Next::Done,
+            _ => deadline(&view).map_or(Next::Frame, |ms| Next::At(ms / 1000.0)),
+        }
     });
+}
+
+/// When `view`'s motion next comes to something (ms, the frames' clock):
+/// an eased move's end, a mouse wheel's or a touchpad's rest; what runs
+/// its frame while no frames are drawn ([`Next::At`]). `None` while only
+/// drawing is left (the indicator's fade, the spinner) or input it waits
+/// for.
+fn deadline(view: &NshView) -> Option<f64> {
+    let state = view.state();
+    let end = match state.scroll.as_ref()?.live.phase {
+        Phase::Animate {
+            start, duration, ..
+        } => start + duration,
+        Phase::Wheel {
+            last,
+            gesture: false,
+            ..
+        } => last + WHEEL_IDLE,
+        Phase::AwaitMomentum { since } => since + MOMENTUM_WAIT,
+        _ => return None,
+    };
+    // A millisecond past it: the frame there finds it ended whatever the
+    // rounding.
+    Some(end + 1.0)
 }
 
 /// What a scroll view has left to do after a frame ([`tick`]).

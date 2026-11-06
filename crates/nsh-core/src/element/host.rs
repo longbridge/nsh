@@ -11,8 +11,8 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     builder::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
-        VideoProgress, WebNavigation,
+        self, CaretEvent, Composition, HintReason, NativeEvent, OverlayPosition, Selection,
+        VideoInfo, VideoProgress, WebNavigation,
     },
 };
 use crate::{
@@ -1076,6 +1076,18 @@ impl Screen {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
     }
 
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
+        })
+    }
+
     /// What the status bar shows while the screen is up (iOS and Android;
     /// TS: `statusBar`): over the screens below it and the app's default,
     /// field by field, as a view controller's `preferredStatusBarStyle`.
@@ -1238,7 +1250,9 @@ impl Overlay {
 
     /// Makes it a hint (a tooltip): shown once the pointer rested on its
     /// anchor (its parent without one) for `delay`, until the pointer
-    /// leaves or presses the anchor, on the desktops only; it is placed
+    /// leaves or presses the anchor, on the desktops only, and while the
+    /// keyboard focus is on the anchor (or in it, outside an overlay), in
+    /// every idiom, until the focus leaves; Escape hides it. It is placed
     /// against the anchor and should not take the pointer
     /// ([`Interactive::pointer_events`] none). [`Self::hint_open`] decides
     /// instead of the pointer.
@@ -1254,16 +1268,26 @@ impl Overlay {
         self.bind_prop(open, |o| Prop::Overlay(OverlayProp::Open(o)))
     }
 
-    /// The pointer rested on a hint's anchor for its delay: it asks to
-    /// show (and shows, unless [`Self::hint_open`] decides).
-    pub fn on_hint_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Show, listener.into_listener(), events::unit)
+    /// The pointer rested on a hint's anchor for its delay, or the
+    /// keyboard focus came to it: it asks to show (and shows, unless
+    /// [`Self::hint_open`] decides), with why.
+    pub fn on_hint_show<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Show,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
-    /// The pointer left or pressed a hint's anchor, or the hint left the
-    /// view, after it asked to show: it asks to hide.
-    pub fn on_hint_hide<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
+    /// The pointer left or pressed a hint's anchor, the focus left it,
+    /// Escape was pressed or the hint left the view, after it asked to
+    /// show: it asks to hide, with why.
+    pub fn on_hint_hide<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Dismiss,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
     /// The core placed it against its anchor: the side it went on, its
@@ -1282,6 +1306,18 @@ impl Modal {
     pub fn animation(self, animation: impl IntoReactive<ModalAnimation>) -> Self {
         self.bind_prop(animation, |animation: ModalAnimation| {
             Prop::Modal(ModalProp::Animation(animation))
+        })
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
         })
     }
 
@@ -1438,6 +1474,14 @@ impl WebView {
         self.bind_prop(enabled, |enabled: bool| {
             Prop::Native(NativeProp::BackForwardGestures(enabled))
         })
+    }
+
+    /// Keeps the page's website data (cookies, storage, the cache) only
+    /// as long as the web view, apart from the app's other web views
+    /// (default no; Android: no HTTP cache and no saved form data). Read
+    /// when the web view is made, so it takes a value, not a signal.
+    pub fn incognito(self, incognito: bool) -> Self {
+        self.set(Prop::Native(NativeProp::Incognito(incognito)))
     }
 
     /// A page started loading.
@@ -2352,6 +2396,13 @@ impl From<Drawing> for Painter {
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
 
+/// A program where an optional one goes (`.transition_shader(wipe)`).
+impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {
+    fn into_reactive(self) -> super::Reactive<Option<crate::shader::TransitionShader>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2394,6 +2445,42 @@ mod tests {
         u.0.iter()
             .find(|(n, _)| &**n == name)
             .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn screens_and_modals_take_a_transition_shader() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let source = "struct Uniforms { edge: f32 }\n\
+            fn shade(uv: vec2f) -> vec4f {\n    \
+            return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress * uniforms.edge);\n}\n";
+        let shader = crate::shader::Shader::compile(source).expect("compiles");
+        let wipe = crate::shader::TransitionShader::new(shader)
+            .uniform("edge", 1.0_f32)
+            .duration(std::time::Duration::from_millis(400));
+        let expected = crate::shader::NavShaderSpec {
+            source: source.into(),
+            uniforms: ShaderUniforms(vec![("edge".into(), UniformValue::Number(1.0))]),
+            duration: Some(400.0),
+        };
+        let spec = |attrs: &super::super::builder::Attrs| {
+            attrs.props.iter().find_map(|p| match p {
+                Prop::TransitionShader(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let page = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&page.resolved_attrs()), Some(Some(expected.clone())));
+        let dialog = modal().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&dialog.resolved_attrs()), Some(Some(expected.clone())));
+        // A binding goes back to the page's or the dialog's own animation.
+        let on = signal(true);
+        let bound = screen()
+            .transition_shader(move || on.get().then(|| wipe.clone()))
+            .0;
+        assert_eq!(spec(&bound.resolved_attrs()), Some(Some(expected)));
+        on.set(false);
+        assert_eq!(spec(&bound.resolved_attrs()), Some(None));
     }
 
     #[test]

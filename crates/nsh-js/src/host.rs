@@ -58,6 +58,7 @@ pub(crate) struct Shared {
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_filesystem:
         RefCell<Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>>,
+    pub(crate) system_updater: RefCell<Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
@@ -721,6 +722,11 @@ impl Host {
         *self.shared.system_filesystem.borrow_mut() = filesystem;
     }
 
+    /// Installs what `nsh/updater` runs on.
+    pub fn set_updater(&self, updater: Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>) {
+        *self.shared.system_updater.borrow_mut() = updater;
+    }
+
     /// Installs the host WebSocket transport.
     pub fn set_websocket_transport(
         &self,
@@ -1036,6 +1042,23 @@ impl Host {
         });
     }
 
+    /// Publishes the displays to JS (`nsh/desktop`'s `displays()`). Call
+    /// before evaluating the bundle where there are displays, then on every
+    /// change; without a call they are none.
+    pub fn set_displays(&self, displays: &[nsh_core::desktop::Display]) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_displays(raw, displays) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1219,14 +1242,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
         }
-        EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-            position,
-            page_position,
-            modifiers,
-        }) => {
-            obj.set("position", point_object(cx, *position)?)?;
-            obj.set("pagePosition", point_object(cx, *page_position)?)?;
-            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
+        EventPayload::ContextMenu(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+            // `null` when no pointer asked, as declared.
+            match e.pointer_type {
+                Some(pointer) => obj.set("pointerType", pointer.name())?,
+                None => obj.set("pointerType", Value::new_null(cx.clone()))?,
+            }
         }
         EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
@@ -2114,14 +2138,15 @@ const report = (v) => text(String(v));
     #[test]
     fn context_menu_payload_has_both_positions() {
         let host = Host::new().unwrap();
-        let event = nsh_core::ContextMenuEvent {
-            position: point(px(1.0), px(2.0)),
-            page_position: point(px(11.0), px(22.0)),
-            modifiers: nsh_core::keymap::Modifiers {
+        let event = nsh_core::ContextMenuEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(11.0), px(22.0)),
+            nsh_core::keymap::Modifiers {
                 ctrl: true,
                 ..Default::default()
             },
-        };
+            Some(nsh_core::PointerType::Mouse),
+        );
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::ContextMenu(event)).unwrap();
             let obj = value.as_object().unwrap();
@@ -2141,6 +2166,16 @@ const report = (v) => text(String(v));
             let m: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(m.get::<_, bool>("control").unwrap());
             assert!(!m.get::<_, bool>("platform").unwrap());
+            assert_eq!(obj.get::<_, String>("pointerType").unwrap(), "mouse");
+            let keyboard = nsh_core::ContextMenuEvent::new(
+                event.position,
+                event.page_position,
+                event.modifiers,
+                None,
+            );
+            let value = payload_object(&cx, &EventPayload::ContextMenu(keyboard)).unwrap();
+            let pointer: Value = value.as_object().unwrap().get("pointerType").unwrap();
+            assert!(pointer.is_null());
         });
     }
 

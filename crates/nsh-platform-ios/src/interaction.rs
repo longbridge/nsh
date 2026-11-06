@@ -265,6 +265,9 @@ pub(crate) fn keyframes(layer: &CALayer, animation: Option<&KeyframeAnimation>, 
         // SAFETY: a plain clock read.
         animation.setBeginTime(objc2_quartz_core::CACurrentMediaTime() + a.delay as f64 / 1000.0);
     }
+    if let Some(hz) = a.frame_rate.filter(|hz| hz.is_finite() && *hz > 0.0) {
+        animation.setPreferredFrameRateRange(crate::animation::rate_range(Some(hz)));
+    }
     // Keeps running when the view leaves the window and comes back.
     animation.setRemovedOnCompletion(false);
     layer.addAnimation_forKey(&animation, Some(&key));

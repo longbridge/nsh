@@ -731,9 +731,26 @@ impl TextEngine for PangoTextEngine {
             // not grow them, or an input grows when the user types Chinese
             // (UIKit keeps the font's line height too).
             if style.line_height.0 > 0.0 {
-                insert(
-                    pango::AttrInt::new_line_height_absolute(to_pango(style.line_height.0)).into(),
-                );
+                // Not on the attachments' placeholders: Pango gives every
+                // run under it exactly that height, so an attachment
+                // taller than the line would not grow it. Their shapes
+                // reserve the line's own box instead (below).
+                let height = to_pango(style.line_height.0);
+                let mut from = start;
+                for (a, b) in placeholders
+                    .iter()
+                    .copied()
+                    .filter(|&(a, b)| a < end && b > start)
+                    .chain(std::iter::once((end, end)))
+                {
+                    if a > from {
+                        let mut attr = pango::AttrInt::new_line_height_absolute(height);
+                        attr.set_start_index(from);
+                        attr.set_end_index(a);
+                        attrs.insert(attr);
+                    }
+                    from = from.max(b);
+                }
             } else {
                 let (ascent, descent) = self.natural_metrics(context, &desc);
                 natural.push((start, end, ascent, descent));
@@ -764,18 +781,30 @@ impl TextEngine for PangoTextEngine {
             };
             let top = a.ascent(font, alignments.get(a.index));
             let (up, down) = a.extent(font, alignments.get(a.index));
+            let (mut up, mut down) = (to_pango(up.0), to_pango(down.0));
+            // With a fixed `lineHeight`, at least the box the text's runs
+            // take (their font with the line height spread evenly above and
+            // below, as Pango spreads it): the line grows only where the
+            // attachment reaches past that box, as a replaced inline box
+            // grows a CSS line.
+            let style = text
+                .span_at(a.index)
+                .map_or_else(Default::default, |s| s.style);
+            if style.line_height.0 > 0.0 {
+                let desc = font_description(&style, &self.ui_family);
+                let (ascent, descent) = self.natural_metrics(context, &desc);
+                let height = to_pango(style.line_height.0);
+                let above = ascent + (height - ascent - descent) / 2;
+                up = up.max(above);
+                down = down.max(height - above);
+            }
             let ink = pango::Rectangle::new(
                 0,
                 -to_pango(top.0),
                 to_pango(a.width.0),
                 to_pango(a.height.0),
             );
-            let logical = pango::Rectangle::new(
-                0,
-                -to_pango(up.0),
-                to_pango(a.width.0),
-                to_pango((up + down).0),
-            );
+            let logical = pango::Rectangle::new(0, -up, to_pango(a.width.0), up + down);
             let mut shape = pango::AttrShape::new(&ink, &logical);
             shape.set_start_index(start as u32);
             shape.set_end_index(end as u32);
@@ -840,6 +869,10 @@ impl TextEngine for PangoTextEngine {
             width = width.min(max.max(0.0));
         }
         Size::new(Points(width), Points(from_pango(bottom).ceil()))
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        true
     }
 
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
@@ -2363,6 +2396,61 @@ mod tests {
         }
     }
 
+    /// With a fixed `lineHeight`, an attachment taller than the line grows
+    /// its own line instead of painting over its neighbours; a small one
+    /// leaves the line as tall as the others.
+    #[test]
+    fn attachments_taller_than_the_line_height_grow_their_line() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let style = ResolvedTextStyle {
+            font_size: Points(15.0),
+            line_height: Points(20.0),
+            ..Default::default()
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        for align in [
+            nsh_core::VerticalAlign::Baseline,
+            nsh_core::VerticalAlign::TextTop,
+            nsh_core::VerticalAlign::TextBottom,
+            nsh_core::VerticalAlign::Middle,
+        ] {
+            for height in [4.0, 28.0] {
+                let mut t = text(&[("Ax\nAx", style)]);
+                let mut alignments = nsh_core::AttachmentAlignments::default();
+                alignments.push(
+                    &mut t,
+                    Size::new(Points(40.0), Points(height)),
+                    align,
+                    style,
+                );
+                t.push(" x\nAx", style);
+                let prepared = engine.prepare_aligned(&t, &alignments);
+                let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+                let lines = engine.lines(&layout);
+                assert_eq!(lines.len(), 3);
+                assert!(
+                    near(lines[0].height.0, 20.0),
+                    "{align:?} {height}: {lines:?}"
+                );
+                assert!(
+                    near(lines[2].height.0, 20.0),
+                    "{align:?} {height}: {lines:?}"
+                );
+                let line = &lines[1];
+                if height < 20.0 {
+                    assert!(near(line.height.0, 20.0), "{align:?} {height}: {line:?}");
+                } else {
+                    assert!(line.height.0 >= height, "{align:?} {height}: {line:?}");
+                }
+                let top = engine.attachments(&layout)[0].expect("shown").y.0;
+                assert!(
+                    top >= line.y.0 - 0.5 && top + height <= (line.y + line.height).0 + 0.5,
+                    "{align:?} {height}: {top} {line:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn layout_matches_measure() {
         let engine = PangoTextEngine::new("sans-serif".into());
@@ -2783,5 +2871,38 @@ mod fallback_tests {
         let latin = h("Grace");
         assert_eq!(h("Grace你好世界"), latin, "CJK");
         assert_eq!(h("Grace😀"), latin, "emoji");
+    }
+    /// The core shares measurements between the widths from a text's widest
+    /// line to the one measured (`breaks_lines_greedily`): each of them
+    /// must measure the same.
+    #[test]
+    fn widths_that_hold_the_widest_line_measure_the_same() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let texts = [
+            "The quick brown fox jumps over the lazy dog, and keeps running through the long grass until the evening comes.",
+            "第 12 条消息：开始处理 T-1012，很快完成。窗口尺寸变化时每一段文字都要按新的宽度重新折行，详情见 PR 的说明。",
+            "混合 mixed 文本 with `code` 和 punctuation，「引号」、括号（如此）以及 https://example.com/a/very/long/path/that/has/no/spaces/at/all 这样的链接。",
+            "first line\nsecond line that is rather longer than the first\n\nafter a blank line",
+        ];
+        for text in texts {
+            let mut attributed = nsh_core::AttributedText::default();
+            attributed.push(text, nsh_core::ResolvedTextStyle::default());
+            let prepared = engine.prepare(&attributed);
+            for width in (60..700).step_by(23) {
+                let measured = engine.measure(&prepared, Some(Points(width as f32)));
+                let narrowest = measured.width.0.ceil() as i32;
+                for narrower in narrowest..width {
+                    let size = engine.measure(&prepared, Some(Points(narrower as f32)));
+                    assert_eq!(
+                        size.height, measured.height,
+                        "{text} at {narrower}, from {width}"
+                    );
+                    assert_eq!(
+                        size.width, measured.width,
+                        "{text} at {narrower}, from {width}"
+                    );
+                }
+            }
+        }
     }
 }

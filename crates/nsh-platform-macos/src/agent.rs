@@ -6,6 +6,7 @@
 
 use std::{
     rc::Rc,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -18,7 +19,7 @@ use nsh_testing::agent::{Key, Native};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSApplication, NSEventType, NSView, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventType, NSView, NSWindow,
 };
 use objc2_foundation::{NSRect, NSSize};
 
@@ -31,15 +32,60 @@ const ACTIVATION: Duration = Duration::from_secs(1);
 const FRAME: Duration = Duration::from_millis(16);
 /// How far one gesture event scrolls at most, in points.
 const GESTURE_STEP: f64 = 20.0;
+/// How far a press may land from the last one, in points, and still count
+/// as its next click (the window server's own distance is not public).
+const CLICK_DISTANCE: f64 = 4.0;
+
+/// A left button press: where, when (seconds since the system started)
+/// and its click count.
+#[derive(Clone, Copy)]
+struct Click {
+    x: f64,
+    y: f64,
+    time: f64,
+    count: isize,
+}
 
 /// The surface the agent acts on, by key (its calls must be `Send`).
 pub(crate) struct MacNative {
     key: u64,
+    /// The last left button press, which the next one may follow.
+    last_click: Mutex<Option<Click>>,
 }
 
 impl MacNative {
     pub(crate) fn new(key: u64) -> Self {
-        MacNative { key }
+        MacNative {
+            key,
+            last_click: Mutex::new(None),
+        }
+    }
+
+    /// The click count of a left button press at `(x, y)` now: the window
+    /// server stamps it on real presses, and AppKit and the input layer
+    /// tell double and triple clicks by it. A press close to the last one
+    /// within the system's double-click interval is its next click, as the
+    /// window server counts them (on and on, not back to 1 after 3).
+    fn click_count(&self, x: f64, y: f64) -> isize {
+        let now = synth::timestamp();
+        let mut last = self.last_click.lock().unwrap_or_else(|e| e.into_inner());
+        let count = match *last {
+            Some(last)
+                if now - last.time <= NSEvent::doubleClickInterval()
+                    && (x - last.x).abs() <= CLICK_DISTANCE
+                    && (y - last.y).abs() <= CLICK_DISTANCE =>
+            {
+                last.count + 1
+            }
+            _ => 1,
+        };
+        *last = Some(Click {
+            x,
+            y,
+            time: now,
+            count,
+        });
+        count
     }
 
     /// `f` with the surface and its window, on the main queue, waited for;
@@ -73,12 +119,16 @@ impl MacNative {
 
     /// Makes the app active, as presses into web views need (in another
     /// app, a click into a page only activates it): waits for it a second
-    /// at most.
+    /// at most. An app run in the background (`AppOptions::background`)
+    /// cannot be activated, and is not asked to.
     fn activate(&self) {
         let deadline = Instant::now() + ACTIVATION;
         while Instant::now() < deadline {
             let active = self.on_main(|_, window| {
                 let app = NSApplication::sharedApplication(MainThreadMarker::from(window));
+                if app.activationPolicy() == NSApplicationActivationPolicy::Prohibited {
+                    return true;
+                }
                 if !app.isActive() {
                     #[allow(deprecated)]
                     app.activateIgnoringOtherApps(true);
@@ -150,22 +200,26 @@ impl Native for MacNative {
         self.activate();
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         self.on_main(|_, window| {
+            let clicks = self.click_count(x, y);
             // A real pointer arrives before it presses (hover state).
             synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            synth::mouse(window, NSEventType::LeftMouseDown, x, y, 1);
-            synth::mouse(window, NSEventType::LeftMouseUp, x, y, 1);
+            synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+            synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks);
         });
     }
 
     fn long_press(&self, at: Point<Points>, hold: Duration) {
         self.activate();
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
-        self.on_main(|_, window| {
+        let clicks = self.on_main(|_, window| {
+            let clicks = self.click_count(x, y);
             synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            synth::mouse(window, NSEventType::LeftMouseDown, x, y, 1);
+            synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+            clicks
         });
         std::thread::sleep(hold);
-        self.on_main(|_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, 1));
+        let clicks = clicks.unwrap_or(1);
+        self.on_main(|_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
     }
 
     fn scroll(&self, at: Point<Points>, delta: Point<Points>) {
@@ -198,22 +252,26 @@ impl Native for MacNative {
     fn drag(&self, from: Point<Points>, to: Point<Points>) {
         self.activate();
         let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
-        self.on_main(move |_, window| {
-            synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            synth::mouse(window, NSEventType::LeftMouseDown, x, y, 1);
-        });
+        let clicks = self
+            .on_main(move |_, window| {
+                let clicks = self.click_count(x, y);
+                synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
+                synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+                clicks
+            })
+            .unwrap_or(1);
         std::thread::sleep(nsh_testing::agent::LANDING);
         let mut last = from;
         for at in nsh_testing::agent::drag_path(from, to) {
             std::thread::sleep(nsh_testing::agent::FRAME);
             let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
             self.on_main(move |_, window| {
-                synth::mouse(window, NSEventType::LeftMouseDragged, x, y, 1);
+                synth::mouse(window, NSEventType::LeftMouseDragged, x, y, clicks);
             });
             last = at;
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
-        self.on_main(move |_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, 1));
+        self.on_main(move |_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
     }
 
     fn type_text(&self, text: &str) {
@@ -242,6 +300,8 @@ impl Native for MacNative {
 
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
         self.activate();
+        // Another button's press ends a run of left clicks.
+        *self.last_click.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         self.on_main(move |_, window| {
             synth::mouse(window, NSEventType::RightMouseDown, x, y, 1);

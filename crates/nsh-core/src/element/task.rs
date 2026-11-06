@@ -85,6 +85,12 @@ pub(crate) enum Action {
         crate::picker::PickRequest,
         AnswerSlot<Vec<crate::picker::PickedFile>>,
     ),
+    /// Shows the system's picker for files of any type; the files picked
+    /// (none when cancelled) resolve the slot.
+    PickFiles(
+        crate::picker::FilePickRequest,
+        AnswerSlot<Vec<crate::picker::PickedFile>>,
+    ),
     /// Calls function `name` of the embedding app (`nsh/host`); its
     /// value, or why it failed, resolves the slot.
     HostCall {
@@ -104,6 +110,11 @@ pub(crate) enum Action {
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
     /// A speech recognition session's request ([`crate::speech`]).
     Speech(SpeechAction),
+    /// A notification's request ([`crate::notifications`]).
+    Notification(NotificationAction),
+    /// The next link the system hands the app ([`crate::url_scheme`])
+    /// resolves the slot, those that came before first.
+    NextUrlSchemeOpen(AnswerSlot<String>),
     /// Whether a web view's ref gives its page trusted input here
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.
@@ -163,6 +174,27 @@ pub(crate) enum SpeechAction {
     Abort(u32),
     /// Whether speech can be recognized; the answer resolves the slot.
     Available(AnswerSlot<bool>),
+}
+
+/// What the app asks about notifications ([`Action::Notification`]).
+pub(crate) enum NotificationAction {
+    /// The permission; with `ask`, the user is asked first when they were
+    /// not yet. The answer resolves the slot.
+    Permission {
+        ask: bool,
+        answer: AnswerSlot<crate::notifications::NotificationPermission>,
+    },
+    /// Shows a notification; whether the system took it resolves the slot.
+    Show {
+        notification: crate::notifications::Notification,
+        answer: AnswerSlot<bool>,
+    },
+    /// Removes the notification called this.
+    Close(String),
+    /// Sets the app's badge.
+    SetBadge(u32),
+    /// The id of the next notification pressed resolves the slot.
+    NextPress(AnswerSlot<String>),
 }
 
 /// A request on local paths waiting for the platform's answer

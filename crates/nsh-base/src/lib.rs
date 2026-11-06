@@ -18,6 +18,8 @@
 
 mod accordion;
 mod alert_dialog;
+#[cfg(any(feature = "editor", feature = "rich-editor"))]
+mod autoscroll;
 mod avatar;
 mod button;
 mod calendar;
@@ -29,8 +31,10 @@ mod combobox;
 mod command;
 mod data_table;
 mod date_picker;
+#[cfg(feature = "editor")]
 mod diff;
 pub mod dock;
+#[cfg(feature = "editor")]
 pub mod editor;
 mod hover_card;
 mod keys;
@@ -42,12 +46,14 @@ mod number_input;
 mod numeric;
 mod otp_input;
 mod pagination;
+#[cfg(feature = "plot")]
 pub mod plot;
 mod popover;
 mod popup;
 mod progress;
 mod radio;
 mod resizable;
+#[cfg(feature = "rich-editor")]
 pub mod rich_editor;
 mod roving;
 mod scrollbar;
@@ -55,11 +61,21 @@ mod select;
 mod sheet;
 mod slider;
 mod sort;
+mod status_line;
 mod switch;
 mod syntax;
 mod table;
 mod tabs;
+pub mod terminal;
 pub mod text_view;
+
+/// The KaTeX fonts `TextView` draws formulas with, in one file,
+/// zstd-compressed (about 230 kB of 500 kB; license in
+/// `fonts/katex.LICENSE.txt`). The native runtimes embed them; `nsh` publishes
+/// them next to a web runtime, which fetches them for its first formula.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub const MATH_FONTS: &[u8] = include_bytes!("../fonts/katex.pack.zst");
 mod theme;
 mod time_field;
 mod toast;
@@ -132,30 +148,14 @@ pub use crate::{
         DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,
         DateRangePreset, DateTime, PickedDate, date_picker,
     },
-    diff::{
-        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffHunkBounds,
-        DiffIndicators, DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide,
-        DiffStats, DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent,
-        DiffViewPart, DiffViewProps, DiffViewStyles, diff_view,
-    },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
-    editor::{
-        Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
-        EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
-        EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
-        EditorElement, EditorEvent, EditorFoldRange, EditorGutterMark, EditorGutterPlacement,
-        EditorHoverEvent, EditorLocation, EditorOverviewRulerLane, EditorOverviewRulerMark,
-        EditorPart, EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll,
-        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
-        EditorTextPressEvent, EditorToken, editor,
-    },
     hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
-        context_menu, menu, menu_item, menu_separator, submenu,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
+        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
@@ -206,9 +206,10 @@ pub use crate::{
     tabs::{Tab, TabElement, TabEvent, TabProps, Tabs, TabsElement, TabsProps, tab, tabs},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
-        TextViewParts, TextViewProps, TextViewStyles, text_view,
+        TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewClasses,
+        TextViewCodeAction, TextViewCodeActionEvent, TextViewElement, TextViewEvent,
+        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart, TextViewParts,
+        TextViewProps, TextViewSelectionEvent, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
@@ -231,6 +232,25 @@ pub use crate::{
     },
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
     tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
+};
+#[cfg(feature = "editor")]
+pub use crate::{
+    diff::{
+        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffHunkBounds,
+        DiffIndicators, DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide,
+        DiffStats, DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent,
+        DiffViewPart, DiffViewProps, DiffViewStyles, diff_view,
+    },
+    editor::{
+        Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
+        EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
+        EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
+        EditorElement, EditorEvent, EditorFoldRange, EditorGutterMark, EditorGutterPlacement,
+        EditorHoverEvent, EditorLocation, EditorOverviewRulerLane, EditorOverviewRulerMark,
+        EditorPart, EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll,
+        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
+        EditorTextPressEvent, EditorToken, editor,
+    },
 };
 
 /// The JS module apps import the foundation as.
@@ -267,19 +287,24 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
 pub mod parts {
     use nsh_core::element::Registry;
 
+    #[cfg(feature = "plot")]
+    use crate::plot;
+    #[cfg(feature = "rich-editor")]
+    use crate::rich_editor;
     use crate::{
         Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, AlertDialog,
         Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
         CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
         Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
-        Combobox, Command, ContextMenu, DataTable, DatePicker, DiffView, DockArea, Editor,
-        HoverCard, Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover,
-        Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet,
-        Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter,
-        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle,
-        ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, plot, rich_editor,
-        toast,
+        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, HoverCard, Link, Menu,
+        MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
+        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
+        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, toast,
     };
+    #[cfg(feature = "editor")]
+    use crate::{DiffView, Editor};
 
     /// What a part does: registers its components, classes and modules.
     pub type Part = fn(&mut Registry);
@@ -293,13 +318,17 @@ pub mod parts {
         ("tree", tree),
         ("fields", fields),
         ("text_view", text_view),
+        #[cfg(feature = "editor")]
         ("editor", editor),
+        #[cfg(feature = "editor")]
         ("diff", diff),
+        #[cfg(feature = "rich-editor")]
         ("rich_editor", rich_editor),
         ("data_table", data_table),
         ("table", table),
         ("dock", dock),
         ("resizable", resizable),
+        #[cfg(feature = "plot")]
         ("plot", plot),
     ];
 
@@ -404,17 +433,20 @@ pub mod parts {
     }
 
     /// The `Editor`: a code editor.
+    #[cfg(feature = "editor")]
     pub fn editor(registry: &mut Registry) {
         registry.register::<Editor>();
     }
 
     /// `DiffView`: the changes between two texts or of a patch.
+    #[cfg(feature = "editor")]
     pub fn diff(registry: &mut Registry) {
         registry.register::<DiffView>();
     }
 
     /// `RichEditor`, with its schema, session and plugin classes and its
     /// module.
+    #[cfg(feature = "rich-editor")]
     pub fn rich_editor(registry: &mut Registry) {
         registry.register::<rich_editor::view::RichEditor>();
         rich_editor::js::register(registry);
@@ -451,6 +483,7 @@ pub mod parts {
     }
 
     /// Charts' parts, a module of their own: `nsh/base/plot`.
+    #[cfg(feature = "plot")]
     pub fn plot(registry: &mut Registry) {
         registry.submodule(plot::registry());
     }
@@ -466,6 +499,7 @@ mod tests {
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
+    #[cfg(all(feature = "editor", feature = "plot", feature = "rich-editor"))]
     #[test]
     fn the_exports_are_pinned() {
         let registry = super::registry();
@@ -638,6 +672,7 @@ mod tests {
     #[test]
     fn every_export_is_documented() {
         assert_eq!(super::registry().undocumented(), Vec::<String>::new());
+        #[cfg(feature = "plot")]
         assert_eq!(super::plot::registry().undocumented(), Vec::<String>::new());
     }
 }

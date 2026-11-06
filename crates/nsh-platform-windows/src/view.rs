@@ -340,6 +340,28 @@ struct Node {
     /// Where the window's last frame painted it (not its children), clipped
     /// to what was visible: the area to draw again when it changes.
     painted: Cell<Option<WindowRect>>,
+    /// The newest change in it or what it holds ([`NshView::changes`]).
+    changes: Cell<u64>,
+}
+
+thread_local! {
+    /// The last change stamped on the views ([`NshView::changed`]).
+    static CHANGES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The newest change stamp: a picture taken now holds every change up to
+/// it ([`NshView::changes`]).
+pub(crate) fn change_stamp() -> u64 {
+    CHANGES.with(Cell::get)
+}
+
+/// A change stamp newer than every one before ([`NshView::changed`],
+/// [`crate::surface::Surface::invalidate`]).
+pub(crate) fn next_change_stamp() -> u64 {
+    CHANGES.with(|c| {
+        c.set(c.get() + 1);
+        c.get()
+    })
 }
 
 /// The smallest rectangle holding `a` and `b`.
@@ -383,6 +405,7 @@ impl NshView {
             invalidate: RefCell::new(None),
             queued: Cell::new(false),
             painted: Cell::new(None),
+            changes: Cell::new(0),
         }))
     }
 
@@ -418,24 +441,63 @@ impl NshView {
         *self.0.invalidate.borrow_mut() = Some(invalidate);
     }
 
+    /// It no longer roots a surface's tree ([`Self::set_invalidate`]).
+    pub(crate) fn clear_invalidate(&self) {
+        self.0.invalidate.borrow_mut().take();
+    }
+
     /// Something it or its subtree draws changed: its surface draws that
-    /// again (if it is in one).
+    /// again (if it is in one), and it and the views it is in hold a newer
+    /// change ([`Self::changes`]: a shader picturing them takes them again).
     pub(crate) fn changed(&self) {
-        if self.0.queued.get() {
-            return;
-        }
+        let stamp = next_change_stamp();
         let mut node = self.0.clone();
         loop {
+            node.changes.set(stamp);
             let parent = node.parent.borrow().upgrade();
             match parent {
                 Some(p) => node = p,
                 None => break,
             }
         }
+        if self.0.queued.get() {
+            return;
+        }
         let invalidate = node.invalidate.borrow().clone();
         if let Some(f) = invalidate {
             f(self);
         }
+    }
+
+    /// Draws again what it draws itself (a shader's own frame): a change
+    /// of what the views it is in hold, not of what it holds (a shader
+    /// picturing its children does not take them again for its own frame).
+    pub(crate) fn redraw(&self) {
+        let stamp = next_change_stamp();
+        let mut node = self.0.clone();
+        loop {
+            let parent = node.parent.borrow().upgrade();
+            match parent {
+                Some(p) => {
+                    p.changes.set(stamp);
+                    node = p;
+                }
+                None => break,
+            }
+        }
+        if self.0.queued.get() {
+            return;
+        }
+        let invalidate = node.invalidate.borrow().clone();
+        if let Some(f) = invalidate {
+            f(self);
+        }
+    }
+
+    /// The stamp of the newest change in it or what it holds
+    /// ([`change_stamp`] when it was made).
+    pub(crate) fn changes(&self) -> u64 {
+        self.0.changes.get()
     }
 
     /// Whether it is on its surface's list of changed views; set by the

@@ -8,6 +8,7 @@ import CoreAnimated from "./core-animated";
 import CoreCanvas from "./core-canvas";
 import CoreElements from "./core-elements";
 import CoreErrorBoundary from "./core-error-boundary";
+import CoreFrameRate from "./core-frame-rate";
 import CoreList from "./core-list";
 import CoreMotion from "./core-motion";
 import CoreOverlay from "./core-overlay";
@@ -18,6 +19,7 @@ import CoreResource from "./core-resource";
 import CoreShader from "./core-shader";
 import CoreShaderEffects from "./core-shader-effects";
 import ModuleUrl from "./module-url";
+import WebLoad from "./web-load";
 import Steps from "./steps";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -26,6 +28,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-canvas": CoreCanvas,
   "core-elements": CoreElements,
   "core-error-boundary": CoreErrorBoundary,
+  "core-frame-rate": CoreFrameRate,
   "core-list": CoreList,
   "core-motion": CoreMotion,
   "core-overlay": CoreOverlay,
@@ -37,6 +40,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-shader-effects": CoreShaderEffects,
   "module-url": ModuleUrl,
   "steps": Steps,
+  "web-load": WebLoad,
 };
 const shown = signal("");
 

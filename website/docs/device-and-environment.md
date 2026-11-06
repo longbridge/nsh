@@ -334,8 +334,8 @@ On Android, a view embedded below a toolbar gets only the parts of the system ba
 |---|---|---|
 | `os()` | `platform.os` | `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web` (`os().name()` is TSX's string). Mac Catalyst is iOS. |
 | `os_version()` | `platform.version` | Major and minor; on Android the API level and 0. |
-| `idiom()` | `platform.idiom` | `Idiom::Phone`, `Pad`, `Mac`, `Tv` or `Desktop`; `Desktop` exactly where `is_desktop()` holds. |
-| `is_desktop()` | `platform.desktop` | macOS, Windows or Linux, or a desktop browser ([Desktop and mobile](./platform-specific.md#desktop-and-mobile)). |
+| `idiom()` | `platform.idiom` | `Idiom::Phone`, `Pad`, `Mac`, `Tv`, `Desktop` or `Terminal`; `Terminal` in a terminal, else `Desktop` exactly where `is_desktop()` holds. |
+| `is_desktop()` | `platform.desktop` | macOS, Windows or Linux, a desktop browser or a terminal ([Desktop and mobile](./platform-specific.md#desktop-and-mobile)). |
 | `is_catalyst()` | `platform.catalyst` | Mac Catalyst, in either of its idioms. |
 
 TSX's `platform` in full:
@@ -344,8 +344,8 @@ TSX's `platform` in full:
 |---|---|
 | `platform.os` | `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`. Mac Catalyst reports `"ios"`. |
 | `platform.version` | A string: iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. |
-| `platform.idiom` | `"phone"`, `"pad"`, `"mac"`, `"tv"` or `"desktop"`. `"desktop"` exactly where `platform.desktop` is `true`. `"mac"` is UIKit's Mac idiom under Mac Catalyst, a mobile idiom. |
-| `platform.desktop` | Desktop behavior applies: macOS, Windows, Linux and desktop browsers. `desktop={{…}}` props and `platform.select({ desktop })` follow it. |
+| `platform.idiom` | `"phone"`, `"pad"`, `"mac"`, `"tv"`, `"desktop"` or `"terminal"`. `"terminal"` in a terminal, else `"desktop"` exactly where `platform.desktop` is `true`. `"mac"` is UIKit's Mac idiom under Mac Catalyst, a mobile idiom. |
+| `platform.desktop` | Desktop behavior applies: macOS, Windows, Linux, desktop browsers and terminals. `desktop={{…}}` props and `platform.select({ desktop })` follow it. |
 | `platform.catalyst` | The app runs under Mac Catalyst (`os` `"ios"`), in the Mac or the iPad idiom. |
 | `platform.select(spec)` | The value for this platform; see [Platform-specific code](./platform-specific.md#platformselect). |
 
@@ -379,8 +379,13 @@ animation effects setting, `pixelRatio()` the monitor's scale, and `Intl` format
 
 In a browser ([the web runtime](./web.md)), `platform.os` is `"web"` and `platform.version` `"0.0"`. The idiom is
 `"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone,
-decided when the app starts. The locale, `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`,
-the safe area and the keyboard height come from the browser and follow it live.
+decided when the app starts. The locale, `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
+focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard
+height come from the browser and follow it live.
+
+In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal"`, `platform.desktop` is `true` and
+`platform.os` is the machine's own system. `colorScheme()` follows the terminal's background, `reduceMotion()` is
+`true`, and the safe area and the keyboard height are 0.
 
 ## Pixel density
 

@@ -1,0 +1,36 @@
+[package]
+name = "nsh-platform-tui"
+description = "Native Shell surfaces embedded in a terminal grid."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["js"]
+js = ["nsh-engine/js"]
+run-app = []
+dev = ["js", "dep:nsh-dev", "dep:nsh-testing", "dep:serde_json", "dep:ureq"]
+
+[dependencies]
+nsh-dev = { workspace = true, optional = true, features = ["client"] }
+nsh-testing = { workspace = true, optional = true, features = ["agent"] }
+serde_json = { workspace = true, optional = true }
+ureq = { workspace = true, optional = true }
+nsh-core.workspace = true
+nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor"] }
+nsh-engine = { workspace = true, features = ["net"] }
+ratatui-core.workspace = true
+ratatui-widgets.workspace = true
+unicode-width.workspace = true
+unicode-segmentation.workspace = true
+crossbeam-channel.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+nsh-bundler.workspace = true

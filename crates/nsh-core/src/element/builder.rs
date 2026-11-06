@@ -223,6 +223,8 @@ pub struct Attrs {
     pub(crate) class: Option<SharedString>,
     /// The view is a selectable view ([`crate::selection`]).
     pub(crate) selectable_view: bool,
+    /// The text continues the one before it ([`Element::continues_text`]).
+    pub(crate) continues_text: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u16,
@@ -282,6 +284,9 @@ impl Attrs {
         }
         if self.selectable_view != old.selectable_view {
             out.push(Prop::SelectableView(self.selectable_view));
+        }
+        if self.continues_text != old.continues_text {
+            out.push(Prop::ContinuesText(self.continues_text));
         }
         if self.projected_states != old.projected_states {
             out.push(Prop::ProjectedStates(self.projected_states));
@@ -422,6 +427,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) alignment: Option<crate::ListAlignment>,
     pub(crate) viewport: Option<crate::ListViewport>,
 }
 
@@ -452,6 +458,9 @@ impl ListConfig {
         }
         if self.follow_end != old.follow_end {
             out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        }
+        if self.alignment != old.alignment {
+            out.push(Prop::ListAlignment(self.alignment.unwrap_or_default()));
         }
         if self.viewport != old.viewport {
             out.push(Prop::ListViewport(self.viewport.unwrap_or_default()));
@@ -890,6 +899,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// Marks a text as the continuation of the text before it in document
+    /// order: a long line a component draws as several texts, one per
+    /// wrapped part (`DiffView`'s soft wrap). In a selectable view
+    /// ([`Self::selectable`]) a copy joins the parts with nothing between
+    /// them, as the one line they are, and a double or triple click
+    /// selects a word or the whole line across them
+    /// ([`crate::selection::SelectionTexts::continues`]). Off by default.
+    fn continues_text(mut self, continues: impl IntoReactive<bool>) -> Self {
+        self.node()
+            .bind_attr(continues, |a, continues| a.continues_text = continues);
+        self
+    }
+
     /// Tailwind classes the app passed (a prop naming the classes of one
     /// of the component's parts: `classes={{ heading: "text-2xl" }}`),
     /// after the element's own styles, as the app's `class` on a
@@ -972,6 +994,27 @@ impl Style {
         typed.extend_as(Variant::default(), over.1.clone());
         style.1 = typed;
         style
+    }
+
+    /// The color it fills its view with in no state (`backgroundColor`,
+    /// Rust's `bg`), if it sets one that is no gradient and not
+    /// transparent: what a part's terminal form draws its text in (a
+    /// progress bar's run in its indicator's color). The typed styles'
+    /// over the declarations; their bound parts are left out.
+    pub fn background_color(&self) -> Option<crate::element::AdaptiveColor> {
+        let typed = self.1.static_color(crate::StyleKey::BackgroundColor);
+        let declared = || {
+            self.decls().iter().rev().find_map(|decl| match decl {
+                crate::StyleDecl::Set(
+                    crate::StyleKey::BackgroundColor,
+                    crate::PropertyValue::Color(color),
+                ) => Some(color.map(crate::element::AdaptiveColor::from)),
+                _ => None,
+            })?
+        };
+        typed
+            .or_else(declared)
+            .filter(|c| *c != crate::element::AdaptiveColor::from(crate::Color::TRANSPARENT))
     }
 
     /// Its declarations, in order (not its typed styles').
@@ -1421,6 +1464,23 @@ pub trait Interactive: Element {
         self.on(
             EventKind::ContextMenu,
             events::typed(listener.into_listener(), events::context_menu),
+        )
+    }
+
+    /// The selection across the texts of a selectable view
+    /// ([`Self::selectable`]) changed: the selected text, as a copy gives
+    /// it, empty once nothing is selected, and where it starts in the
+    /// view's whole text (TSX `onSelectionChange` of a `<View selectable>`,
+    /// `{ text, start }`). Only the outermost selectable view of an area
+    /// reports it; an [`Input`](super::Input)'s own selection is its
+    /// `on_selection_change`.
+    fn on_text_selection_change<M>(
+        self,
+        listener: impl IntoListener<super::TextSelectionEvent, M>,
+    ) -> Self {
+        self.on(
+            EventKind::SelectionChange,
+            events::typed(listener.into_listener(), events::selected_text),
         )
     }
 

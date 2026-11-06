@@ -148,6 +148,9 @@ so only load it from your own app's files.
 - `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
   stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
   256 MB heap); the development host runs apps on its own, with `Limits::standalone()`.
+- `AppOptions::transparent` makes the view see-through: it draws no window background, and `open_app_window` /
+  `run_app` open a transparent window, so what the app leaves unpainted shows what is behind the window (desktop
+  widgets, overlays). False by default.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
 - `AppView::on_app_error(|error| …)` hears the app's errors: `error.kind` (the app failed to load, an uncaught
@@ -186,7 +189,8 @@ What draws or behaves differently from the native desktop backends:
   [Requirements](#requirements)); where pages stay black under Xwayland ("Failed to create GBM buffer" in the log),
   run the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`. On macOS and Windows clipping ancestors do not cut them and
   failed loads report no `onError`. `baseUrl`, `scrollable` and `allowsBackForwardNavigationGestures` are
-  not supported.
+  not supported. An `incognito` web view keeps its pages' data as the OS's own backend does
+  ([website data](./web-view-and-video.md#website-data)).
 - **Accessibility** goes through AccessKit: screen readers can activate, focus, set values and scroll elements into
   view everywhere; custom actions and the context-menu action are not passed on yet.
 

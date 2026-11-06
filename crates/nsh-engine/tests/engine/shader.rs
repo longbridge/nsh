@@ -203,3 +203,60 @@ mount(() => (
         "{change:?}"
     );
 }
+
+#[test]
+fn pages_and_dialogs_take_a_transition_shader() {
+    let (_engine, rx) = start(
+        r##"import { mount, Text, View } from "nsh";
+import { Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
+const nav = createNavStack<{ name: string }>([{ name: "home" }]);
+const wipe = { source: "fn shade(uv: vec2f) -> vec4f { return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress); }", duration: 400 };
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {(route) => (
+        <NavPage title={route.name} transitionShader={wipe}>
+          <Text>{route.name}</Text>
+        </NavPage>
+      )}
+    </NavStack>
+    <Dialog open transitionShader={wipe}>
+      <Text>in dialog</Text>
+    </Dialog>
+  </View>
+));
+"##,
+    );
+    let batches = items_until(&rx, |b| {
+        b.iter()
+            .flatten()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::NavShader {
+                        shader: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count()
+            >= 2
+    });
+    let shaders: Vec<_> = batches
+        .iter()
+        .flatten()
+        .filter_map(|i| match i {
+            MountItem::NavShader {
+                shader: Some(s), ..
+            } => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shaders.len(), 2, "the page and the dialog");
+    for shader in shaders {
+        assert_eq!(shader.duration, Duration::from_millis(400));
+        assert_eq!(shader.layer.role, ShaderRole::Transition);
+        let inputs = shader.layer.shader.inputs();
+        assert!(inputs.contains(ShaderInput::From) && inputs.contains(ShaderInput::To));
+    }
+}

@@ -46,7 +46,7 @@
 //! shortcuts after `nsh/keymap`'s bindings ([`shortcut`]), so a binding
 //! wins over a menu item of the same keystroke, then Ctrl+W / Cmd+W, which
 //! closes the window unless the app takes it. Quitting and closing (keys,
-//! roles, `Window.close()`, the close button) go to the embedding app's
+//! roles, `Application.quit()`, `Window.close()`, the close button) go to the embedding app's
 //! handler instead when it set one ([`crate::AppView::on_close_request`]).
 
 mod menus;
@@ -60,7 +60,7 @@ use std::{
 use gpui::{
     AnyElement, AnyWindowHandle, App, Bounds, CursorStyle, DispatchPhase, Hitbox, HitboxBehavior,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    ResizeEdge, Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
+    ResizeEdge, Size, Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
 };
 // Text fields' and selectable text's context menus (`text_input.rs`,
 // `text.rs`) show their items with these.
@@ -144,6 +144,8 @@ enum Op {
     Minimize,
     ToggleMaximize,
     ToggleFullScreen,
+    /// `setFrame`'s width and height (a missing one keeps the window's).
+    Resize(Option<f32>, Option<f32>),
     Close,
     Quit,
     Hide,
@@ -154,6 +156,34 @@ enum Op {
 /// What the embedding app does instead of quitting or closing the window
 /// ([`crate::AppView::on_close_request`]).
 type CloseHandler = Rc<dyn Fn(CloseRequest, &mut Window, &mut App)>;
+
+/// A size asked of the platform, which may apply it some time later.
+#[derive(Clone, Copy)]
+struct AskedSize {
+    size: Size<Pixels>,
+    /// The window's size when it was asked: while the window still has it,
+    /// the platform has not answered, and `size` is what the window will be.
+    from: Size<Pixels>,
+}
+
+/// The size `setFrame`'s `width` and `height` make of a window now `current`:
+/// one left out keeps the window's, or the size asked last while the platform
+/// has not applied it. Once the window has changed (to that size, a size the
+/// platform allowed, or one the user dragged it to) its own size counts.
+fn frame_size(
+    current: Size<Pixels>,
+    asked: Option<AskedSize>,
+    width: Option<f32>,
+    height: Option<f32>,
+) -> Size<Pixels> {
+    let kept = asked
+        .filter(|asked| asked.from == current)
+        .map_or(current, |asked| asked.size);
+    gpui::size(
+        width.map_or(kept.width, gpui::px),
+        height.map_or(kept.height, gpui::px),
+    )
+}
 
 /// A surface's chrome.
 #[derive(Default)]
@@ -176,8 +206,12 @@ pub(crate) struct Chrome {
     entries: RefCell<Vec<(u32, Option<MenuRole>)>>,
     /// Window operations to carry out.
     ops: RefCell<Vec<Op>>,
+    /// The last size `setFrame` asked for.
+    asked_size: Cell<Option<AskedSize>>,
     /// The menu open (drawn), if any.
     open: RefCell<Option<menus::Open>>,
+    /// The icons of its rows.
+    icons: RefCell<menus::Icons>,
     /// The menu bar's items, in window coordinates (from the last frame).
     bar_items: RefCell<Vec<Bounds<Pixels>>>,
     /// When the menu bar shows (`Window.setMenuBar`).
@@ -322,9 +356,21 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Minimize => push(surface, Op::Minimize),
         DesktopCommand::ToggleMaximize => push(surface, Op::ToggleMaximize),
         DesktopCommand::ToggleFullScreen => push(surface, Op::ToggleFullScreen),
-        // GPUI's window bounds are chosen when the window opens, and it
-        // has no window levels.
-        DesktopCommand::SetFrame(_) | DesktopCommand::SetLevel(_) => {}
+        // GPUI sizes a window but leaves its place to the platform (Wayland
+        // windows cannot place themselves), and it has no window levels.
+        DesktopCommand::SetFrame(frame) => {
+            if frame.width.is_some() || frame.height.is_some() {
+                push(
+                    surface,
+                    Op::Resize(frame.width.map(|w| w.0), frame.height.map(|h| h.0)),
+                );
+            }
+        }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
+        DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.
@@ -337,7 +383,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
+        DesktopCommand::Quit => push(surface, Op::Quit),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
@@ -359,6 +409,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
+        // The host app owns the tray and global shortcuts.
+        DesktopCommand::SetTray(_)
+        | DesktopCommand::RegisterGlobalShortcut { .. }
+        | DesktopCommand::UnregisterGlobalShortcut(_) => {}
     }
 }
 
@@ -668,6 +722,13 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
                 }
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
+            Op::Resize(width, height) => {
+                let chrome = &surface.chrome;
+                let from = window.bounds().size;
+                let size = frame_size(from, chrome.asked_size.get(), width, height);
+                window.resize(size);
+                chrome.asked_size.set(Some(AskedSize { size, from }));
+            }
             Op::Close => {
                 if !ask_to_close(surface, CloseRequest::Close, window, cx) {
                     window.remove_window();
@@ -871,7 +932,12 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                         title_double_click(window);
                     }
                     MouseButton::Left => surface.chrome.drag.set(Some((x, y))),
-                    MouseButton::Right if PLATFORM == Platform::Linux => {
+                    // (a view of the app's own with a context menu there
+                    // hears the click instead)
+                    MouseButton::Right
+                        if PLATFORM == Platform::Linux
+                            && !crate::input::hears_context_menu(&surface.root, x - ox, y - oy) =>
+                    {
                         window.show_window_menu(e.position);
                     }
                     _ => return,
@@ -1216,12 +1282,14 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             checked: None,
             role: Some(role),
             when: nsh_core::keymap::When::Always,
+            icon: None,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {
         label: label.to_owned(),
         enabled: true,
         items,
+        icon: None,
     };
     vec![
         submenu(
@@ -1295,6 +1363,8 @@ fn gpui_keystroke(s: &Shortcut) -> String {
     out
 }
 
+/// `items` as GPUI's native menus (macOS): GPUI's `MenuItem` has no image,
+/// so these show no icons, unlike the rows [`menus`] draws.
 fn native_items(
     surface: u64,
     items: &[MenuItem],
@@ -1326,6 +1396,7 @@ fn native_items(
                 label,
                 enabled,
                 items,
+                ..
             } => gpui::MenuItem::submenu(gpui::Menu {
                 name: label.clone().into(),
                 items: native_items(surface, items, entries, bindings),
@@ -1368,6 +1439,7 @@ fn set_native_menus(surface: &Surface, cx: &mut App) {
                 label,
                 enabled,
                 items,
+                ..
             } => Some(gpui::Menu {
                 name: label.clone().into(),
                 items: native_items(surface.key(), items, &mut entries, &mut bindings),
@@ -1464,6 +1536,31 @@ mod tests {
     use nsh_core::desktop::{Key, Shortcut};
 
     use super::*;
+
+    #[test]
+    fn set_frame_keeps_the_size_asked_until_the_window_changes() {
+        let size = |width: f32, height: f32| gpui::size(gpui::px(width), gpui::px(height));
+        let current = size(800.0, 600.0);
+        // Nothing asked yet: a size left out is the window's.
+        assert_eq!(
+            frame_size(current, None, Some(640.0), None),
+            size(640.0, 600.0)
+        );
+        // The platform has not applied the last size: a size left out is that one's.
+        let asked = Some(AskedSize {
+            size: size(640.0, 600.0),
+            from: current,
+        });
+        assert_eq!(
+            frame_size(current, asked, None, Some(400.0)),
+            size(640.0, 400.0)
+        );
+        // It has (or the user has dragged the window): the window's own size counts.
+        assert_eq!(
+            frame_size(size(700.0, 500.0), asked, None, Some(400.0)),
+            size(700.0, 400.0)
+        );
+    }
 
     #[gpui::test]
     fn order_front_activates_without_rendering_and_leaves_embedded_windows_alone(

@@ -1740,6 +1740,18 @@ fn mark_canvas_with(
     before_layout: impl Fn() -> Painter + 'static,
     draw: impl Fn(Painter, f32) -> Painter + 'static,
 ) -> CanvasView {
+    // A terminal lays the canvas out in whole Cells: an inset of a few
+    // points past the plot rounds to none on one side and a Cell on the
+    // other, so the drawing, moved by the bleed, would reach into the
+    // padding beside the plot. Its dots cut nothing a stroke's half would
+    // show, so there the canvas is the plot's area.
+    let bleed = move || {
+        if crate::terminal::is_terminal() {
+            0.0
+        } else {
+            bleed()
+        }
+    };
     canvas(move || {
         if plot.is_some_and(|plot| !plot.is_sized()) {
             return before_layout();

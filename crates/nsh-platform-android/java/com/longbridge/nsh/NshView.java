@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -95,6 +94,10 @@ public class NshView extends FrameLayout {
     private final Object hostLock = new Object();
     private float density;
     private final Box root;
+    /** The screen effect or transition drawing over the surface, if any. */
+    Box screen;
+    /** The page and dialog transitions through a shader running, by stack or dialog id. */
+    final android.util.SparseArray<ShaderFrames> navFrames = new android.util.SparseArray<>();
     private final Mounter mounter;
     private final TouchTracker touches;
 
@@ -199,21 +202,7 @@ public class NshView extends FrameLayout {
         // The keyboard's curve and duration, as it starts to move: what makes
         // room for it moves with it (`LayoutCurve::Keyboard`).
         if (Build.VERSION.SDK_INT >= 30) {
-            setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
-                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
-                @Override
-                public void onPrepare(WindowInsetsAnimation animation) {
-                    // Before the end state's insets are applied.
-                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
-                    keyboardDuration = animation.getDurationMillis();
-                    mounter.keyboardMotion(animation.getInterpolator(), keyboardDuration);
-                }
-
-                @Override
-                public WindowInsets onProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> running) {
-                    return insets;
-                }
-            });
+            KeyboardAnimation.install(this, mounter);
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
@@ -527,6 +516,41 @@ public class NshView extends FrameLayout {
         Native.setOpenUrlHandler(handle, handler != null);
     }
 
+    /**
+     * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
+     * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
+     * the app's launcher activity.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleNotificationIntent(android.content.Intent intent) {
+        Notifications.handleIntent(intent);
+    }
+
+    /**
+     * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
+     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     *
+     * @param url the URL
+     */
+    public void openUrl(String url) {
+        if (url == null || handle == 0) return;
+        mounter.eventMap(1, Native.URL_SCHEME, new String[] {"url"}, new Object[] {url});
+    }
+
+    /**
+     * Hands the app the URL {@code intent} carries, if it is an {@code ACTION_VIEW} intent with one ({@link #openUrl}).
+     * The activity showing this view calls it from {@code onCreate} (with the launch intent, when it is not being
+     * recreated) and {@code onNewIntent}.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleUrlSchemeIntent(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data != null) openUrl(data.toString());
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {
@@ -585,21 +609,56 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        mounter.cancelAnimations();
+        endShaders();
     }
 
     /**
      * Called by the native side when the running app stopped because another
      * one replaced it ({@code Host::load}). Batches the old app sent before
-     * are already queued, so its components go after them and before the
-     * new app's first batch.
+     * are already queued, so its components and shaders go after them and
+     * before the new app's first batch.
      */
     void appStopped() {
-        main.post(mounter::destroyComponents);
+        main.post(() -> {
+            mounter.destroyComponents();
+            mounter.cancelAnimations();
+            endShaders();
+        });
+    }
+
+    /**
+     * The app stopped: libnsh forgot its shaders, so the frames they left go
+     * too (its page and dialog transitions, its screen shader's, its
+     * effects'), and none stays frozen over the next app.
+     */
+    private void endShaders() {
+        for (int i = navFrames.size() - 1; i >= 0; i--) {
+            ShaderFrames frames = navFrames.valueAt(i);
+            if (frames instanceof NavTransition) ((NavTransition) frames).cancel();
+        }
+        navFrames.clear();
+        mounter.dropShaders();
+    }
+
+    /**
+     * A view in the surface draws anew (its own invalidation brings the
+     * window frame): a screen shader pictures the surface again before it.
+     * The screen shader's own frames invalidate this view, not a descendant.
+     */
+    @Override
+    public void onDescendantInvalidated(View child, View target) {
+        super.onDescendantInvalidated(child, target);
+        if (screen != null) screen.surfaceChanged();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (screen != null) {
+            screen.shaderSize();
+            screen.picturesChanged();
+        }
         // The environment follows in onLayout.
         if (handle != 0 && w > 0 && h > 0) Native.resize(handle, w / density, h / density);
     }
@@ -613,7 +672,7 @@ public class NshView extends FrameLayout {
      */
     private int lifecycle;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
-    private long keyboardDuration = 250;
+    long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
     private java.util.Locale hostLocale;
     private float hostFontScale;
@@ -935,14 +994,37 @@ public class NshView extends FrameLayout {
         if (handle != 0) Native.frame(handle);
     };
 
+    /** Where a shader's frames show. */
+    interface ShaderFrames {
+        /**
+         * A new frame: {@code pixels} (null for an empty frame) are only valid
+         * during the call; whether it {@code replaces} what it covers, how far
+         * it reaches beyond the box ({@code overflow}, points).
+         */
+        void shaderFrame(java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow);
+    }
+
     /**
      * A shader view's new frame, called by libnsh on the UI thread during
-     * {@link Native#tick}: {@code pixels} (null for an empty frame) are only
-     * valid during the call.
+     * {@link Native#tick}.
      */
-    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height) {
-        View v = mounter.view(id);
-        if (v instanceof Box) ((Box) v).shaderFrame(pixels, width, height);
+    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow) {
+        ShaderFrames nav = navFrames.get(id);
+        View v = nav == null ? mounter.view(id) : null;
+        if (nav == null && v instanceof ShaderFrames) nav = (ShaderFrames) v;
+        if (nav != null) nav.shaderFrame(pixels, width, height, replaces, overflow);
+    }
+
+    /** A screen shader's frame where it replaces the surface. */
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        if (screen != null && screen.drawScreen(canvas)) return;
+        super.dispatchDraw(canvas);
+    }
+
+    /** The surface as it is (a screen shader's picture). */
+    void drawSurface(android.graphics.Canvas canvas) {
+        super.dispatchDraw(canvas);
     }
 
     /** JS waits for a display frame (`requestAnimationFrame`). */

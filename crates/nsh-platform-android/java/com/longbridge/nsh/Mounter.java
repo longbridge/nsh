@@ -63,6 +63,9 @@ final class Mounter {
     private static final int APPEARANCE = 33;
     private static final int COMPONENT_PROP_SLOTS = 34;
     private static final int SHADER = 35;
+    private static final int SHADER_TRANSITION = 36;
+    private static final int SHADER_INPUT = 37;
+    private static final int NAV_SHADER = 38;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
@@ -182,6 +185,8 @@ final class Mounter {
     private final SparseArray<ModalHost> modals = new SparseArray<>();
     /** Screens' options, applied once the batch's stacks are settled. */
     private final SparseArray<ScreenOptions> screenOptions = new SparseArray<>();
+    /** The pages and dialogs that come and go through a shader (`transitionShader`; libnsh has it). */
+    final android.util.SparseBooleanArray navShaders = new android.util.SparseBooleanArray();
     /** Parents of screens, header items and modals (not their superviews). */
     private final android.util.SparseIntArray hosts = new android.util.SparseIntArray();
     private final java.util.LinkedHashSet<Integer> dirtyStacks = new java.util.LinkedHashSet<>();
@@ -539,7 +544,27 @@ final class Mounter {
                     // The layer stays in libnsh, which renders it (`shader.rs`).
                     View v = views.get(b.getInt());
                     boolean on = b.getInt() != 0;
-                    if (v instanceof Box) ((Box) v).setShader(on);
+                    int role = b.getInt();
+                    float overflow = b.getFloat();
+                    int inputs = b.getInt();
+                    if (v instanceof Box) ((Box) v).setShader(on, role, overflow, inputs);
+                    break;
+                }
+                case SHADER_TRANSITION: {
+                    View v = views.get(b.getInt());
+                    float ms = b.getFloat();
+                    if (v instanceof Box) ((Box) v).startTransition(ms);
+                    break;
+                }
+                case SHADER_INPUT: {
+                    View v = views.get(b.getInt());
+                    if (v instanceof Box) ((Box) v).picturesChanged();
+                    break;
+                }
+                case NAV_SHADER: {
+                    int id = b.getInt();
+                    if (b.getInt() != 0) navShaders.put(id, true);
+                    else navShaders.delete(id);
                     break;
                 }
                 case COMPONENT_PROP_SLOTS: {
@@ -686,10 +711,25 @@ final class Mounter {
      * again.
      */
     void destroyComponents() {
+        Notifications.forget(this);
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
         }
+    }
+
+    /**
+     * The app stopped: its shader views stop picturing and drawing frames
+     * libnsh no longer renders (a screen shader gives the surface back), and
+     * its pages and dialogs no longer go through a shader. No {@code DELETE}
+     * follows for them.
+     */
+    void dropShaders() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof Box) ((Box) v).dropShader();
+        }
+        navShaders.clear();
     }
 
     /** Makes registered component {@code name} in box {@code id}. */
@@ -839,12 +879,15 @@ final class Mounter {
         if (v instanceof StackBox) stacks.remove(v);
         SelectableView area = selectableViews.get(id);
         if (area != null) {
-            area.clear();
+            area.remove();
             selectableViews.remove(id);
         }
         screenOptions.remove(id);
+        navShaders.delete(id);
+        if (v instanceof Box) ((Box) v).dropShader();
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
+        stopEffects(id);
         detach(v);
         if (v instanceof ImageBox) cancelImage((ImageBox) v);
         if (v instanceof WebBox) ((WebBox) v).destroy();
@@ -979,6 +1022,9 @@ final class Mounter {
                 decor.borderWidths[i] = borderWidths[i] * density;
                 decor.borderColors[i] = borderColors[i];
             }
+            // A RippleDrawable rasterizes its mask once; a shape change here
+            // would leave the ripple clipped to the stale (pre-change) shape.
+            rippleMaskDirty(id);
             decor.borderStyle = borderStyle;
             decor.continuous = continuous;
             decor.originX = originXFraction ? originX : originX * density;
@@ -990,6 +1036,7 @@ final class Mounter {
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
             decor.gradients = fx.gradients;
+            decor.masks = fx.masks;
             decor.outlineWidth = fx.outlineWidth;
             decor.outlineColor = fx.outlineColor;
             decor.outlineStyle = fx.outlineStyle;
@@ -1090,6 +1137,9 @@ final class Mounter {
                         decor.radii[i] = from.radii[i] + (radii[i] - from.radii[i]) * t;
                         decor.borderWidths[i] = from.borderWidths[i] + (widths[i] - from.borderWidths[i]) * t;
                     }
+                    // Same as above: the ripple's cached mask must follow the
+                    // animated shape (e.g. the press corner morph).
+                    rippleMaskDirty(id);
                 }
             }
             now.opacity = opacity ? from.opacity + (to.opacity - from.opacity) * t : to.opacity;
@@ -1102,6 +1152,12 @@ final class Mounter {
             now.rotateY = to.rotateY;
             now.perspective = to.perspective;
             now.background = decor != null ? decor.fill : to.background;
+            // The frame's border colors are what the decor now carries; a
+            // fresh Dynamic's all-transparent array would have applyDynamic
+            // "restore" them to transparent every frame (an outlined view's
+            // border vanished after its first transition and never came
+            // back).
+            if (decor != null) System.arraycopy(decor.borderColors, 0, now.borderColors, 0, 4);
             applyDynamic(v, now);
             v.invalidate();
         });
@@ -1118,6 +1174,40 @@ final class Mounter {
             System.arraycopy(from.borderColors, 0, decor.borderColors, 0, 4);
         }
         a.start();
+    }
+
+    /**
+     * Stops the transition and keyframe animation of `id`, which is gone: an
+     * endless keyframe animation (a pulsing placeholder) would otherwise run
+     * on unseen, and the animation handler keep its view and this mounter.
+     */
+    private void stopEffects(int id) {
+        ValueAnimator transition = transitions.get(id);
+        transitions.remove(id);
+        if (transition != null) transition.cancel();
+        ValueAnimator keyframes = keyframeAnimators.get(id);
+        keyframeAnimators.remove(id);
+        motions.remove(id);
+        if (keyframes != null) keyframes.cancel();
+    }
+
+    /**
+     * The app stopped: its running animations stop too, since no
+     * {@code DELETE} follows for their views. The animation handler is the
+     * UI thread's and holds an animation until it ends, so an endless one
+     * would keep this mounter, its views and their activity forever.
+     */
+    void cancelAnimations() {
+        java.util.ArrayList<Animator> running = new java.util.ArrayList<>();
+        for (int i = 0; i < layoutAnimators.size(); i++) running.add(layoutAnimators.valueAt(i));
+        for (int i = 0; i < transitions.size(); i++) running.add(transitions.valueAt(i));
+        for (int i = 0; i < keyframeAnimators.size(); i++) running.add(keyframeAnimators.valueAt(i));
+        // Their end listeners remove them from these maps: clear first.
+        layoutAnimators.clear();
+        transitions.clear();
+        keyframeAnimators.clear();
+        motions.clear();
+        for (Animator a : running) a.cancel();
     }
 
     /** Starts (or stops) the keyframe animation of `v`. */
@@ -1317,6 +1407,17 @@ final class Mounter {
     }
 
     /**
+     * Drops the cached mask of the ripple of view {@code id}: a
+     * RippleDrawable rasterizes its mask once and reuses it until told
+     * otherwise, so any corner-radius change under an active (or later)
+     * ripple must invalidate it for the mask to follow the new shape.
+     */
+    private void rippleMaskDirty(int id) {
+        Feedback f = feedback.get(id);
+        if (f != null && f.ripple != null) f.ripple.invalidateSelf();
+    }
+
+    /**
      * Whether presses on {@code id} show feedback. A view that also handles
      * presses shows it itself; for one that does not, the root's
      * `TouchTracker` does, and the view stays unclickable.
@@ -1444,11 +1545,13 @@ final class Mounter {
             panActivations.remove(id);
         }
         boolean selectableView = b.getInt() != 0;
+        boolean continuesText = b.getInt() != 0;
         if (v == null) return;
+        if (v instanceof TextBox) ((TextBox) v).continuesText = continuesText;
         SelectableView area = selectableViews.get(id);
         if (selectableView && (area == null || area.view != v)) {
             if (area != null) area.clear();
-            selectableViews.put(id, new SelectableView(this, v));
+            selectableViews.put(id, new SelectableView(this, v, id));
         } else if (!selectableView && area != null) {
             area.clear();
             selectableViews.remove(id);
@@ -1995,6 +2098,17 @@ final class Mounter {
                 if (v instanceof WebBox) ((WebBox) v).command(kind, text);
                 break;
             }
+            case 46: {
+                String url = (String) objects[b.getInt()];
+                int count = b.getInt();
+                java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
+                for (int i = 0; i < count; i++) {
+                    String name = (String) objects[b.getInt()];
+                    headers.put(name, (String) objects[b.getInt()]);
+                }
+                if (v instanceof WebBox) ((WebBox) v).load(url, headers);
+                break;
+            }
             case 10: {
                 float seconds = b.getFloat();
                 if (v instanceof VideoBox) ((VideoBox) v).seek(seconds);
@@ -2076,8 +2190,24 @@ final class Mounter {
                 Picker.show(context, request);
                 break;
             }
+            case 45: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                String extensions = (String) objects[b.getInt()];
+                request.extensions = extensions.isEmpty() ? new String[0] : extensions.split(",");
+                request.maxBytes = b.getInt();
+                request.files = true;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 44: {
+                Notifications.command(this, b, objects);
                 break;
             }
             case 26: {
@@ -2155,8 +2285,8 @@ final class Mounter {
                     default: source = new Object[] {0};
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
-                boolean scroll = b.getInt() != 0, js = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js);
+                boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
+                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
                 break;
             }
             case 4: {

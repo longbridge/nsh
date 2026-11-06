@@ -48,62 +48,12 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
-/// The largest side of a frame, in pixels.
-pub const MAX_SIDE: u32 = 4096;
+pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
-/// The pixels a backend shows: 8 bits per channel, premultiplied alpha.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PixelFormat {
-    /// Red, green, blue, alpha (GDK's `R8G8B8A8_PREMULTIPLIED`, Core
-    /// Graphics' premultiplied last, Android's `ARGB_8888`).
-    #[default]
-    Rgba,
-    /// Blue, green, red, alpha (Direct2D's, GPUI's).
-    Bgra,
-}
-
-impl PixelFormat {
-    fn texture(self) -> wgpu::TextureFormat {
-        match self {
-            PixelFormat::Rgba => wgpu::TextureFormat::Rgba8Unorm,
-            PixelFormat::Bgra => wgpu::TextureFormat::Bgra8Unorm,
-        }
-    }
-}
-
-/// A rendered frame: `height` rows of `width` pixels, `stride` bytes apart.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct Frame {
-    /// The pixels, row by row.
-    pub pixels: Vec<u8>,
-    /// Width in pixels.
-    pub width: u32,
-    /// Height in pixels.
-    pub height: u32,
-    /// Bytes from one row to the next (at least `width * 4`).
-    pub stride: u32,
-    /// Counts the frames shown: a new value is a new picture.
-    pub serial: u64,
-}
-
-impl Frame {
-    /// The rows, without their padding.
-    pub fn rows(&self) -> impl Iterator<Item = &[u8]> {
-        let row = self.width as usize * 4;
-        self.pixels
-            .chunks(self.stride.max(1) as usize)
-            .take(self.height as usize)
-            .map(move |r| &r[..row.min(r.len())])
-    }
-
-    /// The pixels with no padding between rows (`width * 4` bytes apart).
-    pub fn tight(&self) -> Cow<'_, [u8]> {
-        if self.stride == self.width * 4 {
-            Cow::Borrowed(&self.pixels)
-        } else {
-            Cow::Owned(self.rows().flatten().copied().collect())
-        }
+fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
+    match format {
+        PixelFormat::Rgba => wgpu::TextureFormat::Rgba8Unorm,
+        PixelFormat::Bgra => wgpu::TextureFormat::Bgra8Unorm,
     }
 }
 
@@ -271,7 +221,7 @@ impl Renderer {
                     entry_point: Some("nsh_fragment"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: self.format.texture(),
+                        format: texture_format(self.format),
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -315,7 +265,7 @@ fn picture_descriptor(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: format.texture(),
+        format: texture_format(format),
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     }
@@ -432,6 +382,8 @@ pub struct ShaderView {
     progress: Option<f32>,
     /// The transition running: since when and for how long.
     transition: Option<(Instant, Duration)>,
+    /// It runs backwards: `nsh.progress` goes from 1 to 0.
+    backwards: bool,
 }
 
 impl ShaderView {
@@ -573,7 +525,16 @@ impl ShaderView {
     /// `duration` from `now` (the platform gives the `from` picture first).
     pub fn start_transition(&mut self, duration: Duration, now: Instant) {
         self.transition = Some((now, duration));
+        self.backwards = false;
         self.dirty = true;
+    }
+
+    /// Starts a transition that runs backwards, `nsh.progress` from 1 to 0
+    /// (a page that leaves, a dialog that closes: the same shader as their
+    /// coming, the other way).
+    pub fn start_transition_backwards(&mut self, duration: Duration, now: Instant) {
+        self.start_transition(duration, now);
+        self.backwards = true;
     }
 
     /// Whether a transition runs at `now`; one that ended lets its `from`
@@ -609,7 +570,8 @@ impl ShaderView {
     fn progress_at(&self, now: Instant) -> f32 {
         if let Some((since, duration)) = self.transition {
             let t = now.saturating_duration_since(since).as_secs_f32();
-            return (t / duration.as_secs_f32().max(f32::MIN_POSITIVE)).clamp(0.0, 1.0);
+            let p = (t / duration.as_secs_f32().max(f32::MIN_POSITIVE)).clamp(0.0, 1.0);
+            return if self.backwards { 1.0 - p } else { p };
         }
         self.progress
             .or_else(|| self.layer.as_ref().map(|l| l.progress.0))
@@ -678,11 +640,18 @@ impl ShaderView {
         &self.frame
     }
 
+    /// Collects a frame that came back without rendering another; `true`
+    /// when [`Self::frame`] is new. A page's or a dialog's overlay whose
+    /// transition ended shows the frames still on their way this way.
+    pub fn collect_frame(&mut self, renderer: &Renderer) -> bool {
+        let _ = renderer.device.poll(wgpu::PollType::Poll);
+        self.collect()
+    }
+
     /// Renders a frame if one is due and collects one that came back;
     /// `true` when [`Self::frame`] is new. `now` is the frame clock's time.
     pub fn render(&mut self, renderer: &Renderer, now: Instant) -> bool {
-        let _ = renderer.device.poll(wgpu::PollType::Poll);
-        let mut collected = self.collect();
+        let mut collected = self.collect_frame(renderer);
         let Some(layer) = self.layer.clone() else {
             return collected;
         };
@@ -884,7 +853,7 @@ fn target(renderer: &Renderer, width: u32, height: u32) -> Target {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: renderer.format.texture(),
+        format: texture_format(renderer.format),
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
@@ -1199,5 +1168,30 @@ mod tests {
             "left of the box: progress 1"
         );
         assert_eq!(pixel(&f, 2, 2), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn collecting_a_frame_renders_none() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        // Reads `nsh.time`: `render` draws again on every call.
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
+            &[],
+        )));
+        assert!(!view.render(&renderer, Instant::now()), "on its way");
+        let start = Instant::now();
+        while !view.collect_frame(&renderer) {
+            assert!(start.elapsed() < Duration::from_secs(5), "no frame");
+            let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!((view.frame().width, view.frame().height), (2, 2));
+        assert!(!view.pending(), "no other frame was rendered");
+        assert!(!view.collect_frame(&renderer));
+        assert!(view.wants_frame(), "its time still runs");
     }
 }

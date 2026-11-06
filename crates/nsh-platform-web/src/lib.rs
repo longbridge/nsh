@@ -34,6 +34,7 @@ mod browser;
 mod animation;
 mod canvas;
 mod encode;
+mod event;
 mod ffi;
 mod filesystem;
 mod net;
@@ -184,6 +185,14 @@ base_parts!(
     resizable => nsh_part_resizable,
     plot => nsh_part_plot,
 );
+
+/// Makes `TextView`'s formulas typeset: no app imports this. A published
+/// runtime keeps it in a side module the page loads for the first formula.
+#[cfg(feature = "base-full")]
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_feature_math() {
+    nsh_base::text_view::install_math();
+}
 
 /// `nsh/base` in the lite runtime (feature `base-full` off): its controls
 /// (the core and the parts split from it), so the larger parts' code stays
@@ -475,6 +484,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         None => env.lifecycle,
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
+    env.notifications = flag("notifications").unwrap_or(env.notifications);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -489,6 +499,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
+        e.notifications = env.notifications;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {
@@ -958,7 +969,8 @@ fn send(f: impl FnOnce(&mut Running)) -> f64 {
     pump()
 }
 
-/// A display frame (`requestAnimationFrame`, `now` in ms): ticks the
+/// A display frame (`requestAnimationFrame`, `now` in ms), or one the page
+/// runs at a deadline while frames stop ([`nsh_deadline`]): ticks the
 /// native animations and runs JS's frame callbacks. Returns the pump
 /// delay.
 #[unsafe(no_mangle)]
@@ -981,6 +993,21 @@ pub extern "C" fn nsh_frame(now: f64) -> f64 {
         }
     });
     pump()
+}
+
+/// When the native animations next have something to end that the app
+/// hears of (an animation's `finished`): a time in ms on [`nsh_frame`]'s
+/// clock, given the time `now` on it, or -1 for nothing (none runs, or
+/// only ones that loop forever). While animation frames stop (a hidden
+/// tab), the page runs an [`nsh_frame`] by then (`Player.keepDeadline`).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_deadline(now: f64) -> f64 {
+    let at = APP.with(|a| {
+        let app = a.borrow();
+        // The animation graph's clock is in seconds.
+        app.as_ref()?.animation.deadline(now / 1000.0)
+    });
+    at.map_or(-1.0, |at| at * 1000.0)
 }
 
 /// An event on view `id`, named by its prop (`onPress`), with its payload
@@ -1006,193 +1033,8 @@ pub unsafe extern "C" fn nsh_event(
     // SAFETY: guaranteed by the caller.
     let json = unsafe { string(ptr, len) };
     let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-    let num = |k: &str| value.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-    let text = |k: &str| {
-        value
-            .get(k)
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let payload = match kind {
-        EventKind::ScrollEnd
-        | EventKind::ScrollDragStart
-        | EventKind::ScrollDragEnd
-        | EventKind::MomentumStart
-        | EventKind::MomentumEnd => EventPayload::Scroll(point(Points(num("x")), Points(num("y")))),
-        // A video's and a web view's loads carry more than an image's.
-        EventKind::Load if value.get("duration").is_none() && value.get("url").is_none() => {
-            // `naturalWidth` / `naturalHeight`: whole pixels.
-            EventPayload::Image(size(
-                DevicePixels(num("width") as i32),
-                DevicePixels(num("height") as i32),
-            ))
-        }
-        EventKind::Error => EventPayload::Error {
-            message: text("message"),
-        },
-        // `{ position, pagePosition, modifiers, pressedButton }`, as handlers
-        // get it.
-        EventKind::MouseEnter | EventKind::MouseLeave | EventKind::MouseMove => {
-            let (position, page_position, modifiers) = pointer_at(&value);
-            let pressed_button = value
-                .get("pressedButton")
-                .and_then(|v| v.as_str())
-                .and_then(mouse_button);
-            EventPayload::Mouse(nsh_core::MouseEvent::new(
-                position,
-                page_position,
-                modifiers,
-                pressed_button,
-            ))
-        }
-        EventKind::ContextMenu
-        | EventKind::Press
-        | EventKind::LongPress
-        | EventKind::PressDown
-        | EventKind::PressUp
-            if kind == EventKind::ContextMenu || value.get("pagePosition").is_some() =>
-        {
-            // `{ position, pagePosition, modifiers }` (presses: and
-            // `clicks`), as handlers get it.
-            let (position, page_position, modifiers) = pointer_at(&value);
-            if kind != EventKind::ContextMenu {
-                EventPayload::Press(nsh_core::PressEvent {
-                    position,
-                    page_position,
-                    modifiers,
-                    clicks: (num("clicks") as u32).max(1),
-                })
-            } else {
-                EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-                    position,
-                    page_position,
-                    modifiers,
-                })
-            }
-        }
-        EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
-            text: text("text"),
-            count: num("count") as u32,
-        },
-        // `{ bounds: { origin, size } }`, as handlers get it.
-        EventKind::CaretMove => {
-            let caret = value.get("bounds");
-            let n = |part: &str, c: &str| {
-                caret
-                    .and_then(|v| v.get(part))
-                    .and_then(|v| v.get(c))
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0) as f32
-            };
-            EventPayload::caret(nsh_core::Bounds {
-                origin: point(Points(n("origin", "x")), Points(n("origin", "y"))),
-                size: size(Points(n("size", "width")), Points(n("size", "height"))),
-            })
-        }
-        EventKind::Host => EventPayload::Json(value),
-        _ => match &value {
-            serde_json::Value::Object(map) => EventPayload::Map(
-                map.iter()
-                    .filter_map(|(k, v)| {
-                        // Payload keys are static in the core: intern the
-                        // known ones.
-                        let key: &'static str = match k.as_str() {
-                            "key" => "key",
-                            "start" => "start",
-                            "end" => "end",
-                            "id" => "id",
-                            "index" => "index",
-                            "data" => "data",
-                            "actionName" => "actionName",
-                            "currentTime" => "currentTime",
-                            "duration" => "duration",
-                            "isBuffering" => "isBuffering",
-                            "width" => "width",
-                            "height" => "height",
-                            "top" => "top",
-                            "right" => "right",
-                            "bottom" => "bottom",
-                            "left" => "left",
-                            "text" => "text",
-                            "composing" => "composing",
-                            "has" => "has",
-                            "uri" => "uri",
-                            "files" => "files",
-                            "error" => "error",
-                            "url" => "url",
-                            "title" => "title",
-                            "loading" => "loading",
-                            "canGoBack" => "canGoBack",
-                            "canGoForward" => "canGoForward",
-                            "loaded" => "loaded",
-                            "total" => "total",
-                            "color" => "color",
-                            _ => return None,
-                        };
-                        let v = match v {
-                            serde_json::Value::Number(n) => {
-                                PayloadValue::Number(n.as_f64().unwrap_or(0.0))
-                            }
-                            serde_json::Value::Bool(b) => PayloadValue::Bool(*b),
-                            serde_json::Value::String(s) => PayloadValue::Str(s.clone()),
-                            _ => return None,
-                        };
-                        Some((key, v))
-                    })
-                    .collect(),
-            ),
-            _ => EventPayload::None,
-        },
-    };
+    let payload = event::payload(kind, value);
     send(|app| app.control.dispatch_event(id, kind, payload))
-}
-
-/// The pointer of a mouse or press payload: its `position`, `pagePosition`
-/// and `modifiers`.
-fn pointer_at(
-    value: &serde_json::Value,
-) -> (
-    nsh_core::Point<Points>,
-    nsh_core::Point<Points>,
-    nsh_core::keymap::Modifiers,
-) {
-    let at = |k: &str| {
-        let p = value.get(k);
-        let n = |c: &str| {
-            p.and_then(|p| p.get(c))
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0) as f32
-        };
-        point(Points(n("x")), Points(n("y")))
-    };
-    let flag = |k: &str| {
-        value
-            .get("modifiers")
-            .and_then(|m| m.get(k))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    };
-    let modifiers = nsh_core::keymap::Modifiers {
-        ctrl: flag("control"),
-        alt: flag("alt"),
-        shift: flag("shift"),
-        cmd: flag("platform"),
-    };
-    (at("position"), at("pagePosition"), modifiers)
-}
-
-/// The button a mouse payload's `pressedButton` names (`nsh.js` names the
-/// first of the DOM's `buttons` bits held).
-fn mouse_button(name: &str) -> Option<nsh_core::MouseButton> {
-    Some(match name {
-        "left" => nsh_core::MouseButton::Left,
-        "right" => nsh_core::MouseButton::Right,
-        "middle" => nsh_core::MouseButton::Middle,
-        "back" => nsh_core::MouseButton::Back,
-        "forward" => nsh_core::MouseButton::Forward,
-        _ => return None,
-    })
 }
 
 /// `onPaste` of input `id`: what the user pasted, as JSON `{ text, files:
@@ -1412,8 +1254,9 @@ fn key_of(code: u32) -> Option<Key> {
 /// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
 /// Windows key), `editing` when a text field has the focus, `repeat` for
 /// an auto-repeat. Returns the binding that fires, -1 for none (the key
-/// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
-/// reports a firing binding with [`nsh_key_command`].
+/// goes on), -2 for a held key's repeat (consumed, nothing fires) or
+/// `-3 - id` for binding `id` passing the key through (it fires, then the
+/// key goes on). JS reports a firing binding with [`nsh_key_command`].
 ///
 /// `f64` keeps every `u32` binding ID positive in JS, including Rust
 /// shortcuts (`1 << 31` and up) and overlay Escape (`u32::MAX`), while
@@ -1439,6 +1282,7 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -
         KeyMatch::None => -1.0,
         KeyMatch::Held => -2.0,
         KeyMatch::Fire(id) => id as f64,
+        KeyMatch::Notify(id) => -3.0 - id as f64,
     }
 }
 

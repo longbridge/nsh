@@ -234,6 +234,17 @@ fn typing_inserts_at_the_caret_and_reports_the_text() {
 }
 
 #[test]
+fn typing_the_same_text_after_moving_the_caret_inserts_it() {
+    let mut app = start(props(""));
+    app.type_text("id:editor", "a").unwrap();
+    see(&mut app, &value("a"));
+    keys(&mut app, &["left"]);
+    see(&mut app, "Sel 0:0");
+    app.type_text("id:editor", "a").unwrap();
+    see(&mut app, &value("aa"));
+}
+
+#[test]
 fn arrows_move_and_shift_arrows_select() {
     let mut app = start(props("abc\ndef"));
     focus(&mut app);
