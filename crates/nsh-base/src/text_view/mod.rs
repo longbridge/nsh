@@ -15,6 +15,11 @@ mod parts;
 mod tex_text;
 mod view;
 
+/// Makes formulas typeset in a web runtime: the gate of its side module
+/// (`nsh_feature_math`), which holds what this reaches and nothing else does.
+#[cfg(all(feature = "math", target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use self::formula::install as install_math;
 pub use self::{
     document::{
         Alert, Block, CodeBlock, ColumnAlign, CustomNode, Document, Footnote, Image, ImageLength,
@@ -31,9 +36,3 @@ pub use self::{
         TextViewSelectionEvent, text_view,
     },
 };
-
-/// Makes formulas typeset in a web runtime: the gate of its side module
-/// (`nsh_feature_math`), which holds what this reaches and nothing else does.
-#[cfg(all(feature = "math", target_arch = "wasm32"))]
-#[doc(hidden)]
-pub use self::formula::install as install_math;

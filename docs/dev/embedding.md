@@ -2,7 +2,10 @@
 
 - `nsh package <entry> --target ios|ios-simulator|android|linux|macos|windows` builds an installable app from the prebuilt runtime: metadata from
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
-  and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>
+  and a dark window theme, so the launch screen is in it) or flags. iOS and macOS packages add the app's
+  `ios` / `macos` `infoPlist` keys and `entitlements` (`crates/nsh-cli/src/apple.rs`: JSON as property list values,
+  the keys NSH sets refused with what to set instead; device builds check entitlements against the profile, which
+  keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
@@ -315,6 +318,13 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Notifications.** The process's notifications (`nsh`'s `Notifications`) belong to the embedding app unless it
+  hands them to the app it embeds: `AppOptions::notifications` on macOS and Windows (off by default; `run_app` sets
+  it). Then the view's app owns them for the whole process: on macOS NSH becomes the notification center's delegate
+  (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
+  AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
+  permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
+  the app by its id either way.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),

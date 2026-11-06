@@ -311,7 +311,7 @@ impl WebHost {
     }
 
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-    /// `injectJavaScript()` and `postMessage()`.
+    /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &nsh_core::Command) {
         let Some(web) = &self.web else { return };
         let script = match command {
@@ -339,6 +339,23 @@ impl WebHost {
                 }
                 (nsh_core::Command::StopLoading, _) => {
                     let _: () = msg_send![web, stopLoading];
+                }
+                // Only this request carries the headers; WebKit makes its
+                // subresources' and later navigations' requests itself.
+                (nsh_core::Command::Load(load), _) => {
+                    let Some(url) = NSURL::URLWithString(&NSString::from_str(&load.src)) else {
+                        return;
+                    };
+                    let request: Retained<AnyObject> =
+                        msg_send![class(c"NSMutableURLRequest"), requestWithURL: &*url];
+                    for (name, value) in &load.headers {
+                        let _: () = msg_send![
+                            &request,
+                            setValue: &*NSString::from_str(value),
+                            forHTTPHeaderField: &*NSString::from_str(name)
+                        ];
+                    }
+                    let _: Option<Retained<AnyObject>> = msg_send![web, loadRequest: &*request];
                 }
                 _ => {}
             }

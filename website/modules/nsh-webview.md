@@ -93,6 +93,7 @@ interface WebViewNavigation {
 | `stopLoading()` | Stops loading. |
 | `injectJavaScript(script)` | Runs `script` in the page. |
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
+| `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
 
 ## Talking to the page
 

@@ -153,6 +153,9 @@ pub(crate) fn decode_command<'js>(name: &str, arg: Value<'js>) -> compat::Result
             Some(input) => Command::SendInput(input),
             None => return Ok(None),
         },
+        // An iframe cannot send headers with its request: `load` does
+        // nothing here rather than load the page without them.
+        "load" => return Ok(None),
         "seek" => Command::Seek(arg.as_number().unwrap_or(0.0)),
         "native" => {
             let o = arg.as_object();

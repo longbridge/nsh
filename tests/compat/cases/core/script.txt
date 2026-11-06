@@ -427,3 +427,8 @@ tap id:risky
 expect Caught pressed
 expect Break
 covers [nsh] ErrorBoundary
+# web-load
+tap id:case-web-load
+tap id:load
+expect Loaded, invalid header: TypeError
+covers [nsh] WebView

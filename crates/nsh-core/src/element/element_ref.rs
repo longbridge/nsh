@@ -267,6 +267,14 @@ impl ElementRef {
         self.send(Command::SendInput(input));
     }
 
+    /// Loads `load.src` in a web view with `load.headers` on the document
+    /// request only (not its subresources, later navigations or reloads),
+    /// as an `Authorization` header for a signed-in page. Its host must be
+    /// one the `webview` capability allows.
+    pub fn load(&self, load: crate::WebLoad) {
+        self.send(Command::Load(load));
+    }
+
     /// Jumps a video to `seconds`.
     pub fn seek(&self, seconds: f64) {
         self.send(Command::Seek(seconds));
