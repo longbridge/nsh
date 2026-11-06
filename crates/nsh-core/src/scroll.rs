@@ -394,6 +394,29 @@ impl ScrollState {
         point(self.x - inset.left, self.y - inset.top)
     }
 
+    /// Orders the scroll view's children as they are on screen, the order
+    /// Tab and screen readers go through its content in: along its axis,
+    /// then across it. A list recycles its cells, so in the view tree they
+    /// stay in the order they were made, not their rows'. `origin` is a
+    /// child's frame origin; the sort is stable.
+    pub fn reading_order<T>(&self, children: &mut [T], origin: impl Fn(&T) -> Point<Points>) {
+        if children.len() < 2 {
+            return;
+        }
+        let key = |child: &T| {
+            let at = origin(child);
+            if self.horizontal {
+                (at.x.0, at.y.0)
+            } else {
+                (at.y.0, at.x.0)
+            }
+        };
+        children.sort_by(|a, b| {
+            let (a, b) = (key(a), key(b));
+            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+        });
+    }
+
     /// The offset along the main axis.
     fn offset(&self) -> f32 {
         if self.horizontal { self.x.0 } else { self.y.0 }
@@ -1573,6 +1596,31 @@ pub fn reveal(host: &impl ScrollHost, start: Points, len: Points) -> Points {
 mod tests {
     use super::*;
     use crate::EdgeInsets;
+
+    #[test]
+    fn content_is_read_in_the_order_it_is_on_screen() {
+        // Recycled cells: made for rows 0 to 3, rows 0 and 1 scrolled
+        // away and their cells bound to rows 4 and 5.
+        let cells = [(0, 160.0), (1, 200.0), (2, 80.0), (3, 120.0)];
+        let mut vertical = cells;
+        scroll_state((100.0, 1000.0), false)
+            .reading_order(&mut vertical, |c| point(Points(0.0), Points(c.1)));
+        assert_eq!(vertical.map(|c| c.0), [2, 3, 0, 1]);
+        // Two columns read row by row; a horizontal list column by column.
+        let grid = [
+            (0, (50.0, 0.0)),
+            (1, (0.0, 40.0)),
+            (2, (0.0, 0.0)),
+            (3, (50.0, 40.0)),
+        ];
+        let at = |c: &(i32, (f32, f32))| point(Points(c.1.0), Points(c.1.1));
+        let mut rows = grid;
+        scroll_state((100.0, 1000.0), false).reading_order(&mut rows, at);
+        assert_eq!(rows.map(|c| c.0), [2, 0, 1, 3]);
+        let mut columns = grid;
+        scroll_state((1000.0, 100.0), true).reading_order(&mut columns, at);
+        assert_eq!(columns.map(|c| c.0), [2, 1, 0, 3]);
+    }
 
     fn scroll_state(content: (f32, f32), horizontal: bool) -> ScrollState {
         ScrollState {

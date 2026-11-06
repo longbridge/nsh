@@ -560,6 +560,26 @@ impl NshView {
         f(&self.0.children.borrow())
     }
 
+    /// Calls `f` with its children in the order Tab and screen readers go
+    /// through them: a scroll view's as they are on screen (a list's
+    /// recycled cells are not in their rows' order in the tree:
+    /// [`ScrollState::reading_order`]), any other view's bottom to top.
+    pub(crate) fn with_children_in_reading_order<R>(&self, f: impl FnOnce(&[NshView]) -> R) -> R {
+        let sorted = self.try_state().and_then(|s| {
+            let scroll = s.scroll.as_ref()?;
+            let mut kids = self.child_views();
+            scroll.reading_order(&mut kids, |v| {
+                v.try_state()
+                    .map_or_else(Default::default, |s| s.frame.origin)
+            });
+            Some(kids)
+        });
+        match sorted {
+            Some(kids) => f(&kids),
+            None => self.with_children(f),
+        }
+    }
+
     /// Inserts this view into `parent`, below `before` (on top when `None`
     /// or not a child of `parent`). Detaches it from its old parent first.
     pub(crate) fn insert_before(&self, parent: &NshView, before: Option<&NshView>) {
