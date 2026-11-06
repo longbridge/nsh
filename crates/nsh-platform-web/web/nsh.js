@@ -1929,6 +1929,16 @@ class Player {
     box.replaceChildren(copy, message);
   }
 
+  /** Loads `img` from `src`, the address of `uri`: an app's asset from
+   * another origin (a packaged site's `--asset-url`) as a CORS image, so a
+   * canvas and a transition's snapshot may still draw it. */
+  setImageSource(img, uri, src) {
+    const asset = uri?.startsWith("asset:/") && new URL(src, location.href).origin !== location.origin;
+    if (asset) img.crossOrigin = "anonymous";
+    else img.removeAttribute("crossorigin");
+    img.src = src;
+  }
+
   asset(uri) {
     if (!uri) return uri;
     if (uri.startsWith("asset:/")) {
@@ -2178,7 +2188,11 @@ class Player {
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
     const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
+    // A stack laid out at no size (`display: none`: a tab not selected) or
+    // at one again changes whether it shows (`stackShown`).
+    const emptied = el._kind === "stack" && el._frame && !(el._frame[2] > 0 && el._frame[3] > 0) !== !(w > 0 && h > 0);
     el._frame = [x, y, w, h];
+    if (emptied) this.syncHistorySoon();
     this.placeFrame(el);
     this.readingChanged(el.parentNode);
     if (resized && el._corners) this.placeCorners(el);
@@ -2748,7 +2762,7 @@ class Player {
     if (el._ph) {
       el._ph.className = el._imgClass + (el._ph.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
       if (ph) {
-        if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
+        if (el._ph.getAttribute("src") !== ph) this.setImageSource(el._ph, placeholder, ph);
       } else {
         el._ph.remove();
         el._ph = null;
@@ -2768,7 +2782,7 @@ class Player {
     // Shown when it loaded: faded in over the placeholder, or at once.
     img.style.transition = "";
     img.style.opacity = fade > 0 ? "0" : "";
-    img.src = src;
+    this.setImageSource(img, uri, src);
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
@@ -4563,7 +4577,7 @@ class Player {
         entry.ready = true;
         for (const w of entry.waiting) this.drawSoon(w);
       };
-      img.src = src;
+      this.setImageSource(img, uri, src);
       this.images.set(src, entry);
     }
     if (!entry.ready) entry.waiting.add(el);
@@ -5005,13 +5019,27 @@ class Player {
     return modals[modals.length - 1] ?? null;
   }
 
+  /** Whether stack `el` shows: in the tree, visible, and laid out with a
+   * size, as the views around it. `display: none` (a tab not selected) is
+   * laid out by the core at zero size, which the browser's
+   * `checkVisibility` does not see. */
+  stackShown(el) {
+    if (!el.isConnected || !(el.checkVisibility?.({ visibilityProperty: true }) ?? true)) return false;
+    // It and the views around it: a page of a stack laid out at no size is
+    // laid out at its stack's.
+    for (let view = el; view && view !== this.root; view = view.parentElement) {
+      const frame = view._frame;
+      if (frame && !(frame[2] > 0 && frame[3] > 0)) return false;
+    }
+    return true;
+  }
+
   /** The innermost shown stack (inside `within`, else anywhere) that goes
    * back: it has a screen under the top one, or a top one that asks. */
   backStack(within) {
-    const shown = (el) => el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true);
     const candidates = [];
     for (const el of this.views.values()) {
-      if (el._kind !== "stack" || !shown(el) || (within && !within.contains(el))) continue;
+      if (el._kind !== "stack" || !this.stackShown(el) || (within && !within.contains(el))) continue;
       const screens = this.screensOf(el);
       if (screens.length > 1 || screens[screens.length - 1]?._screen?.preventBack) candidates.push(el);
     }
@@ -5080,7 +5108,7 @@ class Player {
   backDepth() {
     let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
     for (const el of this.views.values()) {
-      if (el._kind === "stack" && el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true)) {
+      if (el._kind === "stack" && this.stackShown(el)) {
         depth += Math.max(0, this.screensOf(el).length - 1);
       }
     }
@@ -6371,7 +6399,7 @@ class Player {
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
     img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ error: `failed to load ${uri}` });
-    img.src = this.asset(uri);
+    this.setImageSource(img, uri, this.asset(uri));
   }
 
   // Network -------------------------------------------------------------

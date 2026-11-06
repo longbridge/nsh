@@ -1108,6 +1108,11 @@ impl Nav {
             let ns = st.view.ns();
             ns.window().is_some()
                 && !ns.isHiddenOrHasHiddenAncestor()
+                && nsh_core::navigation::shown_in_layout(
+                    std::iter::successors(Some(st.view.clone()), NshView::parent_view)
+                        .filter(|v| v.parent_view().is_some())
+                        .map(|v| v.state().frame),
+                )
                 && within.is_none_or(|w| ns.isDescendantOf(w.ns()))
                 && st.screens.takes_back(|top| {
                     self.screens

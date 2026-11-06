@@ -26,6 +26,7 @@ use crate::{
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
+        services::FetchFailure,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
     },
@@ -478,7 +479,7 @@ impl ClipboardAnswer {
 struct PendingFetch {
     /// What arrived so far.
     response: crate::element::HttpResponse,
-    answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
+    answer: AnswerSlot<Result<crate::element::HttpResponse, FetchFailure>>,
 }
 
 /// What notifications wait for ([`crate::notifications`]).
@@ -5314,6 +5315,12 @@ impl<M: TextEngine> Core<M> {
                 );
                 self.components.fetch_requests.push((id, *request));
             }
+            Action::RegisterFont(data, answer) => {
+                // The family is the answer: a font without one is refused.
+                let family = crate::text::font_family(&data)
+                    .and_then(|family| self.register_font(&data).map(|()| family));
+                answer.borrow_mut().deliver(family);
+            }
             Action::PickImages(request, answer) => {
                 if !self.access.allows_picker() {
                     answer.borrow_mut().deliver(Vec::new());
@@ -5603,12 +5610,29 @@ impl<M: TextEngine> Core<M> {
             }
             FetchEvent::Failed(error) => {
                 if let Some(pending) = self.components.fetches.remove(&id) {
-                    pending.answer.borrow_mut().deliver(Err(error));
+                    pending
+                        .answer
+                        .borrow_mut()
+                        .deliver(Err(FetchFailure::Failed(error)));
                 }
                 return false;
             }
         }
         true
+    }
+
+    /// Fails the tasks' request `id`, which the app's capabilities do not
+    /// grant: `url` is the URL refused, the request's or a redirect's (the
+    /// engine checks every hop), `message` why. A task's
+    /// [`fetch`](crate::element::fetch) fails with the message; a module
+    /// function's call rejects with `ERR_ACCESS_DENIED`, `permission`
+    /// `"network"` and `resource` the URL, as JS's `fetch` does
+    /// (`registerFont`).
+    pub fn fetch_refused(&mut self, id: u32, message: String, url: String) {
+        if let Some(pending) = self.components.fetches.remove(&id) {
+            let refused = FetchFailure::Refused { message, url };
+            pending.answer.borrow_mut().deliver(Err(refused));
+        }
     }
 
     /// Resolves clipboard read `id` with the platform's answer (an empty
