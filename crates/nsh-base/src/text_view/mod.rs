@@ -12,6 +12,7 @@ mod markdown;
 #[cfg(feature = "math")]
 mod math;
 mod parts;
+mod selection;
 mod tex_text;
 mod view;
 
@@ -30,9 +31,10 @@ pub use self::{
         mdast,
     },
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
+    selection::{TextSelectionFormat, TextSelectionOptions},
     view::{
-        CodeHighlighter, TextView, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewProps,
-        text_view,
+        CodeHighlighter, TextView, TextViewApi, TextViewCodeAction, TextViewCodeActionEvent,
+        TextViewElement, TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath,
+        TextViewProps, TextViewSelectionEvent, text_view,
     },
 };

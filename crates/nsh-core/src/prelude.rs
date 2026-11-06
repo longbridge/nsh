@@ -167,6 +167,7 @@ pub use crate::element::{
     System,
     Task,
     Text,
+    TextSelectionEvent,
     TextShadow,
     Timing,
     Tokens,

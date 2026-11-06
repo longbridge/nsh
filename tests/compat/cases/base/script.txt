@@ -671,6 +671,21 @@ style text:"Area label" userSelect none
 nostyle text:"Inner text" userSelect
 style text:"Own selection" userSelect text
 nostyle text:"Outside text" userSelect
+# The selection each area reports: its text, empty once nothing is selected.
+expect Area selected: none
+expect Own selected: none
+listens id:area onSelectionChange
+event id:area onSelectionChange text=first
+expect Area selected: first
+event id:area onSelectionChange text=
+expect Area selected: nothing
+event id:own onSelectionChange text=Own
+expect Own selected: Own
+expect Own read: Own | **Own** | <p><strong>Own</strong></p>
+event id:own onSelectionChange text=
+expect Own read: nothing
+expect Area selected: nothing
+covers [events] onSelectionChange
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
