@@ -576,6 +576,10 @@ impl Session {
         app.answer_dialogs_myself();
         app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
+        // The link that launched it, there before the app listens.
+        if let Some(url) = &launch.deep_link {
+            app.send_deep_link(url);
+        }
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(app))));
@@ -763,6 +767,12 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
         return unsupported(
             "host.handlers",
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
+        );
+    }
+    if launch.deep_link.is_some() {
+        return unsupported(
+            "deepLink",
+            "the system hands links to packaged apps: run the test without --target",
         );
     }
     let Some(target) = target else {
@@ -1138,6 +1148,7 @@ mod tests {
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
+            deep_link: None,
         }
     }
 
@@ -1164,6 +1175,16 @@ mod tests {
         plain.reduced_motion = Some(true);
         assert_eq!(check(&plain, &ios), Ok(()));
         assert_eq!(check(&plain, &macos), Ok(()));
+
+        // A launching link: only headless runs hand one over.
+        let mut linked = launch();
+        linked.deep_link = Some("myapp://item/42".into());
+        let error = check(&linked, &macos).unwrap_err();
+        assert!(
+            error.contains("`deepLink` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
 
         // A size: a desktop's window takes it, a device's screen does not.
         let mut sized = launch();

@@ -112,6 +112,9 @@ pub(crate) enum Action {
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
+    /// The next deep link the system hands the app ([`crate::deep_link`])
+    /// resolves the slot, those that came before first.
+    NextDeepLink(AnswerSlot<String>),
     /// Whether a web view's ref gives its page trusted input here
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.

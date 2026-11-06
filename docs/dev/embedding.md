@@ -22,6 +22,14 @@
   are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- Deep links: `nsh.json` `"deepLinks": { "schemes": [...] }` names the URL schemes a packaged app claims (checked by
+  `nsh_core::deep_link::schemes_from_json` in the bundler, the CLI and a Rust app's generated root). `nsh package`
+  declares them to the system (`CFBundleURLTypes` on macOS and iOS) and writes them to `app.json`, which the runner
+  reads with the app's id (`nsh_engine::Bundle::deep_link_schemes`; a Rust app's `Root::deep_link_schemes`), never
+  from the app's code. The platform reports every URL the system opens the app with as the root's `DeepLink` event; the
+  core drops the links of other schemes and keeps the rest until the app listens (`DeepLinks.on("open")`,
+  `next_deep_link()`). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
+  A signed package embedded in another app claims no schemes: the embedding app owns them.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
   with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries

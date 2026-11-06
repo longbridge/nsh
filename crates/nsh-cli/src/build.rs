@@ -333,11 +333,16 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
         let path = out.join(name);
         fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
     }
-    // The app's id, which names where it keeps its data (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the schemes
+    // it claims (`Bundle::read`).
     let app = out.join("app.json");
     let id = crate::package::app_id(entry)?;
-    fs::write(&app, serde_json::json!({ "id": id }).to_string())
-        .with_context(|| format!("write {}", app.display()))?;
+    let schemes = crate::package::read_config(&dunce::canonicalize(entry)?)?.deep_link_schemes()?;
+    fs::write(
+        &app,
+        crate::package::app_json(serde_json::json!({ "id": id }), &schemes),
+    )
+    .with_context(|| format!("write {}", app.display()))?;
     let declared = out.join("capabilities.json");
     match built.capabilities_json() {
         Some(json) => {

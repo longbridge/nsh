@@ -18,6 +18,7 @@ pub mod color;
 mod core;
 mod css;
 mod css_named;
+pub mod deep_link;
 pub mod desktop;
 mod effects;
 pub mod element;

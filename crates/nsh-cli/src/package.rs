@@ -111,6 +111,10 @@ pub(crate) struct AppConfig {
     pub(crate) web: WebConfig,
     /// Where the app finds its updates (`update.rs`).
     pub(crate) updater: Option<crate::updater::UpdaterConfig>,
+    /// `{ "schemes": [...] }`: the URL schemes the app claims, whose links
+    /// open it ([`AppConfig::deep_link_schemes`]).
+    #[serde(default)]
+    pub(crate) deep_links: Option<serde_json::Value>,
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
@@ -147,6 +151,16 @@ impl AppConfig {
         }
     }
 
+    /// The URL schemes the app claims (`"deepLinks": { "schemes": [...] }`),
+    /// checked, in lower case.
+    pub(crate) fn deep_link_schemes(&self) -> anyhow::Result<Vec<String>> {
+        match &self.deep_links {
+            None => Ok(Vec::new()),
+            Some(value) => nsh_core::deep_link::schemes_from_json(value)
+                .map_err(|e| anyhow::anyhow!("nsh.json: {e}")),
+        }
+    }
+
     /// Adds what the system shows when the app first asks for the
     /// microphone and speech recognition, which it requires (it ends an app
     /// that asks without them), when the app may recognize speech.
@@ -171,6 +185,35 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
         "The app turns what you say into text.",
     ),
 ];
+
+/// The `app.json` of a package: `info` (the app's id, ...) with the
+/// schemes it claims, which its runner hands the core so the deep links of
+/// others are dropped (`nsh_engine::Bundle::deep_link_schemes`).
+pub(crate) fn app_json(mut info: serde_json::Value, schemes: &[String]) -> String {
+    if !schemes.is_empty() {
+        info["deepLinks"] = serde_json::json!({ "schemes": schemes });
+    }
+    info.to_string()
+}
+
+/// Declares the URL schemes the app claims in an Apple `Info.plist`
+/// (`CFBundleURLTypes`), so the system opens the app for their links.
+fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
+    use plist::Value;
+    if schemes.is_empty() {
+        return;
+    }
+    let mut url_type = plist::Dictionary::new();
+    url_type.insert("CFBundleURLName".into(), Value::String(id.to_owned()));
+    url_type.insert(
+        "CFBundleURLSchemes".into(),
+        Value::Array(schemes.iter().cloned().map(Value::String).collect()),
+    );
+    info.insert(
+        "CFBundleURLTypes".into(),
+        Value::Array(vec![Value::Dictionary(url_type)]),
+    );
+}
 
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
@@ -316,6 +359,12 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
+    let schemes = config.deep_link_schemes()?;
+    if options.target == PackageTarget::Web && !schemes.is_empty() {
+        ui::warn(
+            "nsh.json deepLinks: a web page opens from its address, so the schemes are left out",
+        );
+    }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let executable = if executable.is_empty() {
         "App".to_owned()
@@ -388,10 +437,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    // The app's id, which names where it keeps its data (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the schemes
+    // it claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
-        serde_json::json!({ "id": id }).to_string(),
+        app_json(serde_json::json!({ "id": id }), &schemes),
     )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
@@ -412,6 +462,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Gpui => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk);
+    url_types(&mut info, &id, &schemes);
     if let Some(icon) = &config.icon {
         let partial = compile_icon(icon, &app, sdk)?;
         for (key, value) in partial {
@@ -752,7 +803,8 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
-    fs::write(nsh.join("app.json"), info.to_string())?;
+    let schemes = config.deep_link_schemes()?;
+    fs::write(nsh.join("app.json"), app_json(info, &schemes))?;
     let icon = match &config.icon {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
@@ -760,7 +812,9 @@ fn package_macos(
         }
         None => false,
     };
-    plist::Value::Dictionary(macos_info_plist(name, id, executable, config, icon))
+    let mut plist = macos_info_plist(name, id, executable, config, icon);
+    url_types(&mut plist, id, &schemes);
+    plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
     let output = Command::new("codesign")
@@ -1193,6 +1247,49 @@ mod tests {
         assert!(usage(None));
         assert!(usage(Some(serde_json::json!({ "speech": true }))));
         assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+    }
+
+    #[test]
+    fn apps_claim_their_url_schemes_in_the_package() {
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "deepLinks": { "schemes": ["MyApp", "myapp-dev"] } }"#)
+                .unwrap();
+        let schemes = config.deep_link_schemes().unwrap();
+        assert_eq!(schemes, ["myapp", "myapp-dev"]);
+        // The system opens the app for their links...
+        let mut info = info_plist("A", "com.a", "a", &config, "iphoneos");
+        url_types(&mut info, "com.a", &schemes);
+        let types = info["CFBundleURLTypes"].as_array().unwrap();
+        let url_type = types[0].as_dictionary().unwrap();
+        assert_eq!(url_type["CFBundleURLName"].as_string(), Some("com.a"));
+        let listed: Vec<_> = url_type["CFBundleURLSchemes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(listed, ["myapp", "myapp-dev"]);
+        // ...and the runner lets them through.
+        let json: serde_json::Value =
+            serde_json::from_str(&app_json(serde_json::json!({ "id": "com.a" }), &schemes))
+                .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "id": "com.a", "deepLinks": { "schemes": ["myapp", "myapp-dev"] } })
+        );
+        // An app that claims none declares none.
+        let mut info = macos_info_plist("A", "com.a", "a", &AppConfig::default(), false);
+        url_types(&mut info, "com.a", &[]);
+        assert!(!info.contains_key("CFBundleURLTypes"));
+        assert_eq!(
+            app_json(serde_json::json!({ "id": "com.a" }), &[]),
+            r#"{"id":"com.a"}"#
+        );
+        // Schemes of the system and other apps are refused.
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "deepLinks": { "schemes": ["https"] } }"#).unwrap();
+        let error = config.deep_link_schemes().unwrap_err().to_string();
+        assert!(error.starts_with("nsh.json: deepLinks.schemes:"), "{error}");
     }
 
     #[test]

@@ -19,6 +19,7 @@ mod compiled;
 mod component_bench;
 mod components;
 mod counter;
+mod deep_links;
 mod errors;
 mod external_wake;
 mod fetch;

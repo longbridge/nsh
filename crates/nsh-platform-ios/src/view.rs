@@ -89,6 +89,12 @@ impl AppView {
         Inner::load(&self.inner, App::Rust(root));
     }
 
+    /// Hands `url`, a link the system opened the standalone app with, to
+    /// the running app (`DeepLinks`).
+    pub(crate) fn deep_link(&self, url: String) {
+        self.inner.deep_link(url);
+    }
+
     /// Sets where `asset:/…` files (images, fonts) are read from. A change
     /// applies from the next [`AppView::load`].
     pub fn set_asset_base(&self, base: Option<crate::AssetBase>) {
@@ -286,6 +292,15 @@ impl Inner {
         // Below development overlays.
         this.container.insertSubview_atIndex(surface.view(), 0);
         state.surface = Some(surface);
+    }
+
+    /// Hands `url`, a link the system opened the app with, to the running
+    /// app ([`Surface::deep_link`]).
+    pub(crate) fn deep_link(&self, url: String) {
+        match &self.state.borrow().surface {
+            Some(surface) => surface.deep_link(url),
+            None => log::warn!("deep link dropped: no app runs"),
+        }
     }
 
     /// Applies a development update in place; false when no app runs.
