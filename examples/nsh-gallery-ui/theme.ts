@@ -1,6 +1,6 @@
 // Internal design tokens and finishes shared by gallery and website demos.
-import type { Tokens, ViewStyle } from "nsh";
-import { token } from "nsh";
+import type { AnimatedValue, Tokens, ViewStyle } from "nsh";
+import { createAnimatedValue, effect, reduceMotion, token } from "nsh";
 import { Easing } from "nsh";
 import { colorScheme } from "nsh";
 import { platform } from "nsh";
@@ -181,10 +181,11 @@ export interface Finish {
  * hard 1-point drop under what stands up and a 1-point inner shade in what
  * is sunk; only floating surfaces (menus, glass) cast a soft
  * shadow. `hover` and `pressed` are a raised control's states, `fill` a
- * slider's or a meter's run of the accent.
+ * slider's or a meter's run of the accent; `knob` a switch's knob on its
+ * sunk track, `knobOn` the white one with an olive edge on the citrus.
  */
 export const finish = themed<
-  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>
+  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "knobOn" | "pill" | "chip" | "glass" | "menu", Finish>
 >(finishes.dark, finishes.light);
 
 export type Tone = "neutral" | "accent" | "info" | "warn" | "danger" | "up" | "down";
@@ -232,6 +233,27 @@ export const motion = {
   move: { stiffness: 504, damping: 38 },
   enter: { duration: 420, easing: Easing.out(Easing.cubic) },
 } as const;
+
+/**
+ * An animated value that springs to `target` each time it changes (a
+ * control's state: 1 while on, 0 while off), natively: JS only starts each
+ * spring. A change mid-way turns it from where it is, with its velocity;
+ * with reduced motion it lands at once. For discrete changes only: what
+ * the pointer drives (a dragged thumb, a hover's place) is set in the same
+ * frame, never sprung toward the pointer.
+ */
+export function follow(target: () => number, spring: { stiffness: number; damping: number } = motion.control): AnimatedValue {
+  const v = createAnimatedValue(target());
+  let shown = target();
+  effect(() => {
+    const next = target();
+    if (next === shown) return;
+    shown = next;
+    if (reduceMotion()) v.set(next);
+    else v.spring(next, spring);
+  });
+  return v;
+}
 
 /**
  * A pressable under the pointer (`hoverStyle`): a whisper of the text color

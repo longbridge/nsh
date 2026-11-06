@@ -7,6 +7,7 @@ import { colors, finish, focusRing } from "./theme";
 import { buttonLabel, buttonLook, type ButtonKind, type ButtonLookOptions } from "./look/button";
 export { ui, tint } from "./palette";
 export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
+export { switchHitSlop, switchLook, type SwitchLook, type SwitchSize } from "./look/switch";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
  * color over its surface, quieter than pressed and than selected. Leave it

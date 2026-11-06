@@ -2,7 +2,7 @@ import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { Button, Switch } from "nsh/base";
 import { Keyboard, keyboardFrame } from "nsh";
-import { button, buttonText, desktop, field, tint, ui } from "./palette";
+import { button, buttonText, desktop, field, switchLook, tint, ui } from "./palette";
 
 function App() {
   const draft = signal("");
@@ -45,10 +45,7 @@ function App() {
             checked={enabled()}
             onChange={({ checked }) => enabled.set(checked)}
             class="flex-row items-center gap-2 px-1 active:opacity-70"
-            trackClass="w-9 rounded-full p-0.5 transition-colors motion-reduce:transition-none"
-            trackStyle={enabled() ? ui().accentFill : ui().inset}
-            thumbClass="size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4"
-            thumbStyle={enabled() ? { backgroundColor: ui().onAccent } : ui().raised}
+            {...switchLook(() => enabled())}
           >
             <Text style={{ color: ui().text, fontSize: 13, fontWeight: "600" }}>enabled {String(enabled())}</Text>
           </Switch>

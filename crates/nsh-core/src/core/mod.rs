@@ -798,6 +798,13 @@ impl Node {
         if self.spare {
             props.accessibility.hidden = true;
         }
+        if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
+            props.screen_order = Some(if list.horizontal {
+                crate::geometry::Axis::Horizontal
+            } else {
+                crate::geometry::Axis::Vertical
+            });
+        }
         props
     }
 
@@ -4033,6 +4040,8 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.sync_spacer(key, true);
                         self.outer_moved = true;
+                        // Its children are read along the new axis.
+                        flags |= dirty::VIEW_PROPS;
                     }
                 }
             }
@@ -5539,7 +5548,7 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare {
+        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {

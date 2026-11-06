@@ -185,7 +185,7 @@ const toggle = (id: number) =>
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | 显示滚动条：平台的滚动指示器，或应用设置主题后的[内置滚动条](../elements/scrollbar.md#内置滚动条)；对象是该视图自己的主题。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `ref` | `.element_ref(&list)` | `ListRef` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
-头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的。
+头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的：整个插槽是一个 `<If>` 或 `<Each>` 时，它随条件或数据更新；组件只调用一次。
 
 ## 多列与网格
 
