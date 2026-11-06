@@ -158,6 +158,15 @@ fn open_sets_the_environment_and_routes_answer_requests() {
 }
 
 #[test]
+fn fonts_registered_while_the_app_runs_name_their_family() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/fonts");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
     use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};
 

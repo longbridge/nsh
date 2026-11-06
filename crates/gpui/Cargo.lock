@@ -5428,6 +5428,7 @@ dependencies = [
  "taffy",
  "tokio",
  "tokio-tungstenite",
+ "ttf-parser",
  "unicode-linebreak",
  "unicode-properties",
  "ureq",

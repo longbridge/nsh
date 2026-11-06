@@ -2417,7 +2417,7 @@ impl Net {
         let mut tasks = std::mem::take(&mut self.tasks);
         for (id, request) in tasks.drain(..) {
             if let Err(refused) = self.request(Requester::Task(id), request) {
-                core.fetch_event(id, FetchEvent::Failed(refused.message));
+                core.fetch_refused(id, refused.message, refused.url);
             }
         }
         self.tasks = tasks;
@@ -3298,11 +3298,15 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                     }
                 }
             }
-            (Requester::Task(id), Some(event)) => {
-                let event = event.unwrap_or_else(|refused| FetchEvent::Failed(refused.message));
+            (Requester::Task(id), Some(Ok(event))) => {
                 if !state.core.fetch_event(id, event) {
                     state.net.cancel(who);
                 }
+            }
+            // A redirect the app may not follow: its hop is cancelled
+            // already (`Net::event`).
+            (Requester::Task(id), Some(Err(refused))) => {
+                state.core.fetch_refused(id, refused.message, refused.url)
             }
         },
         Message::AssetRead(who, hop, request, read) => {
