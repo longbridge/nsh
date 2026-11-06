@@ -1295,11 +1295,12 @@ pub(crate) fn config(
             return;
         };
         s.horizontal = horizontal;
-        // A horizontal view keeps its indicator: it is the mouse's scroll
-        // bar, and a mouse without a horizontal wheel has no other way
-        // to move it (mouse drags do not scroll); a built-in bar of the
-        // app's (`replaced`) is the mouse's then.
-        s.indicator = indicator || (horizontal && !replaced);
+        // The view shows its indicator only when it asks to, on either
+        // axis: a mouse without a horizontal wheel still moves a
+        // horizontal view with Shift + wheel, with the vertical wheel
+        // where nothing around scrolls vertically, and with the keys. A
+        // built-in bar of the app's (`replaced`) takes its place.
+        s.indicator = indicator && !replaced;
         if !indicator {
             s.live.alpha = 0.0;
         }
