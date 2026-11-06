@@ -4,7 +4,7 @@
 //! batch, input or animation). A host app makes the view and puts it in a
 //! window itself. AppKit views live on the main thread, so this test runs
 //! without libtest's harness, on the process's own. Its arguments pick the
-//! cases to run (`window`, `unhide`); none runs both.
+//! cases to run (`window`, `unhide`, `scaled`); none runs all three.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -53,6 +53,35 @@ mod macos {
         view().test_id("label").child(text(
             move || if changed.get() { "Trades" } else { "Orders" },
         ))
+    }
+
+    #[component]
+    fn Scaled() -> impl IntoElement {
+        view().flex_1().overflow_hidden().child(
+            view()
+                .w(px(500.0))
+                .h(px(250.0))
+                .origin_top_left()
+                .scale(0.8)
+                .children(
+                    [
+                        (20.0, "inside", "Inside"),
+                        (420.0, "outside", "Outside"),
+                        (520.0, "clipped", "Clipped"),
+                    ]
+                    .map(|(x, id, label)| {
+                        nsh_base::button()
+                            .absolute()
+                            .left(px(x))
+                            .top(px(40.0))
+                            .w(px(80.0))
+                            .h(px(24.0))
+                            .bg(|| nsh_base::theme().primary)
+                            .text_color(|| nsh_base::theme().primary_foreground)
+                            .child(text(label).test_id(id))
+                    }),
+                ),
+        )
     }
 
     /// Runs the main run loop until `done` holds, for at most 5 s.
@@ -191,6 +220,37 @@ mod macos {
         println!("draw_on_show: unhide: ok");
     }
 
+    /// Ordinary window composition, not cacheDisplayInRect (which forces
+    /// drawing and can conceal deferred text). The fully clipped control
+    /// must keep its text deferred.
+    fn scaled_window(mtm: MainThreadMarker) {
+        let window = window(mtm);
+        window.setContentSize(NSSize::new(400.0, 200.0));
+        window.setTitle(&NSString::from_str("Scaled visibility"));
+        window.center();
+        let app = AppView::new(
+            mtm,
+            AppOptions {
+                size: (400, 200),
+                ..AppOptions::default()
+            },
+        );
+        let root = app.view();
+        window.setContentView(Some(&root));
+        window.orderFrontRegardless();
+        app.load(Root::of::<Scaled>().into());
+        until("the scaled mount", || find(&root, "clipped").is_some());
+        let inside = find(&root, "inside").unwrap();
+        let outside = find(&root, "outside").unwrap();
+        let clipped = find(&root, "clipped").unwrap();
+        until("the inside text", || drawn(&inside));
+        until("the outside text", || drawn(&outside));
+        assert!(!drawn(&clipped), "fully clipped text was drawn");
+        app.stop();
+        window.close();
+        println!("draw_on_show: scaled: ok");
+    }
+
     pub(super) fn run() {
         let mtm = MainThreadMarker::new().expect("the main thread");
         let _app = NSApplication::sharedApplication(mtm);
@@ -201,6 +261,9 @@ mod macos {
         }
         if runs("unhide") {
             unhide(mtm);
+        }
+        if runs("scaled") {
+            scaled_window(mtm);
         }
     }
 }

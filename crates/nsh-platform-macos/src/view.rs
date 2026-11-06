@@ -1498,8 +1498,6 @@ impl NshView {
         };
         if !root && self.ns().frame() != rect {
             self.ns().setFrame(rect);
-            // A transform or opacity alone (an endless animation) does
-            // not count: views out of sight stay so ([`crate::sight`]).
             crate::sight::moved();
             self.size_container();
             crate::native::resized(self);
@@ -1549,6 +1547,9 @@ impl NshView {
         layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
         layer.setPosition(self.ns().frame().origin);
         let t = transform.as_ref().map_or(IDENTITY, ca_transform);
+        if layer.transform() != t {
+            crate::sight::moved();
+        }
         layer.setTransform(t);
         layer.setOpacity(opacity.clamp(0.0, 1.0));
         layer.setHidden(hidden);
@@ -1670,10 +1671,9 @@ impl NshView {
 /// `visibleRect` follows the bounds as AppKit has them committed; while a
 /// scroll offset shows as a layer transform the truth is the scroll state,
 /// so each ancestor's content shows from its scroll-state origin
-/// ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)). Ancestor
-/// transforms are not applied: nearly all are identity, and a transformed
-/// clip at most defers or draws early. Frames are the placed ones
-/// (`ns().frame()`: a sticky shift and mirroring applied), not the logical
+/// ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)). Transforms
+/// map each ancestor's visible part into its content space. Frames are the
+/// placed ones (`ns().frame()`: a sticky shift and mirroring applied), not the logical
 /// ones, for the view and its ancestors alike: the clip spaces are the
 /// ancestors' containers'. Hidden views are AppKit's (a screen under the
 /// top one), looked at once per view a pass resolves; the containers
@@ -1702,6 +1702,10 @@ impl crate::sight::Tree for Views {
 
     fn frame(&self, node: &NshView) -> crate::sight::Span {
         crate::sight::placed(node.ns().frame())
+    }
+
+    fn transform(&self, node: &NshView) -> Option<Matrix> {
+        node.state().transform()
     }
 
     fn content(&self, node: &NshView) -> ((f32, f32), bool) {
@@ -1742,6 +1746,10 @@ impl crate::sight::Tree for Planned {
             return Views.frame(node);
         }
         crate::sight::placed(node.placed_rect())
+    }
+
+    fn transform(&self, node: &NshView) -> Option<Matrix> {
+        Views.transform(node)
     }
 
     fn content(&self, node: &NshView) -> ((f32, f32), bool) {
