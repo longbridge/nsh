@@ -204,6 +204,11 @@ pub struct AppOptions {
     /// a `macos={{ backdrop }}` material blending behind the window). False
     /// by default.
     ///
+    /// Only a host that builds `AppOptions` and calls [`run_app`] itself
+    /// sets this: the hosts and runners nsh ships leave it false, so a
+    /// `nsh run` or packaged app's window stays opaque, and a backdrop
+    /// material blending `behind-window` does not make it transparent.
+    ///
     /// An embedded [`AppView`] draws no background over its host's content
     /// too, but never changes the host's window: the embedding app makes its
     /// window nonopaque and clear itself where it wants that.

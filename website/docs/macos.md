@@ -171,7 +171,11 @@ exited `run_app`'s runner starts the app again with the same arguments: inside a
 
 `AppOptions { transparent: true, ..Default::default() }` opens `run_app`'s window nonopaque with a clear
 background, so what the app leaves unpainted shows what is behind the window (a HUD panel, a
-[`macos={{ backdrop }}`](./styling.md#filters-and-blending) with `behind-window`). It is `false` by default.
+[`macos={{ backdrop }}`](./styling.md#filters-and-blending) with `behind-window`). It is `false` by default, and
+only a Rust host that builds `AppOptions` and calls `run_app` itself can ask for it: the development host
+`nsh-macos-host` (`nsh run` builds it) and `nsh-macos-app` (its `setup`, the packaged TSX runner and the Rust runner
+`nsh` generates) keep it `false`, so their windows stay opaque, and a `behind-window` material does not make a window
+transparent by itself.
 An embedded `AppView` does not change the window it is put in: make your own `NSWindow` nonopaque with a clear
 `backgroundColor` for the same look.
 
@@ -252,7 +256,8 @@ Not supported, or different:
   `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and
   `glassTintColor` as `glassEffect`'s tint on macOS 26; before macOS 26 the blur stands in for glass. These are
   compositor effects, so `app.screenshot()` does not show them, and a `behind-window` material shows the desktop only
-  through a see-through window (`AppOptions::transparent`).
+  through a see-through window (`AppOptions::transparent`, which only a Rust host that opens its own `run_app` window
+  sets; the blending never makes a window transparent itself).
 - **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing; input accessory views
   are never shown (there is no software keyboard) and `keyboardShouldPersistTaps` is ignored.
 - **`WebView`'s `scrollable={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll

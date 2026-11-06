@@ -54,7 +54,10 @@
   An embedded macOS view draws no window background of its own: to show what is behind the window (a
   `macos={{ backdrop }}` with `behind-window`, a translucent panel), the embedding app makes its `NSWindow`
   nonopaque with a clear `backgroundColor` itself. `AppOptions::transparent` asks `run_app`'s own window for
-  that; an `AppView` never changes the window it is put in.
+  that, and only a host that builds `AppOptions` itself can: the development host `nsh-macos-host` (`nsh run` builds
+  it) and `nsh-macos-app`'s `setup` (the packaged TSX runner and the Rust runner `nsh` generates) leave it `false`, and
+  a `behind-window` material in the app does not make their windows transparent. An `AppView` never changes the
+  window it is put in.
   GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): `let view = cx.new(|cx|
   AppView::new(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
   any element tree (in a GPUI Kit window, as a child of its `Root`); it fills the space its parent gives it and takes

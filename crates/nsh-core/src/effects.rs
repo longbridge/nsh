@@ -603,7 +603,11 @@ impl BackdropMaterial {
 /// There is no CSS for this -- `backdrop-filter` only describes filters --
 /// so the names follow AppKit's `NSVisualEffectMaterial`,
 /// `NSVisualEffectBlendingMode` and `NSVisualEffectState` in kebab case.
+///
+/// Fields may be added: start with [`Self::default`] and set what it
+/// needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct MacOsBackdrop {
     /// The material: what is blurred and how it is tinted.
     pub material: MacOsBackdropMaterial,

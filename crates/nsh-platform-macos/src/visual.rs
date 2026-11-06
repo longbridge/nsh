@@ -1324,11 +1324,11 @@ mod tests {
             Some(BackdropKind::Glass)
         );
 
-        glass.macos_backdrop = Some(MacOsBackdrop {
-            material: MacOsBackdropMaterial::HudWindow,
-            blending: MacOsBackdropBlending::BehindWindow,
-            state: MacOsBackdropState::FollowsWindowActiveState,
-        });
+        let mut backdrop = MacOsBackdrop::default();
+        backdrop.material = MacOsBackdropMaterial::HudWindow;
+        backdrop.blending = MacOsBackdropBlending::BehindWindow;
+        backdrop.state = MacOsBackdropState::FollowsWindowActiveState;
+        glass.macos_backdrop = Some(backdrop);
         assert!(has_backdrop(&glass));
         assert_eq!(
             backdrop_kind(&glass, 0.0, false, true),

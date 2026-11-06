@@ -638,13 +638,13 @@ fn macos_props_apply_on_macos_through_the_mount() {
             .collect::<Vec<_>>()
     };
     let macos = styles(Os::MacOs);
+    let mut backdrop = MacOsBackdrop::default();
+    backdrop.material = MacOsBackdropMaterial::Sidebar;
+    backdrop.blending = MacOsBackdropBlending::BehindWindow;
+    backdrop.state = MacOsBackdropState::Inactive;
     assert_eq!(
         macos.iter().find_map(|style| style.macos_backdrop),
-        Some(MacOsBackdrop {
-            material: MacOsBackdropMaterial::Sidebar,
-            blending: MacOsBackdropBlending::BehindWindow,
-            state: MacOsBackdropState::Inactive,
-        })
+        Some(backdrop)
     );
     assert_eq!(
         macos.iter().find_map(|style| style.glass_tint_color),
