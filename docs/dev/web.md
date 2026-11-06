@@ -845,6 +845,15 @@ plain click on it stays the app's (`onPress`; the root's `click` listener preven
 with a modifier key or the middle button opens `href` as the browser does. The other backends store the props and
 draw nothing differently.
 
+**The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the
+QuickJS hosts serve `nsh-js`'s `web_page.rs` (`isAvailable` false, `Head` renders nothing), the browser runtime its
+own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web` namespace). `page.js` runs in the
+page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
+mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
+one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
+and `document.title` / `<html lang>` fall back to what the page had before. A `canonical` path starts at the site's
+base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
+
 ## Not implemented
 
 Platform services other than the theme color, dialogs, the clipboard and the host; image download progress; a web

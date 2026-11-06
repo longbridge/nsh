@@ -171,6 +171,10 @@ Rust 应用用 `nsh_core::element::desktop` 绘制自己的标题栏（[用 Rust
 
 见 [nsh/desktop](../modules/nsh-desktop.md)。
 
+### nsh/web
+
+在浏览器中，应用是站点的一个页面。`nsh/web` 的 `Head` 在挂载期间设置页面的标题、描述、规范 URL 和元数据，供搜索引擎和链接预览使用；`isAvailable` 在浏览器中为 `true`。在其他平台上 `Head` 不渲染任何内容。见 [nsh/web](../modules/nsh-web.md) 和 [Web](./web.md#搜索引擎)。
+
 ### 状态栏
 
 在两个平台上，状态栏都属于最上层的页面或对话框，和 UIKit 中由最上层视图控制器决定一样：[`NavPage` 和 `Dialog` 接受 `statusBar`](../modules/nsh-base.md#status-bar)（Rust 中为 `.status_bar(StatusBarStyle::Light)`，其他字段用 `StatusBarSetting`），其中有 `foreground`（`"auto"`、深色背景用 `"light"`、浅色背景用 `"dark"`）、`hidden` 和 `animated`。最近显示的页面或对话框按字段逐项生效，它离开后下面那个重新生效。`nsh.json` 的 `"statusBar"` 是它们之下的应用默认值。

@@ -432,6 +432,24 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 按压链接触发的是应用的 `onPress`，应用照常导航；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时在新标签页中打开它。
 
+### 标题和描述
+
+[`nsh/web`](../modules/nsh-web.md) 的 `Head` 在挂载期间设置页面的 `<head>`：标题、描述、规范 URL、语言、更多 `<meta>`（Open Graph、Twitter 卡片、`robots`）以及结构化数据。每个页面放一个 head，描述正在显示的页面；最后挂载的 head 设置的内容生效：
+
+```tsx
+import { Head } from "nsh/web";
+
+<NavPage title={note.title} header={<SiteHeader />}>
+  <Head
+    title={`${note.title} · Market Notes`}
+    description={note.summary}
+    canonical={`/notes/${note.slug}`}
+    jsonLd={{ "@context": "https://schema.org", "@type": "Article", headline: note.title }}
+  />
+  …
+</NavPage>
+```
+
 ## 限制
 
 下列内容由浏览器决定，Web 后端遵循它：

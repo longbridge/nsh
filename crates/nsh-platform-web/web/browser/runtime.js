@@ -1,3 +1,5 @@
+import { createWebPage } from "./page.js";
+
 // A module given as source text, as a blob URL; its source map inline, so
 // DevTools maps it.
 function moduleURL(code, name, sourceMap) {
@@ -221,6 +223,7 @@ export function createBrowserHost(player) {
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
+        const page = createWebPage(reactive, player);
         const base = modules.exports.get("nsh/base");
         if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
 
@@ -231,6 +234,7 @@ export function createBrowserHost(player) {
         namespaces.set("nsh/android", { ...mobile, isAvailable: false });
         namespaces.set("nsh/ios", { ...mobile, isAvailable: false });
         namespaces.set("nsh", nsh);
+        namespaces.set("nsh/web", page.exports);
         namespaces.set("nsh:rt", dom.rt);
         // Development bundles import it for `__nsh_hot`, the global their
         // modules and update scripts call.

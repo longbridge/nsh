@@ -439,6 +439,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: "",
     },
     NativeModule {
+        name: "nsh/web",
+        exports: crate::web_page::EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(crate::web_page::TYPES),
+    },
+    NativeModule {
         name: "nsh/webview",
         exports: platform_modules::WEBVIEW_EXPORTS,
         also: &[],

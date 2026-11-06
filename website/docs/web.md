@@ -481,6 +481,26 @@ so the page looks and behaves as before, and its markup reads as a document:
 A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, and a
 click with a modifier key or the middle button opens it in a new tab.
 
+### Titles and descriptions
+
+[`nsh/web`](../modules/nsh-web.md)'s `Head` sets the page's `<head>` while it is mounted: the title, the description,
+the canonical URL, the language, more `<meta>`s (Open Graph, Twitter cards, `robots`) and structured data. A head in
+each page describes the page that shows; the one mounted last wins for what it sets:
+
+```tsx
+import { Head } from "nsh/web";
+
+<NavPage title={note.title} header={<SiteHeader />}>
+  <Head
+    title={`${note.title} · Market Notes`}
+    description={note.summary}
+    canonical={`/notes/${note.slug}`}
+    jsonLd={{ "@context": "https://schema.org", "@type": "Article", headline: note.title }}
+  />
+  …
+</NavPage>
+```
+
 ## Limits
 
 The browser decides these, and the web backend follows it:

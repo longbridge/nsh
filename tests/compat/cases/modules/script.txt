@@ -250,3 +250,13 @@ event id:heard onHost type=event event=tick payload=2
 wait 50
 expect Host heard: [1]
 covers [nsh] host
+# mod-web
+tap id:case-mod-web
+# No page here: `isAvailable` is false and a head renders nothing, before
+# and after its props change.
+expect Web: false
+expect Title: Notes
+tap id:retitle
+expect Title: Q3 earnings
+covers [nsh/web] isAvailable
+covers [nsh/web] Head
