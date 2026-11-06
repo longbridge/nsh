@@ -1133,6 +1133,18 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 - 安全区域（Rust 的 `safe_area()`；TSX 的 `safeArea()`、`safeAreaInsets()`）和软键盘（Rust 的 `keyboard_height()`；TSX 的 `keyboardFrame()`）见[安全区域与键盘](#safe-area-and-keyboard)。
 - 屏幕阅读器和减弱动态效果的设置在 [`nsh` 的无障碍 API](#accessibility) 中。
 
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
+```
+
+在应用运行时注册字体，结果是 `{ family }`，即它的字体族名，供 `fontFamily` 使用：应用下载或生成的字体，即 TrueType、OpenType、WOFF 或 WOFF2 数据，或者字体文件的 URL（应用自己的文件 `asset:/...`，或网络上的文件，按 `fetch` 的方式读取：适用 `network` 权限）。此后使用该字体族的文字都会用它排版，之前已显示的文字也会重新排版。`network` 权限不允许该 URL 或它重定向到的 URL 时，以一个 `Error` 拒绝，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"network"`，`resource` 为被拒绝的 URL，与 `fetch` 相同；URL 无法加载或数据不是字体时以 `Error` 拒绝。Rust：`register_font(data) -> Answer<Result<String, String>>`，在任务中等待。应用发布的字体则在第一帧之前注册（[字体](../docs/fonts.md#在应用运行时注册字体)）。
+
 ## PanResponder
 
 Pan responder 是构建在手势响应者系统之上的拖动手势：元素认领一次手势的触摸，然后独自接收这些触摸和手势状态，手势状态会帮你跟踪各触点的中心、移动距离和速度。Rust 代码用 `.claim_touches(TouchClaim::…)` 认领触摸，用 `.on_responder_*` 监听，其 `ResponderEvent` 带有 `PanGesture`，都在 `nsh_core::prelude` 中；TSX 从 `nsh` 导入 `PanResponder`，它的 `onPanResponder…` 回调接收触摸事件和手势状态。
@@ -1822,6 +1834,12 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 ### Notifications.show
 
 `show` 的结果表示系统是否接收了这条通知；没有权限时为 `false`。应用在前台时通知照常显示。用相同的 `id` 再次显示会替换旧通知，`Notifications.close(id)` 用于移除。
+
+`silent: true` 让通知显示时不发声、不振动，与 Web 的 `Notification` 一致；默认播放系统提示音。Apple 平台显示不带声音的通知，Android 把它放进不提醒的分组（无声音、振动和弹出横幅），Windows 显示静音的 toast，Linux 附带通知服务的 `suppress-sound` 提示，Web 把 `silent` 交给浏览器。
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
 
 ### Notifications.on
 

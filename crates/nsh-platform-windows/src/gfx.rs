@@ -52,7 +52,7 @@ use windows::{
                     DXGI_SAMPLE_DESC,
                 },
                 CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT,
-                DXGI_PRESENT_PARAMETERS, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_PRESENT_PARAMETERS, DXGI_RGBA, DXGI_SCALING_NONE, DXGI_SWAP_CHAIN_DESC1,
                 DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
                 IDXGIDevice1, IDXGIFactory2, IDXGISurface, IDXGISwapChain1, IDXGISwapChain2,
@@ -243,6 +243,8 @@ pub(crate) struct SwapChain {
     last: Option<Vec<RECT>>,
     /// A frame was presented since the buffers were made or resized.
     shown: bool,
+    /// What fills the window past the buffers (`0xRRGGBBAA`) while it grows.
+    background: Option<u32>,
     /// A transparent window's: composed, premultiplied alpha.
     premultiplied: bool,
     /// Frame pacing: one frame in flight per swap chain.
@@ -407,7 +409,10 @@ impl SwapChain {
             },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
-            Scaling: DXGI_SCALING_STRETCH,
+            // While a resize is drawn DWM already shows the window at its new
+            // size: the last frame stays as it was, where stretching it would
+            // move everything in the window by part of a pixel, every frame.
+            Scaling: DXGI_SCALING_NONE,
             // Back buffers keep their pixels: frames draw only what changed.
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE,
@@ -437,6 +442,7 @@ impl SwapChain {
             generation: generation(),
             last: None,
             shown: false,
+            background: None,
             premultiplied,
             latency,
         })
@@ -446,6 +452,26 @@ impl SwapChain {
     #[cfg(test)]
     pub(crate) fn premultiplied(&self) -> bool {
         self.premultiplied
+    }
+
+    /// Fills the window past the buffers with `color` from the next present
+    /// on, while a resize's frame is being drawn. A composed swap chain
+    /// stretches instead (DirectComposition takes no other scaling).
+    pub(crate) fn set_background(&mut self, color: nsh_core::Color) {
+        if self.premultiplied || self.background.replace(color.0) == Some(color.0) {
+            return;
+        }
+        let channel = |shift: u32| ((color.0 >> shift) & 0xff) as f32 / 255.0;
+        let rgba = DXGI_RGBA {
+            r: channel(24),
+            g: channel(16),
+            b: channel(8),
+            a: 1.0,
+        };
+        // SAFETY: a COM call on a live swap chain; the color outlives it.
+        if let Err(err) = unsafe { self.swap.SetBackgroundColor(&rgba) } {
+            log::warn!("cannot set the swap chain's background: {err}");
+        }
     }
 
     /// The window shows a frame of these buffers, which stays until the next.

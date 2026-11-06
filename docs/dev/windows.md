@@ -81,6 +81,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   macOS): `WM_SIZE` waits for the layout at the new size (`MountSink::resized`), at most 16 ms, and applies it before
   it draws. An engine that misses the deadline (JS busy, a costly layout) is not waited for again until it reports a
   resize done; the area the window grew by then shows the window's background until the layout arrives.
+  A window's swap chain never stretches (`DXGI_SCALING_NONE`): DWM shows the window at its new size before that frame
+  is presented, and a stretched last frame would move everything by part of a pixel on each step of a resize. The last
+  frame stays where it is, and the swap chain's background color (`system::window_background`) fills the rest.
 - **Text is typeset on the engine thread** with DirectWrite's shared, free-threaded factory; the final layout is plain
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
