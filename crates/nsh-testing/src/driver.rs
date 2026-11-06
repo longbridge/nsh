@@ -13,7 +13,10 @@ use nsh_core::{
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
-use crate::headless::{DialogAnswer, Headless};
+use crate::{
+    headless::{DialogAnswer, Headless},
+    module::LocaleSettingsOptions,
+};
 
 /// An app a test opened, driven by steps and read by queries.
 pub(crate) trait Driver: Send {
@@ -69,6 +72,12 @@ pub(crate) trait Driver: Send {
     fn set_lifecycle(&mut self, state: Lifecycle) -> Result<(), String> {
         let _ = state;
         Err(headless_only("setLifecycle"))
+    }
+    /// The user's locale settings that `settings` names, as the system
+    /// reports them (`localeSettings()`).
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let _ = settings;
+        Err(headless_only("setLocaleSettings"))
     }
     /// The system hands the app a link that opens it (`openWithUrl`).
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
@@ -231,6 +240,11 @@ impl Driver for Headless {
         self.set_environment(&format!("setLifecycle({})", state.name()), |e| {
             e.lifecycle = state;
         })
+    }
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let pins = settings.pins("setLocaleSettings")?;
+        let what = format!("setLocaleSettings({})", settings.label());
+        self.set_environment(&what, |e| pins.apply(e))
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

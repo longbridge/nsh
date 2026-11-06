@@ -1031,11 +1031,12 @@ pub fn config(
 ) {
     let changed = host.scroll_mut(|s, _| {
         s.horizontal = horizontal;
-        // A horizontal view keeps its indicator: it is the mouse's scroll
-        // bar, and a mouse without a horizontal wheel has no other way
-        // to move it (mouse drags do not scroll); a built-in bar of the
-        // app's (`replaced`) is the mouse's then.
-        s.indicator = indicator || (horizontal && !replaced);
+        // The view shows its indicator only when it asks to, on either
+        // axis: a mouse without a horizontal wheel still moves a
+        // horizontal view with Shift + wheel, with the vertical wheel
+        // where nothing around scrolls vertically, and with the keys. A
+        // built-in bar of the app's (`replaced`) takes its place.
+        s.indicator = indicator && !replaced;
         if !indicator {
             s.live.alpha = 0.0;
         }
@@ -2087,6 +2088,24 @@ mod tests {
                 ),
                 _ => assert_eq!(y, 400.0),
             }
+        }
+    }
+
+    #[test]
+    fn indicator_follows_the_view_on_either_axis() {
+        let host = TestHost {
+            state: std::cell::RefCell::new(scroll_state((300.0, 1000.0), false)),
+            redraws: std::cell::Cell::new(0),
+        };
+        for horizontal in [false, true] {
+            config(&host, horizontal, true, false, false);
+            assert!(host.state.borrow().indicator);
+            // `scrollbar={false}` hides it, a horizontal view's too.
+            config(&host, horizontal, false, false, false);
+            assert!(!host.state.borrow().indicator);
+            // A built-in bar of the app's takes its place.
+            config(&host, horizontal, true, true, false);
+            assert!(!host.state.borrow().indicator);
         }
     }
 
