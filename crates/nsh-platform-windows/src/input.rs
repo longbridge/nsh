@@ -1076,7 +1076,8 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     true
 }
 
-/// The enabled text fields shown under `view`, in tree order.
+/// The enabled text fields shown under `view`, in tree order (a scroll
+/// view's content as it is on screen).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
     {
         let s = view.state();
@@ -1087,7 +1088,7 @@ fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
             out.push(view.clone());
         }
     }
-    view.with_children(|children| {
+    view.with_children_in_reading_order(|children| {
         for child in children {
             collect_fields(child, out);
         }

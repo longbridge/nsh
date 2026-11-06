@@ -22,7 +22,7 @@ use std::rc::Rc;
 use gpui::{
     App, Bounds, CursorStyle, DispatchPhase, FocusHandle, Hitbox, KeyDownEvent, KeyUpEvent,
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window,
+    ScrollDelta, ScrollEvent, TouchPhase, Window,
 };
 
 use crate::{
@@ -300,7 +300,7 @@ pub(crate) fn install(
 
     let s = surface.clone();
     let h = hitbox.clone();
-    window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+    window.on_mouse_event(move |e: &ScrollEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || !h.should_handle_scroll(window) {
             return;
         }

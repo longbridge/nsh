@@ -2,13 +2,15 @@ import { type AnimatedValue, cleanup, Clipboard, createAnimatedValue, Easing, ef
 import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, ghostFill, hovered, mono, motion, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
+import { play as sound } from "../../nsh-gallery-ui/sound";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, mono, motion, pressSink, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
-// the button role; the look is the gallery's (`Button` of `nsh-gallery-ui`):
-// a raised neutral, the citrus main action, a quiet ghost, a destructive
-// tint, each with its hover, pressed, focus and disabled states. The motion
-// is the gallery's too: a press sinks, a new icon or a spinner grows in and
+// the button role; the look is the gallery's (`buttonLook` of
+// `nsh-gallery-ui`): a raised neutral, the citrus main action, a quiet
+// ghost, a destructive tint, each with its hover, pressed, focus and
+// disabled states. The motion is the gallery's too: a press sinks (natively,
+// its `activeStyle`), a new icon or a spinner grows in and
 // the label's new width eases in (`motion.control`), all at once with
 // reduced motion.
 
@@ -54,42 +56,19 @@ function popOn(key: () => unknown): AnimatedValue {
  * its icon in the accent and popping as it turns on or off.
  */
 function IconButton(props: { icon: IconName; label: string; short?: string; shortcut?: string; on?: boolean; tone?: "danger"; variant?: "ghost" | "secondary"; onPress: () => void }) {
-  const size = pointer ? 28 : 40;
-  const press = createAnimatedValue(1);
   const pop = popOn(() => props.on);
-  const raised = () => props.variant === "secondary";
-  const tint = () => (props.on ? colors.accent : props.tone === "danger" ? colors.danger : raised() ? colors.text : colors.muted);
+  const look = { on: () => props.on, tone: props.tone, variant: props.variant };
   return (
     <View
       onPress={props.onPress}
-      onPressDown={() => press.spring(0.9, motion.press)}
-      onPressUp={() => press.spring(1, motion.press)}
       role="button"
       accessibilityLabel={props.label}
       accessibilityState={props.on === undefined ? undefined : { selected: props.on }}
       tooltip={<Tip label={props.shortcut && pointer ? `${props.label}  ${props.shortcut}` : props.label} />}
-      hoverStyle={props.on ? undefined : props.tone === "danger" ? { backgroundColor: tints.danger } : raised() ? finish.hover : hovered()}
-      activeStyle={raised() ? finish.pressed : { backgroundColor: alpha(colors.text, 0.1) }}
-      focusStyle={focusRing()}
-      style={{
-        // The terminal sizes it to its label.
-        width: terminal ? undefined : size,
-        height: terminal ? undefined : size,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: radius.control,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: "transparent",
-        backgroundColor: props.on ? tints.accent : ghostFill(),
-        ...(raised() && !props.on ? finish.raised : {}),
-        transform: [{ scale: press }],
-        transitionProperty: "background-color, border-color, box-shadow",
-        transitionDuration: 120,
-      }}
+      {...iconButtonLook(look)}
     >
       <View style={{ transform: [{ scale: pop }] }}>
-        <IconLabel name={props.icon} label={props.short ?? props.label} size={pointer ? 15 : 18} tint={tint()} />
+        <IconLabel name={props.icon} label={props.short ?? props.label} {...iconButtonGlyph(look)} />
       </View>
     </View>
   );
@@ -115,8 +94,10 @@ function FillButton(props: {
   onPressUp?: () => void;
   onLongPress?: () => void;
 }) {
-  const press = createAnimatedValue(1);
   const glyph = follow(() => (props.busy || props.icon ? 1 : 0));
+  // The press sinks it natively (`activeStyle`); press down and up reach
+  // the app only for what a held press means (the hold's fill).
+  const press = pressSink(0.97, "background-color, border-color, box-shadow, opacity");
   return (
     <View
       testID={props.testID}
@@ -126,15 +107,10 @@ function FillButton(props: {
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       delayLongPress={props.delayLongPress}
-      onPressDown={() => {
-        press.spring(0.97, motion.press);
-        props.onPressDown?.();
-      }}
-      onPressUp={() => {
-        press.spring(1, motion.press);
-        props.onPressUp?.();
-      }}
+      onPressDown={props.onPressDown}
+      onPressUp={props.onPressUp}
       hoverStyle={props.disabled ? undefined : finish.hover}
+      activeStyle={props.disabled ? undefined : press.activeStyle}
       focusStyle={focusRing()}
       style={{
         alignSelf: "flex-start",
@@ -149,9 +125,7 @@ function FillButton(props: {
         borderWidth: 1,
         ...finish.raised,
         opacity: props.disabled ? 0.4 : 1,
-        transform: [{ scale: press }],
-        transitionProperty: "background-color, border-color, box-shadow, opacity",
-        transitionDuration: 120,
+        ...press.transition,
       }}
     >
       <View
@@ -434,6 +408,7 @@ export function ButtonDemo() {
       last.set("Save: started");
       after(1200, () => {
         save.set("done");
+        sound("success");
         last.set("Save: done");
         after(1800, () => save.set("idle"));
       });
@@ -454,6 +429,7 @@ export function ButtonDemo() {
             progress.set(null);
             fill.set(0);
             doneUpload.set(true);
+            sound("success");
             last.set("Upload: done");
           });
       };
@@ -488,6 +464,7 @@ export function ButtonDemo() {
     const copied = signal<string | null>(null);
     const copy = (what: string, text: string) => {
       void Clipboard.writeText(text);
+      sound("success", { volume: 0.3 });
       copied.set(what);
       last.set(`copied ${what}`);
       after(1600, () => copied() === what && copied.set(null));
@@ -578,6 +555,7 @@ export function ButtonDemo() {
               onLongPress={() => {
                 resize();
                 state.set("done");
+                sound("close", { volume: 0.8 });
                 fill.set(0);
                 nudge.set(false);
                 last.set("deleted Q3 roadmap");

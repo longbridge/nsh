@@ -34,6 +34,7 @@ use windows::{
             Gdi::{
                 BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST,
                 MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ScreenToClient, UpdateWindow,
+                ValidateRect,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -70,6 +71,10 @@ pub(crate) const WM_NSH_MENU: u32 = WM_APP + 4;
 /// The embedding app's root window was shown, hidden, minimized or
 /// restored ([`observe_root`]).
 const WM_NSH_ROOT: u32 = WM_APP + 5;
+/// A window's swap chain has room for a frame again ([`crate::gfx`]): posted
+/// from a pool thread, so it is handled before any `WM_PAINT` (which comes
+/// last in a thread's queue and, with several windows to draw, late).
+pub(crate) const WM_NSH_PAINT: u32 = WM_APP + 7;
 
 /// How often the ticker asks for the compositor again while nothing
 /// composes ([`Ticker`]): frames resume within this once it does.
@@ -809,6 +814,14 @@ fn handle(
             crate::chrome::menu_command(surface, (wparam.0 & 0xFFFF) as u16);
             return Some(LRESULT(0));
         }
+        WM_NSH_PAINT => {
+            // Drawn now: a pending `WM_PAINT` of the window would only draw
+            // the same frame again.
+            // SAFETY: a plain call on this window.
+            let _ = unsafe { ValidateRect(Some(hwnd), None) };
+            surface.paint();
+            return Some(LRESULT(0));
+        }
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             // SAFETY: paired Begin / EndPaint on this window.
@@ -1052,7 +1065,12 @@ fn handle(
         WM_SETFOCUS => crate::text_input::window_focus(surface, true),
         WM_KILLFOCUS => crate::text_input::window_focus(surface, false),
         WM_GETOBJECT => return crate::access::get_object(surface, hwnd, wparam, lparam),
-        WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+        // `WM_TIMECHANGE`: the time zone changed (`localeSettings()`).
+        WM_SETTINGCHANGE
+        | WM_THEMECHANGED
+        | WM_SYSCOLORCHANGE
+        | WM_DWMCOLORIZATIONCOLORCHANGED
+        | WM_TIMECHANGE => {
             crate::system::settings_changed(surface);
         }
         WM_ACTIVATEAPP => crate::system::app_activated(surface, wparam.0 != 0),

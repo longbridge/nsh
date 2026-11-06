@@ -70,7 +70,7 @@ await downloadUpdate(({ received, total }) => progress.set(total ? received / to
 function installAndRestart(): Promise<void>;
 ```
 
-把下载好的压缩包解压到应用旁边，校验新应用（id、可执行文件，macOS 上还有代码签名），替换进去，启动新应用并结束当前进程。Promise 只在失败时才会结束，失败时已安装的应用保持原样：没有下载过更新或应用无法替换时 reject。调用前先保存用户会丢失的内容。
+把下载好的压缩包解压到应用旁边，校验新应用（id、可执行文件，macOS 上还有代码签名），替换进去，然后像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。Promise 只在失败时才会结束，失败时已安装的应用保持原样：没有下载过更新或应用无法替换时 reject。
 
 Linux 和 macOS 上整个目录或 `.app` 一起替换，保留用户给它起的名字；Windows 上逐个文件替换，有一个失败就全部恢复。
 
@@ -128,4 +128,4 @@ export const install = () =>
 
 ## Rust
 
-Rust 应用（`nsh.json` 的 `"root"`）直接使用 `nsh-updater` crate，并自带 HTTP 客户端：`Config::check` 校验清单，`Download` 校验压缩包，`Installation::install_and_launch` 替换应用并启动，启动失败时回滚（[应用更新](../docs/app-updates.md#rust-应用)）。
+Rust 应用（`nsh.json` 的 `"root"`）直接使用 `nsh-updater` crate，并自带 HTTP 客户端：`Config::check` 校验清单，`Download` 校验压缩包，`Installation::install` 替换应用，`nsh_core::element::desktop::restart()` 启动新版本（[应用更新](../docs/app-updates.md#rust-应用)）。

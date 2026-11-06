@@ -286,7 +286,8 @@ compared side by side with the others. Its layout and colors' meanings are the g
 - **The core lays out in points.** Taffy places each view. The backend projects its frame to Cells using the
   rounding rule below; child frames, content boxes, drawing and hit testing share that projection. Text is measured
   on the grid on the engine thread. Changing the area passed to `render` sends the new viewport and environment
-  to the engine.
+  to the engine. An app loaded before the surface's first draw shows from the engine's layout at the drawn area
+  on, never laid out for a surface with no size.
 - **One engine per surface.** `app.rs` owns the public lifecycle and configuration. `surface.rs` carries complete
   `MountBatch` messages, structured errors and frame requests over a channel. Only rendering drains the inbox;
   `mount.rs` applies a whole batch before callbacks, drawing or input can observe it. Replacing or stopping an

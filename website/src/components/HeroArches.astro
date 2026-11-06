@@ -53,8 +53,8 @@ vec4 dots(vec2 p){
   lit*=smoothstep(.25,.6,patch_);
   rad+=cell*.06*lit;
   a=smoothstep(rad+.7,rad-.7,length(p-c));
-  float o=(uDark>.5?.34:.55)*(.35+.65*patch_+near)*copy*fade*a;
-  vec3 col=uDark>.5?vec3(.74,.78,.82):vec3(.29,.44,.2);
+  float o=(uDark>.5?.34:.4)*(.35+.65*patch_+near)*copy*fade*a;
+  vec3 col=uDark>.5?vec3(.74,.78,.82):vec3(.34,.38,.46);
   vec3 tint=uDark>.5?CITRUS:vec3(.52,.76,.08);
   float lo=mix(o,(uDark>.5?.9:.85)*copy*fade*a,lit);
   col=mix(col,tint,lit);
@@ -92,7 +92,7 @@ vec4 shade(float x, vec2 p, vec2 g, float al){
       col+=vec3(.66,.70,.76)*smoothstep(.2,.0,abs(t+.5))*(.1+.34*ch);
       col+=vec3(.5,.53,.58)*smoothstep(.93,1.,abs(t))*.07;
     }else{
-      col=mix(vec3(.72,.76,.75),vec3(.985,.99,.985),ch);
+      col=mix(vec3(.75,.77,.81),vec3(.985,.988,.995),ch);
       col=mix(col,vec3(1.),apex*h*.4);
       col+=vec3(1.)*spec*.5;
       col=mix(col,vec3(.56,.80,.08)*(.72+.42*ch),cit*.86);
@@ -107,7 +107,7 @@ vec4 shade(float x, vec2 p, vec2 g, float al){
     if(lit>.01)alpha=mix(alpha,1.,lit);
   }else if(x>.32){
     float k=(x-.32)/.05;
-    col=uDark>.5?vec3(.012,.014,.018):vec3(.82,.85,.83);
+    col=uDark>.5?vec3(.012,.014,.018):vec3(.84,.86,.89);
     col+=CITRUS*exp(-k*3.4)*(uDark>.5?.24:.2);
   }else if(x>.18){
     float t=(x-.25)/.07, h=sqrt(max(0.,1.-t*t));
@@ -120,7 +120,7 @@ vec4 shade(float x, vec2 p, vec2 g, float al){
     col*=.92+.1*sin(al*3.+t0*.2);
   }else{
     float s=smoothstep(.18,.08,x);
-    col=uDark>.5?mix(vec3(.05,.06,.04),vec3(.008,.009,.012),s):mix(vec3(.84,.86,.82),vec3(.965,.97,.965),s);
+    col=uDark>.5?mix(vec3(.05,.06,.04),vec3(.008,.009,.012),s):mix(vec3(.86,.87,.9),vec3(.97,.973,.98),s);
     vec2 bc=vec2(uArch.x,uRes.y-uArch.y+.06*R);
     vec2 toPtr=uPtr.xy-bc;
     bc+=toPtr/max(length(toPtr),1.)*min(length(toPtr)*.02,.014*R)*uPtr.z;
@@ -255,6 +255,10 @@ void main(){
     let chosen = -1, hovered = -1;
     const apply = () => {
       const on = chosen >= 0 ? chosen : hovered;
+      if (on >= 0 && intro >= 0) {
+        intro = -1;
+        nextWave(performance.now());
+      }
       for (let i = 0; i < 8; i++) if (intro < 0) target[i] = i === on ? 1 : 0;
       wake();
     };
@@ -278,10 +282,17 @@ void main(){
       wake();
     }, { passive: true });
 
-    // Once, on load: light leaves the bead and passes out through the eight
-    // arches, an app reaching each platform.
+    // On load, light leaves the bead and passes out through the eight
+    // arches, an app reaching each platform; then again now and then, at a
+    // random pause, sometimes back in, never while a platform is named.
     let intro = still.matches ? -1 : 0;
     const start = performance.now();
+    let waveAt = start + 500, waveStep = 170, waveIn = false;
+    const nextWave = (now: number) => {
+      waveAt = now + 12000 + Math.random() * 12000;
+      waveStep = 150 + Math.random() * 80;
+      waveIn = Math.random() < 0.35;
+    };
     const dark = () => (document.documentElement.classList.contains('light') ? 0 : 1);
 
     const draw = (now: number) => {
@@ -304,11 +315,19 @@ void main(){
       if (!visible || document.hidden) return;
       if (now - last >= 32) {
         last = now;
+        if (intro < 0 && !still.matches && now >= waveAt) {
+          if (chosen < 0 && hovered < 0) intro = 0;
+          else nextWave(now);
+        }
         if (intro >= 0) {
-          const e = (now - start - 500) / 170;
-          for (let i = 0; i < 8; i++) target[i] = e > i && e < i + 2 ? 1 : 0;
+          const e = (now - waveAt) / waveStep;
+          for (let i = 0; i < 8; i++) {
+            const k = waveIn ? 7 - i : i;
+            target[i] = e > k && e < k + 2 ? 1 : 0;
+          }
           if (e > 10) {
             intro = -1;
+            nextWave(now);
             apply();
           }
         }

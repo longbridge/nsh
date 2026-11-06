@@ -53,7 +53,7 @@ function App() {
         <View
           onPress={play}
           disabled={streaming()}
-          {...button()}
+          {...button("secondary", { disabled: streaming })}
         >
           <Text style={buttonText()}>{streaming() ? "Streaming…" : "Stream it again"}</Text>
         </View>

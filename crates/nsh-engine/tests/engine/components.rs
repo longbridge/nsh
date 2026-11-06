@@ -107,6 +107,7 @@ fn app_config(
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 
@@ -2260,11 +2261,13 @@ const QUIT: &str = r#"import { mount, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
 Application.quit();
-mount(() => <Text>{`quit ${typeof Application.quit}`}</Text>);
+Application.restart();
+mount(() => <Text>{`quit ${typeof Application.quit} ${typeof Application.restart}`}</Text>);
 "#;
 
 /// `Application.quit()` reaches the platform as the root's quit command, which it
-/// carries out as its quit menu role.
+/// carries out as its quit menu role; `Application.restart()` as the root's
+/// restart command.
 #[test]
 fn app_quit_reaches_the_platform() {
     use nsh_core::desktop::DesktopCommand;
@@ -2276,17 +2279,19 @@ fn app_quit_reaches_the_platform() {
             ..Environment::default()
         },
     );
-    let batches = until(&rx, |batch| shows(batch, "quit function"));
-    assert!(
-        batches.iter().flat_map(|b| &b.items).any(|item| matches!(
-            item,
-            MountItem::Command {
-                id: ROOT_ID,
-                command: Command::Desktop(command),
-            } if **command == DesktopCommand::Quit
-        )),
-        "{batches:?}"
-    );
+    let batches = until(&rx, |batch| shows(batch, "quit function function"));
+    for expected in [DesktopCommand::Quit, DesktopCommand::Restart] {
+        assert!(
+            batches.iter().flat_map(|b| &b.items).any(|item| matches!(
+                item,
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } if **command == expected
+            )),
+            "{expected:?}: {batches:?}"
+        );
+    }
 }
 
 const LOCALE: &str = r#"import { mount, Text } from "nsh";

@@ -336,6 +336,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
         DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
@@ -353,6 +355,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::Quit => quit(hwnd),
+        // Quits as above, then the runner starts the app again; an
+        // embedding app's window is its own.
+        DesktopCommand::Restart => {
+            if crate::app::request_restart() {
+                quit(hwnd);
+            }
+        }
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);

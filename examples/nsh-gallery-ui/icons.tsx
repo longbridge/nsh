@@ -43,8 +43,10 @@ export type IconName =
   | "sidebar"
   | "sun"
   | "moon"
+  | "undo"
   | "volume-low"
   | "volume-high"
+  | "volume-off"
   | "code"
   | "sliders"
   | "stepper"
@@ -587,12 +589,27 @@ const glyphs: Record<IconName, Draw> = {
     wave(c, 3.2);
     wave(c, 6.2);
   },
+  "volume-off": (c) => {
+    speaker(c);
+    line(c, [13, 7.5, 18, 12.5]);
+    line(c, [18, 7.5, 13, 12.5]);
+  },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.
     c.beginPath();
     c.arc(10, 10, 6.5, 0.134, Math.PI * 2 - 1.704);
     c.arc(13.2, 6.8, 5.2, Math.PI * 2 - 2.468, 0.898, true);
     c.closePath();
+    c.stroke();
+  },
+  undo: (c) => {
+    // An arrowhead pointing back and the path it came by, turning down and back.
+    line(c, [7.5, 11.5, 3.5, 7.5, 7.5, 3.5]);
+    c.beginPath();
+    c.moveTo(3.5, 7.5);
+    c.lineTo(12, 7.5);
+    c.arc(12, 11.75, 4.25, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(9, 16);
     c.stroke();
   },
 };

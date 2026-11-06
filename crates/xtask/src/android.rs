@@ -239,7 +239,8 @@ fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
                 .find(|include| include.is_dir())
         });
     let mut extra = format!(
-        "--sysroot=\"{}\"",
+        "--target={}{MIN_SDK} --sysroot=\"{}\"",
+        clang_target(triple),
         toolchain
             .join("sysroot")
             .display()

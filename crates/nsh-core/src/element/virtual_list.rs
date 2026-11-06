@@ -185,6 +185,10 @@ pub(crate) struct VirtualListEl {
     pub(crate) initial_index: Option<u32>,
     /// How long rows stay viewable before they are reported.
     pub(crate) min_view_time: Option<Duration>,
+    /// The owner of the run that made the list (a component's view, a
+    /// branch, an `each` row): its rows are made under it, so they see its
+    /// context and go with it.
+    pub(crate) scope: Option<super::Owner>,
 }
 
 /// A virtualized, recycling list of `count` rows rendered by `row`: only
@@ -197,6 +201,11 @@ pub(crate) struct VirtualListEl {
 /// can be a signal or a closure: the list grows and shrinks in place. Give
 /// the rows' identities with [`VirtualList::keys`] when rows come and go
 /// other than at the end.
+///
+/// The rows are made under the owner of the code that called
+/// `virtual_list` (the component's view, or the run of a [`super::when`],
+/// [`super::dynamic`] or [`super::each`] row it is in): they see what it
+/// provides ([`super::use_context`]) and are disposed with it.
 pub fn virtual_list<R: IntoElement>(
     count: impl IntoReactive<usize>,
     row: impl Fn(Position) -> R + 'static,
@@ -211,6 +220,7 @@ pub fn virtual_list<R: IntoElement>(
         separator: None,
         initial_index: None,
         min_view_time: None,
+        scope: Some(super::Owner::current_or_detached()).filter(|o| *o != super::Owner::detached()),
     }));
     VirtualList(node)
 }
