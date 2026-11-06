@@ -283,7 +283,7 @@ and Windows.
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
-- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.9 uses it): the adapters pass on only `Click`, `Focus`,
+- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.13 uses it): the adapters pass on only `Click`, `Focus`,
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
@@ -306,9 +306,13 @@ and Windows.
 ### Programmatic window frame and level
 
 The host chooses window bounds and level when opening a GPUI window.
-`Window.setFrame` resizes a standalone window (`Window::resize`; a size it
-leaves out keeps the window's) and ignores the origin: GPUI cannot move a
-window, and Wayland windows cannot place themselves. `Window.setLevel` leaves
+`Window.setFrame` resizes a standalone window's content (`Window::resize`; a
+size it leaves out keeps the window's, each side at least 1 point, since
+Wayland's `wp_viewport` rejects a smaller one as a fatal error) and ignores the
+origin and `animated`: GPUI cannot move a window, and Wayland windows cannot
+place themselves. A maximized or full-screen window keeps its size. With
+server-side decorations GPUI cannot see that a tiling compositor has tiled the
+window, so there the compositor's tile wins over the size. `Window.setLevel` leaves
 the host's level intact. Embedded views leave their host's window alone.
 
 `Window.orderFront` activates a standalone window through a main-thread

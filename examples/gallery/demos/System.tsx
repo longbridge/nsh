@@ -389,6 +389,30 @@ function ContextMenu() {
   );
 }
 
+/** Sizes the window (desktops: `Window.setFrame`). */
+function WindowFrame() {
+  const size = () => `${Math.round(windowSize().width)} × ${Math.round(windowSize().height)}`;
+  return (
+    <Card icon="system" title="Window frame" subtitle="nsh/desktop · Window.setFrame" right={<Badge label={size()} tone="neutral" />}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <Button label="1000 × 720" variant="secondary" onPress={() => Window.setFrame({ size: { width: 1000, height: 720 } })} />
+        <Button label="Width 800" variant="secondary" onPress={() => Window.setFrame({ size: { width: 800 } })} />
+        <Button
+          label="Width, then height"
+          variant="secondary"
+          onPress={() => {
+            Window.setFrame({ size: { width: 900 } });
+            Window.setFrame({ size: { height: 640 } });
+          }}
+        />
+      </View>
+      <Text style={{ fontSize: 12, color: colors.faint }}>
+        "Width, then height" makes 900 × 640 in one go. A maximized or full-screen window keeps its size.
+      </Text>
+    </Card>
+  );
+}
+
 /** Shared by the main window and the second one: one JS runtime renders
  * both, so a signal is all they need. */
 const sharedCount = signal(0);
@@ -490,6 +514,6 @@ function Network() {
 }
 
 export function System() {
-  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, Windows, Network];
+  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, WindowFrame, Windows, Network];
   return <DemoPage cards={sections} />;
 }
