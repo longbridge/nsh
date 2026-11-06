@@ -1459,7 +1459,8 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// is on screen, when it cannot be taken or the app threw. The failures a
 /// test may expect carry a `code` to match (messages may change):
 /// `ERR_NSH_TEST_NOT_FOUND` (nothing matches the selector),
-/// `ERR_NSH_TEST_DISABLED` (what it names is disabled), `ETIMEDOUT` (a wait
+/// `ERR_NSH_TEST_DISABLED` (what it names is disabled),
+/// `ERR_NSH_TEST_COVERED` (another view is drawn over it), `ETIMEDOUT` (a wait
 /// ran out of time), `ERR_NSH_TEST_NO_BACK` (nothing to go back from).
 /// The app closes when the test that opened it ends.
 #[class]

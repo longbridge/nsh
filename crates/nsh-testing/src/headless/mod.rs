@@ -1400,6 +1400,21 @@ impl Headless {
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        // A real finger lands where the view is drawn: a view drawn over it
+        // there takes the press, so the step fails as the user would.
+        if let Some(target) = self.screen.bounds_in_root(id) {
+            let point = self
+                .screen
+                .press_point(&parsed, id)
+                .map_or(target.center(), |p| target.origin + p);
+            if let Some(cover) = self.screen.covering(id, point) {
+                return Err(format!(
+                    "{}; {}",
+                    failure::covered(selector, &self.screen.selector_of(cover)),
+                    self.on_screen()
+                ));
+            }
+        }
         let at = self
             .screen
             .canvas_node(&parsed)

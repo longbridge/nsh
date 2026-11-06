@@ -310,7 +310,8 @@ fn key_equivalent(window: &NSWindow, app: &NSApplication, event: &NSEvent) -> bo
 /// once the menu has been validated; an item nothing answers does nothing
 /// when sent, and one the app disabled has an action nothing answers.
 fn menu_item(menu: &NSMenu, event: &NSEvent) -> Option<Retained<NSMenuItem>> {
-    let flags = event.modifierFlags() & key_equivalent_modifiers();
+    let flags =
+        event.modifierFlags() & (key_equivalent_modifiers() | NSEventModifierFlags::Function);
     let key = event
         .charactersIgnoringModifiers()?
         .to_string()
@@ -326,7 +327,7 @@ fn key_equivalent_modifiers() -> NSEventModifierFlags {
         | NSEventModifierFlags::Control
 }
 
-/// [`menu_item`]'s search, for the event's `flags` (of those modifiers)
+/// [`menu_item`]'s search, for the event's `flags` (of those modifiers and Fn)
 /// and lower-case `key`.
 fn find_item(
     menu: &NSMenu,
@@ -347,12 +348,21 @@ fn find_item(
         if equivalent.is_empty() {
             continue;
         }
+        let mask = item.keyEquivalentModifierMask();
+        // An item of the Fn (Globe) key (Fn+D Dictation, Fn+F Full Screen)
+        // wants it held; other items take a key with or without it, as the
+        // keyboard's function keys and arrows carry it.
+        if mask.contains(NSEventModifierFlags::Function)
+            && !flags.contains(NSEventModifierFlags::Function)
+        {
+            continue;
+        }
         // An upper-case equivalent means Shift with its lower case.
-        let mut wanted = item.keyEquivalentModifierMask() & key_equivalent_modifiers();
+        let mut wanted = mask & key_equivalent_modifiers();
         if equivalent.chars().any(char::is_uppercase) {
             wanted |= NSEventModifierFlags::Shift;
         }
-        if wanted == flags
+        if wanted == flags & key_equivalent_modifiers()
             && if equivalent.is_ascii() {
                 equivalent.eq_ignore_ascii_case(key)
             } else {
