@@ -141,27 +141,27 @@ export function createBrowserHost(player) {
         const scope = await new Promise((resolve, reject) => {
           let settled = false;
           const bootstrap = doc.createElement("script");
-          const finish = (error, scope) => {
+          const finish = (ok, value) => {
             if (settled) return;
             settled = true;
             realm.removeEventListener("error", failed);
             bootstrap.onload = bootstrap.onerror = null;
-            if (error) reject(error); else resolve(scope);
+            if (ok) resolve(value); else reject(value);
           };
           // Classic script execution errors reach the Window, not the script's
           // error handler. Observe only this bootstrap, not unrelated page code.
           const failed = event => {
             if (event.filename !== bootstrap.src) return;
             event.preventDefault();
-            finish(event.error ?? new Error(event.message));
+            finish(false, event.error ?? new Error(event.message));
           };
-          rejectLoad = error => finish(error);
-          Object.defineProperty(realm, "__nsh_browser_bootstrap", { value: scope => finish(null, scope), configurable: true });
+          rejectLoad = error => finish(false, error);
+          Object.defineProperty(realm, "__nsh_browser_bootstrap", { value: scope => finish(true, scope), configurable: true });
           bootstrap.src = new URL("./bootstrap.js", import.meta.url).href;
-          bootstrap.onerror = () => finish(new Error("could not load the browser facade"));
-          bootstrap.onload = () => finish(new Error("the browser facade did not initialize"));
+          bootstrap.onerror = () => finish(false, new Error("could not load the browser facade"));
+          bootstrap.onload = () => finish(false, new Error("the browser facade did not initialize"));
           realm.addEventListener("error", failed);
-          try { doc.head.append(bootstrap); } catch (error) { finish(error); }
+          try { doc.head.append(bootstrap); } catch (error) { finish(false, error); }
         });
         if (!active()) throw new Error("the app was disposed");
         rejectLoad = null;

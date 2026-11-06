@@ -563,7 +563,7 @@ async def check_facade_failure(page, script):
     await stopped(page, ["recovered"])
 
 
-async def check_bootstrap_execution_failure(page, code):
+async def check_bootstrap_execution_failure(page, code, expected_error=None):
     pattern = "**/browser/bootstrap.js"
     await page.route(pattern, lambda route: route.fulfill(
         status=200, content_type="text/javascript", body=code))
@@ -571,6 +571,8 @@ async def check_bootstrap_execution_failure(page, code):
         await begin(page, "failed")
         await outcome(page, "failed", "rejected")
         await page.evaluate("harness.expectedReports.push(harness.outcomes.failed.report)")
+        if expected_error is not None:
+            assert await page.evaluate("harness.outcomes.failed.error") == expected_error
         assert await page.locator("iframe").count() == 0
         assert len(await page.evaluate("errors")) == 1
     finally:
@@ -612,6 +614,8 @@ def lifecycle_cases():
           for name, code in [("syntax-error", "const = ;"),
                              ("throw", "throw new Error('fixture bootstrap failed');"),
                              ("missing-callback", "void 0;")]],
+        ("bootstrap-falsy-throw", functools.partial(check_bootstrap_execution_failure,
+                                                  code="throw 0;", expected_error="0"), ()),
         ("cleanup-failure", check_cleanup_failure, ()),
     ]
 
