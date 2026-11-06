@@ -567,6 +567,17 @@ impl ListState {
             let Some(new) = index else {
                 if s.index.take().is_some() {
                     self.free.push(slot as u32);
+                } else if let (Some(r), Some(n)) = (s.requested, s.requested.and_then(shift))
+                    && s.rendered == Some(r)
+                {
+                    // A free cell still showing an item that stays follows
+                    // it (the runtime is told), so the item gets it back.
+                    s.requested = Some(n);
+                    s.rendered = Some(n);
+                    if n != r {
+                        self.moved.push((slot as u32, n));
+                    }
+                    continue;
                 }
                 // The cell's content follows the new data at its old index:
                 // it is bound again before it shows.
@@ -1001,6 +1012,14 @@ impl ListState {
         }
         self.count = count;
         self.items_changed = true;
+        // The rows past the end went: a cell that showed one shows whatever
+        // comes there next only once bound again.
+        for s in &mut self.slots {
+            if s.requested.is_some_and(|r| r >= count) {
+                s.requested = None;
+                s.rendered = None;
+            }
+        }
         self.sizes.resize(count as usize, f32::NAN);
         self.rebuild_offsets();
         if self.load_more_at.is_some_and(|c| c != count) {
@@ -1538,36 +1557,57 @@ impl ListState {
                 self.unbind(slot);
             }
         }
-        let bind = |this: &mut Self, i: u32| {
+        // First the items whose own cell is free and still shows them (the
+        // window shrank and grew back: a dock showed and went, the window
+        // was resized): they take it back as it is, nothing to make again.
+        // Then the rest, each in any free cell.
+        let bind = |this: &mut Self, i: u32, own: bool| {
             if this.by_index.contains_key(&i) {
                 return;
             }
-            let slot = match this.free.pop() {
-                Some(slot) => slot,
-                None => {
-                    this.slots.push(Slot {
-                        cell: u32::MAX,
-                        index: None,
-                        rendered: None,
-                        requested: None,
-                    });
-                    this.slots.len() as u32 - 1
-                }
+            let slots = &this.slots;
+            let shows = |s: &u32| {
+                let s = &slots[*s as usize];
+                s.rendered == Some(i) && s.requested == Some(i)
+            };
+            let own_slot = this.free.iter().rposition(shows);
+            let slot = match own_slot {
+                Some(at) => this.free.remove(at),
+                None if own => return,
+                None => match this.free.pop() {
+                    Some(slot) => slot,
+                    None => {
+                        this.slots.push(Slot {
+                            cell: u32::MAX,
+                            index: None,
+                            rendered: None,
+                            requested: None,
+                        });
+                        this.slots.len() as u32 - 1
+                    }
+                },
             };
             this.slots[slot as usize].index = Some(i);
             this.by_index.insert(i, slot);
         };
-        if let Some((first, last)) = range {
-            for i in first..=last {
-                bind(self, i);
-            }
-        }
-        for s in [before, sticky].into_iter().flatten() {
-            bind(self, s);
-        }
         let count = self.count;
-        for &i in kept.iter().filter(|&&i| i < count) {
-            bind(self, i);
+        let passes: &[bool] = if self.free.is_empty() {
+            &[false]
+        } else {
+            &[true, false]
+        };
+        for &own in passes {
+            if let Some((first, last)) = range {
+                for i in first..=last {
+                    bind(self, i, own);
+                }
+            }
+            for s in [before, sticky].into_iter().flatten() {
+                bind(self, s, own);
+            }
+            for &i in kept.iter().filter(|&&i| i < count) {
+                bind(self, i, own);
+            }
         }
         let (start, end) = self.urgent_span(at);
         let new = binds.len();
@@ -2593,6 +2633,84 @@ mod tests {
         l.set_inverted(true);
         // Item 0 at the bottom of the viewport.
         assert_eq!(l.offset_for_index(0, 0.0, 0.0), 4600.0);
+    }
+
+    /// Binds the window and confirms what it asked, as the runtime does:
+    /// the cells it made, by slot.
+    fn bind_all(l: &mut ListState, binds: &mut Vec<(u32, u32)>) {
+        binds.clear();
+        l.update_window(binds);
+        for &(slot, index) in binds.iter() {
+            if l.slots[slot as usize].cell == u32::MAX {
+                l.add_slot_cell(CellSlot::Item(slot), 100 + slot);
+            }
+            l.rendered(100 + slot, index);
+        }
+    }
+
+    #[test]
+    fn items_take_back_the_free_cell_that_still_shows_them() {
+        let mut l = list(100, 50.0, 400.0);
+        let mut binds = Vec::new();
+        l.offset = 1000.0;
+        bind_all(&mut l, &mut binds);
+        let cells = |l: &ListState| -> Vec<(u32, u32)> {
+            let mut c: Vec<_> = l
+                .slots
+                .iter()
+                .filter_map(|s| s.index.map(|i| (i, s.cell)))
+                .collect();
+            c.sort_unstable();
+            c
+        };
+        let before = cells(&l);
+        // The viewport shrinks (a panel shows below the list), then grows
+        // back: the rows at the edges leave the window, then return.
+        l.viewport = 200.0;
+        bind_all(&mut l, &mut binds);
+        assert!(cells(&l).len() < before.len());
+        l.viewport = 400.0;
+        bind_all(&mut l, &mut binds);
+        assert_eq!(cells(&l), before, "each row is back in its own cell");
+        assert!(binds.is_empty(), "nothing to bind again: {binds:?}");
+        // Scrolled a little, the window gives other rows the free cells.
+        l.offset = 1200.0;
+        bind_all(&mut l, &mut binds);
+        assert!(!binds.is_empty());
+    }
+
+    #[test]
+    fn free_cells_follow_their_items_through_splices() {
+        let mut l = list(100, 50.0, 400.0);
+        let mut binds = Vec::new();
+        l.offset = 1000.0;
+        bind_all(&mut l, &mut binds);
+        let cell_of =
+            |l: &ListState, i: u32| l.slots.iter().find(|s| s.index == Some(i)).map(|s| s.cell);
+        let last = l.slots.iter().filter_map(|s| s.index).max().unwrap();
+        let own = cell_of(&l, last).unwrap();
+        // The window shrinks: the last row's cell is free, still showing it.
+        l.viewport = 200.0;
+        bind_all(&mut l, &mut binds);
+        assert_eq!(cell_of(&l, last), None);
+        // Two rows arrive at the top: the free cell is told its row's new
+        // index, and gets it back when the window grows again.
+        l.splice(0, 0, 2);
+        binds.clear();
+        l.update_window(&mut binds);
+        let slot = l.slots.iter().position(|s| s.cell == own).unwrap() as u32;
+        assert!(binds.contains(&(slot, last + 2)), "{binds:?}");
+        l.viewport = 400.0;
+        bind_all(&mut l, &mut binds);
+        assert_eq!(cell_of(&l, last + 2), Some(own));
+        assert!(!binds.iter().any(|&(s, _)| s == slot), "{binds:?}");
+        // A free cell whose row went is bound again before it shows.
+        l.viewport = 200.0;
+        bind_all(&mut l, &mut binds);
+        assert_eq!(cell_of(&l, last + 2), None);
+        l.splice(last + 2, 1, 0);
+        let s = l.slots[slot as usize];
+        assert_eq!((s.rendered, s.requested), (None, None));
     }
 
     #[test]

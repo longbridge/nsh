@@ -22219,6 +22219,28 @@ fn render_lists_binds(
     }
 }
 
+/// Stacks the children of view `parent` as `batch` inserts and removes
+/// them (`stacked`, bottom to top).
+fn stack_children(stacked: &mut Vec<NodeId>, parent: NodeId, batch: Option<&MountBatch>) {
+    for item in batch.iter().flat_map(|b| &b.items) {
+        match *item {
+            MountItem::Insert {
+                parent: p,
+                child,
+                before,
+            } if p == parent => {
+                stacked.retain(|&v| v != child);
+                let at = before
+                    .and_then(|b| stacked.iter().position(|&v| v == b))
+                    .unwrap_or(stacked.len());
+                stacked.insert(at, child);
+            }
+            MountItem::Remove { id } => stacked.retain(|&v| v != id),
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     let mut c = core();
@@ -22232,10 +22254,13 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         })
         .unwrap();
     }
-    c.commit();
+    // The second list's views, bottom to top, as the batches stack them.
+    let mut stacked = Vec::new();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     // The page's scroll view pins them, in its offsets: the first list's
     // row 0 from 100 until row 10 pushes it out, row 10 from 600 until its
     // bottom meets the list's end (1100).
@@ -22253,9 +22278,10 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     // The second list's rows are not bound yet (it starts at 1100, past
     // the window); scrolled there, its row 0 joins, from 1100.
     c.set_scroll_offset(2, point(px(0.0), px(1200.0)), 0);
-    c.commit();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     let pinned = sticky_of(&batch, 2).expect("the page's sticky cells");
     assert!(
         pinned.contains(&(cells[&5][bound_slot(&c, 5, 0) as usize], 1100.0, 1550.0)),
@@ -22265,11 +22291,14 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         pinned.contains(&(cells[&4][bound_slot(&c, 4, 10) as usize], 600.0, 1050.0)),
         "{pinned:?}"
     );
-    // A sticky cell goes on top of its list's other cells.
-    assert!(batch.items.iter().any(|i| matches!(
-        i,
-        MountItem::Insert { parent: 5, child, before: None } if *child == cells[&5][bound_slot(&c, 5, 0) as usize]
-    )));
+    // A sticky cell goes on top of its list's other cells: only sticky
+    // cells are above it.
+    let sticky = [0, 10].map(|i| cells[&5][bound_slot(&c, 5, i) as usize]);
+    let at = stacked.iter().position(|&v| v == sticky[0]).unwrap();
+    assert!(
+        stacked[at + 1..].iter().all(|v| sticky.contains(v)),
+        "{stacked:?}"
+    );
     // The first list leaves the page: its cells leave the page's set, and
     // the second list's move up with it (it now starts at 100).
     c.apply(Op::Remove {

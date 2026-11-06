@@ -79,6 +79,8 @@
 - **Spare list cells** (recycled cells without an item) keep their last row. The core hides them (`Core::set_spare`:
   `visibility: hidden` and `accessibilityElementsHidden`) when they lie in the render window, were never placed or
   the items changed, and shows them as it places them; the few the window leaves behind while scrolling stay shown.
+  A row coming back into the window takes back the spare cell that still shows it (the window shrank and grew back
+  as a panel showed and went), so it is not made again; spare cells follow their rows through splices.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
