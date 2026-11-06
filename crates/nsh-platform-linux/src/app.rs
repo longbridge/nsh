@@ -424,6 +424,36 @@ fn initial_environment() -> Environment {
 /// The window [`run_app`] shows and its view, once shown.
 type Shown = (gtk::ApplicationWindow, Rc<AppView>);
 
+thread_local! {
+    /// The standalone app's application ([`run_app`]): what [`quit`] ends.
+    static STANDALONE: RefCell<Option<glib::WeakRef<gtk::Application>>> =
+        const { RefCell::new(None) };
+}
+
+/// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
+/// its windows close as the user closing them would, then its run ends,
+/// also while something else holds the application (a tray icon). A view
+/// embedded in another app leaves the app's lifecycle to that app: false
+/// there, with nothing done.
+pub(crate) fn quit() -> bool {
+    let app = STANDALONE.with(|s| s.borrow().as_ref().and_then(|app| app.upgrade()));
+    let Some(app) = app else {
+        return false;
+    };
+    // Not while a surface applies its batch: closing its window stops it.
+    glib::idle_add_local_once(move || quit_application(&app));
+    true
+}
+
+/// Closes `app`'s windows (closing the main one stops its engine), then
+/// ends its run.
+fn quit_application(app: &gtk::Application) {
+    for window in app.windows() {
+        window.close();
+    }
+    app.quit();
+}
+
 /// Runs `source` in a window until it is closed.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     options.notifications = true;
@@ -443,6 +473,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             gtk::gio::ApplicationFlags::NON_UNIQUE
         })
         .build();
+    STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
     let args: Vec<String> = if links {
         crate::links::register(&options.app_id, &options.title, &options.schemes);
         crate::links::launch_args(&options.schemes)
@@ -519,11 +550,8 @@ fn install_shortcuts(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     let quit = gtk::gio::SimpleAction::new("quit", None);
     let weak = app.downgrade();
     quit.connect_activate(move |_, _| {
-        // Closing the windows stops their apps; the last one ends the run.
         if let Some(app) = weak.upgrade() {
-            for window in app.windows() {
-                window.close();
-            }
+            quit_application(&app);
         }
     });
     app.add_action(&quit);

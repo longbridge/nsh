@@ -733,6 +733,49 @@ fn html_in_markdown() {
 }
 
 #[test]
+fn tags_of_no_element_are_text() {
+    // Not HTML's elements: the tags show as written.
+    assert_eq!(
+        blocks("美股 <US tech> 板块与 <公司名> 都涨了"),
+        vec![p(vec![t("美股 <US tech> 板块与 <公司名> 都涨了")])]
+    );
+    assert_eq!(
+        blocks("a <Foo bar>b</Foo> c"),
+        vec![p(vec![t("a <Foo bar>b</Foo> c")])]
+    );
+    // Alone on its line: the tag is text, the lines after it Markdown.
+    assert_eq!(
+        blocks("<US tech>\n**涨了** 2%\n\nNext"),
+        vec![
+            p(vec![t("<US tech> "), strong(vec![t("涨了")]), t(" 2%")]),
+            p(vec![t("Next")]),
+        ]
+    );
+    // HTML's elements, any case, and comments read as before.
+    assert_eq!(
+        blocks("x <B>y</B> <!-- hidden --> z"),
+        blocks("x <b>y</b> <!-- hidden --> z")
+    );
+    assert_eq!(
+        blocks("x <b>y</b>"),
+        vec![p(vec![t("x "), strong(vec![t("y")])])]
+    );
+    // A `tag` extension's element is read as the extension.
+    let doc = Parser::new()
+        .extension(MarkdownExtension::tag("ticker", "Ticker"))
+        .markdown("Buy <Ticker sym=\"AAPL\">Apple</Ticker> now");
+    let [Block::Paragraph { content }] = doc.blocks.as_slice() else {
+        panic!("{doc:?}");
+    };
+    assert!(
+        content
+            .iter()
+            .any(|i| matches!(i, Inline::Custom(node) if node.name == "ticker")),
+        "{content:?}"
+    );
+}
+
+#[test]
 fn mdx() {
     let parser = Parser::new()
         .options(MarkdownOptions {

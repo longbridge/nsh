@@ -100,7 +100,7 @@ expect Listener: stopped
 covers [nsh] UrlScheme
 # mod-desktop
 tap id:case-mod-desktop
-# no title bar area, the window and menu functions do nothing, and a popup
+# no title bar area, the window, app and menu functions do nothing, and a popup
 # closes at once.
 expect Desktop: false
 expect Title bar: 0 0 0
@@ -111,12 +111,15 @@ expect Calls: window done, close function, minimize function
 tap id:menu
 expect Calls: menu done
 expect Popup: closed
+tap id:application
+expect Calls: application done, quit function
 tap id:toggles
 expect Calls: toggles done
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] Window
 covers [nsh/desktop] Menu
+covers [nsh/desktop] Application
 # mod-device
 tap id:case-mod-device
 # iOS phone at 1 pixel per point, in the light scheme.

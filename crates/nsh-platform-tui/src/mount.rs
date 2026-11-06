@@ -451,6 +451,11 @@ impl Mounter {
                     command: Command::ExitApp,
                     ..
                 } => self.exit = true,
+                // `Application.quit()`: the app ends, as with a menu's quit role.
+                MountItem::Command {
+                    command: Command::Desktop(ref desktop),
+                    ..
+                } if **desktop == nsh_core::desktop::DesktopCommand::Quit => self.exit = true,
                 // The app's design tokens, for the platform's own controls
                 // (Linux's menus, iOS's and Android's alerts). The
                 // terminal's own controls (menus, the menu bar, system
