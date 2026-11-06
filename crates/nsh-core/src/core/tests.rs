@@ -10972,6 +10972,73 @@ mod components {
         assert!(shown.iter().all(|t| !t.starts_with("failed")), "{shown:?}");
     }
 
+    /// What a branch of `ScopedRows` provides to what it makes.
+    #[derive(Clone)]
+    struct BranchContext(&'static str);
+
+    thread_local! {
+        /// Whether a row of `ScopedRows` ran after its branch went.
+        static RAN_AFTER_BRANCH: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Its own rows in a branch that provides a context and holds a signal
+    /// of its own; a press closes the branch and changes what the rows read.
+    #[component]
+    fn ScopedRows() -> impl IntoElement {
+        let (open, tick) = (signal(true), signal(0u32));
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                batch(|| {
+                    tick.update(|t| *t += 1);
+                    open.set(false);
+                })
+            }))
+            .child(when(open, move || {
+                provide_context(BranchContext("provided"));
+                let local = signal(1u32);
+                virtual_list(3, move |at| {
+                    let label = use_context::<BranchContext>().map_or("missing", |c| c.0);
+                    effect(move || {
+                        tick.get();
+                        if local.try_get().is_none() {
+                            RAN_AFTER_BRANCH.with(|r| r.set(true));
+                        }
+                    });
+                    view()
+                        .h(px(40.0))
+                        .child(text(format!("{label} {}", at.index())))
+                })
+                .estimated_item_size(px(40.0))
+                .flex_1()
+            }))
+    }
+
+    #[test]
+    fn virtual_list_rows_belong_to_the_run_that_made_the_list() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ScopedRows>(|| ()));
+        let batch = c.commit().unwrap();
+        // The rows see what the branch around the list provides.
+        let shown = texts(&batch);
+        assert!(shown.contains(&"provided 0".to_owned()), "{shown:?}");
+        assert!(!shown.iter().any(|t| t.starts_with("missing")), "{shown:?}");
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        // They go with the branch: nothing of theirs runs once it went.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        for _ in 0..3 {
+            let _ = c.commit();
+        }
+        assert!(!RAN_AFTER_BRANCH.with(Cell::get));
+    }
+
     /// A chat: its own rows in a list that follows its end; a press makes
     /// the last row taller (a reply streaming in).
     #[component]

@@ -64,13 +64,18 @@ type Rows = (u32, Option<Rc<[u64]>>);
 
 /// The parts of a view's list cells that show rows: the index each one's
 /// content reads, and the content's owner.
-type CellRows =
-    Rc<RefCell<FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>>>;
+type CellRows = Rc<RefCell<CellRowMap>>;
+
+/// The index and owner of each part of a list's cells showing a row.
+type CellRowMap = FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>;
 
 /// A component's own list.
 struct VirtualListState {
     /// The component whose view it is in (its rows' handlers are its).
     owner: NodeId,
+    /// The owner of the run that made the list, if any: its rows are made
+    /// under it and disposed with it.
+    scope: Option<crate::element::Owner>,
     row: RowFn,
     count: u32,
     keys: Option<Rc<[u64]>>,
@@ -2089,8 +2094,11 @@ impl<M: TextEngine> Core<M> {
                     .and_then(|k| self.nodes[k as usize].list.as_ref())
                     .is_some_and(|l| l.inverted);
                 let state = self.components.virtual_lists.get(&list).map(|state| {
+                    // The run that made the list went (its view goes in
+                    // this commit): no row is made under it.
+                    let gone = state.scope.is_some_and(|s| !s.is_live());
                     (
-                        state.count as usize,
+                        if gone { 0 } else { state.count as usize },
                         state.row.clone(),
                         state.separator.clone(),
                         state.rows.clone(),
@@ -2176,10 +2184,17 @@ impl<M: TextEngine> Core<M> {
         el
     }
 
-    /// The owner of the component whose list cell `cell` is in.
+    /// The owner a list cell `cell`'s row is made under: the run that made
+    /// the list, else the component whose list it is.
     fn cell_parent_owner(&self, cell: NodeId) -> crate::element::Owner {
-        let component = self
-            .list_of(cell)
+        let list = self.list_of(cell);
+        if let Some(scope) = list
+            .and_then(|list| self.components.virtual_lists.get(&list))
+            .and_then(|s| s.scope)
+        {
+            return scope;
+        }
+        let component = list
             .and_then(|list| {
                 self.components
                     .virtual_lists
@@ -4124,6 +4139,7 @@ impl<M: TextEngine> Core<M> {
             .entry(id)
             .or_insert_with(|| VirtualListState {
                 owner,
+                scope: None,
                 row: list.row.clone(),
                 count: 0,
                 keys: None,
@@ -4138,6 +4154,15 @@ impl<M: TextEngine> Core<M> {
                 latest: None,
                 report: None,
             });
+        // The rows go with the run that made the list. A list a later run
+        // keeps takes that run's owner: its cells are made again below.
+        if state.scope != list.scope {
+            state.scope = list.scope;
+            if let Some(scope) = list.scope {
+                let rows = Rc::downgrade(&state.rows);
+                scope.run(|| crate::element::cleanup(move || dispose_rows(&rows)));
+            }
+        }
         let cells = state.rows.clone();
         let bound = matches!(list.count, Reactive::Bound(_)) || list.keys.is_some();
         let (count, keys) = (list.count, list.keys);
@@ -6035,6 +6060,17 @@ impl<M: TextEngine> Core<M> {
 fn drop_caught<T>(value: T) {
     if let Err(message) = caught(move || drop(value)) {
         log::error!(target: "js", "a value of a call into Rust panicked as it dropped: {message}");
+    }
+}
+
+/// Disposes the contents of a list's cells: the run that made the list went.
+fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
+    let Some(rows) = rows.upgrade() else {
+        return;
+    };
+    let owners: Vec<_> = rows.borrow_mut().drain().map(|(_, (_, o))| o).collect();
+    for owner in owners {
+        owner.dispose();
     }
 }
 
