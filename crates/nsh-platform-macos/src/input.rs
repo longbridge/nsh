@@ -357,7 +357,7 @@ fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
             .is_some_and(|focused| focused == *view)
     });
     if focused && view.id() != ROOT_ID {
-        window.makeFirstResponder(Some(event_root(surface).ns()));
+        window.makeFirstResponder(Some(root_in(surface, &window).ns()));
     }
 }
 
@@ -608,6 +608,17 @@ fn repick(key: u64) {
 /// picks, converts and focuses is in that window until the next event.
 pub(crate) fn enter(surface: &Surface, window: Option<NshView>) {
     *surface.input.window_root.borrow_mut() = window;
+}
+
+/// The root view `window` shows: the surface's, or that of a window of the
+/// app's own. What runs outside an event (a commit's `blur()`, a page
+/// leaving) finds the root by the window, never by [`event_root`], which
+/// is the last event's.
+pub(crate) fn root_in(surface: &Surface, window: &objc2_app_kit::NSWindow) -> NshView {
+    crate::window::roots(surface)
+        .into_iter()
+        .find(|root| root.ns().window().as_deref() == Some(window))
+        .unwrap_or_else(|| surface.root.clone())
 }
 
 /// The root view of the window the event being handled happened in
@@ -861,7 +872,7 @@ pub(crate) fn focus_control(surface: &Surface, view: &NshView) {
     };
     // A field that edits keeps the focus while a click is handled (the
     // view refuses it then): the window takes it first, as `blur()` does.
-    if crate::text_input::editing(surface) {
+    if crate::text_input::editing_in(&root_in(surface, &window)) {
         window.makeFirstResponder(None);
     }
     window.makeFirstResponder(Some(view.ns()));
@@ -873,7 +884,7 @@ pub(crate) fn blur_control(surface: &Surface, view: &NshView) {
     if let Some(window) = view.ns().window()
         && has_key_focus(view)
     {
-        window.makeFirstResponder(Some(event_root(surface).ns()));
+        window.makeFirstResponder(Some(root_in(surface, &window).ns()));
     }
 }
 
@@ -978,9 +989,13 @@ pub(crate) fn accessibility_show_menu(surface: &Surface, view: &NshView) -> bool
         (s.id, s.frame.size)
     };
     let position = nsh_core::input::context_menu_anchor(size, rtl);
+    let root = view
+        .ns()
+        .window()
+        .map_or_else(|| surface.root.clone(), |window| root_in(surface, &window));
     let page = view.ns().convertPoint_toView(
         objc2_foundation::NSPoint::new(f64::from(position.x.0), f64::from(position.y.0)),
-        Some(event_root(surface).ns()),
+        Some(root.ns()),
     );
     let event = nsh_core::ContextMenuEvent::new(
         position,
@@ -2546,18 +2561,14 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
 /// coordinates) when nsh's own picking lands on one: the root's `hitTest:`
 /// hands it the mouse, past app views that let the pointer through
 /// (`pointerEvents: none` overlays), which AppKit's picking would stop at.
-pub(crate) fn native_at(
-    surface: &Surface,
-    x: f32,
-    y: f32,
-) -> Option<Retained<objc2_app_kit::NSView>> {
-    let hit = pick(&event_root(surface), x, y)?;
+pub(crate) fn native_at(root: &NshView, x: f32, y: f32) -> Option<Retained<objc2_app_kit::NSView>> {
+    let hit = pick(root, x, y)?;
     if !hit.native {
         return None;
     }
     let local = hit.view.ns().convertPoint_fromView(
         objc2_foundation::NSPoint::new(x as f64, y as f64),
-        Some(event_root(surface).ns()),
+        Some(root.ns()),
     );
     let (lx, ly) = (local.x as f32, local.y as f32);
     let s = hit.view.state();

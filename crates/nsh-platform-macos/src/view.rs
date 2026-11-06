@@ -949,12 +949,18 @@ impl ViewObj {
     /// superview's coordinates.
     fn root_hit(&self, point: NSPoint) -> Retained<NSView> {
         let me = || Retained::from(&**self);
-        let Some(surface) = self.input_surface() else {
+        // A query AppKit makes at any time: it picks in this root and leaves
+        // the input's window (`input::enter`) to the events.
+        let Some(surface) = self
+            .surface()
+            .or_else(|| self.ivars().window.borrow().upgrade())
+        else {
             return me();
         };
         let outer = superview(self);
         let p = self.convertPoint_fromView(point, outer.as_deref());
-        let Some(native) = crate::input::native_at(&surface, p.x as f32, p.y as f32) else {
+        let root = NshView(self.retain());
+        let Some(native) = crate::input::native_at(&root, p.x as f32, p.y as f32) else {
             return me();
         };
         // A web view that does not scroll leaves wheels to the app's

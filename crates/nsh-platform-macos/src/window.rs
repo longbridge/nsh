@@ -30,8 +30,8 @@ use objc2::{
     runtime::{Bool, ProtocolObject},
 };
 use objc2_app_kit::{
-    NSAppearance, NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSColor, NSScreen,
-    NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSAppearance, NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSColor,
+    NSResponder, NSScreen, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
@@ -93,8 +93,13 @@ pub(crate) fn command(
         }
         DesktopCommand::Hide => window.orderOut(None),
         // The app closes it by removing its root (`handle.close()`); a
-        // close asked for here is the user's (`Dismiss`).
-        DesktopCommand::Close => window.performClose(None),
+        // close asked for here goes as the user's (`windowShouldClose:`).
+        // `performClose:` would only beep on a window without a close
+        // button (`frame: "none"`).
+        DesktopCommand::Close => {
+            window.orderOut(None);
+            surface.event(id, EventKind::Dismiss, EventPayload::None);
+        }
         // Menus and the title bar's style are the main window's.
         _ => {}
     }
@@ -128,16 +133,18 @@ fn open(surface: &Rc<Surface>, view: &NshView, options: &WindowOptions) {
                 | NSWindowStyleMask::Resizable
         }
     };
-    // SAFETY: NSWindow's designated initializer.
-    let window = unsafe {
-        NSWindow::initWithContentRect_styleMask_backing_defer(
-            NSWindow::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, 0.0), size),
-            style,
-            NSBackingStoreType::Buffered,
-            false,
-        )
+    // SAFETY: NSWindow's designated initializer, on a subclass that adds
+    // no state of its own.
+    let window: Retained<OwnWindow> = unsafe {
+        msg_send![
+            OwnWindow::alloc(mtm),
+            initWithContentRect: NSRect::new(NSPoint::new(0.0, 0.0), size),
+            styleMask: style,
+            backing: NSBackingStoreType::Buffered,
+            defer: false
+        ]
     };
+    let window = Retained::into_super(window);
     // SAFETY: the window is kept in `Surface::windows` until it goes.
     unsafe { window.setReleasedWhenClosed(false) };
     let main = surface.root.ns().window();
@@ -304,6 +311,31 @@ fn close(w: AppWindow) {
     w.window.setContentView(None);
     w.window.close();
 }
+
+define_class!(
+    /// A window of the app's own. One without a frame (`frame: "none"`)
+    /// takes the keyboard and becomes the main window as a titled one does:
+    /// AppKit's borderless windows refuse both, so its inputs could not be
+    /// typed in.
+    #[unsafe(super(NSWindow, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NshOwnWindow"]
+    struct OwnWindow;
+
+    unsafe impl NSObjectProtocol for OwnWindow {}
+
+    impl OwnWindow {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            true
+        }
+    }
+);
 
 define_class!(
     /// The delegate of a window of the app's own: the user's close asks the

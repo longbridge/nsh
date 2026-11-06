@@ -564,7 +564,7 @@ pub(crate) fn lend(surface: &Rc<Surface>, top: &NshView, image: &NSView) -> Vec<
                     .is_some_and(|v| v.isDescendantOf(&shown))
             });
             if focused {
-                window.makeFirstResponder(Some(crate::input::event_root(surface).ns()));
+                window.makeFirstResponder(Some(crate::input::root_in(surface, &window).ns()));
             }
         }
         // SAFETY: NSView's designated initializer.

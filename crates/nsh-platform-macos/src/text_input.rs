@@ -2098,27 +2098,36 @@ pub(crate) fn blur(view: &NshView) {
     }
 }
 
-/// Unfocuses whatever input of the surface has focus.
+/// Unfocuses whatever input of the surface has focus, in any of its
+/// windows (the main one and the app's own).
 pub(crate) fn blur_all(surface: &Rc<Surface>) {
-    if let Some(window) = crate::input::event_root(surface).ns().window()
-        && editing(surface)
-    {
-        to_root(&window, surface);
+    let roots = std::iter::once(surface.root.clone()).chain(crate::window::roots(surface));
+    for root in roots {
+        if let Some(window) = root.ns().window()
+            && editing_in(&root)
+        {
+            to_root(&window, surface);
+        }
     }
 }
 
-/// Ends editing and gives the keyboard focus to the surface's root. The
-/// window takes it first: the root refuses it while a field edits during a
-/// click (a click elsewhere leaves the focus in the field).
+/// Ends editing and gives the keyboard focus to the root `window` shows.
+/// The window takes it first: the root refuses it while a field edits
+/// during a click (a click elsewhere leaves the focus in the field).
 fn to_root(window: &objc2_app_kit::NSWindow, surface: &Surface) {
     window.makeFirstResponder(None);
-    window.makeFirstResponder(Some(crate::input::event_root(surface).ns()));
+    window.makeFirstResponder(Some(crate::input::root_in(surface, window).ns()));
 }
 
-/// Whether one of the surface's inputs has the keyboard focus (a click
-/// elsewhere leaves it there, as desktops do).
+/// Whether one of the surface's inputs has the keyboard focus in the window
+/// of the event being handled (a click elsewhere leaves it there, as
+/// desktops do).
 pub(crate) fn editing(surface: &Surface) -> bool {
-    let root = crate::input::event_root(surface);
+    editing_in(&crate::input::event_root(surface))
+}
+
+/// Whether an input under `root` has its window's keyboard focus.
+pub(crate) fn editing_in(root: &NshView) -> bool {
     let root = root.ns();
     let Some(responder) = root.window().and_then(|w| w.firstResponder()) else {
         return false;
