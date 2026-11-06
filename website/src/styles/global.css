@@ -226,12 +226,14 @@ html.light {
 }
 /* Over the gallery theme's light tokens, which load after this file. */
 html.light:root {
-  --nsh-gallery-primary: #96c823;
+  /* The primary button as in dark: one flat citrus with a fine top light,
+     only its edge a touch darker so it holds on white. */
+  --nsh-gallery-primary: #c2ea62;
   --nsh-gallery-primary-foreground: #13160c;
-  --nsh-gallery-finish-light-background-color: #8cc01d;
-  --nsh-gallery-finish-light-background-image: linear-gradient(180deg, #b2de45, #8cc01d 55%, #7cb015);
-  --nsh-gallery-finish-light-border-color: #6f9f12;
-  --nsh-gallery-finish-light-box-shadow: inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(63 102 6 / 25%), 0 1px 2px rgb(63 102 6 / 22%);
+  --nsh-gallery-finish-light-background-color: #c2ea62;
+  --nsh-gallery-finish-light-background-image: linear-gradient(180deg, #c2ea62 0%, #c2ea62 100%);
+  --nsh-gallery-finish-light-border-color: rgb(60 90 0 / 45%);
+  --nsh-gallery-finish-light-box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%), inset 0 1px 1px rgb(255 255 255 / 35%), 0 1px 1px rgb(0 0 0 / 8%);
   --logo-edge: #3f6606;
   --logo-shine: #d4f178;
   --logo-bead-lo: #1b1e24;
