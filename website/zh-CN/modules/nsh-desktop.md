@@ -516,7 +516,7 @@ interface GlobalShortcutModule {
 
 在 Windows 上一个按键只属于一个应用：已被其他应用占用或由系统保留（Win+L）时返回 `false`。按住不放只触发一次。
 
-在 Linux 上通过桌面 portal（`org.freedesktop.portal.GlobalShortcuts`）注册，这是 Wayland 下唯一的方式。按键只是建议值：桌面可能请用户确认或改选其他按键。Hyprland 在自己的配置里绑定，按应用 id 和小写的按键名：`bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`。
+在 Linux 上通过桌面 portal（`org.freedesktop.portal.GlobalShortcuts`）注册，这是 Wayland 下唯一的方式。按键只是建议值：桌面可能请用户确认或改选其他按键。Hyprland 在自己的配置里绑定，按应用 id 和小写的按键名：`bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`，Lua 配置写作 `hl.bind("CTRL + ALT + K", hl.dsp.global("com.example.mail:ctrl+alt+k"))`。portal 按应用 id 识别应用，这需要应用的 `.desktop` 文件：`nsh package` 会安装它，`nsh run` 会为带 URL scheme 的应用写入它。
 
 ```tsx
 import { GlobalShortcut, Window } from "nsh/desktop";

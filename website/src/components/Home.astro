@@ -468,6 +468,8 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
 </main>
 
 <script>
+  import { playSound } from '../lib/sound';
+
   // The platform names and the arches name the same thing: naming one lights
   // its arch (HeroArches.astro), and an arch under the pointer lights its name.
   for (const hero of document.querySelectorAll<HTMLElement>('[data-hero]')) {
@@ -671,6 +673,7 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
     }
 
     panel.querySelector('[data-press]')?.addEventListener('click', () => {
+      playSound('tap');
       const now = reduce ? performance.now() - 1e4 : performance.now();
       moved = now;
       const next: Bead[] = [];
