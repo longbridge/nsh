@@ -170,6 +170,13 @@ const KEYFRAMES = `
   text-underline-offset: 0.2em; }
 .nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
+/* A view of no size (\`display: none\` lays it out at none) draws nothing of
+   its own, as on the native backends, which draw inside its bounds: CSS
+   would still draw its border overlay (a border-box is never smaller than
+   its borders, so four 1px borders make a 2px square), its outline and its
+   shadow's spread. Its children stay, a zero-size anchor's included. */
+.nsh-empty > .nsh-border { display: none; }
+.nsh-v.nsh-empty { outline: none; box-shadow: none; }
 /* The mounter's own styles: no element has an inline style but its frame
    and animated values (generated classes, \`op_css\`, come after these). */
 .nsh-page { overscroll-behavior: none; }
@@ -2179,6 +2186,8 @@ class Player {
     // at one again changes whether it shows (`stackShown`).
     const emptied = el._kind === "stack" && el._frame && !(el._frame[2] > 0 && el._frame[3] > 0) !== !(w > 0 && h > 0);
     el._frame = [x, y, w, h];
+    // No size: nothing of its own shows (`.nsh-empty`).
+    el.classList.toggle("nsh-empty", !(w > 0 && h > 0));
     if (emptied) this.syncHistorySoon();
     this.placeFrame(el);
     this.readingChanged(el.parentNode);
