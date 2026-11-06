@@ -129,7 +129,8 @@ The editor works as code editors do:
 - **Several carets.** Alt-click (Option-click) adds a caret, `mod+d` selects the next occurrence of the selection,
   `mod+shift+l` all of them, and the add-caret keys add one on the row above or below. Typing, deleting, moving and
   every command act at each one; Escape goes back to one. `undoSelection` (`cmd+u`, `ctrl+u`) goes back to the
-  selections before the last move.
+  selections before the last move. The carets blink while the editor has the focus; on Linux they stay shown after
+  ten seconds with no edit, caret move or focus change (GTK's default), until the next one.
 - **Selections grow** by units with `expandSelection` (`ctrl+shift+cmd+right`, `shift+alt+right`): the word, a
   string's contents and the string, a bracket pair's contents and the pair, the line, the text; `shrinkSelection`
   goes back the same way. `splitSelectionIntoLines` (`shift+alt+i`) turns a selection over several lines into one

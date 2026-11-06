@@ -28,6 +28,10 @@ use super::{
 /// is in progress).
 const SINK_LIMIT: usize = 256;
 
+/// How long the carets blink on Linux after the last edit, caret move or
+/// focus change: GTK's `gtk-cursor-blink-timeout`.
+const BLINK_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A press being dragged: where it started and what it selects by.
 #[derive(Debug, Clone, Copy)]
 struct Drag {
@@ -103,6 +107,9 @@ pub(crate) struct Ed {
     pub(crate) hscroll: ElementRef,
     pub(crate) input: ElementRef,
     blink_task: Rc<RefCell<Option<Spawned<()>>>>,
+    /// Linux: stops the blinking ten seconds after the last edit, caret
+    /// move or focus change.
+    blink_stop: Rc<RefCell<Option<Spawned<()>>>>,
     /// What language features are built on (`hooks.rs`).
     pub(crate) hooks: super::hooks::Hooks,
     /// The selections moves left, for `undoSelection`.
@@ -171,6 +178,7 @@ impl Ed {
             hscroll: element_ref(),
             input: element_ref(),
             blink_task: Rc::default(),
+            blink_stop: Rc::default(),
             hooks: super::hooks::Hooks::new(),
             sel_history: Rc::new(RefCell::new(sel_history)),
             expansions: Rc::default(),
@@ -1078,10 +1086,17 @@ impl Ed {
         self.restart_blink();
     }
 
-    /// Shows the carets and blinks them while the editor has the focus.
+    /// Shows the carets and blinks them while the editor has the focus. On
+    /// Linux they stop blinking, shown, after ten seconds with no edit, caret
+    /// move or focus change (GTK's `gtk-cursor-blink-timeout`, as the text
+    /// inputs do): each blink draws a frame, so an editor left focused would
+    /// otherwise wake the app and the GPU twice a second for as long as its
+    /// window stays open.
     fn restart_blink(&self) {
-        if let Some(task) = self.blink_task.borrow_mut().take() {
-            task.cancel();
+        for task in [&self.blink_task, &self.blink_stop] {
+            if let Some(task) = task.borrow_mut().take() {
+                task.cancel();
+            }
         }
         self.blink.set(true);
         if !self.focused.get_untracked() {
@@ -1092,6 +1107,16 @@ impl Ed {
             blink.update(|b| *b = !*b);
         });
         *self.blink_task.borrow_mut() = Some(task);
+        if os() == Os::Linux {
+            let blinking = self.blink_task.clone();
+            let stop = set_timeout(BLINK_TIMEOUT, move || {
+                if let Some(task) = blinking.borrow_mut().take() {
+                    task.cancel();
+                }
+                blink.set(true);
+            });
+            *self.blink_stop.borrow_mut() = Some(stop);
+        }
     }
 
     // The ref's other methods.
