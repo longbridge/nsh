@@ -11,6 +11,12 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# AppKit needs the process main thread; opt in with --ignored in a desktop session.
+[[test]]
+name = "native"
+path = "tests/native/main.rs"
+harness = false
+
 [features]
 default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto"]
 # JS apps (bundles, signed packages); without it, the library only runs a

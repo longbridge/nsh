@@ -171,6 +171,14 @@ nsh package App.tsx --target web --run
 
 `<digest>` 是文件内容 SHA-256 的前几位：文件名只在内容变化时才变化，所以新版本只会改动 `index.html` 和真正变化了的文件。所有 URL 都是相对的，站点放在任何主机的任何目录下都能运行（`https://example.com/apps/counter/`）。
 
+在自己的路径上打开的应用（[进入应用的链接](#进入应用的链接)）在 `nsh.json` 中写明站点所在的路径：
+
+```json
+{ "web": { "base": "/apps/counter/" } }
+```
+
+页面随之带上 `<base href="/apps/counter/">`，在 `https://example.com/apps/counter/sports/football` 和在 `https://example.com/apps/counter/` 一样能加载。`"base": "/"` 表示站点位于主机的根路径。`nsh package --target web --run` 在这个路径下提供站点。路径的各段由 ASCII 字母、数字、`-`、`.`、`_` 和 `~` 组成，其他字符按浏览器发送时的方式做百分号编码（`/应用/` 写作 `/%E5%BA%94%E7%94%A8/`）。
+
 ### 运行时大小
 
 打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他页面导入的部分在首屏显示后于后台下载。应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时，它的 `nsh.<digest>.wasm` 包含整个运行时以及它自己的 crate。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：
@@ -190,6 +198,19 @@ nsh package App.tsx --target web --run
 | 其余所有文件 | `public, max-age=31536000, immutable` |
 
 以 `application/wasm` 类型提供 `.wasm`（浏览器会边下载边编译），并把预压缩的副本发给支持它的浏览器：nginx 用 `brotli_static on; gzip_static on;`，Caddy 用 `file_server { precompressed br gzip }`，或使用支持 Brotli 的 CDN。用 Brotli 时运行时比 gzip 小约四分之一。`nsh package --target web --run` 就按这种方式在 `http://127.0.0.1:4173/` 上提供站点。
+
+#### 进入应用的链接
+
+把自己的路径显示在地址栏里的应用（`https://example.com/sports/football`）是单页应用：打开指向这类路径的链接，或在这里刷新，都会加载 `index.html`，再由应用显示路径对应的页面。托管服务把这类请求改写为 `index.html`：最后一段路径没有文件扩展名、`Accept` 头要求 `text/html` 的 `GET` 请求。文件仍用各自的 URL，应用自己的请求（`fetch` 接受 `*/*`）得到托管服务本来的应答。`nsh package --target web --run` 和开发服务器（`nsh run --target web`）都遵循这条规则；在托管服务上：
+
+| 托管服务 | 改写方式 |
+|---|---|
+| nginx | `location / { try_files $uri /index.html; }` |
+| Netlify | 在 `_redirects` 中写 `/*  /index.html  200`（已存在的文件照常提供） |
+| Cloudflare Pages | 站点顶层没有 `404.html` 时自带 |
+| GitHub Pages | 把 `index.html` 复制一份为 `404.html` |
+
+在多段的路径上（`/sports/football`），`nsh.json` 写明站点路径时（上文的 `web.base`），页面从站点自己的路径加载它的文件；开发服务器的页面从 `/` 加载。
 
 发布到 Web 的应用与打包的原生应用运行方式相同：以发布模式运行，具有其 `nsh.json` 声明的能力（[沙箱与能力](./sandbox-and-capabilities.md)），TSX 应用由浏览器的 JavaScript 引擎执行。当能力限制了 `network` 时，页面还会带上 Content-Security-Policy `connect-src`，其中列出声明的主机（以及页面自身的源），由浏览器自己拒绝发往其他主机的请求和重定向。导致应用无法启动的错误会显示在页面上；之后的错误输出到浏览器控制台。
 
@@ -357,7 +378,7 @@ export async function createHost(player) {
 
 `fetch`（包括流、`AbortController` 和 `FormData`）以及 `<Image>` 的 URL 都走浏览器自己的网络栈，在此之前 NSH 已按应用的[能力声明](./sandbox-and-capabilities.md)做过检查。请求是浏览器发出的，所以遵循浏览器的规则：
 
-- **相对 URL** 与浏览器里一样，相对于页面的 URL 解析：发布出去的应用用 `fetch("/api/items")` 就能访问自己的接口，`<Image src="/photos/a.jpg" />` 从自己的服务器加载。（原生平台没有页面，仍需使用绝对 URL。）
+- **相对 URL** 与浏览器里一样，相对于页面的 URL（页面有 `<base href>` 时为它）解析：发布出去的应用用 `fetch("/api/items")` 就能访问自己的接口，`<Image src="/photos/a.jpg" />` 从自己的服务器加载。（原生平台没有页面，仍需使用绝对 URL。）
 - **CORS。** 发往页面所在源以外的请求，只有对方服务器允许页面的源（`Access-Control-Allow-Origin`）才会成功，否则 `fetch` 以网络错误拒绝。只能读到服务器公开的响应头。
 - **Cookie**（以及 HTTP 认证信息）只发送给页面自己的源（`credentials: "same-origin"`），浏览器禁止的请求头（`Cookie`、`User-Agent`、`Host` 等）会被丢弃。
 - **重定向**由浏览器跟随。不应跟随重定向的请求遇到重定向时会失败：`redirect: "manual"` 和 `"error"`，以及能力声明限制了 `network` 的应用发出的请求（NSH 要逐跳检查，而浏览器在跟随之前不会透露重定向的目标）。
