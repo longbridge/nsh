@@ -74,8 +74,10 @@ struct VirtualListState {
     /// The component whose view it is in (its rows' handlers are its).
     owner: NodeId,
     /// The owner of the run that made the list, if any: its rows are made
-    /// under it and disposed with it.
-    scope: Option<crate::element::Owner>,
+    /// under it and disposed with it. Shared with the cleanup each run
+    /// registers, which disposes the rows only while the list is still
+    /// that run's.
+    scope: Rc<std::cell::Cell<Option<crate::element::Owner>>>,
     row: RowFn,
     count: u32,
     keys: Option<Rc<[u64]>>,
@@ -2070,7 +2072,9 @@ impl<M: TextEngine> Core<M> {
                     let at = row_position(index, count, count_signal, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
-                let el = self.build_cell(host, inst, build);
+                // The wrapper is the placing component's.
+                let parent = self.list_component_owner(list);
+                let el = self.build_cell(parent, inst, build);
                 inst.row_index = made.take();
                 if let (Some(list), Some(index), Some(owner)) =
                     (list, inst.row_index, inst.cell_owner)
@@ -2096,12 +2100,14 @@ impl<M: TextEngine> Core<M> {
                 let state = self.components.virtual_lists.get(&list).map(|state| {
                     // The run that made the list went (its view goes in
                     // this commit): no row is made under it.
-                    let gone = state.scope.is_some_and(|s| !s.is_live());
+                    let scope = state.scope.get();
+                    let gone = scope.is_some_and(|s| !s.is_live());
                     (
                         if gone { 0 } else { state.count as usize },
                         state.row.clone(),
                         state.separator.clone(),
                         state.rows.clone(),
+                        scope,
                     )
                 });
                 match state {
@@ -2116,7 +2122,7 @@ impl<M: TextEngine> Core<M> {
                         inst.row_index = None;
                         ElNode::empty_view()
                     }
-                    Some((count, row, separator, rows)) => {
+                    Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
                         let build = || {
@@ -2136,7 +2142,12 @@ impl<M: TextEngine> Core<M> {
                             .into_element()
                             .0
                         };
-                        let el = self.build_cell(host, inst, build);
+                        // Under the run that made the list, also when the
+                        // row is inside another component's wrapper (an
+                        // `Items` prop): the list is known here, not from
+                        // the cell's parent.
+                        let parent = scope.unwrap_or_else(|| self.list_component_owner(Some(list)));
+                        let el = self.build_cell(parent, inst, build);
                         inst.row_index = made.take();
                         if let (Some(index), Some(owner)) = (inst.row_index, inst.cell_owner) {
                             rows.borrow_mut().insert(host, (index, owner));
@@ -2167,33 +2178,25 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Builds a list cell's row with `build` under an owner of the cell's
-    /// own (the previous row's goes), made under the list component's so the
-    /// row sees its context.
+    /// own (the previous row's goes), made under `parent` so the row sees
+    /// its context.
     fn build_cell(
         &mut self,
-        cell: NodeId,
+        parent: crate::element::Owner,
         inst: &mut Instance,
         build: impl FnOnce() -> ElNode,
     ) -> Result<ElNode, String> {
         if let Some(owner) = inst.cell_owner.take() {
             owner.dispose();
         }
-        let parent = self.cell_parent_owner(cell);
         let (owner, el) = parent.run(|| crate::element::create_root(|| caught(build)));
         inst.cell_owner = Some(owner);
         el
     }
 
-    /// The owner a list cell `cell`'s row is made under: the run that made
-    /// the list, else the component whose list it is.
-    fn cell_parent_owner(&self, cell: NodeId) -> crate::element::Owner {
-        let list = self.list_of(cell);
-        if let Some(scope) = list
-            .and_then(|list| self.components.virtual_lists.get(&list))
-            .and_then(|s| s.scope)
-        {
-            return scope;
-        }
+    /// The owner of the component whose list `list` is (its own list, or
+    /// the list it places another component's `Items` in).
+    fn list_component_owner(&self, list: Option<NodeId>) -> crate::element::Owner {
         let component = list
             .and_then(|list| {
                 self.components
@@ -4139,7 +4142,7 @@ impl<M: TextEngine> Core<M> {
             .entry(id)
             .or_insert_with(|| VirtualListState {
                 owner,
-                scope: None,
+                scope: Rc::default(),
                 row: list.row.clone(),
                 count: 0,
                 keys: None,
@@ -4156,11 +4159,20 @@ impl<M: TextEngine> Core<M> {
             });
         // The rows go with the run that made the list. A list a later run
         // keeps takes that run's owner: its cells are made again below.
-        if state.scope != list.scope {
-            state.scope = list.scope;
+        if state.scope.get() != list.scope {
+            state.scope.set(list.scope);
             if let Some(scope) = list.scope {
                 let rows = Rc::downgrade(&state.rows);
-                scope.run(|| crate::element::cleanup(move || dispose_rows(&rows)));
+                let current = Rc::downgrade(&state.scope);
+                scope.run(|| {
+                    crate::element::cleanup(move || {
+                        // A run the list has since left keeps the rows of
+                        // the run it is in now.
+                        if current.upgrade().is_some_and(|c| c.get() == Some(scope)) {
+                            dispose_rows(&rows);
+                        }
+                    })
+                });
             }
         }
         let cells = state.rows.clone();

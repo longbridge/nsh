@@ -11039,6 +11039,132 @@ mod components {
         assert!(!RAN_AFTER_BRANCH.with(Cell::get));
     }
 
+    thread_local! {
+        static REOWNED_CONTROL:
+            Cell<Option<(Signal<bool>, Owner, Owner)>> = const { Cell::new(None) };
+        static REOWNED_B_ROW:
+            Cell<Option<Signal<u32>>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn ReownedVirtualList() -> impl IntoElement {
+        let use_b = signal(false);
+        let (owner_a, list_a) = crate::element::create_root(|| {
+            virtual_list(1, |_| text("A").h(px(40.0)))
+                .estimated_item_size(px(40.0))
+                .flex_1()
+        });
+        let (owner_b, list_b) = crate::element::create_root(|| {
+            virtual_list(1, |_| {
+                let live = signal(7u32);
+                REOWNED_B_ROW.with(|r| r.set(Some(live)));
+                text("B").h(px(40.0))
+            })
+            .estimated_item_size(px(40.0))
+            .flex_1()
+        });
+        REOWNED_CONTROL.with(|c| c.set(Some((use_b, owner_a, owner_b))));
+        // These independent roots require explicit disposal.
+        cleanup(move || {
+            owner_a.dispose();
+            owner_b.dispose();
+        });
+        view().flex_1().child(dynamic(move || {
+            if use_b.get() {
+                list_b.clone()
+            } else {
+                list_a.clone()
+            }
+        }))
+    }
+
+    #[test]
+    fn disposing_a_lists_previous_creator_keeps_its_current_rows() {
+        REOWNED_B_ROW.with(|r| r.set(None));
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ReownedVirtualList>(|| ()));
+        let first = c.commit().unwrap();
+        assert_eq!(texts(&first), ["A"]);
+        let list = first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the list");
+
+        let (use_b, owner_a, owner_b) = REOWNED_CONTROL.with(Cell::get).unwrap();
+        let _entered = c.components.runtime.enter();
+        assert!(owner_a.is_live() && owner_b.is_live());
+        use_b.set(true);
+        let switched = c.commit().unwrap();
+        assert_eq!(texts(&switched), ["B"]);
+        // Switching creators retains the native list instead of replacing it.
+        assert!(
+            !switched
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == list))
+        );
+        assert!(!switched.items.iter().any(|i| matches!(
+            i,
+            MountItem::Create {
+                kind: ViewKind::Scroll,
+                ..
+            }
+        )));
+        assert!(owner_a.is_live() && owner_b.is_live());
+        let row = REOWNED_B_ROW.with(Cell::get).expect("B rendered");
+        assert_eq!(row.try_get(), Some(7));
+
+        owner_a.dispose();
+        assert!(owner_b.is_live(), "B's creator remains live");
+        assert_eq!(
+            row.try_get(),
+            Some(7),
+            "A's cleanup must not dispose the retained list's B row"
+        );
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ScopedItemsProps {
+        items: Items,
+    }
+
+    #[component]
+    fn ScopedItemsHost(props: ScopedItemsProps) -> impl IntoElement {
+        view().flex_1().list(
+            props.items,
+            |list| list.flex_1().estimated_item_size(px(40.0)),
+            |row, _| row,
+        )
+    }
+
+    #[component]
+    fn ScopedItemsCaller() -> impl IntoElement {
+        view().flex_1().child(when(true, || {
+            provide_context(BranchContext("provided"));
+            ScopedItemsHost::element(ScopedItemsProps::initial())
+                .flex_1()
+                .items(virtual_list(1, |at| {
+                    let label = use_context::<BranchContext>().map_or("missing", |c| c.0);
+                    text(format!("{label} {}", at.index())).h(px(40.0))
+                }))
+        }))
+    }
+
+    #[test]
+    fn virtual_rows_passed_as_items_see_their_creators_context() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ScopedItemsCaller>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["provided 0"]);
+    }
+
     /// A chat: its own rows in a list that follows its end; a press makes
     /// the last row taller (a reply streaming in).
     #[component]
