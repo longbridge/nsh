@@ -119,6 +119,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "picker": true,
     "speech": true,
     "notifications": true,
+    "audio": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] }
   }
@@ -197,6 +198,11 @@ picks what reaches the app.
 `"speech": true` lets the app recognize what the user says ([`Speech`](../modules/nsh.md#speech)): the microphone and
 the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
 
+### `audio`
+
+`"audio": true` lets the app make sound ([`Sound` and `AudioPlayer`](../modules/nsh.md#sound)). A remote source also
+needs a `network` grant for its host.
+
 ### `notifications`
 
 `"notifications": true` lets the app show system notifications and set its icon's badge
@@ -248,6 +254,7 @@ if (host.available()) {
 | Clipboard | Every function of `Clipboard` rejects with `ERR_ACCESS_DENIED`, `permission` `"clipboard"` and `resource` `""`; the system clipboard is never touched. |
 | Picker | `pickImages` and `pickFiles` show nothing and reject with `ERR_ACCESS_DENIED`, `permission` `"picker"` and `resource` `""`. |
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
+| Sound | `Sound.load` rejects and `new AudioPlayer` throws `ERR_ACCESS_DENIED`, `permission` `"audio"` and `resource` the source; nothing is read or played. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |
 | Host call | `host.call` rejects with `ERR_ACCESS_DENIED`, `permission` `"host"` and `resource` the function's name (`host.post` throws it); the call never reaches the host. |

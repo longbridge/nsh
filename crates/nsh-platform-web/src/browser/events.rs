@@ -148,7 +148,8 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
         }
         EventPayload::Picked { id, .. }
         | EventPayload::FileRequest { id, .. }
-        | EventPayload::Speech { id, .. } => object([("id", number(*id))])?,
+        | EventPayload::Speech { id, .. }
+        | EventPayload::Audio { id, .. } => object([("id", number(*id))])?,
         EventPayload::Native { name, data } => object([
             ("name", Value::string(name)?),
             ("data", Value(host.json(data)?.0[0] as u32)),
