@@ -1339,6 +1339,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         }
     }
     let Some(chain) = swap.as_mut() else { return };
+    chain.set_background(crate::system::window_background(surface));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
         *swap = None;
@@ -1622,6 +1623,7 @@ pub(crate) fn window_frame(
         }
     }
     let Some(chain) = swap.as_mut() else { return };
+    chain.set_background(crate::system::window_background(surface));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");
         *swap = None;
