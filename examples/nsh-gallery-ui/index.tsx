@@ -10,10 +10,12 @@ import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
 import { alpha, colors, finish, focusRing, mono, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type ButtonSize, roundButtonGlyph, roundButtonLook } from "./look/button";
+import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
 
 export * from "./theme";
 export * from "./look/button";
+export * from "./look/press";
 export * from "./look/switch";
 export * from "./photos";
 export { Segmented } from "./segmented";
@@ -54,8 +56,9 @@ export function bindRefresh(refresh: () => void): string | null {
 }
 
 /**
- * A pressable that sinks a little under the finger and springs back (the
- * spring runs natively; only press in / out reach JS).
+ * A pressable that sinks a little while pressed and eases back, natively
+ * (`pressSink`: its `activeStyle`, none with reduced motion), so no press
+ * waits for JS.
  */
 export function Press(props: {
   onPress?: () => void;
@@ -73,20 +76,18 @@ export function Press(props: {
   hoverStyle?: ViewStyle;
   children: JSX.Element;
 }) {
-  const s = createAnimatedValue(1);
   return (
     <View
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       disabled={props.disabled}
       hoverStyle={props.disabled ? undefined : (props.hoverStyle ?? { opacity: 0.86 })}
-      onPressDown={() => s.spring(props.scale ?? 0.97, motion.press)}
-      onPressUp={() => s.spring(1, motion.press)}
+      activeStyle={props.disabled ? undefined : pressSink(props.scale).activeStyle}
       role={props.role ?? "button"}
       accessibilityLabel={props.accessibilityLabel}
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
-      style={[props.style ?? null, { transform: [{ scale: s }], opacity: props.disabled ? 0.4 : 1 }]}
+      style={[props.style ?? null, { ...pressSink().transition, opacity: props.disabled ? 0.4 : 1 }]}
       focusStyle={focusRing()}
     >
       {props.children}
@@ -95,14 +96,16 @@ export function Press(props: {
 }
 
 /**
- * `Press`'s feedback for a `Tab` of `nsh/base`, which reports no press down
- * to spring with: it sinks a little while pressed and eases back, and takes
- * presses 4 pt around it without taking more room (a hit slop). Spread
- * `style` and `activeStyle` into the tab's.
+ * `Press`'s feedback for a `Tab` of `nsh/base`: it sinks a little while
+ * pressed and eases back (`pressSink`), and takes presses 4 pt around it
+ * without taking more room (a hit slop). Spread `style` and `activeStyle`
+ * into the tab's.
  */
 export const tabPress = {
-  style: { margin: -4, padding: 4, transitionProperty: "transform", transitionDuration: 150, transitionTimingFunction: "ease-out" },
-  activeStyle: { transform: [{ scale: 0.97 }] },
+  style: { margin: -4, padding: 4, ...pressSink().transition },
+  get activeStyle(): ViewStyle {
+    return pressSink().activeStyle;
+  },
 } satisfies { style: ViewStyle; activeStyle: ViewStyle };
 
 /**
