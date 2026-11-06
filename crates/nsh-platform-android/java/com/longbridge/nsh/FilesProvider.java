@@ -110,7 +110,7 @@ public final class FilesProvider extends ContentProvider {
         // The viewer only ever reads: never hand out a writable handle.
         if (!"r".equals(mode)) throw new FileNotFoundException(uri.toString());
         File file = fileFor(uri);
-        if (file == null || !file.exists()) throw new FileNotFoundException(uri.toString());
+        if (file == null || !file.isFile()) throw new FileNotFoundException(uri.toString());
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 

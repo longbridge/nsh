@@ -12,9 +12,10 @@ final class FileRoots {
     private FileRoots() {}
 
     /**
-     * {@code file} canonicalized when it is inside one of {@code roots},
-     * else {@code null}. Canonicalizing both sides also resolves a {@code
-     * ..} or a symlink that would otherwise name a file outside the roots.
+     * {@code file} canonicalized when it is a file inside one of {@code
+     * roots}, else {@code null}. Canonicalizing both sides also resolves a
+     * {@code ..} or a symlink that would otherwise name a file outside the
+     * roots. A root directory itself is not a file to serve.
      */
     static File under(File file, File[] roots) {
         File canonical;
@@ -32,7 +33,7 @@ final class FileRoots {
             } catch (IOException e) {
                 continue;
             }
-            if (path.equals(prefix) || path.startsWith(prefix + File.separator)) {
+            if (path.startsWith(prefix + File.separator)) {
                 return canonical;
             }
         }

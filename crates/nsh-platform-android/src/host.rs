@@ -1477,8 +1477,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 _ => {}
             }
         }
+        // Without an id an answer could only land on request 0: drop the
+        // event instead of letting a stray one finish another request.
+        let Some(id) = id else {
+            return;
+        };
         EventPayload::FileRequest {
-            id: id.unwrap_or(0),
+            id,
             paths: Vec::new(),
             error,
         }

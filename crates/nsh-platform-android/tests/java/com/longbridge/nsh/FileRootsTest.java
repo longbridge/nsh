@@ -41,6 +41,8 @@ public final class FileRootsTest {
                 FileRoots.under(new File(base.resolve("files").toFile(),
                         ".." + File.separator + "elsewhere" + File.separator + "secrets.txt"),
                         roots) == null);
+        check("a root directory itself is not a file to serve",
+                FileRoots.under(base.resolve("files").toFile(), roots) == null);
         System.out.println("FileRootsTest: ok");
     }
 
