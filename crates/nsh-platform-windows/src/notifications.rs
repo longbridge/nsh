@@ -666,6 +666,17 @@ mod tests {
 
     #[test]
     fn the_toast_loads_in_the_system_parser() {
+        use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
+        struct Apartment;
+        impl Drop for Apartment {
+            fn drop(&mut self) {
+                // SAFETY: balances initialization after the WinRT objects drop.
+                unsafe { RoUninitialize() };
+            }
+        }
+        // SAFETY: this test owns its thread's WinRT apartment.
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.unwrap();
+        let _apartment = Apartment;
         let xml = toast_xml(&Notification::new("chat:\"42\"\n", "<T> & \u{1}", "B\n"));
         let document = XmlDocument::new().unwrap();
         document.LoadXml(&HSTRING::from(xml)).unwrap();
