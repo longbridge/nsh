@@ -44,7 +44,7 @@ use windows::{
         NotificationSetting, ToastNotification, ToastNotificationManager, ToastNotifier,
     },
     Win32::{
-        Foundation::{HWND, RECT},
+        Foundation::{ERROR_NOT_FOUND, HWND, RECT},
         Graphics::Gdi::{
             ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS,
             CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET,
@@ -239,7 +239,7 @@ fn set_value(key: &str, name: Option<&str>, value: &str) -> Result<()> {
 fn permission() -> NotificationPermission {
     let setting = match notifier() {
         None => return NotificationPermission::Unavailable,
-        Some(notifier) => notifier.and_then(|n| n.Setting()),
+        Some(notifier) => notifier.and_then(|n| setting(&n)),
     };
     match setting {
         Ok(NotificationSetting::Enabled) => NotificationPermission::Granted,
@@ -251,13 +251,24 @@ fn permission() -> NotificationPermission {
     }
 }
 
+/// The user's setting for the app's notifications. An app that has not
+/// shown one yet has no entry in Settings > System > Notifications, and
+/// `Setting` fails with `ERROR_NOT_FOUND` until the first toast makes it:
+/// nothing turned off, so they are on.
+fn setting(notifier: &ToastNotifier) -> Result<NotificationSetting> {
+    match notifier.Setting() {
+        Err(err) if err.code() == ERROR_NOT_FOUND.to_hresult() => Ok(NotificationSetting::Enabled),
+        setting => setting,
+    }
+}
+
 /// Whether the system took `notification`.
 fn show(notification: &Notification) -> Result<bool> {
     let Some(notifier) = notifier() else {
         return Ok(false);
     };
     let notifier = notifier?;
-    if notifier.Setting()? != NotificationSetting::Enabled {
+    if setting(&notifier)? != NotificationSetting::Enabled {
         return Ok(false);
     }
     let document = XmlDocument::new()?;
