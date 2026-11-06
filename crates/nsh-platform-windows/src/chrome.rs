@@ -336,6 +336,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
         DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
