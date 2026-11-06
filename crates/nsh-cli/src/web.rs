@@ -2273,7 +2273,8 @@ mod tests {
                 "/snippets/app-1/inline0.js",
                 "/nsh-host.js",
                 "/browser/runtime.js",
-                "/browser/dom.js",
+                "/browser/bootstrap.js",
+                "/browser/realm.js",
             ] {
                 let file = format!("{origin}{file}");
                 assert!(
