@@ -30,8 +30,8 @@ use objc2::{
     runtime::{Bool, ProtocolObject},
 };
 use objc2_app_kit::{
-    NSAppearance, NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSScreen, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSAppearance, NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSColor, NSScreen,
+    NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
@@ -191,7 +191,11 @@ fn open(surface: &Rc<Surface>, view: &NshView, options: &WindowOptions) {
     );
     view.set_window_of(Rc::downgrade(surface));
     if let Some(appearance) = surface.root.ns().appearance() {
+        window.setAppearance(Some(&appearance));
         view.ns().setAppearance(Some(&appearance));
+    }
+    if let Some(color) = surface.background.get() {
+        window.setBackgroundColor(Some(&ns_color(color)));
     }
     if crate::file_drop::accepting(surface) {
         crate::file_drop::register(view.ns());
@@ -214,9 +218,40 @@ pub(crate) fn roots(surface: &Surface) -> Vec<NshView> {
 /// The app's appearance changed (`setColorScheme`): its windows follow, as
 /// the main window's root does.
 pub(crate) fn set_appearance(surface: &Surface, appearance: Option<&NSAppearance>) {
-    for root in roots(surface) {
-        root.ns().setAppearance(appearance);
+    for (window, view) in windows(surface) {
+        window.setAppearance(appearance);
+        view.ns().setAppearance(appearance);
     }
+}
+
+/// The surface's background behind the app (the color scheme's, or the
+/// app's own that fills the main window): its windows show it behind their
+/// root, as the main window does behind its root.
+pub(crate) fn set_background(surface: &Surface, color: nsh_core::Color) {
+    let ns = ns_color(color);
+    for (window, _) in windows(surface) {
+        window.setBackgroundColor(Some(&ns));
+    }
+}
+
+fn ns_color(color: nsh_core::Color) -> Retained<NSColor> {
+    let c = color.0;
+    let f = |shift: u32| f64::from((c >> shift) & 0xff) / 255.0;
+    NSColor::colorWithSRGBRed_green_blue_alpha(f(24), f(16), f(8), f(0))
+}
+
+/// The windows' window and root, cloned out of the table.
+fn windows(surface: &Surface) -> Vec<(Retained<NSWindow>, NshView)> {
+    surface
+        .windows
+        .try_borrow()
+        .map(|windows| {
+            windows
+                .values()
+                .map(|w| (w.window.clone(), w.view.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The root view of a window of the app's own was resized (it is the

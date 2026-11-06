@@ -63,8 +63,8 @@ mod transition;
 mod tray;
 mod view;
 mod visual;
-mod window_state;
 mod window;
+mod window_state;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

@@ -361,6 +361,7 @@ fn follow_background(surface: &Surface) {
     if surface.background.replace(Some(color)) == Some(color) {
         return;
     }
+    crate::window::set_background(surface, color);
     // The root's own layer is the app's (its style); the view holding it
     // is the surface's.
     let Some(layer) = crate::view::superview(surface.root.ns()).and_then(|v| v.layer()) else {
