@@ -1005,8 +1005,6 @@ mod command_tests {
 
     use super::{Cli, Command, run::Target};
 
-    /// Signing a package again changes no contents, so a flag that shapes a
-    /// build is refused rather than ignored, before any file is read.
     #[test]
     fn publish_ios_and_package_signing_have_separate_arguments() {
         let cli = Cli::try_parse_from([
@@ -1060,6 +1058,8 @@ mod command_tests {
         );
     }
 
+    /// Signing a package again changes no contents, so a flag that shapes a
+    /// build is refused rather than ignored, before any file is read.
     #[test]
     fn publishing_a_package_refuses_the_flags_of_a_build() {
         for (flag, args) in [
