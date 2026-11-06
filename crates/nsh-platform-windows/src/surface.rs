@@ -249,6 +249,11 @@ pub(crate) struct Surface {
     /// Keys the window takes before anything focused sees them (the
     /// standalone app's full screen, the dev host's reload).
     pub(crate) shortcuts: RefCell<Vec<ShortcutHandler>>,
+    /// The app's own windows besides this one (`Window.open`).
+    pub(crate) windows: RefCell<Vec<Rc<crate::app_window::AppWindow>>>,
+    /// The root view the input being handled is in: a window of the app's
+    /// own's ([`crate::app_window::enter`]), or [`Surface::root`].
+    pub(crate) input_root: RefCell<Option<NshView>>,
 }
 
 impl Surface {
@@ -308,6 +313,8 @@ impl Surface {
             on_resized: RefCell::default(),
             resize_late: Cell::new(false),
             shortcuts: RefCell::default(),
+            windows: RefCell::default(),
+            input_root: RefCell::default(),
             chrome: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
@@ -466,6 +473,7 @@ impl Surface {
         self.js_frame.set(false);
         self.resize_late.set(false);
         self.frame_clients.borrow_mut().clear();
+        crate::app_window::close_all(self);
         self.invalidate();
     }
 
@@ -582,6 +590,7 @@ impl Surface {
         self.full_damage.set(true);
         self.whole_change.set(crate::view::next_change_stamp());
         self.request_paint();
+        crate::app_window::invalidate_all(self);
     }
 
     /// The change stamp of the last request to draw the whole window
@@ -607,6 +616,14 @@ impl Surface {
         if !self.invalid.replace(true) {
             crate::window::invalidate(self.hwnd());
         }
+    }
+
+    /// The root view the input being handled is in.
+    pub(crate) fn input_root(&self) -> NshView {
+        self.input_root
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| self.root.clone())
     }
 
     /// What changed since the last frame, in the window's DIPs: where the
@@ -1136,7 +1153,8 @@ mod tests {
         let saved = cursor_info();
         let surface = Surface::new(Environment::default());
         let hwnd =
-            crate::window::create(&surface, "NSH cursor regression", (320, 240), None, false).unwrap();
+            crate::window::create(&surface, "NSH cursor regression", (320, 240), None, false)
+                .unwrap();
         let mut desktop = Desktop {
             hwnd,
             saved,

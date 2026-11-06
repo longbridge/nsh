@@ -534,7 +534,7 @@ fn menu(cx: *mut JsContext) -> JsValue {
 
 /// The platforms that show windows of the app's own.
 fn opens_windows(os: Os) -> bool {
-    matches!(os, Os::Linux)
+    matches!(os, Os::Linux | Os::Windows)
 }
 
 /// Number property `key`, if it is a finite number.
@@ -866,7 +866,7 @@ export interface WindowOpener {
    * the open window of the same `id`. The window runs in the app's one JS
    * runtime: it reads and writes the same signals, stores and modules as
    * the main window, so there is nothing to send between windows. Closing
-   * the main window closes it too. Linux for now; elsewhere it throws. */
+   * the main window closes it too. Linux and Windows; elsewhere it throws. */
   open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
 }
 

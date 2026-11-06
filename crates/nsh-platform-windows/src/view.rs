@@ -441,6 +441,11 @@ impl NshView {
         *self.0.invalidate.borrow_mut() = Some(invalidate);
     }
 
+    /// It no longer roots a surface's tree ([`Self::set_invalidate`]).
+    pub(crate) fn clear_invalidate(&self) {
+        self.0.invalidate.borrow_mut().take();
+    }
+
     /// Something it or its subtree draws changed: its surface draws that
     /// again (if it is in one), and it and the views it is in hold a newer
     /// change ([`Self::changes`]: a shader picturing them takes them again).
