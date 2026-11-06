@@ -370,7 +370,10 @@ impl Screen {
             MountItem::ModalConfig { id, config } => {
                 self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
             }
-            MountItem::Frame { id, frame } => self.nodes.entry(*id).or_default().frame = *frame,
+            MountItem::Frame { id, frame } => {
+                self.nodes.entry(*id).or_default().frame = *frame;
+                self.pull_back(*id);
+            }
             MountItem::ViewStyle { id, style } => {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
@@ -445,6 +448,7 @@ impl Screen {
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.content = Some(*size);
                 }
+                self.pull_back(*id);
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 // Not clamped: the core knows its content.
@@ -1956,6 +1960,27 @@ impl Screen {
         }
     }
 
+    /// Scroll view `id`'s content or viewport changed: an offset past the
+    /// new end comes back to it and is reported, as the platforms' scroll
+    /// views do (UIKit adjusts the offset as the content size changes, the
+    /// desktops clamp what they report), so the rows that remain show. A
+    /// pull past the start is the finger's and stays.
+    fn pull_back(&mut self, id: NodeId) {
+        let end = self.scroll_end(id);
+        let Some(scroll) = self.scroll_mut(id) else {
+            return;
+        };
+        let at = if scroll.horizontal {
+            &mut scroll.x
+        } else {
+            &mut scroll.y
+        };
+        if *at > end {
+            *at = end;
+            self.scrolled.push(id);
+        }
+    }
+
     /// The scroll views a command moved since the last call.
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
@@ -2165,6 +2190,48 @@ mod tests {
         // A line break starts a line.
         screen.input_mut(2).unwrap().text = "ab\nc".into();
         assert_eq!(caret(&screen), (4.0 + 5.5, 18.0, 12.0));
+    }
+
+    #[test]
+    fn an_offset_past_the_content_comes_back_to_its_end_and_is_reported() {
+        let mut screen = Screen::default();
+        let content = |height: f32| MountItem::ScrollContent {
+            id: 2,
+            size: Size::new(Points(390.0), Points(height)),
+        };
+        let by = |dy: f32| MountItem::ScrollBy {
+            id: 2,
+            dx: Points::ZERO,
+            dy: Points(dy),
+        };
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Scroll),
+            frame(2, 0.0, 0.0, 390.0, 800.0),
+            content(56.0),
+            insert(1, 2),
+        ]));
+        // Rows arrive above the one row: the core keeps it in place with a
+        // scroll it sends before the new content size, and the view goes
+        // as far as that size lets it.
+        screen.apply(&batch(vec![by(1176.0), content(1232.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(432.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // The content shrinks to a row again: the offset follows, so the
+        // row shows.
+        screen.apply(&batch(vec![content(56.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points::ZERO);
+        assert_eq!(screen.take_scrolled(), [2]);
+        // So does a viewport growing past the content's end.
+        screen.apply(&batch(vec![by(432.0), content(1232.0)]));
+        assert!(screen.take_scrolled().is_empty());
+        screen.apply(&batch(vec![frame(2, 0.0, 0.0, 390.0, 1000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(232.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // A pull past the start is the finger's: content changes leave it.
+        screen.scroll_mut(2).unwrap().y = Points(-40.0);
+        screen.apply(&batch(vec![content(2000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
+        assert!(screen.take_scrolled().is_empty());
     }
 
     #[test]
