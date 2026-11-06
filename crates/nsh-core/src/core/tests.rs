@@ -10972,6 +10972,104 @@ mod components {
         assert!(shown.iter().all(|t| !t.starts_with("failed")), "{shown:?}");
     }
 
+    /// A long list of its own rows: row 1 holds a field, row 2 a menu (an
+    /// overlay) while it is open; a press closes the menu.
+    #[component]
+    fn RowsWithFieldAndMenu() -> impl IntoElement {
+        let menu = signal(true);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| menu.set(false)))
+            .child(
+                virtual_list(500, move |at| {
+                    view()
+                        .h(px(40.0))
+                        .child(text(move || format!("row {}", at.index())))
+                        .child(when(
+                            move || at.index() == 1,
+                            || view().focusable(true).child(text("field")),
+                        ))
+                        .child(when(
+                            move || at.index() == 2 && menu.get(),
+                            || overlay().child(text("menu")),
+                        ))
+                })
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A row holding the keyboard focus or an open overlay stays rendered
+    /// while the list scrolls far away: recycled, its field would lose the
+    /// focus and its menu close. Once they are gone, the row is recycled.
+    #[test]
+    fn virtual_lists_keep_rows_with_the_focus_or_an_open_overlay() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<RowsWithFieldAndMenu>(|| ()));
+        let batch = c.commit().unwrap();
+        let list = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                _ => None,
+            })
+            .expect("a list");
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        let text_node = |content: &str| {
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"))
+        };
+        let field = {
+            let key = c.key(text_node("field")).unwrap();
+            c.nodes[c.nodes[key as usize].parent as usize].id
+        };
+        let menu = text_node("menu");
+        c.set_states(field, FOCUSED);
+        let _ = c.commit();
+        let bound = |c: &Core<FakeEngine>, row: u32| {
+            let key = c.key(list).unwrap();
+            let list = c.nodes[key as usize].list.as_ref().unwrap();
+            list.slots.iter().any(|s| s.index == Some(row))
+        };
+        let scroll = |c: &mut Core<FakeEngine>, y: f32, applied| {
+            c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+            for _ in 0..3 {
+                let _ = c.commit();
+            }
+        };
+        scroll(&mut c, 4000.0, 1);
+        scroll(&mut c, 12000.0, 2);
+        assert!(
+            bound(&c, 1) && c.key(field).is_ok(),
+            "the focused row stays"
+        );
+        assert!(
+            bound(&c, 2) && c.key(menu).is_ok(),
+            "the row with the open menu stays"
+        );
+        // The focus leaves and the menu closes: the rows go.
+        c.set_states(field, 0);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let _ = c.commit();
+        scroll(&mut c, 16000.0, 3);
+        assert!(!bound(&c, 1) && !bound(&c, 2));
+    }
+
     /// A chat: its own rows in a list that follows its end; a press makes
     /// the last row taller (a reply streaming in).
     #[component]

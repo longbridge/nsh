@@ -79,6 +79,9 @@
 - **Spare list cells** (recycled cells without an item) keep their last row. The core hides them (`Core::set_spare`:
   `visibility: hidden` and `accessibilityElementsHidden`) when they lie in the render window, were never placed or
   the items changed, and shows them as it places them; the few the window leaves behind while scrolling stay shown.
+- **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
+  a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
+  (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
