@@ -452,7 +452,8 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame.
+  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
