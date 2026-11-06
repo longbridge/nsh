@@ -197,27 +197,53 @@ export function Inspector(props: { children?: __JSX.Element }) {
 
 /** The subject and its inspector: a stage beside an inspector column in a
  * wide window, one column `gap` apart otherwise (`grow`: the column fills
- * the page's height). */
+ * the page's height). A window crossing the width changes only the styles:
+ * the subject and the inspector stay the same views, so they keep their
+ * state (a component's own, and what the app heard from it). */
 export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Element; gap?: number; width?: number; grow?: boolean }) {
+  const gap = () => props.gap ?? 14;
+  // Stacked, the subject keeps its own height and the inspector takes what
+  // is left of a growing column, as when they were the column's own items.
+  const narrow = () => ({ gap: gap() });
   return __View({
     get style() {
-      return sideBySide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : undefined, gap: props.gap ?? 14 };
+      return sideBySide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : undefined, gap: gap() };
     },
     get children() {
-      if (!sideBySide()) return [props.children, props.inspector];
       return [
-        Stage({
-          get width() {
-            return props.width;
-          },
-          get gap() {
-            return props.gap;
+        // The stage: a bordered frame centering the subject, side by side.
+        __View({
+          get style() {
+            return sideBySide()
+              ? {
+                  flex: 1,
+                  minWidth: 0,
+                  borderRadius: 16,
+                  borderWidth: 1,
+                  borderColor: ui().line,
+                  backgroundColor: tint(ui().text, 0.02),
+                  padding: 24,
+                  alignItems: "center" as const,
+                  justifyContent: "center" as const,
+                }
+              : narrow();
           },
           get children() {
-            return props.children;
+            return __View({
+              get style() {
+                return sideBySide() ? { width: "100%" as const, maxWidth: props.width ?? 440, gap: gap() } : narrow();
+              },
+              get children() {
+                return props.children;
+              },
+            });
           },
         }),
-        Inspector({
+        // The inspector: a column beside the stage, under it otherwise.
+        __View({
+          get style() {
+            return sideBySide() ? { width: 300, gap: 12 } : { flex: props.grow ? 1 : undefined, gap: gap() };
+          },
           get children() {
             return props.inspector;
           },
