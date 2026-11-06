@@ -204,6 +204,11 @@ pub struct Environment {
     /// its ends (`bottom` is 0); all 0 while the system shows its title
     /// bar.
     pub title_bar: Edges<Points>,
+    /// The app's window: its bounds on the screen, its mode and display
+    /// (desktops; `None` elsewhere and where the surface has no window).
+    /// The engine holds back a move or resize until the window stops for
+    /// a moment, so platforms report every change.
+    pub window_state: Option<crate::desktop::WindowState>,
     /// Height of the software keyboard over the surface; 0 when hidden.
     pub keyboard_height: Points,
     /// Duration of the keyboard's show / hide animation in milliseconds.
@@ -298,6 +303,7 @@ impl Default for Environment {
             window: Size::default(),
             safe_area: Edges::default(),
             title_bar: Edges::default(),
+            window_state: None,
             keyboard_height: Points(0.0),
             keyboard_duration: 250.0,
             color_scheme: ColorScheme::Light,

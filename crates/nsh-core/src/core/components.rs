@@ -974,6 +974,12 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
+    }
+
     /// The environment components read is now `environment`.
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
@@ -5057,7 +5063,14 @@ impl<M: TextEngine> Core<M> {
 
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, command) => {
+            Action::Command(id, mut command) => {
+                // Saved bounds go onto the displays there are now, whichever
+                // side (Rust or JS) restores them.
+                if let Command::Desktop(desktop) = &mut command
+                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
+                {
+                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
+                }
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {

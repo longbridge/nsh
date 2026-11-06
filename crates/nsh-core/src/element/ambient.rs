@@ -47,6 +47,8 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The displays (desktops), as the platform reports them.
+    displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
 }
 
 impl Ambient {
@@ -63,6 +65,7 @@ struct EnvSignals {
     window: Memo<Size<Points>>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
+    window_state: Memo<Option<crate::desktop::WindowState>>,
     keyboard_height: Memo<Points>,
     keyboard_duration: Memo<f32>,
     dark: Memo<bool>,
@@ -90,6 +93,7 @@ impl EnvSignals {
                 window: part!(window),
                 safe_area: part!(safe_area),
                 title_bar: part!(title_bar),
+                window_state: part!(window_state),
                 keyboard_height: part!(keyboard_height),
                 keyboard_duration: part!(keyboard_duration),
                 dark: part!(dark),
@@ -138,6 +142,25 @@ impl super::Runtime {
                 with_data(|d| d.ambient.env = Some(signals));
             }
         }
+    }
+
+    /// The displays now: what read them runs again.
+    pub(crate) fn set_displays(&self, displays: Arc<[crate::desktop::Display]>) {
+        let _entered = self.enter();
+        let signal = displays_signal();
+        if signal.with_untracked(|d| **d != *displays) {
+            signal.set(displays);
+        }
+    }
+
+    /// `bounds` fitted on the displays now (`set_window_bounds`), without
+    /// subscribing to them.
+    pub(crate) fn fit_window_bounds(
+        &self,
+        bounds: crate::desktop::WindowBounds,
+    ) -> crate::desktop::WindowBounds {
+        let _entered = self.enter();
+        displays_signal().with_untracked(|d| bounds.fit_on_displays(d))
     }
 
     /// The design tokens now: what read them runs again.
@@ -1412,6 +1435,25 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
 
 pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
+}
+
+pub(crate) fn window_state() -> Option<crate::desktop::WindowState> {
+    env(|e| e.window_state)
+}
+
+pub(crate) fn displays() -> Vec<crate::desktop::Display> {
+    displays_signal().with(|d| d.to_vec())
+}
+
+/// The displays' signal, made empty on first use (whatever reads it before
+/// the platform reports displays follows them when it does).
+fn displays_signal() -> Signal<Arc<[crate::desktop::Display]>> {
+    if let Some(signal) = with_data(|d| d.ambient.displays) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(Arc::from(Vec::new())));
+    with_data(|d| d.ambient.displays = Some(signal));
+    signal
 }
 
 /// The views' menu handlers.

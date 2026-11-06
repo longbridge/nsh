@@ -3,7 +3,8 @@
 //! wait for display frames, components set the layout direction and read
 //! the pixel ratio, the device, the locale and whether the app is in use;
 //! they speak, move the screen reader and set the status bar with their
-//! dialogs.
+//! dialogs; they read the desktop window's state, a move once it stops,
+//! and the displays.
 
 use std::{
     collections::HashMap,
@@ -19,7 +20,9 @@ use nsh_base::dialog;
 use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
+    desktop::{Display, DisplayId, WindowBounds, WindowState},
     element::{AssetFile, AssetKind, Registry, Root},
+    geometry::{Bounds, point, size},
     platform::{Idiom, Lifecycle, Locale, Os},
     prelude::*,
 };
@@ -458,4 +461,161 @@ fn components_speak_move_the_reader_and_set_the_status_bar() {
     );
     // The reader's focus went to the note's view.
     assert_eq!(focused[0].0, texts["The note"]);
+}
+
+/// Shows the window's x, mode and whether it is minimized, and how many
+/// displays there are.
+#[component]
+fn WindowInfo() -> impl IntoElement {
+    view().child(text(move || {
+        let displays = nsh_core::element::desktop::displays().len();
+        match nsh_core::element::desktop::window_state() {
+            Some(state) => {
+                let mode = match state.window_bounds {
+                    WindowBounds::Windowed(_) => "windowed",
+                    WindowBounds::Maximized(_) => "maximized",
+                    WindowBounds::Fullscreen(_) => "fullscreen",
+                };
+                format!(
+                    "x {} {mode} minimized {} displays {displays}",
+                    state.bounds.origin.x.0, state.minimized
+                )
+            }
+            None => format!("no window, displays {displays}"),
+        }
+    }))
+}
+
+/// A window at `x`, 800 × 600, in `mode`'s mode.
+fn window_at(x: f32, mode: fn(Bounds<Points>) -> WindowBounds) -> Environment {
+    let bounds = Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
+    Environment {
+        window_state: Some(WindowState::new(bounds, mode(bounds))),
+        ..Environment::default()
+    }
+}
+
+fn display(id: u64, x: f32) -> Display {
+    let bounds = Bounds::new(point(px(x), px(0.0)), size(px(1440.0), px(900.0)));
+    Display::new(DisplayId(id), bounds, bounds, x == 0.0)
+}
+
+/// The last text the batches so far showed.
+fn last_text(rx: &Receiver<MountBatch>, last: &mut String) -> String {
+    while let Ok(batch) = rx.try_recv() {
+        for item in &batch.items {
+            if let MountItem::Text { text, .. } = item {
+                last.clone_from(&text.text);
+            }
+        }
+    }
+    last.clone()
+}
+
+/// Moves `engine`'s manual clock by `ms`, then waits until it got there.
+fn advance(engine: &Engine, ms: u64) {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    engine
+        .control()
+        .advance_clock(Duration::from_millis(ms), move || {
+            let _ = tx.send(());
+        });
+    rx.recv_timeout(Duration::from_secs(10)).unwrap();
+}
+
+#[test]
+fn components_read_the_window_once_it_stops_and_the_displays() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: window_at(0.0, WindowBounds::Windowed),
+        clock: nsh_core::time::Clock::manual(
+            std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_225_600),
+        ),
+        ..config(App::Rust(Root::of::<WindowInfo>()))
+    };
+    let sink = FrameSink {
+        batches: tx,
+        frames: Arc::new(AtomicUsize::new(0)),
+    };
+    // The displays sent before the start are there as the app first renders.
+    let engine = Engine::start_with(
+        config,
+        || ApproxTextEngine,
+        sink,
+        |control| {
+            control.set_displays(vec![display(1, 0.0), display(2, 1440.0)]);
+        },
+    )
+    .unwrap();
+    let mut last = String::new();
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 windowed minimized false displays 2"
+    );
+    // A drag: held back while the window moves, reported 150 ms after it
+    // stopped.
+    engine
+        .control()
+        .set_environment(window_at(10.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    engine
+        .control()
+        .set_environment(window_at(20.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 windowed minimized false displays 2"
+    );
+    advance(&engine, 60);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 20 windowed minimized false displays 2"
+    );
+    // Another part of the environment while the window moves does not
+    // hold it longer.
+    engine
+        .control()
+        .set_environment(window_at(30.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    engine.control().set_environment(Environment {
+        font_scale: 1.5,
+        ..window_at(30.0, WindowBounds::Windowed)
+    });
+    advance(&engine, 60);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 30 windowed minimized false displays 2"
+    );
+    // A change of mode or minimizing comes at once, with the bounds of then.
+    engine
+        .control()
+        .set_environment(window_at(0.0, WindowBounds::Maximized));
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized false displays 2"
+    );
+    let mut minimized = window_at(0.0, WindowBounds::Maximized);
+    if let Some(state) = &mut minimized.window_state {
+        state.minimized = true;
+    }
+    engine.control().set_environment(minimized);
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized true displays 2"
+    );
+    // A display unplugged.
+    engine.control().set_displays(vec![display(1, 0.0)]);
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized true displays 1"
+    );
+    // Off desktops there is no window and no display.
+    engine.control().set_environment(Environment::default());
+    engine.control().set_displays(Vec::new());
+    advance(&engine, 0);
+    assert_eq!(last_text(&rx, &mut last), "no window, displays 0");
 }
