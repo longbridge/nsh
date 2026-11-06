@@ -497,8 +497,10 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked: a surface
-  that wants frames falls back to a main-queue timer after 100 ms without one (`surface.rs`), or transitions never end.
+- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
+  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
+  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+  which would add a second clock beside the link's while the window shows.
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).
@@ -545,6 +547,12 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Thread-local COM objects released inside `ExitProcess` end the process with a stray exit code**: the main thread's
   thread-local destructors run after the graphics DLLs and their driver threads are gone. `run_app` runs the window on
   a thread of its own and joins it, so the devices, font faces and bitmaps cached per thread go at a plain thread exit.
+- **GPU drivers start worker threads for every Direct3D 11 device** (about 28 on NVIDIA, 15 on AMD) unless it is made
+  with `D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS` (`gfx.rs`). NSH draws with a device from one
+  thread, so they only contend with the UI threads; with a device on each of several threads, windows missed hundreds
+  of frames a minute and CPU went up several times on NVIDIA and Intel. Microsoft calls the flag "not recommended for
+  general use": it is meant for apps that call Direct3D from a single thread, which NSH does (video decoding takes
+  Direct3D's multithread lock and stays valid; the flag changes no thread safety).
 - **Win32 timers tick at ~15.6 ms** (the default timer resolution) and wake-ups come late on a loaded machine: tests
   must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and a test's waits
   need slack.

@@ -405,11 +405,11 @@ function SecondWindow() {
 }
 
 function Windows() {
-  const supported = platform.os === "linux";
+  const supported = platform.os === "linux" || platform.os === "windows";
   return (
     <Card icon="system" title="Windows" subtitle="nsh/desktop · Window.open">
       <Text testID="main-count" style={{ fontSize: 14, color: colors.muted }}>
-        {supported ? `Shared count: ${sharedCount()}` : "Window.open is on Linux for now"}
+        {supported ? `Shared count: ${sharedCount()}` : "Window.open is on Linux and Windows for now"}
       </Text>
       {supported && (
         <View style={{ flexDirection: "row", gap: 8 }}>

@@ -128,6 +128,12 @@ pub struct AppOptions {
     pub app_id: String,
     /// The window title.
     pub title: String,
+    /// The app's icon, an `.ico` file: the window's (title bar, taskbar,
+    /// Alt+Tab) when the executable has no icon of its own (the
+    /// development host, a runner packaged off Windows), and the one its
+    /// notifications show. The release runner reads `nsh\icon.ico`, which
+    /// `nsh package` writes; the development host takes `--icon`.
+    pub icon: Option<PathBuf>,
     /// The initial window size in points.
     pub size: (i32, i32),
     /// A see-through window (Electron's, Tauri's and winit's
@@ -182,6 +188,7 @@ impl Default for AppOptions {
             asset_base: None,
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
+            icon: None,
             size: (1200, 800),
             transparent: false,
             skip_taskbar: false,
@@ -248,6 +255,9 @@ impl AppView {
         }
         if options.skip_taskbar && parent.is_none() {
             surface.chrome.skip_taskbar.set(true);
+        }
+        if parent.is_none() {
+            crate::window::set_icon(hwnd, options.icon.as_deref());
         }
         let view = Rc::new(AppView {
             surface,
@@ -463,7 +473,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = OleInitialize(None);
     }
     crate::system::set_app_id(&options.app_id);
-    crate::notifications::start(&options.app_id, &options.title);
+    crate::notifications::start(&options.app_id, &options.title, options.icon.as_deref());
     let view = match AppView::new(None, options.clone()) {
         Ok(view) => view,
         Err(err) => {

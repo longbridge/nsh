@@ -176,6 +176,7 @@ pub(crate) fn draw(
                 pane: false,
                 right_line: None,
                 field_group: false,
+                lined_group: false,
                 handle: false,
                 rule: false,
                 track: false,
@@ -236,6 +237,9 @@ struct Layer {
     /// Inside an input group's band ([`input_group`]): its field is
     /// raised with it, not a step of its own.
     field_group: bool,
+    /// Inside an input group that draws its line (a box three rows tall):
+    /// its field shows its extent by that box, with no underline of its own.
+    lined_group: bool,
     /// Inside an adjustable view (a resize handle): a column of `│` in
     /// it is a divider's line ([`rule_axis`]).
     handle: bool,
@@ -367,6 +371,8 @@ impl Painter<'_> {
                     && view.frame.size.height <= self.cells.height()
             })
             && input_group(self.tree, id);
+        // Any input group, which a line of its own may frame.
+        let field_box = input_group(self.tree, id);
         // Such a group whose field has the keys shows it on its band.
         let group_focused = holds_field && focused_field_in(self.tree, id, 3);
         let rule_box = holds_rule(self.tree, id, 3);
@@ -1160,6 +1166,7 @@ impl Painter<'_> {
                 .filter(|&(right, _)| (0..=LINE_GAP).contains(&(right - bounds.right)))
         };
         child_layer.field_group |= group;
+        child_layer.lined_group |= edges.any() && bounds.bottom - bounds.top >= 3 && field_box;
         child_layer.handle |= view.props.accessibility.role == AccessibilityRole::Adjustable;
         child_layer.rule |= rule_box;
         child_layer.track = track;
@@ -1340,6 +1347,7 @@ impl Painter<'_> {
                     crate::ColorDepth::Ansi16 | crate::ColorDepth::Monochrome
                 ),
                 popup: popup_item,
+                lined_group: layer.lined_group,
             };
             match ground.ramp {
                 Some(ramp) => mark_surface(
@@ -2479,6 +2487,9 @@ struct Marks {
     /// The view is an item of a popup (a list's option, a menu's item):
     /// its focus spans its row, as a selected item's reverse does.
     popup: bool,
+    /// The view is inside an input group that draws its line
+    /// ([`Layer::lined_group`]).
+    lined_group: bool,
 }
 
 /// Draws the view's state over its drawn Cells (its subtree's included):
@@ -2563,7 +2574,7 @@ fn mark_state(
     // A field shows its extent with no fill to show it (its fill is a
     // ramp's step, which a bandless terminal has not): an underline along
     // its last row, unless its line is drawn (a box three rows tall).
-    let lined = edges.any() && bounds.bottom - bounds.top >= 3;
+    let lined = edges.any() && bounds.bottom - bounds.top >= 3 || marks.lined_group;
     let row = (!inner.is_empty())
         .then(|| Rect::new(inner.x, inner.bottom() - 1, inner.width, 1).intersection(visible))
         .filter(|row| !row.is_empty());

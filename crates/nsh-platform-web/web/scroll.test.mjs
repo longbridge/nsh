@@ -337,3 +337,28 @@ test('the command end fallback waits while a smooth scroll moves', (t) => {
   t.mock.timers.tick(200);
   assert.deepEqual(ends, [400]);
 });
+
+test('a glide whose frames stop ends where it was going, once', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  const ends = [];
+  el._events.add('onScrollEnd');
+  p.event = (id, name, e) => ends.push(e.y);
+  p.call = () => {};
+  p.wheel(wheel(el, 900));
+  runFrames(2);
+  assert.ok(el._glide && el.scrollTop < 900, 'gliding');
+  // No more frames (a hidden tab): its frame stays queued.
+  t.mock.timers.tick(200);
+  assert.deepEqual(ends, [], 'its frames have not stopped for long yet');
+  clock += 400;
+  t.mock.timers.tick(200);
+  assert.equal(el.scrollTop, 900);
+  assert.deepEqual(ends, [900]);
+  assert.equal(el._glide, null);
+  assert.equal(el._driven, 0);
+  frames.clear();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(ends, [900]);
+});
