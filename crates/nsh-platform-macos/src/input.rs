@@ -1254,6 +1254,42 @@ pub(crate) fn local(_surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32,
     p
 }
 
+/// A point in `view`'s coordinates in those of its outermost ancestor:
+/// the frames' origins, the scroll offsets and, with `transforms`, the
+/// transforms on the way (layer transforms, which AppKit's conversions
+/// leave out), as [`local`] undoes them. `None` when a transform's
+/// perspective puts the point at infinity.
+#[cfg(feature = "dev")]
+pub(crate) fn to_top(view: &NshView, p: (f32, f32), transforms: bool) -> Option<(f32, f32)> {
+    let mut p = p;
+    for pair in chain(view).windows(2) {
+        let (child, parent) = (&pair[0], &pair[1]);
+        if transforms && let Some(m) = child.state().transform() {
+            p = project(&m, p)?;
+        }
+        let origin = child.ns().frame().origin;
+        let o = container_offset(parent);
+        p = (p.0 + origin.x as f32 - o.0, p.1 + origin.y as f32 - o.1);
+    }
+    Some(p)
+}
+
+/// Where row-vector transform `m` shows point `p` of a view's plane
+/// (z = 0), perspective included: what [`unproject`] inverts.
+#[cfg(feature = "dev")]
+fn project(m: &nsh_core::Matrix, p: (f32, f32)) -> Option<(f32, f32)> {
+    let m = &m.0;
+    let (x, y) = (p.0 as f64, p.1 as f64);
+    let w = x * m[3] + y * m[7] + m[15];
+    if w.abs() < 1e-12 {
+        return None;
+    }
+    Some((
+        ((x * m[0] + y * m[4] + m[12]) / w) as f32,
+        ((x * m[1] + y * m[5] + m[13]) / w) as f32,
+    ))
+}
+
 fn gesture_values(surface: &Surface, view: &NshView, id: NodeId) -> GestureValues {
     surface
         .input

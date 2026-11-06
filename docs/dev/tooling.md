@@ -565,7 +565,9 @@ the gesture; it lands at the scroll view's middle, and after a gesture that move
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
 it has the most room, then a quarter of the way from the other; between gestures it waits only for the view to stop
 moving, `Agent::stopped`, and once it is in view for the app to settle, so a page that is never quiet, a ticking
-timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`, where
+the view is drawn: its transforms included, a thumb centered with `translate(-50%)` pressed on its middle, as the
+platform's hit testing finds it; macOS maps through the views' layer transforms, which AppKit's conversions leave out; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
 text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input

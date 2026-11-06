@@ -164,13 +164,40 @@ fn in_window(ns: &NSView, rect: NSRect, window: &NSWindow) -> Option<Bounds<Poin
     ))
 }
 
+/// `rect` of `view` (its coordinates) in the window's content, where it is
+/// drawn: AppKit's conversion ([`in_window`]) places it as the frames and
+/// scroll offsets do but leaves the views' layer transforms out, which
+/// hit testing heeds, so each corner moves by what the transforms on the
+/// way shift it ([`crate::input::to_top`]) and the box around them is
+/// where it shows. A thumb centered with a `translate(-50%)` is pressed on
+/// its middle.
+fn mapped(view: &crate::view::NshView, rect: NSRect, window: &NSWindow) -> Option<Bounds<Points>> {
+    crate::scroll::commit_ancestors(view);
+    let plain = in_window(view.ns(), rect, window)?;
+    let (x0, y0) = (rect.origin.x as f32, rect.origin.y as f32);
+    let (w, h) = (rect.size.width as f32, rect.size.height as f32);
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for (dx, dy) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+        let corner = (x0 + dx, y0 + dy);
+        let moved = crate::input::to_top(view, corner, true)?;
+        let still = crate::input::to_top(view, corner, false)?;
+        let x = plain.origin.x.0 + dx + moved.0 - still.0;
+        let y = plain.origin.y.0 + dy + moved.1 - still.1;
+        (min_x, min_y) = (min_x.min(x), min_y.min(y));
+        (max_x, max_y) = (max_x.max(x), max_y.max(y));
+    }
+    Some(Bounds::new(
+        point(Points(min_x), Points(min_y)),
+        Size::new(Points(max_x - min_x), Points(max_y - min_y)),
+    ))
+}
+
 impl Native for MacNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_main(|surface, window| {
             let mounter = surface.mounter.borrow();
             let view = mounter.views.get(&id)?;
-            crate::scroll::commit_ancestors(view);
-            in_window(view.ns(), view.ns().bounds(), window)
+            mapped(view, view.ns().bounds(), window)
         })
         .flatten()
     }
@@ -179,9 +206,8 @@ impl Native for MacNative {
         self.on_main(|surface, window| {
             let mounter = surface.mounter.borrow();
             let view = mounter.views.get(&text)?;
-            crate::scroll::commit_ancestors(view);
             let rect = *crate::text::range_rects(&view.state(), start, end).first()?;
-            in_window(view.ns(), rect, window)
+            mapped(view, rect, window)
         })
         .flatten()
     }
