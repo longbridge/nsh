@@ -5,6 +5,8 @@
 //! compact and scientific forms. The output is a list of parts
 //! (`formatToParts`); `format` joins them.
 
+use std::borrow::Cow;
+
 use super::{Part, locale::Numbers};
 
 /// What is formatted besides the number.
@@ -441,7 +443,11 @@ fn currency_symbol(code: &str, display: CurrencyDisplay, lang: &str, region: &st
                 "$".to_owned()
             }
         }
-        "USD" if lang == "de" || lang == "fr" || lang == "it" || lang == "nl" => "$".to_owned(),
+        "USD" if lang == "de" || lang == "fr" || lang == "it" || lang == "nl" || lang == "fa" => {
+            "$".to_owned()
+        }
+        // The rial, as Persian writes it (`ریال ۱٬۲۳۴٫۵۰`).
+        "IRR" if lang == "fa" => "ریال".to_owned(),
         "USD" => "US$".to_owned(),
         "CAD" => "CA$".to_owned(),
         "AUD" => "A$".to_owned(),
@@ -519,7 +525,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
     let mut zero = false;
     let mut plural = true;
     match number {
-        None if matches!(value, Value::Nan) => push(&mut body, "nan", "NaN"),
+        None if matches!(value, Value::Nan) => push(&mut body, "nan", numbers.nan),
         None => push(&mut body, "infinity", "∞"),
         Some(mut d) => {
             if f.style == Style::Percent && !d.is_zero() {
@@ -538,7 +544,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
     };
     let sign = |parts: &mut Vec<Part>| match sign {
         Some(true) => push(parts, "minusSign", numbers.minus),
-        Some(false) => push(parts, "plusSign", "+"),
+        Some(false) => push(parts, "plusSign", numbers.plus),
         None => {}
     };
     match &f.style {
@@ -554,6 +560,14 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
         Style::Currency { code, display } => {
             let symbol = currency_symbol(code, *display, lang, region);
             let letters = symbol.chars().last().is_some_and(char::is_alphabetic);
+            // Locales with their own (right-to-left) digits keep the symbol
+            // on the number's side with a left-to-right mark, as CLDR
+            // writes it (`‎$۱٬۲۳۴٫۵۰`).
+            let symbol = if numbers.own_digits() {
+                format!("\u{200e}{symbol}")
+            } else {
+                symbol
+            };
             sign(&mut parts);
             if numbers.currency_before && *display != CurrencyDisplay::Name {
                 push(&mut parts, "currency", symbol);
@@ -591,6 +605,13 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
                     push(&mut parts, "unit", if plural { many } else { one });
                 }
             }
+        }
+    }
+    // Locales with their own digits write them everywhere a number appears,
+    // also in a currency's or a compact unit's company.
+    for part in &mut parts {
+        if let Cow::Owned(text) = numbers.localize_digits(&part.value) {
+            part.value = text;
         }
     }
     parts
@@ -642,7 +663,7 @@ fn number_body(
                 (rounded, min_fraction) = scaled.rounded(f.rounding);
             }
             digits(parts, &rounded, min_fraction, f, numbers, Grouping::Off);
-            push(parts, "exponentSeparator", "E");
+            push(parts, "exponentSeparator", numbers.exponential);
             if exponent < 0 {
                 push(parts, "exponentMinusSign", numbers.minus);
             }
@@ -780,6 +801,48 @@ mod tests {
         assert_eq!(fmt("en-US", -5.0, &sign(SignDisplay::Never)), "5");
         assert_eq!(fmt("en-US", -0.0, &sign(SignDisplay::Negative)), "0");
         assert_eq!(fmt("sv-SE", -5.0, &Format::DEFAULT), "\u{2212}5");
+    }
+
+    /// Persian as browsers format it: `arabext` digits, its own separators,
+    /// and a left-to-right mark keeping the sign on the number's side.
+    #[test]
+    fn persian_numbers_like_browsers() {
+        let d = Format::DEFAULT;
+        assert_eq!(fmt("fa-IR", 1234567.891, &d), "۱٬۲۳۴٬۵۶۷٫۸۹۱");
+        assert_eq!(fmt("fa-IR", 123.5, &d), "۱۲۳٫۵");
+        assert_eq!(fmt("fa-IR", -1234.5, &d), "\u{200e}\u{2212}۱٬۲۳۴٫۵");
+        assert_eq!(fmt("fa-IR", -0.0, &d), "\u{200e}\u{2212}۰");
+        assert_eq!(fmt("fa-IR", f64::NAN, &d), "ناعدد");
+        let percent = with(|f| {
+            f.style = Style::Percent;
+            f.rounding = Rounding::Fraction { min: 0, max: 0 };
+        });
+        assert_eq!(fmt("fa-IR", -0.12, &percent), "\u{200e}\u{2212}۱۲\u{66a}");
+        let money = with(|f| {
+            f.style = Style::Currency {
+                code: "USD".to_owned(),
+                display: CurrencyDisplay::Symbol,
+            };
+            f.rounding = Rounding::Fraction { min: 2, max: 2 };
+        });
+        assert_eq!(fmt("fa-IR", 1234.5, &money), "\u{200e}$۱٬۲۳۴٫۵۰");
+        let rial = with(|f| {
+            f.style = Style::Currency {
+                code: "IRR".to_owned(),
+                display: CurrencyDisplay::Symbol,
+            };
+            f.rounding = Rounding::Fraction { min: 2, max: 2 };
+        });
+        assert_eq!(fmt("fa-IR", 1234.5, &rial), "\u{200e}ریال\u{a0}۱٬۲۳۴٫۵۰");
+        let compact = with(|f| f.notation = Notation::Compact { long: false });
+        assert_eq!(fmt("fa-IR", 1500000.0, &compact), "۱٫۵\u{a0}میلیون");
+        assert_eq!(fmt("fa-IR", 2500.0, &compact), "۲٫۵\u{a0}هزار");
+        let long = with(|f| f.notation = Notation::Compact { long: true });
+        assert_eq!(fmt("fa-IR", 1500000.0, &long), "۱٫۵ میلیون");
+        let sci = with(|f| f.notation = Notation::Scientific);
+        assert_eq!(fmt("fa-IR", 12345.0, &sci), "۱٫۲۳۵×۱۰^۴");
+        let int = with(|f| f.min_integer = 3);
+        assert_eq!(fmt("fa-IR", 7.0, &int), "۰۰۷");
     }
 
     #[test]
