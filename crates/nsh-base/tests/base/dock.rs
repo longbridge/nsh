@@ -497,6 +497,26 @@ fn a_window_narrowed_and_widened_again_shows_the_layout_s_docks() {
 }
 
 #[test]
+fn an_area_compact_from_the_start_reports_its_docks_as_it_widens_and_narrows() {
+    let mut app = start(with_two_docks(), 400.0);
+    // Compact: nothing presented, told against the layout's `open`.
+    app.wait_for("Docks Left- Bottom-").unwrap();
+    // Wide: both docks show as the layout says, and are told so.
+    app.set_viewport(Size::new(px(1000.0), px(900.0))).unwrap();
+    app.wait_for("Panel files").unwrap();
+    app.wait_for("Panel terminal").unwrap();
+    app.wait_for("Docks Left- Bottom- Left+ Bottom+").unwrap();
+    // Narrow again: both hidden, each told once.
+    app.set_viewport(Size::new(px(400.0), px(900.0))).unwrap();
+    app.wait_for_gone("Panel files", std::time::Duration::from_secs(5))
+        .unwrap();
+    app.wait_for("Docks Left- Bottom- Left+ Bottom+ Left- Bottom-")
+        .unwrap();
+    // The layout as the app wrote it: compact never changed its `open`.
+    assert!(app.shows("Layout h([*a b]:400 [*c]) left [*files] open 0 bottom [*terminal] open 0"));
+}
+
+#[test]
 fn a_panel_hears_each_change_of_being_displayed() {
     let mut app = start(two_groups(), 1000.0);
     app.wait_for("Active a+ c+").unwrap();
