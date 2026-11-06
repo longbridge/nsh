@@ -757,6 +757,19 @@ fn tex_delimiters() {
 }
 
 #[test]
+fn escaped_brackets_are_text() {
+    // Reference numbers written with escaped brackets: text, not display
+    // formulas.
+    assert_eq!(blocks("\\[1\\]\\[3\\]"), vec![p(vec![t("[1][3]")])]);
+    assert_eq!(
+        blocks("增长较快\\[1\\]\\[3\\]，见\\[注\\]。"),
+        vec![p(vec![t("增长较快[1][3]，见[注]。")])]
+    );
+    // A formula in the same brackets.
+    assert_eq!(blocks("\\[x^2\\]"), vec![Block::Math { tex: "x^2".into() }]);
+}
+
+#[test]
 fn frontmatter() {
     let source = "---\ntitle: Hi\n---\n# Body";
     let doc = Parser::new()

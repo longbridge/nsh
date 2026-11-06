@@ -622,6 +622,7 @@ style text:"Styled paragraph." userSelect text
 # The static functions.
 expect Plain: a b
 expect Parsed: 1 paragraph
+expect Cited: paragraph
 expect Extended: text,custom
 expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
