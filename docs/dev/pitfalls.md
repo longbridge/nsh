@@ -470,8 +470,10 @@ Things that were found the hard way. Read the section of the area you change bef
   backdrop's blur (it draws a `RenderNode`, on hardware canvases only) and hardware layers. A copy holds the last frame
   the window drew, so the agent invalidates the windows and waits for their next frame first (a frame commit callback,
   two Choreographer frames on API 28); the copy is reported on a thread of its own, as the main thread runs the
-  request. The dim behind a dialog is the compositor's layer between the two windows: the agent fills the window's
-  copy with black at the dialog's `dimAmount` before placing the dialog's copy over it. A window without a surface
+  request. A `<modal>` is a dialog window of its own (`ModalHost`), so the activity's copy holds none of it: the
+  agent copies each shown modal's window and the system alert's and places them over it, bottom to top. The dim
+  behind a dialog is the compositor's layer between the windows: the agent fills the picture so far with black at
+  the dialog's `dimAmount` (`FLAG_DIM_BEHIND`) before placing the dialog's copy over it. A window without a surface
   (an activity stopped behind the lock screen of a phone) is drawn into a bitmap, the views as the CPU draws them.
 
 ## macOS, AppKit

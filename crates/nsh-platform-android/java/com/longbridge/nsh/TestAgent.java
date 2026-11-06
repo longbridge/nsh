@@ -26,6 +26,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -176,10 +177,19 @@ final class TestAgent {
         return modal != null ? modal : host.getRootView();
     }
 
+    /**
+     * The focused view keys go to: in the topmost window (a field in a
+     * `<modal>` has its focus in the dialog's window), else in the app's.
+     */
+    private static View focused(NshView host) {
+        View focus = target(host).findFocus();
+        return focus != null ? focus : host.getRootView().findFocus();
+    }
+
     /** Types `text` into the focused field, key by key where keys type it. */
     static void type(NshView host, String text) {
         onMain(() -> {
-            View focus = host.getRootView().findFocus();
+            View focus = focused(host);
             if (focus == null) return null;
             KeyEvent[] keys = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray());
             if (keys != null) {
@@ -198,8 +208,8 @@ final class TestAgent {
     /** Presses the key `code` (`KeyEvent.KEYCODE_*`) with `meta` (`KeyEvent.META_*`). */
     static void key(NshView host, int code, int meta) {
         onMain(() -> {
-            View focus = host.getRootView().findFocus();
-            View to = focus != null ? focus : host.getRootView();
+            View focus = focused(host);
+            View to = focus != null ? focus : target(host);
             long now = SystemClock.uptimeMillis();
             KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, meta);
             // With Ctrl, a shortcut first, as the window's input stage
@@ -300,10 +310,7 @@ final class TestAgent {
     static boolean animating(NshView host) {
         Boolean moving = onMain(() -> {
             long sig = signature(host.getRootView());
-            Dialog d = shownDialog;
-            if (d != null && d.isShowing() && d.getWindow() != null) {
-                sig = sig * 31 + signature(d.getWindow().getDecorView());
-            }
+            for (Window over : overWindows(host)) sig = sig * 31 + signature(over.getDecorView());
             boolean changed = sig != lastSignature;
             lastSignature = sig;
             return changed;
@@ -341,27 +348,47 @@ final class TestAgent {
         return copier;
     }
 
+    /** A window over the app's: a `<modal>`'s dialog or the system alert. */
+    private static final class Layer {
+        Window window;
+        /** Its decor view's rect in its own window. */
+        Rect rect;
+        /** Where it is from the app window's root view. */
+        int x, y;
+        /** The dim the compositor puts under it (`FLAG_DIM_BEHIND`), 0 for none. */
+        float dim;
+    }
+
     /** What a screenshot copies, gathered on the main thread. */
     private static final class Shot {
         View root;
         Window window;
         Rect rootRect;
-        Window dialog;
-        Rect dialogRect;
-        int dialogX, dialogY;
-        float dim;
+        /** Bottom to top: the shown modals in their order, then the system alert. */
+        final ArrayList<Layer> layers = new ArrayList<>();
     }
 
     /**
-     * A picture of the window (and the dialog over it), as a PNG: what the
-     * compositor shows, copied from the windows' surfaces with
-     * {@link PixelCopy}, so it holds what only the GPU draws (texture views,
-     * `RenderEffect` filters, the backdrop's blur, hardware layers). The views
-     * drawn into a bitmap stand in when a surface cannot be copied.
+     * The windows over the app's, bottom to top: every `<modal>` shown (a
+     * dialog window of its own: `Dialog`, sheets, ...), then the system alert.
+     */
+    private static ArrayList<Window> overWindows(NshView host) {
+        ArrayList<Window> windows = new ArrayList<>(host.mounter().modalWindows());
+        Dialog d = shownDialog;
+        if (d != null && d.isShowing() && d.getWindow() != null) windows.add(d.getWindow());
+        return windows;
+    }
+
+    /**
+     * A picture of the window and the windows over it (the modals', the
+     * system alert's), as a PNG: what the compositor shows, each window
+     * copied from its surface with {@link PixelCopy}, so it holds what only
+     * the GPU draws (texture views, `RenderEffect` filters, the backdrop's
+     * blur, hardware layers). A window whose surface cannot be copied is
+     * drawn into the bitmap instead.
      */
     static byte[] screenshot(NshView host) {
-        // One frame for the window, one for the dialog's (counted down at once without one).
-        CountDownLatch drawn = new CountDownLatch(2);
+        CountDownLatch[] drawn = new CountDownLatch[1];
         Shot shot = onMain(() -> {
             View root = host.getRootView();
             if (root.getWidth() == 0 || root.getHeight() == 0) return null;
@@ -374,51 +401,55 @@ final class TestAgent {
                 root.getLocationInWindow(at);
                 s.rootRect = new Rect(at[0], at[1], at[0] + root.getWidth(), at[1] + root.getHeight());
             }
-            Dialog d = shownDialog;
-            if (d != null && d.isShowing() && d.getWindow() != null) {
-                Window dw = d.getWindow();
-                View dv = dw.getDecorView();
-                if (dv.getWidth() > 0 && dv.getHeight() > 0) {
-                    s.dialog = dw;
-                    s.dialogRect = new Rect(0, 0, dv.getWidth(), dv.getHeight());
-                    int[] at = new int[2];
-                    dv.getLocationOnScreen(at);
-                    int[] rootAt = new int[2];
-                    root.getLocationOnScreen(rootAt);
-                    s.dialogX = at[0] - rootAt[0];
-                    s.dialogY = at[1] - rootAt[1];
-                    WindowManager.LayoutParams a = dw.getAttributes();
-                    if ((a.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0) s.dim = a.dimAmount;
-                    dv.invalidate();
-                    awaitFrame(dv, drawn);
-                }
+            int[] rootAt = new int[2];
+            root.getLocationOnScreen(rootAt);
+            for (Window over : overWindows(host)) {
+                View dv = over.getDecorView();
+                if (dv.getWidth() == 0 || dv.getHeight() == 0) continue;
+                Layer l = new Layer();
+                l.window = over;
+                l.rect = new Rect(0, 0, dv.getWidth(), dv.getHeight());
+                int[] at = new int[2];
+                dv.getLocationOnScreen(at);
+                l.x = at[0] - rootAt[0];
+                l.y = at[1] - rootAt[1];
+                WindowManager.LayoutParams a = over.getAttributes();
+                if ((a.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0) l.dim = a.dimAmount;
+                s.layers.add(l);
             }
-            if (s.dialog == null) drawn.countDown();
-            // PixelCopy copies the last frame drawn: draw one with what is there now.
+            // PixelCopy copies the last frame a window drew: each draws one with what is there now.
+            drawn[0] = new CountDownLatch(1 + s.layers.size());
             root.invalidate();
-            awaitFrame(root, drawn);
+            awaitFrame(root, drawn[0]);
+            for (Layer l : s.layers) {
+                View dv = l.window.getDecorView();
+                dv.invalidate();
+                awaitFrame(dv, drawn[0]);
+            }
             return s;
         });
         if (shot == null) return null;
         try {
-            drawn.await(1, TimeUnit.SECONDS);
+            drawn[0].await(1, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         Bitmap b = shot.window == null ? null : copy(shot.window, shot.rootRect);
-        if (b == null) return drawViews(shot.root);
-        if (shot.dialog != null) {
-            Canvas c = new Canvas(b);
-            // The dim behind a dialog is the compositor's, a layer between the two windows.
-            if (shot.dim > 0) c.drawColor(Color.argb(Math.round(shot.dim * 255), 0, 0, 0));
-            Bitmap dialog = copy(shot.dialog, shot.dialogRect);
-            if (dialog != null) {
-                c.drawBitmap(dialog, shot.dialogX, shot.dialogY, null);
-                dialog.recycle();
+        if (b == null) return drawViews(host, shot.root);
+        Canvas c = new Canvas(b);
+        for (Layer l : shot.layers) {
+            // The dim under a window is the compositor's, a layer between it and the ones below.
+            if (l.dim > 0) c.drawColor(Color.argb(Math.round(l.dim * 255), 0, 0, 0));
+            Bitmap over = copy(l.window, l.rect);
+            if (over != null) {
+                c.drawBitmap(over, l.x, l.y, null);
+                over.recycle();
             } else {
                 onMain(() -> {
-                    c.translate(shot.dialogX, shot.dialogY);
-                    shot.dialog.getDecorView().draw(c);
+                    c.save();
+                    c.translate(l.x, l.y);
+                    l.window.getDecorView().draw(c);
+                    c.restore();
                     return true;
                 });
             }
@@ -463,22 +494,27 @@ final class TestAgent {
         return null;
     }
 
-    /** The window's views (and the dialog's) drawn into a bitmap, as a PNG. */
-    private static byte[] drawViews(View root) {
+    /** The window's views and those of the windows over it drawn into a bitmap, as a PNG. */
+    private static byte[] drawViews(NshView host, View root) {
         Bitmap b = onMain(() -> {
             if (root.getWidth() == 0 || root.getHeight() == 0) return null;
             Bitmap bitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(bitmap);
             root.draw(c);
-            Dialog d = shownDialog;
-            if (d != null && d.isShowing() && d.getWindow() != null) {
-                View dv = d.getWindow().getDecorView();
+            int[] rootAt = new int[2];
+            root.getLocationOnScreen(rootAt);
+            for (Window over : overWindows(host)) {
+                View dv = over.getDecorView();
+                WindowManager.LayoutParams a = over.getAttributes();
+                if ((a.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0 && a.dimAmount > 0) {
+                    c.drawColor(Color.argb(Math.round(a.dimAmount * 255), 0, 0, 0));
+                }
                 int[] at = new int[2];
                 dv.getLocationOnScreen(at);
-                int[] rootAt = new int[2];
-                root.getLocationOnScreen(rootAt);
+                c.save();
                 c.translate(at[0] - rootAt[0], at[1] - rootAt[1]);
                 dv.draw(c);
+                c.restore();
             }
             return bitmap;
         });

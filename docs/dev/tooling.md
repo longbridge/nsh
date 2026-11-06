@@ -686,13 +686,15 @@ app; the screen keeps its device's size. Android (`nsh-platform-android`, featur
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
 (`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
-each on the UI thread: `MotionEvent`s dispatched to the window's views (or the dialog's) as a finger's, with drags
-that rest before they lift as on iOS; typing as a keyboard's `KeyEvent`s (`KeyCharacterMap`; what no key types is
+each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
+topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
+iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
-screenshots copy the window's surface and the dialog's with `PixelCopy` after a frame drawn with the current state,
-the dialog composited at its place over the window's dim, so they hold what the GPU draws (video, filters, the backdrop's
-blur), on an emulator without a window too; a window without a surface is drawn into a bitmap instead. A step waits for the native animation graph and for anything
+screenshots copy the activity's window and every window over it (each shown `<modal>`'s dialog in order, then the
+system alert) from their surfaces with `PixelCopy` after a frame drawn with the current state, each composited at its
+place over its dim, so they hold what the GPU draws (video, filters, the backdrop's blur), on an emulator without a
+window too; a window without a surface is drawn into the bitmap instead. A step waits for the native animation graph and for anything
 that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
 system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
 use `nsh_testing::agent::Tester`, which turns the dev client's
