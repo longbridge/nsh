@@ -1019,9 +1019,11 @@ unsafe extern "C" fn separated_run(
         if qjs::JS_IsUndefined(separator) {
             let mut owner = 0f64;
             qjs::JS_ToFloat64(cx, &mut owner, *data.add(4));
-            // The cached separator lives with the cell, not this rerunning computation.
+            qjs::JS_FreeValue(cx, component);
+            // The cached separator lives with the cell, not this rerunning
+            // computation: so does what its getter makes (an `<If>`'s memo).
             separator = nsh_core::reactive::with_owner(reactive::Js(cx), owner as u32, || {
-                slot(cx, component)
+                slot(cx, get(cx, props, "separator"))
             });
             if qjs::JS_IsException(separator) {
                 return separator;

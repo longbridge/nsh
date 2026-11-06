@@ -600,6 +600,49 @@ mount(App);
     assert_eq!(paced.errors(), Vec::<String>::new());
 }
 
+/// A `separator` that is one `<If>` keeps following its condition after
+/// rows move: what its getter makes lives with the cell, not with the
+/// computation that reruns when the cell's index changes.
+#[test]
+fn a_separator_follows_its_if_after_rows_move() {
+    let app = r#"
+import { List, mount, signal, Text, View } from "nsh";
+const on = signal(false);
+const items = signal(["a", "b", "c"]);
+const steps = [
+  () => on.set(true),
+  () => items.set(["z", "a", "b", "c"]),
+  () => on.set(false),
+  () => on.set(true),
+];
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={() => steps.shift()?.()} style={{ height: 0 }} />
+      <List each={items()} style={{ flex: 1 }} separator={<If when={on()}><Text>sep</Text></If>}>
+        {(row) => <Text>{row()}</Text>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let mut paced = Paced::start(app);
+    paced.settle(|_, _| {});
+    let separators = |paced: &Paced| paced.texts.values().filter(|t| *t == "sep").count();
+    assert_eq!(separators(&paced), 0);
+    for expected in [2, 3, 0, 3] {
+        paced.engine.control().dispatch_event(
+            paced.pressable.expect("the pressable view"),
+            nsh_core::EventKind::Press,
+            nsh_core::EventPayload::None,
+        );
+        paced.settle(|_, _| {});
+        assert_eq!(separators(&paced), expected);
+    }
+    assert_eq!(paced.errors(), Vec::<String>::new());
+}
+
 /// A row added above keeps every cell on its row in every batch: cells
 /// whose item moved learn their new index in the commit of the change.
 #[test]

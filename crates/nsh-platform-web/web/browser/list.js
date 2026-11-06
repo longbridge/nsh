@@ -111,9 +111,10 @@ export function createLists(invoke, values, reactive, dom, live, wake) {
             const content = reactive.untracked(() => state.props.children(item, index));
             if ("separator" in state.props) {
               let separator, made = false;
+              const owner = reactive.getOwner();
               rt.insert(cell, () => {
                 if (index() >= (state.props.each?.length ?? 0) - 1) return content;
-                if (!made) { separator = slot(state.props.separator); made = true; }
+                if (!made) { separator = reactive.runWithOwner(owner, () => slot(state.props.separator)); made = true; }
                 return state.props.inverted ? [separator, content] : [content, separator];
               });
             } else rt.insert(cell, content);
