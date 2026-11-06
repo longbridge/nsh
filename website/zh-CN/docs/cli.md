@@ -338,3 +338,13 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |
 | `NSH_WASM_BINDGEN` | `run`、`package`（`--target web`） | 应用的 crate [调用浏览器 API](./web.md#在-rust-中使用浏览器-api) 时使用的 `wasm-bindgen` CLI。默认使用 `PATH` 中的。 |
 | `NO_COLOR` | 所有命令 | 设置后，终端输出不带颜色。 |
+
+## nsh publish ios
+
+```sh
+nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+```
+
+在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，用于 TestFlight。参数也可通过
+`NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。

@@ -15,6 +15,7 @@ mod entry;
 mod init;
 mod logger;
 mod package;
+mod publish_ios;
 mod run;
 mod runtime;
 mod rust_app;
@@ -358,22 +359,25 @@ enum Command {
         #[arg(short, long)]
         out: PathBuf,
     },
-    /// Build an app in release mode and sign it into a package (`.nshpkg`)
+    /// Upload to a store (`publish ios`), or build and sign a package (`.nshpkg`)
     /// for apps that embed nsh to verify and run. Metadata comes from
     /// `nsh.json` next to the entry, overridden by the flags below. Given a
     /// package instead of an app, signs it again with this key: only its
     /// certificate, signing time and signature change.
+    #[command(subcommand_negates_reqs = true, args_conflicts_with_subcommands = true)]
     Publish {
+        #[command(subcommand)]
+        destination: Option<PublishDestination>,
         /// The entry module, the app's directory (default: the current one),
         /// whose `App.tsx` is the entry, or a package (`.nshpkg`) to sign again.
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// The release key's secret key (`.secret`).
-        #[arg(long)]
-        key: PathBuf,
+        #[arg(long, required = true)]
+        key: Option<PathBuf>,
         /// Its certificate (`nsh certify`).
-        #[arg(long)]
-        cert: PathBuf,
+        #[arg(long, required = true)]
+        cert: Option<PathBuf>,
         /// The package to write (default: `.nsh/out/<id>-<build>.nshpkg`); a
         /// package signed again may name the one read.
         #[arg(short, long)]
@@ -502,6 +506,12 @@ struct PackageArgs {
     run: bool,
 }
 
+#[derive(Subcommand, Clone)]
+enum PublishDestination {
+    /// Upload an App Store-signed IPA to App Store Connect for TestFlight.
+    Ios(publish_ios::Args),
+}
+
 impl Command {
     /// The entry argument of the commands that build an app.
     fn entry_mut(&mut self) -> Option<&mut PathBuf> {
@@ -563,6 +573,13 @@ fn no_limits_for_rust(
 }
 
 fn run(mut command: Command) -> anyhow::Result<()> {
+    if let Command::Publish {
+        destination: Some(PublishDestination::Ios(args)),
+        ..
+    } = &command
+    {
+        return publish_ios::publish(args);
+    }
     // A package given to `nsh publish` has no app to resolve or build.
     if let Command::Publish {
         entry,
@@ -575,6 +592,7 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         source_map,
         strip_debug,
         min_runtime,
+        ..
     } = &command
         && sign::is_package(entry)
     {
@@ -591,7 +609,12 @@ fn run(mut command: Command) -> anyhow::Result<()> {
                 "{flag} applies to a build: a package signed again keeps its contents as they are"
             );
         }
-        return sign::resign(entry, key, cert, out.clone());
+        return sign::resign(
+            entry,
+            key.as_deref().context("--key is required")?,
+            cert.as_deref().context("--cert is required")?,
+            out.clone(),
+        );
     }
     let mut types = true;
     // The app a test's path is part of.
@@ -913,6 +936,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             source_map,
             strip_debug,
             min_runtime,
+            ..
         } => {
             let mut config = package::read_config(&entry)?;
             config.id = id.or(config.id);
@@ -921,8 +945,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             config.min_runtime = min_runtime.or(config.min_runtime);
             sign::publish(sign::PublishOptions {
                 entry: &entry,
-                key: &key,
-                cert: &cert,
+                key: key.as_deref().context("--key is required")?,
+                cert: cert.as_deref().context("--cert is required")?,
                 out,
                 config,
                 source_map: source_map.unwrap_or(sign::SourceMapOut::Package),
@@ -954,6 +978,65 @@ mod command_tests {
 
     /// Signing a package again changes no contents, so a flag that shapes a
     /// build is refused rather than ignored, before any file is read.
+    #[test]
+    fn publish_ios_and_package_signing_have_separate_arguments() {
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "publish",
+            "ios",
+            "app.ipa",
+            "--app-id",
+            "123",
+            "--issuer-id",
+            "issuer",
+            "--key-id",
+            "KEY123",
+            "--private-key",
+            "key.p8",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish {
+                destination: Some(super::PublishDestination::Ios(_)),
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish"]).is_err());
+        for entry in [".", "./ios", "app.nshpkg"] {
+            let cli = Cli::try_parse_from([
+                "nsh",
+                "publish",
+                entry,
+                "--key",
+                "key.secret",
+                "--cert",
+                "key.cert",
+            ])
+            .unwrap();
+            assert!(matches!(
+                cli.command,
+                Command::Publish {
+                    destination: None,
+                    ..
+                }
+            ));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "nsh",
+                "publish",
+                "ios",
+                "app.ipa",
+                "--key",
+                "key.secret",
+                "--cert",
+                "key.cert"
+            ])
+            .is_err()
+        );
+    }
+
     #[test]
     fn publishing_a_package_refuses_the_flags_of_a_build() {
         for (flag, args) in [

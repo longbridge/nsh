@@ -286,3 +286,44 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 - [应用更新](./app-updates.md)：自我更新的打包应用
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
+
+## 上传到 TestFlight
+
+`nsh publish ios <IPA>` 使用 App Store Connect 的
+[构建上传 API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads)
+上传经过 App Store 签名的 IPA。在 macOS 上运行，接收 `nsh package` 生成的 IPA，适用于 Rust、Rust + TSX 和 TSX 应用。
+
+先在 App Store Connect 创建应用记录，准备对应 bundle identifier 的 Apple Distribution 签名证书和
+App Store provisioning profile。在 `nsh.json` 中设置 `version`，并在打包前递增 `build`。
+在 App Store Connect 创建有构建上传权限的团队 API Key（Developer、App Manager 或 Admin），
+将 `.p8` 文件保存在仓库外。通过 shell 或 CI 的秘密环境变量提供凭据，保持 `nsh.json` 和版本控制中没有凭据。
+
+```sh
+nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
+  --profile /secure/AppStore.mobileprovision
+
+export NSH_APP_STORE_APP_ID=1234567890
+export NSH_APP_STORE_ISSUER_ID=your-issuer-id
+export NSH_APP_STORE_KEY_ID=your-key-id
+export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
+nsh publish ios .nsh/out/MyApp.ipa
+```
+
+| 参数 | 环境变量 | 含义 |
+|---|---|---|
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | 已创建的 App Store Connect 应用的数字 Apple ID。 |
+| `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | 团队 API Key 的 issuer ID。 |
+| `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API Key ID。 |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | `.p8` 私钥文件路径。 |
+
+四项均必填，命令行参数优先于环境变量。CLI 从 IPA 读取 bundle ID、版本和构建号，
+核对 bundle ID 与 App Store Connect 应用一致，然后签发短期 ES256 token、按指定分段流式上传，
+最后提交 SHA-256 校验和。完成消息包含 upload ID 和应用的 TestFlight 链接。
+
+命令成功表示 Apple 已接受上传，等待处理。在 App Store Connect 查看处理状态、填写出口合规信息、
+设置测试组并处理可能需要的 Beta 审核；App Store 提审和正式发布仍由你手动操作。
+上传中断时，先根据输出的 upload ID 在 App Store Connect 核实状态，再决定是否重试；每次运行都会创建新上传。
+Apple 在处理构建时验证签名和 provisioning profile。
+
+`nsh publish <ENTRY> --key … --cert …` 继续为嵌入场景生成签名 `.nshpkg`。
+本地入口目录名为 `ios` 时，写作 `./ios`。

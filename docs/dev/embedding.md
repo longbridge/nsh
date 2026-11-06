@@ -350,3 +350,22 @@ NSH draws (`src/layers.rs`).
   handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
   `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
   `NshView.ErrorListener`) are unchanged.
+
+## TestFlight uploads
+
+`nsh publish ios <IPA>` (`publish_ios.rs`) uploads a device IPA made by `nsh package` directly
+to App Store Connect's build uploads API. It reads the IPA's Info.plist, verifies the remote app's
+bundle ID, creates a build upload and file reservation, streams the prescribed ranges, and commits
+the SHA-256 checksum. Apple then processes the build; beta distribution and review remain in
+App Store Connect. The existing `.nshpkg` signing form of `publish` is preserved (`./ios` disambiguates
+an entry directory named `ios`).
+
+Credentials use flags or `NSH_APP_STORE_{APP_ID,ISSUER_ID,KEY_ID,PRIVATE_KEY}` environment variables,
+never project configuration. Each control request gets a two-minute ES256 JWT; delivery requests
+use only Apple's supplied headers. HTTP redirects are disabled, transfer errors omit signed URLs,
+and upload ranges must cover the file exactly. The CLI uses the existing ring dependency tree for
+P-256 signing, and existing ureq, base64, sha2, zip and plist crates.
+
+Unit tests verify JWT signatures and claims, request bodies, IPA metadata and range validation.
+A real upload requires a macOS machine, an App Store-signed IPA and an owner's App Store Connect
+team API key; local tests do not prove Apple's signing validation or TestFlight processing.

@@ -342,3 +342,13 @@ Signs a revocation list: release keys and packages that must not load any more.
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |
 | `NSH_WASM_BINDGEN` | `run`, `package` (`--target web`) | The `wasm-bindgen` CLI for an app whose crates [call browser APIs](./web.md#browser-apis-from-rust). Default: the one on `PATH`. |
 | `NO_COLOR` | every command | Set: no colors on terminals. |
+
+## nsh publish ios
+
+```sh
+nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+```
+
+Uploads an App Store-signed IPA on macOS to App Store Connect for TestFlight. Flags also accept
+`NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
+`NSH_APP_STORE_PRIVATE_KEY`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
