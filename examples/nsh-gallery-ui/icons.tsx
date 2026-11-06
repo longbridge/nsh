@@ -43,6 +43,7 @@ export type IconName =
   | "sidebar"
   | "sun"
   | "moon"
+  | "undo"
   | "volume-low"
   | "volume-high"
   | "code"
@@ -593,6 +594,16 @@ const glyphs: Record<IconName, Draw> = {
     c.arc(10, 10, 6.5, 0.134, Math.PI * 2 - 1.704);
     c.arc(13.2, 6.8, 5.2, Math.PI * 2 - 2.468, 0.898, true);
     c.closePath();
+    c.stroke();
+  },
+  undo: (c) => {
+    // An arrowhead pointing back and the path it came by, turning down and back.
+    line(c, [7.5, 11.5, 3.5, 7.5, 7.5, 3.5]);
+    c.beginPath();
+    c.moveTo(3.5, 7.5);
+    c.lineTo(12, 7.5);
+    c.arc(12, 11.75, 4.25, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(9, 16);
     c.stroke();
   },
 };

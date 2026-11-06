@@ -12,12 +12,12 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto"]
+default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto"]
 # JS apps (bundles, signed packages); without it, the library only runs a
 # Rust app and links no QuickJS.
 js = ["nsh-engine/js-core"]
 # Development support: dev server client, log forwarding, error overlay.
-dev = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto", "dep:nsh-dev", "dep:nsh-testing"]
+dev = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto", "dep:nsh-dev", "dep:nsh-testing"]
 # Web views with WebKitGTK 6.0 (`libwebkitgtk-6.0-dev` to build,
 # `libwebkitgtk-6.0-4` to run); without it a web view shows a placeholder.
 webview = ["dep:webkit6"]
@@ -32,6 +32,8 @@ editor = ["nsh-base/editor"]
 rich-editor = ["nsh-base/rich-editor"]
 # The charts: `nsh/base/plot`.
 plot = ["nsh-base/plot"]
+# `Terminal` and its emulator: `vte`.
+term = ["nsh-base/term"]
 # Highlighted code in `TextView` and the `Editor` (syntect). Without it, plain.
 highlight = ["nsh-base/highlight"]
 # `TextView`'s formulas typeset natively (RaTeX and the KaTeX fonts). Without
@@ -51,6 +53,9 @@ nsh-core = { workspace = true, features = ["svg", "loader"] }
 nsh-engine = { workspace = true, features = ["net"] }
 nsh-base.workspace = true
 gtk4.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-audio.workspace = true
 # GIF and WebP (first frame), which GDK cannot decode without gdk-pixbuf loaders;
 # JPEG (and PNG) shrunk to the size a view shows them at.
 image = { workspace = true, features = ["gif", "jpeg", "webp"] }

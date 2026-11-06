@@ -231,7 +231,6 @@ pub(crate) fn set_context(context: Context) {
 }
 
 /// What the core's own loads on this thread go through.
-#[cfg(feature = "svg")]
 pub(crate) fn context() -> Context {
     CONTEXT.with_borrow(Context::clone)
 }

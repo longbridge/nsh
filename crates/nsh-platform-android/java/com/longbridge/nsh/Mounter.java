@@ -712,10 +712,22 @@ final class Mounter {
      */
     void destroyComponents() {
         Notifications.forget(this);
+        if (audio != null) {
+            audio.release();
+            audio = null;
+        }
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
         }
+    }
+
+    /** The app's sounds and players (one per engine), made at its first audio command. UI thread. */
+    private Audio audio;
+
+    private Audio audio() {
+        if (audio == null) audio = new Audio(this);
+        return audio;
     }
 
     /**
@@ -2208,6 +2220,10 @@ final class Mounter {
             }
             case 44: {
                 Notifications.command(this, b, objects);
+                break;
+            }
+            case 47: {
+                audio().command(b, objects);
                 break;
             }
             case 26: {

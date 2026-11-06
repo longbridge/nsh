@@ -1027,6 +1027,23 @@ impl Host {
         });
     }
 
+    /// Publishes the displays to JS (`nsh/desktop`'s `displays()`). Call
+    /// before evaluating the bundle where there are displays, then on every
+    /// change; without a call they are none.
+    pub fn set_displays(&self, displays: &[nsh_core::desktop::Display]) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_displays(raw, displays) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1261,6 +1278,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         // And speech sessions' events (`Speech`'s listeners get them).
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
+        // And sounds' and players' events (their objects' listeners).
+        EventPayload::Audio { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
@@ -2407,6 +2426,61 @@ const report = (v) => text(String(v));
             .filter(|op| matches!(op, Op::Create { .. }))
             .count();
         assert_eq!(created, 1);
+        assert!(host.fatal().is_none());
+    }
+
+    #[test]
+    fn an_interrupt_inside_find_keeps_the_elements_alive() {
+        // An interrupt inside QuickJS's `find` family must not free the
+        // arrays' elements (quickjs-ng #1826), or a later call crashes the
+        // VM. `views[0]` and the second, offset run of each method make the
+        // interrupt land in the method itself.
+        let mut host = sandboxed(Limits {
+            call_budget: Duration::ZERO,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            const methods = ["find", "findIndex", "findLast", "findLastIndex"];
+            globalThis.kept = methods.map(() => ({}));
+            globalThis.weak = kept.map((element) => new WeakRef(element));
+            globalThis.items = kept.map((element) => new Array(100000).fill(element));
+            const press = (handler) => {
+                const view = element("view");
+                prop(view, "onPress", handler);
+                return view;
+            };
+            const nothing = () => {};
+            globalThis.views = [press(() => { for (;;) {} })];
+            methods.forEach((method, i) => {
+                views.push(press(() => items[i][method](() => false)));
+                views.push(press(() => (nothing(), items[i][method](() => false))));
+            });"#,
+        )
+        .unwrap();
+        ops(&host);
+        // Views 2 (the loop), then 4 to 18: two per method.
+        for view in (4..=18).step_by(2) {
+            host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+            host.dispatch_event(view, EventKind::Press, &EventPayload::None);
+        }
+        let errors = errors.borrow().clone();
+        assert_eq!(errors.len(), 16, "{errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("budget of 0 ms")),
+            "{errors:?}"
+        );
+        // The arrays let their elements go; `kept` still holds them.
+        host.eval_source("items = null;").unwrap();
+        host.collect_garbage();
+        host.eval_source(&format!(
+            "{REPORT}report(weak.map((w, i) => w.deref() === kept[i]).join());"
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["true,true,true,true"]);
         assert!(host.fatal().is_none());
     }
 

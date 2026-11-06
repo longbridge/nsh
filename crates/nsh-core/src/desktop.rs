@@ -2,7 +2,9 @@
 //! application menu, context menus and keyboard shortcuts (TS
 //! `nsh/desktop`). The platforms get them as [`DesktopCommand`]s on the
 //! root and report a chosen menu item as [`crate::EventKind::Menu`];
-//! mobile platforms ignore them.
+//! mobile platforms ignore them. The platforms report the window's
+//! bounds in the environment ([`WindowState`]) and the displays with
+//! their own message ([`Display`]).
 
 use std::sync::Arc;
 
@@ -15,6 +17,9 @@ use crate::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
+mod window_state;
+
+pub use window_state::{Display, DisplayId, WindowBounds, WindowState};
 
 /// How the window's title bar looks (`Window.setTitleBar`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -58,11 +63,13 @@ pub struct WindowFrame {
     /// keeps the top edge where it is (the window grows and shrinks at its
     /// bottom edge).
     pub y: Option<Points>,
-    /// Its outer width on macOS / Windows, GTK default width on Linux.
+    /// Its outer width on macOS / Windows, GTK default width on Linux;
+    /// in GPUI windows, the content's width (at least 1 point).
     pub width: Option<Points>,
-    /// Its outer height on macOS / Windows, GTK default height on Linux.
+    /// Its outer height on macOS / Windows, GTK default height on Linux;
+    /// in GPUI windows, the content's height (at least 1 point).
     pub height: Option<Points>,
-    /// Animates the change on macOS (false by default).
+    /// Animates the change on macOS (false by default; GPUI ignores it).
     pub animated: Option<bool>,
 }
 
@@ -799,6 +806,10 @@ pub enum DesktopCommand {
     /// Moves and sizes the window (screen coordinates, points; a field
     /// left out keeps its value).
     SetFrame(WindowFrame),
+    /// Puts the window in a mode with its windowed bounds (screen
+    /// coordinates, points): restored to the bounds, then maximized or in
+    /// full screen when the mode says so. Doing it again changes nothing.
+    SetBounds(WindowBounds),
     /// The window's level (a floating window stays above normal ones).
     SetLevel(WindowLevel),
     /// Keeps the window out of the taskbar (`true`) or puts it back

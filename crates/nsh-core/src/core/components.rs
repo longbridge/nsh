@@ -593,6 +593,8 @@ pub(super) struct Components {
     next_pick: u32,
     /// The speech recognition session running, if any.
     speech: Option<SpeechSession>,
+    /// The sounds and players open, by id: where their events go.
+    audio: FxHashMap<u32, crate::audio::AudioSink>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
     /// The links that open the app ([`crate::url_scheme`]).
@@ -717,6 +719,7 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             speech: None,
+            audio: FxHashMap::default(),
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
@@ -993,6 +996,12 @@ impl<M: TextEngine> Core<M> {
         self.system_dark = environment.dark;
         environment.dark = self.shown_dark();
         self.apply_environment(environment);
+    }
+
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
     }
 
     /// The environment components read is now `environment`.
@@ -5138,9 +5147,100 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Applies a sound's or a player's request: through the embedding
+    /// app's audio stack when it gave one, else as commands on the root the
+    /// platform answers with [`EventKind::Audio`].
+    fn audio_action(&mut self, action: crate::element::AudioAction) {
+        use crate::{
+            audio::{AudioCommand, AudioError, AudioEvent},
+            element::AudioAction,
+        };
+        let (command, sink) = match action {
+            AudioAction::Available(answer) => {
+                let available = match &self.audio {
+                    Some(backend) => backend.available(),
+                    None => self.components.environment.audio,
+                };
+                answer.borrow_mut().deliver(available);
+                return;
+            }
+            AudioAction::Open { command, sink } => {
+                debug_assert!(matches!(
+                    command,
+                    AudioCommand::Load { .. }
+                        | AudioCommand::LoadUrl { .. }
+                        | AudioCommand::Open { .. }
+                ));
+                let failed = |error, message: &str| AudioEvent::Failed {
+                    error,
+                    message: message.into(),
+                };
+                if !self.access.allows_audio() {
+                    sink.send(failed(AudioError::NotAllowed, "sound is not granted"));
+                    sink.close();
+                    self.deny(
+                        "sound is not granted: add `\"audio\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let AudioCommand::Open { src, .. } | AudioCommand::LoadUrl { url: src, .. } =
+                    &command
+                    && !self.access.allows_media(src)
+                {
+                    sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
+                    sink.close();
+                    self.deny(format!(
+                        "`{src}` is not granted by capabilities.network in nsh.json"
+                    ));
+                    return;
+                }
+                if self.audio.is_none() && !self.components.environment.audio {
+                    sink.send(failed(AudioError::Unavailable, "nothing plays sound here"));
+                    sink.close();
+                    return;
+                }
+                self.components.audio.insert(command.id(), sink.clone());
+                (command, sink)
+            }
+            AudioAction::Command(command) => {
+                let id = command.id();
+                let sink = if command.ends() {
+                    self.components.audio.remove(&id)
+                } else {
+                    self.components.audio.get(&id).cloned()
+                };
+                // A command of an object that failed to open, or closed.
+                let Some(sink) = sink else {
+                    return;
+                };
+                if command.ends() {
+                    sink.close();
+                }
+                (command, sink)
+            }
+        };
+        match self.audio.clone() {
+            Some(backend) => backend.command(command, &sink),
+            None => {
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Audio(command),
+                });
+            }
+        }
+    }
+
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, command) => {
+            Action::Command(id, mut command) => {
+                // Saved bounds go onto the displays there are now, whichever
+                // side (Rust or JS) restores them.
+                if let Command::Desktop(desktop) = &mut command
+                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
+                {
+                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
+                }
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -5341,6 +5441,7 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::Speech(action) => self.speech_action(action),
+            Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
             Action::NextUrlSchemeOpen(answer) => {
                 let links = &mut self.components.url_schemes;
@@ -5688,6 +5789,16 @@ impl<M: TextEngine> Core<M> {
                     if ended {
                         self.components.speech = None;
                     }
+                }
+                true
+            }
+            EventKind::Audio if id == crate::ROOT_ID => {
+                let EventPayload::Audio { id: object, event } = payload else {
+                    return false;
+                };
+                // Dropped once the object is closed.
+                if let Some(sink) = self.components.audio.get(object) {
+                    sink.send(event.clone());
                 }
                 true
             }

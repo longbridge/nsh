@@ -20,6 +20,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod audio;
 mod canvas;
 mod chrome;
 mod decor;
@@ -44,6 +45,7 @@ mod notifications;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod sound;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

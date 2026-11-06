@@ -145,6 +145,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`, `/nsh.version`, and for a runtime whose crates call JS through wasm-bindgen its glue, `/nsh-bindgen.js`,
   with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
+  A browser loading another path that names no file gets the page (`server::wants_page`: a `GET` accepting
+  `text/html` of a path whose last segment has no extension), as a single-page app's host rewrites it; `SiteServer`
+  (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
@@ -259,7 +262,8 @@ looks inside the previous part's matches, `nth=<n>`
 keeps one. A part starting with a lowercase word and a colon (`[a-z][a-z0-9-]*:`) that is no known prefix is a parse
 error, never a bare string, so adding a prefix cannot change what an existing selector matches; such a text is
 written `text:tapped: solo`. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
-order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
+order below the root (a scroll view's content in the order it is on screen, as the platforms' Tab and
+screen readers take it: a list's recycled cells are not in their rows' order in the tree), of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
 visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
 clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`ScrollBehavior::enabled`) or the window
 (`Screen::set_viewport`: the headless viewport; on a host the platform's, which `Agent::sync_viewport` tells the model
