@@ -5131,6 +5131,14 @@
 
 //#endregion
 //#region ../nsh-platform-web/web/browser/environment.js
+/** Whether `a` and `b` are the same value, or objects (arrays) with the
+	* same members, compared `depth` levels down. */
+	function same(a, b, depth) {
+		if (a === b) return true;
+		if (depth === 0 || !a || !b || typeof a !== "object" || typeof b !== "object") return false;
+		const keys = Object.keys(a);
+		return keys.length === Object.keys(b).length && keys.every((key) => same(a[key], b[key], depth - 1));
+	}
 	function createEnvironment(reactive, invoke, dom) {
 		const fields = Object.fromEntries(Object.entries({
 			window: {
@@ -5159,7 +5167,15 @@
 			reduceMotion: false,
 			screenReader: false,
 			host: false,
-			lifecycle: "active"
+			lifecycle: "active",
+			localeSettings: {
+				languages: ["en-US"],
+				timeZone: "UTC",
+				hourCycle: "h12",
+				firstDayOfWeek: 7,
+				measurementSystem: "us",
+				temperatureUnit: "fahrenheit"
+			}
 		}).map(([name, value]) => [name, reactive.signal(value)]));
 		const tokens = reactive.signal(0);
 		const insets = reactive.context(() => fields.safeArea());
@@ -5191,6 +5207,7 @@
 			fontScale: () => fields.fontScale(),
 			pixelRatio: () => fields.pixelRatio(),
 			locale: () => fields.locale(),
+			localeSettings: () => fields.localeSettings(),
 			lifecycle: () => fields.lifecycle(),
 			platform
 		};
@@ -5228,8 +5245,7 @@
 				reactive.batch(() => {
 					for (const [name, signal] of Object.entries(fields)) {
 						const value = name === "colorScheme" && appearance !== "system" ? appearance : next[name];
-						const previous = reactive.untracked(signal);
-						if (!(previous && value && typeof value === "object" ? Object.keys(value).every((key) => value[key] === previous[key]) : value === previous)) signal.set(value);
+						if (!same(value, reactive.untracked(signal), 2)) signal.set(value);
 					}
 				});
 				dom.rootProp("layoutDirectionRtl", next.rtl);
