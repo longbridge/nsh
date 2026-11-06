@@ -11,7 +11,6 @@ import android.provider.OpenableColumns;
 import android.webkit.MimeTypeMap;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 
 /**
  * Hands the app's own files to other apps as {@code content:} URIs: the
@@ -22,16 +21,37 @@ import java.io.IOException;
  * declare. No androidx: the columns of {@link #query} are the standard
  * {@link OpenableColumns}, and the grant the viewer needs comes from the
  * manifest's {@code grantUriPermissions}. Only the app's own files/cache
- * directories are served ({@link #fileFor}), as androidx' FileProvider
- * restricts its files to configured roots.
+ * directories are served, as androidx' FileProvider restricts its files to
+ * configured roots; {@link #uriFor} and {@link #fileFor} share that check so
+ * the caller never gets a URI the provider would refuse.
  */
 public final class FilesProvider extends ContentProvider {
-    /** The {@code content:} URI the file at {@code path} opens as. */
+    /** The app's own directories: internal and external, files and cache. */
+    private static File[] roots(Context context) {
+        return new File[] {
+                context.getFilesDir(),
+                context.getCacheDir(),
+                context.getNoBackupFilesDir(),
+                context.getExternalFilesDir(null),
+                context.getExternalCacheDir(),
+        };
+    }
+
+    /** The file the provider would serve, or {@code null} when it is not
+     * inside one of {@link #roots}. */
+    static File servable(Context context, File file) {
+        return context == null ? null : FileRoots.under(file, roots(context));
+    }
+
+    /** The {@code content:} URI the file at {@code path} opens as, or
+     * {@code null} when the provider will not serve it. */
     public static Uri uriFor(Context context, File file) {
+        File served = servable(context, file);
+        if (served == null) return null;
         return new Uri.Builder()
                 .scheme("content")
                 .authority(context.getPackageName() + ".files")
-                .appendPath(file.getAbsolutePath())
+                .appendPath(served.getAbsolutePath())
                 .build();
     }
 
@@ -51,41 +71,10 @@ public final class FilesProvider extends ContentProvider {
         return true;
     }
 
-    /**
-     * The file the URI names, but only inside the app's own directories: an
-     * absolute path in a URI must not expose the rest of the device, and
-     * {@code exported="false"} alone does not bound what a granted URI names.
-     */
+    /** The file the URI names, under the same roots {@link #uriFor} used. */
     private File fileFor(Uri uri) {
-        Context context = getContext();
         String path = uri.getLastPathSegment();
-        if (context == null || path == null) return null;
-        File file;
-        try {
-            file = new File(path).getCanonicalFile();
-        } catch (IOException e) {
-            return null;
-        }
-        File[] roots = {
-                context.getFilesDir(),
-                context.getCacheDir(),
-                context.getNoBackupFilesDir(),
-                context.getExternalFilesDir(null),
-        };
-        String absolute = file.getAbsolutePath();
-        for (File root : roots) {
-            if (root == null) continue;
-            String prefix;
-            try {
-                prefix = root.getCanonicalFile().getAbsolutePath();
-            } catch (IOException e) {
-                continue;
-            }
-            if (absolute.equals(prefix) || absolute.startsWith(prefix + File.separator)) {
-                return file;
-            }
-        }
-        return null;
+        return path == null ? null : servable(getContext(), new File(path));
     }
 
     @Override
