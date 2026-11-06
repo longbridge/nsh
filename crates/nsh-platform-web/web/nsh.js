@@ -90,6 +90,9 @@ const SLIDE_MS = 300;
 const FADE_MS = 200;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
+// Browsers that order Tab and screen readers by `reading-order`
+// (`orderReading`); the others keep the DOM's order.
+const READING_ORDER = typeof CSS !== "undefined" && !!CSS.supports?.("reading-flow", "source-order");
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
 /** How long after something animated comes due a timer makes it happen
@@ -876,6 +879,9 @@ class Player {
     this.appearing = [];
     this.disappearing = [];
     this.changedStacks = new Set();
+    // Scroll views (or their content layers) whose content the batch
+    // placed or added to (`orderReading`).
+    this.readingHosts = new Set();
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
@@ -1483,6 +1489,7 @@ class Player {
   /** Stops what ran and empties the root; its size. */
   reset() {
     this.stop();
+    this.audioDispose();
     this.resetHistory();
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
@@ -1837,6 +1844,7 @@ class Player {
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
       notifications: typeof window.Notification === "function",
+      audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
     };
   }
 
@@ -1930,6 +1938,43 @@ class Player {
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
+    if (this.readingHosts?.size) this.orderReading();
+  }
+
+  /** `el` was placed or added in `parent`: when that is a scroll view's
+   * content, its reading order is set again after the batch. */
+  readingChanged(parent) {
+    if (!READING_ORDER || !parent) return;
+    // A sticky cell is in a track among the other cells.
+    const host = parent._list ? parent.parentNode : parent;
+    if (host && (host._kind === "scroll" || host._screenOrder || host.classList.contains("nsh-layer"))) (this.readingHosts ??= new Set()).add(host);
+  }
+
+  /** Tab and screen readers go through a scroll view's content in the
+   * order it is on screen, along the scroll axis, then across it, as on
+   * the other platforms. A list's recycled cells stay where they were
+   * made in the DOM, which is also the order they paint in, so the DOM is
+   * not in their rows' order: `reading-order` gives the rows' order
+   * without moving them (a move would blur a focused field, restart
+   * animations and reload frames inside them). */
+  orderReading() {
+    for (const host of this.readingHosts) {
+      const scroll = host._kind === "scroll" || host._screenOrder ? host : host.parentNode;
+      const horizontal = scroll?._screenOrder ? scroll._screenOrder === "horizontal" : !!scroll?._horizontal;
+      const kids = [];
+      for (const child of host.children) {
+        const f = (child._list ? child.firstElementChild : child)?._frame;
+        if (f && (child._id !== undefined || child._list)) kids.push(horizontal ? [f[0], f[1], child] : [f[1], f[0], child]);
+      }
+      kids.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      if (host.style.readingFlow !== "source-order") host.style.readingFlow = "source-order";
+      kids.forEach(([, , child], i) => {
+        if (child._readingOrder === i) return;
+        child._readingOrder = i;
+        child.style.readingOrder = String(i);
+      });
+    }
+    this.readingHosts.clear();
   }
 
   /** The batch is applied: views it removed leave the page, unless they
@@ -2034,6 +2079,7 @@ class Player {
     child._leftWith = null;
     const host = parent._layer ?? parent;
     host.insertBefore(child, before && before.parentNode === host ? before : null);
+    this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
@@ -2119,6 +2165,7 @@ class Player {
     const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
     el._frame = [x, y, w, h];
     this.placeFrame(el);
+    this.readingChanged(el.parentNode);
     if (resized && el._corners) this.placeCorners(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
       const box = (f) => ({ left: `${f[0]}px`, top: `${f[1]}px`, width: `${f[2]}px`, height: `${f[3]}px` });
@@ -2415,6 +2462,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._props = props;
+    // A list in its parent's viewport: its cells are read in screen order.
+    if (el._screenOrder !== props.screenOrder) {
+      el._screenOrder = props.screenOrder;
+      this.readingChanged(el);
+    }
     if (props.testID) el.dataset.testid = props.testID;
     else delete el.dataset.testid;
     const pe = props.pointerEvents;
@@ -3870,6 +3922,7 @@ class Player {
         host.insertBefore(track, cell.parentNode === host ? cell : null);
         track.append(cell);
         cell._track = track;
+        this.readingChanged(host);
         tracks.set(cellId, cell);
       }
       cell._range = range;
@@ -3888,6 +3941,7 @@ class Player {
     if (cell.parentNode === track) track.replaceWith(cell);
     else track.remove();
     this.placeFrame(cell);
+    this.readingChanged(cell.parentNode);
   }
 
   /** Where the views around `track` (up to its scroll view) put it in the
@@ -5623,6 +5677,18 @@ class Player {
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
+      case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
+      case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;
+      case "audioStop": this.audioStop(args[0]); break;
+      case "audioUnload": this.audioUnload(args[0]); break;
+      case "playerOpen": this.playerOpen(args[0], args[1], { volume: args[2], rate: args[3], loop: args[4] }); break;
+      case "playerPreload": this.playerPreload(args[0]); break;
+      case "playerResume": this.playerResume(args[0]); break;
+      case "playerPause": this.playerPause(args[0]); break;
+      case "playerSeek": this.playerSeek(args[0], args[1]); break;
+      case "playerSet": this.playerSet(args[0], { volume: args[1], rate: args[2], loop: args[3] }); break;
+      case "playerClose": this.playerClose(args[0]); break;
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
@@ -5700,6 +5766,322 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
+  // Audio (`Sound`, `AudioPlayer`) -----------------------------------------
+  //
+  // One `AudioContext` per runtime (an NSH engine: `reset` disposes it):
+  // sounds are decoded into `AudioBuffer`s at load and played by an
+  // `AudioBufferSourceNode` (+ a `GainNode`) per play; players are
+  // `HTMLAudioElement`s. Browsers keep a context suspended and refuse
+  // `play()` until the page's first user gesture: a sound played before it is
+  // silence, a player's `play()` is `Failed { not-allowed }`.
+
+  audioEvent(id, event, fields) {
+    this.event(ROOT_ID, "onAudio", { id, event, ...fields });
+  }
+
+  audioState() {
+    return (this.audio ??= { ctx: null, sounds: new Map(), voices: [], players: new Map(), unlock: null });
+  }
+
+  /** The context, made on first use; resumed by the page's first gesture. */
+  audioContext() {
+    const audio = this.audioState();
+    if (audio.ctx) return audio.ctx;
+    const Context = window.AudioContext ?? window.webkitAudioContext;
+    if (typeof Context !== "function") return null;
+    const ctx = (audio.ctx = new Context());
+    const types = ["pointerdown", "keydown", "touchend", "click"];
+    const unlock = () => {
+      ctx.resume?.().then?.(() => {
+        if (ctx.state === "running") release();
+      }, () => {});
+    };
+    const release = () => {
+      for (const type of types) window.removeEventListener(type, unlock, true);
+      audio.unlock = null;
+    };
+    for (const type of types) window.addEventListener(type, unlock, { capture: true, passive: true });
+    audio.unlock = release;
+    return ctx;
+  }
+
+  audioBytesFromBase64(text) {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  /** The bytes at `url` (`asset:/` or http(s)); past `maxBytes` is a quota error. */
+  async audioFetch(url, maxBytes) {
+    let response;
+    try {
+      response = await fetch(this.asset(url));
+    } catch (err) {
+      throw { code: "network", message: String(err?.message ?? err) };
+    }
+    if (!response.ok) throw { code: "network", message: `HTTP ${response.status}` };
+    const length = Number(response.headers.get("content-length"));
+    if (length > maxBytes) throw { code: "quota-exceeded", message: `${length} bytes (at most ${maxBytes})` };
+    let bytes;
+    try {
+      bytes = await response.arrayBuffer();
+    } catch (err) {
+      throw { code: "network", message: String(err?.message ?? err) };
+    }
+    if (bytes.byteLength > maxBytes) {
+      throw { code: "quota-exceeded", message: `${bytes.byteLength} bytes (at most ${maxBytes})` };
+    }
+    return bytes;
+  }
+
+  /** `AudioCommand::Load` / `LoadUrl`: decode what `source()` gives. */
+  async audioLoad(id, source, maxDuration) {
+    const audio = this.audioState();
+    const entry = { buffer: null, voices: new Set() };
+    audio.sounds.get(id)?.voices.forEach((voice) => this.audioEndVoice(voice));
+    audio.sounds.set(id, entry);
+    const fail = (error) => {
+      if (audio.sounds.get(id) !== entry) return;
+      audio.sounds.delete(id);
+      this.audioEvent(id, "failed", { error: error?.code ?? "decode", message: String(error?.message ?? error ?? "") });
+    };
+    try {
+      const ctx = this.audioContext();
+      if (!ctx) return fail({ code: "unavailable", message: "no Web Audio" });
+      const bytes = await source();
+      if (audio.sounds.get(id) !== entry) return;
+      let buffer;
+      try {
+        buffer = await ctx.decodeAudioData(bytes);
+      } catch (err) {
+        return fail({ code: "decode", message: String(err?.message ?? err ?? "undecodable audio") });
+      }
+      if (audio.sounds.get(id) !== entry) return;
+      const truncated = buffer.duration > maxDuration;
+      if (truncated) {
+        // Only `maxDuration` of it is kept, as on the other platforms.
+        const frames = Math.max(1, Math.floor(maxDuration * buffer.sampleRate));
+        const short = ctx.createBuffer(buffer.numberOfChannels, frames, buffer.sampleRate);
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+          short.copyToChannel(buffer.getChannelData(c).subarray(0, frames), c);
+        }
+        buffer = short;
+      }
+      entry.buffer = buffer;
+      this.audioEvent(id, "loaded", {
+        duration: buffer.duration,
+        bytes: buffer.length * buffer.numberOfChannels * 4,
+        truncated,
+      });
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  audioEndVoice(voice) {
+    const audio = this.audioState();
+    audio.voices = audio.voices.filter((v) => v !== voice);
+    voice.sound.voices.delete(voice);
+    voice.src.onended = null;
+    try { voice.src.stop(); } catch { /* not started or already stopped */ }
+    try { voice.src.disconnect(); voice.gain.disconnect(); } catch { /* already */ }
+  }
+
+  audioPlay(id, volume, rate) {
+    const audio = this.audioState();
+    const sound = audio.sounds.get(id);
+    const ctx = audio.ctx;
+    // Before the first gesture the context is suspended: silence, not a sound
+    // that starts late.
+    if (!sound?.buffer || !ctx || ctx.state !== "running") return;
+    // At most 32 voices at once: the oldest stops.
+    while (audio.voices.length >= 32) this.audioEndVoice(audio.voices[0]);
+    const src = ctx.createBufferSource();
+    src.buffer = sound.buffer;
+    src.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain).connect(ctx.destination);
+    const voice = { src, gain, sound };
+    src.onended = () => this.audioEndVoice(voice);
+    audio.voices.push(voice);
+    sound.voices.add(voice);
+    src.start();
+  }
+
+  audioStop(id) {
+    this.audioState().sounds.get(id)?.voices.forEach((voice) => this.audioEndVoice(voice));
+  }
+
+  audioUnload(id) {
+    const audio = this.audioState();
+    this.audioStop(id);
+    audio.sounds.delete(id);
+  }
+
+  playerOpen(id, src, settings) {
+    const audio = this.audioState();
+    audio.players.get(id) && this.playerClose(id);
+    audio.players.set(id, { id, src, settings, el: null, failed: false, buffering: false, timer: 0, closed: false });
+  }
+
+  playerEmit(player, event, fields) {
+    if (!player.closed) this.audioEvent(player.id, event, fields);
+  }
+
+  playerDuration(el) {
+    return Number.isFinite(el.duration) ? el.duration : undefined;
+  }
+
+  playerProgress(player) {
+    const el = player.el;
+    if (!el) return;
+    this.playerEmit(player, "progress", { position: el.currentTime, duration: this.playerDuration(el) });
+  }
+
+  playerStopTimer(player) {
+    clearInterval(player.timer);
+    player.timer = 0;
+  }
+
+  playerFail(player, error, message) {
+    this.playerStopTimer(player);
+    player.failed = true;
+    this.playerEmit(player, "failed", { error, message });
+  }
+
+  /** The element of `player`, made (and loading) on first need. */
+  playerElement(player) {
+    if (player.el) return player.el;
+    const el = (player.el = new Audio());
+    el.preload = "auto";
+    this.playerApply(player);
+    const buffer = (on) => {
+      if (player.buffering === on) return;
+      player.buffering = on;
+      this.playerEmit(player, "buffer", { buffering: on });
+    };
+    el.addEventListener("loadedmetadata", () =>
+      this.playerEmit(player, "load", { duration: this.playerDuration(el) }));
+    el.addEventListener("playing", () => {
+      buffer(false);
+      this.playerStopTimer(player);
+      player.timer = setInterval(() => this.playerProgress(player), 250);
+    });
+    el.addEventListener("waiting", () => buffer(true));
+    el.addEventListener("canplay", () => buffer(false));
+    el.addEventListener("pause", () => {
+      this.playerStopTimer(player);
+      // The end pauses the element too: `ended` is what that reports.
+      if (el.ended) return;
+      this.playerProgress(player);
+      this.playerEmit(player, "paused");
+    });
+    el.addEventListener("ended", () => {
+      this.playerStopTimer(player);
+      this.playerProgress(player);
+      this.playerEmit(player, "ended");
+    });
+    el.addEventListener("error", () => {
+      if (!el.getAttribute("src")) return;
+      const http = /^https?:/i.test(player.src);
+      this.playerFail(player, http ? "network" : "decode", el.error?.message || `media error ${el.error?.code}`);
+    });
+    el.src = this.asset(player.src);
+    return el;
+  }
+
+  playerApply(player) {
+    const el = player.el;
+    if (!el) return;
+    el.volume = Math.min(1, Math.max(0, player.settings.volume));
+    el.playbackRate = player.settings.rate;
+    el.loop = Boolean(player.settings.loop);
+  }
+
+  playerPreload(id) {
+    const player = this.audioState().players.get(id);
+    if (player) this.playerElement(player);
+  }
+
+  playerResume(id) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    // After a failure, play again from a fresh load.
+    if (player.failed && player.el) {
+      player.failed = false;
+      player.el.removeAttribute("src");
+      player.el.load();
+      player.el.src = this.asset(player.src);
+    }
+    player.failed = false;
+    const el = this.playerElement(player);
+    if (el.ended) el.currentTime = 0;
+    el.play().then(() => {
+      this.playerEmit(player, "playing");
+    }, (err) => {
+      // A `pause()` or a new load interrupts a pending `play()`: not a failure.
+      if (err?.name === "AbortError") return;
+      this.playerFail(
+        player,
+        err?.name === "NotAllowedError" ? "not-allowed" : err?.name === "NotSupportedError" ? "not-supported" : "failed",
+        String(err?.message ?? err),
+      );
+    });
+  }
+
+  playerPause(id) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    if (!player.el || player.el.paused) this.playerEmit(player, "paused");
+    else player.el.pause();
+  }
+
+  playerSeek(id, position) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    const el = this.playerElement(player);
+    const duration = this.playerDuration(el);
+    el.currentTime = duration === undefined ? position : Math.min(position, duration);
+    this.playerProgress(player);
+  }
+
+  playerSet(id, settings) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    player.settings = settings;
+    this.playerApply(player);
+  }
+
+  playerClose(id) {
+    const audio = this.audioState();
+    const player = audio.players.get(id);
+    if (!player) return;
+    player.closed = true;
+    this.playerStopTimer(player);
+    audio.players.delete(id);
+    const el = player.el;
+    if (el) {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+      player.el = null;
+    }
+  }
+
+  /** Frees everything the audio of the engine that ran held (`reset`). */
+  audioDispose() {
+    const audio = this.audio;
+    if (!audio) return;
+    for (const id of [...audio.players.keys()]) this.playerClose(id);
+    for (const voice of [...audio.voices]) this.audioEndVoice(voice);
+    audio.sounds.clear();
+    audio.unlock?.();
+    audio.ctx?.close?.().catch?.(() => {});
+    this.audio = null;
   }
 
   // `Notifications.permission` / `requestPermission`: `Notification`'s own

@@ -201,6 +201,7 @@ impl Host {
             host: self.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone());
@@ -427,6 +428,10 @@ impl MountSink for Sink {
                     Obj::Str(s) => {
                         let s = env.new_string(s)?;
                         env.set_object_array_element(&objects, i as i32, s)?;
+                    }
+                    Obj::Bytes(bytes) => {
+                        let array = env.byte_array_from_slice(bytes.bytes())?;
+                        env.set_object_array_element(&objects, i as i32, array)?;
                     }
                     Obj::Layout(layout) => {
                         env.set_object_array_element(&objects, i as i32, layout.as_obj())?;
@@ -1083,6 +1088,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.screen_reader = v[10] != 0.0;
     environment.os = nsh_engine::Os::Android;
     environment.notifications = true;
+    environment.audio = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,
@@ -1433,6 +1439,57 @@ fn caret_bounds(fields: &mut Vec<(&'static str, PayloadValue)>) {
     ));
 }
 
+/// `Audio.java`'s report as the core's [`EventPayload::Audio`]: `id` and
+/// `kind` (`loaded`, `load`, `playing`, `paused`, `progress`, `buffer`,
+/// `ended`, `failed`) with the fields that kind has (`durationMs`,
+/// `positionMs`, `bytes`, `truncated`, `buffering`, `error`, `message`).
+fn audio_payload(fields: &[(&'static str, PayloadValue)]) -> Option<EventPayload> {
+    use std::time::Duration;
+
+    use nsh_core::audio::{AudioError, AudioEvent};
+
+    let get = |key: &str| fields.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
+    let number = |key: &str| match get(key) {
+        Some(PayloadValue::Number(n)) => Some(*n),
+        _ => None,
+    };
+    let flag = |key: &str| matches!(get(key), Some(PayloadValue::Bool(true)));
+    let text = |key: &str| match get(key) {
+        Some(PayloadValue::Str(s)) => Some(s.clone()),
+        _ => None,
+    };
+    let millis = |key: &str| number(key).map(|n| Duration::from_millis(n.max(0.0) as u64));
+    let id = number("id")? as u32;
+    let event = match text("kind")?.as_str() {
+        "loaded" => AudioEvent::Loaded {
+            duration: millis("durationMs").unwrap_or_default(),
+            bytes: number("bytes").unwrap_or(0.0).max(0.0) as u64,
+            truncated: flag("truncated"),
+        },
+        "load" => AudioEvent::Load {
+            duration: millis("durationMs"),
+        },
+        "playing" => AudioEvent::Playing,
+        "paused" => AudioEvent::Paused,
+        "progress" => AudioEvent::Progress {
+            position: millis("positionMs").unwrap_or_default(),
+            duration: millis("durationMs"),
+        },
+        "buffer" => AudioEvent::Buffer {
+            buffering: flag("buffering"),
+        },
+        "ended" => AudioEvent::Ended,
+        "failed" => AudioEvent::Failed {
+            error: text("error")
+                .and_then(|name| AudioError::from_name(&name))
+                .unwrap_or(AudioError::Failed),
+            message: text("message").unwrap_or_default(),
+        },
+        _ => return None,
+    };
+    Some(EventPayload::Audio { id, event })
+}
+
 /// An event with an object payload: `keys` and `values` (`Double`,
 /// `Boolean` or `String`), or with a single `value` when `keys` is null.
 #[unsafe(no_mangle)]
@@ -1528,6 +1585,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "caretY" => "caretY",
                 "caretWidth" => "caretWidth",
                 "caretHeight" => "caretHeight",
+                "kind" => "kind",
+                "durationMs" => "durationMs",
+                "positionMs" => "positionMs",
+                "truncated" => "truncated",
+                "buffering" => "buffering",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {
@@ -1537,7 +1599,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         if kind == EventKind::CaretMove {
             caret_bounds(&mut fields);
         }
-        EventPayload::Map(fields)
+        if kind == EventKind::Audio {
+            // `Audio.java`'s reports are the core's own typed events.
+            match audio_payload(&fields) {
+                Some(payload) => payload,
+                None => return,
+            }
+        } else {
+            EventPayload::Map(fields)
+        }
     };
     if let Some(control) = host.control() {
         control.dispatch_event(id as NodeId, kind, payload);

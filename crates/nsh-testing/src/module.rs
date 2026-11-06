@@ -882,6 +882,42 @@ impl From<&nsh_core::speech::SpeechRequest> for SpeechRequest {
     }
 }
 
+/// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
+/// reads it.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct AudioCall {
+    /// `"load"`, `"play"`, `"stop"`, `"unload"` for sounds; `"open"`,
+    /// `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"` for
+    /// players.
+    pub command: String,
+    /// The sound's or player's source.
+    pub src: String,
+    /// `play`'s, `open`'s and `set`'s volume.
+    pub volume: Option<f64>,
+    /// `play`'s, `open`'s and `set`'s rate.
+    pub rate: Option<f64>,
+    /// `seek`'s position, in seconds.
+    pub position: Option<f64>,
+}
+
+/// `value` as the shortest decimal that reads back as it (`0.8`, not
+/// `0.800000011920929`): what the app wrote.
+fn shortest(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+impl From<&crate::headless::AudioCall> for AudioCall {
+    fn from(call: &crate::headless::AudioCall) -> Self {
+        AudioCall {
+            command: call.command.into(),
+            src: call.src.clone(),
+            volume: call.volume.map(shortest),
+            rate: call.rate.map(shortest),
+            position: call.position.map(|p| p.as_secs_f64()),
+        }
+    }
+}
+
 /// A file a test's pick handler gives the app (`app.onPick`).
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct PickFile {
@@ -1505,7 +1541,8 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// is on screen, when it cannot be taken or the app threw. The failures a
 /// test may expect carry a `code` to match (messages may change):
 /// `ERR_NSH_TEST_NOT_FOUND` (nothing matches the selector),
-/// `ERR_NSH_TEST_DISABLED` (what it names is disabled), `ETIMEDOUT` (a wait
+/// `ERR_NSH_TEST_DISABLED` (what it names is disabled),
+/// `ERR_NSH_TEST_COVERED` (another view is drawn over it), `ETIMEDOUT` (a wait
 /// ran out of time), `ERR_NSH_TEST_NO_BACK` (nothing to go back from).
 /// The app closes when the test that opened it ends.
 #[class]
@@ -2015,6 +2052,22 @@ impl App {
             ),
         };
         step(&this, move |app| app.end_speech(error)).await
+    }
+
+    /// What the app asked of the speaker (`Sound`, `AudioPlayer`), in
+    /// order. Headless apps play sound: sounds decode as WAV (their length
+    /// from the header; anything else fails with `decode`), players play a
+    /// minute of their source at once and end when `endAudio` says.
+    /// Headless runs only.
+    pub fn audio(&self) -> Result<Vec<AudioCall>, JsError> {
+        self.with(|app| Ok(app.audio_calls()?.iter().map(AudioCall::from).collect()))
+    }
+
+    /// The players playing reach their end: `end` (those that loop start
+    /// again). Then waits until the app is quiet. Rejects when none plays.
+    /// Headless runs only.
+    pub async fn end_audio(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.end_audio()).await
     }
 
     /// The dialogs the app showed, in order.

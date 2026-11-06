@@ -164,6 +164,18 @@ page and files named after their content.
 new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
 works from any directory of any host (`https://example.com/apps/counter/`).
 
+An app that is opened at its own paths ([links into the app](#links-into-the-app)) names the path its site is served
+under in `nsh.json`:
+
+```json
+{ "web": { "base": "/apps/counter/" } }
+```
+
+The page then has a `<base href="/apps/counter/">`, and loads at `https://example.com/apps/counter/sports/football` as at
+`https://example.com/apps/counter/`. `"base": "/"` is a site at the host's root. `nsh package --target web --run` serves
+the site under that path. The path's segments are ASCII letters, digits, `-`, `.`, `_` and `~`, with other characters
+percent-encoded as browsers send them (`/%E5%BA%94%E7%94%A8/` for `/应用/`).
+
 ### Runtime size
 
 Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and the `nsh/base` components, standard
@@ -191,6 +203,24 @@ Serve `.wasm` as `application/wasm` (browsers then compile it while it downloads
 copies to browsers that accept them: nginx's `brotli_static on; gzip_static on;`, Caddy's `file_server {
 precompressed br gzip }`, or a CDN that compresses with Brotli. With Brotli the runtime is about a quarter smaller
 than with gzip. `nsh package --target web --run` serves the site this way on `http://127.0.0.1:4173/`.
+
+#### Links into the app
+
+An app whose own paths show in the address bar (`https://example.com/sports/football`) is a single-page app: a link to
+one of those paths, or a reload there, loads `index.html`, and the app shows the page the path names. The host rewrites
+such requests to `index.html`: a `GET` whose path has no file extension in its last segment and whose `Accept` header
+asks for `text/html`. Files keep their own URLs and the app's own requests (`fetch` accepts `*/*`) get the host's
+answer. `nsh package --target web --run` and the dev server (`nsh run --target web`) follow this rule; on a host:
+
+| Host | The rewrite |
+|---|---|
+| nginx | `location / { try_files $uri /index.html; }` |
+| Netlify | `/*  /index.html  200` in `_redirects` (files that exist are served as they are) |
+| Cloudflare Pages | built in for a site without a top-level `404.html` |
+| GitHub Pages | a copy of `index.html` as `404.html` |
+
+At a path with several segments (`/sports/football`), the page loads its files from the site's own path when
+`nsh.json` names it (`web.base`, above); the dev server's page loads them from `/`.
 
 An app published for the web runs like a packaged native app: as a release, with the capabilities its `nsh.json` declares
 ([Sandbox and capabilities](./sandbox-and-capabilities.md)), a TSX app on the browser's JavaScript engine. When they restrict `network`, the page also carries a
@@ -391,7 +421,7 @@ The page reports the rest of the environment, and keeps it current:
 
 `fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after NSH has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
 
-- **Relative URLs** resolve against the page's URL, as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
+- **Relative URLs** resolve against the page's URL (its `<base href>` when it has one), as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
 - **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
 - **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (NSH checks every hop, and browsers do not reveal a redirect before following it).

@@ -90,7 +90,7 @@ function App() {
                   </View>
                   <If when={content().undo}>
                     <View onPress={() => dismiss(t().id)} {...button("primary", { size: "sm" })}>
-                      <Text style={buttonText("primary")}>Undo</Text>
+                      <Text style={buttonText("primary", { size: "sm" })}>Undo</Text>
                     </View>
                   </If>
                 </Toast>

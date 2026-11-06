@@ -854,6 +854,11 @@ pub struct EngineConfig {
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
     /// has one (`Environment::speech`).
     pub speech: Option<Arc<dyn nsh_core::speech::SpeechBackend>>,
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) instead of the
+    /// platform: the embedding app's own audio stack, or a test's fake
+    /// (`nsh_testing`'s). `None` (the default): the platform's, where it
+    /// has one (`Environment::audio`).
+    pub audio: Option<Arc<dyn nsh_core::audio::AudioBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -979,6 +984,7 @@ impl EngineConfig {
             host: HostChannel::default(),
             picker: None,
             speech: None,
+            audio: None,
         }
     }
 }
@@ -1035,6 +1041,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("host", &self.host)
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
+            .field("audio", &self.audio.is_some())
             .finish()
     }
 }
@@ -1675,6 +1682,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_audio(config.audio.clone());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
@@ -3055,6 +3063,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,
+        audio: env.audio,
         cell: env.cell,
         web_input: env.web_input,
     }

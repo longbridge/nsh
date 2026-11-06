@@ -759,6 +759,12 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::Announce(text) => crate::access::announce(surface, text),
         Command::Notification(command) => crate::notifications::command(surface, command),
+        Command::Audio(command) => {
+            let base = surface.asset_base.borrow().clone();
+            surface.control(|c| {
+                crate::audio::command(&surface.audio, surface.key(), c, command, base.as_ref())
+            })
+        }
         Command::Desktop(command) => crate::chrome::command(surface, command),
         // The status bar is a phone's; layout animations arrive as mount
         // items.

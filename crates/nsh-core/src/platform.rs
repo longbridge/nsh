@@ -272,6 +272,10 @@ pub struct Environment {
     /// [`crate::notifications`]); without it, the permission is
     /// `unavailable` and nothing shows.
     pub notifications: bool,
+    /// The platform plays sound ([`crate::Command::Audio`],
+    /// [`crate::audio`]); without it, sounds and players fail at once
+    /// (`unavailable`) unless the core has a [`crate::audio::AudioBackend`].
+    pub audio: bool,
     /// The size of one Cell of a grid surface (a terminal, whose content is
     /// whole character Cells), in points; `None` on every other surface.
     /// With it the core lays out with its terminal algorithm, ratatui's
@@ -328,6 +332,7 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             notifications: false,
+            audio: false,
             cell: None,
             web_input: false,
         }

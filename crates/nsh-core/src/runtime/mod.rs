@@ -15,6 +15,7 @@ use crate::element::Registry;
 
 mod accessibility;
 mod android;
+mod audio;
 mod clipboard;
 mod desktop;
 mod device;
@@ -60,6 +61,8 @@ pub fn registries() -> &'static [Registry] {
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<speech::Speech>()
+            .class::<audio::Sound>()
+            .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()
             .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()
