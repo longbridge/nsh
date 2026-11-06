@@ -7068,6 +7068,9 @@ class Player {
         });
         return true;
       }
+      // A link (`semantic="a"` with an `href`) the app shows no menu for has
+      // the browser's: open in a new tab, copy the link.
+      if (el.localName === "a" && el.hasAttribute("href")) return true;
       if (el.matches(".nsh-field, .nsh-selectable")) return false;
     }
     return false;

@@ -844,7 +844,9 @@ fields and taking its place in `views`; views whose element is a control of its 
 inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the browser's margins, fonts, colors, underlines
 and list markers off those tags, so the view looks as a `div` does. A link view gets `href` and is not draggable; a
 plain click on it stays the app's (`onPress`; the root's `click` listener prevents the browser's navigation), a click
-with a modifier key or the middle button opens `href` as the browser does. The other backends store the props and
+with a modifier key or the middle button opens `href` as the browser does, and a context menu on it is the
+browser's (open in a new tab, copy the link) unless the link or a view in it listens for `onContextMenu`
+(`contextMenu`, where the runtime otherwise prevents the browser's menu). The other backends store the props and
 draw nothing differently.
 
 **The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the

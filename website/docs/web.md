@@ -478,8 +478,9 @@ so the page looks and behaves as before, and its markup reads as a document:
 </View>
 ```
 
-A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, and a
-click with a modifier key or the middle button opens it in a new tab.
+A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, a
+click with a modifier key or the middle button opens it in a new tab, and a right click shows the browser's menu for
+links (open in a new tab, copy the link) unless the app shows its own with `onContextMenu`.
 
 ### A URL for each page
 
