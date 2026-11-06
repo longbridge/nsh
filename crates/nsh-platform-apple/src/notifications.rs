@@ -1,6 +1,6 @@
 //! Notifications and the badge on Apple platforms
 //! (`Command::Notification`, `nsh`'s `Notifications`): the UserNotifications
-//! framework. Shared by macOS and iOS (the iOS crate includes this file): the
+//! framework. Shared by macOS and iOS through `nsh-platform-apple`: the
 //! framework is loaded and messaged dynamically, as `speech.rs` does.
 //!
 //! The framework ends an executable without a bundle identifier that
@@ -62,7 +62,7 @@ thread_local! {
 /// Makes the process's notifications the app's and becomes the notification
 /// center's delegate ([`install`]). On the main thread.
 #[cfg_attr(target_os = "ios", allow(dead_code))]
-pub(crate) fn enable() {
+pub fn enable() {
     ENABLED.set(true);
     install();
 }
@@ -107,7 +107,7 @@ define_class!(
 );
 
 /// Applies `command`, reporting through `control`. On the main thread.
-pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
+pub fn command(control: &EngineControl, command: &NotificationCommand) {
     if !ENABLED.get() {
         match command {
             NotificationCommand::Permission { id, .. } => {
@@ -153,7 +153,7 @@ pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
 /// Becomes the notification center's delegate unless the app has one (or
 /// this already is). On the main thread, before the app finishes launching,
 /// where a press can start it.
-pub(crate) fn install() {
+pub fn install() {
     if !ENABLED.get() {
         return;
     }

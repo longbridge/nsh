@@ -66,7 +66,7 @@ struct Audio {
 }
 
 /// Applies `command`, reporting through `control`. On the main thread.
-pub(crate) fn command(control: &EngineControl, command: &SpeechCommand) {
+pub fn command(control: &EngineControl, command: &SpeechCommand) {
     match command {
         SpeechCommand::Start { id, request } => start(control, *id, request.clone()),
         SpeechCommand::Stop { id } => stop(*id),

@@ -120,6 +120,7 @@ crates/
                        the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
+  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer and the notification center
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
                        native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
