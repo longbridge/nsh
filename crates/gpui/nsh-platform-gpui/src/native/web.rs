@@ -6,7 +6,9 @@
 //! ([`WebItem::prepaint`]), and props and commands wait for it. Settings
 //! wry only takes when it builds (the injected scripts, the user agent,
 //! `javascriptEnabled`) make it anew when they change; a new source loads
-//! in the same one.
+//! in the same one. `incognito` is wry's incognito mode: a non-persistent
+//! `WKWebsiteDataStore` on macOS, an InPrivate controller on Windows, an
+//! ephemeral web context on Linux.
 //!
 //! - **Linux**: WebKitGTK 4.1 on GTK 3, which only embeds into X11
 //!   windows: GPUI must run on X11 (or Xwayland). GTK is started on its X11
@@ -235,6 +237,7 @@ mod imp {
         injected_js_before: Option<Arc<str>>,
         user_agent: Option<Arc<str>>,
         javascript_enabled: bool,
+        incognito: bool,
     }
 
     impl BuildKey {
@@ -244,6 +247,7 @@ mod imp {
                 injected_js_before: p.injected_js_before.clone(),
                 user_agent: p.user_agent.clone(),
                 javascript_enabled: p.javascript_enabled,
+                incognito: p.incognito,
             }
         }
     }
@@ -429,6 +433,7 @@ mod imp {
             let key = BuildKey::of(p);
             let mut builder = wry::WebViewBuilder::new()
                 .with_visible(false)
+                .with_incognito(p.incognito)
                 .with_initialization_script_for_main_only(BRIDGE, true);
             if let Some(js) = &p.injected_js_before {
                 builder = builder.with_initialization_script_for_main_only(&**js, true);

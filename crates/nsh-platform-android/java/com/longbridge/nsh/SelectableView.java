@@ -51,6 +51,12 @@ final class SelectableView implements SelectionHandle.Owner {
     private final Mounter mounter;
     /** The area's view. */
     final View view;
+    /** The area's node id. */
+    private final int id;
+    /** The selected text last reported to the area's {@code onSelectionChange}. */
+    private String reported = "";
+    /** The area's view is gone: clearing reports nothing. */
+    private boolean removed;
     /** The native model while there is a selection, else 0. */
     private long handle;
     /** The texts taking part, in document order (while there is a selection). */
@@ -79,9 +85,23 @@ final class SelectableView implements SelectionHandle.Owner {
         return true;
     };
 
-    SelectableView(Mounter mounter, View view) {
+    SelectableView(Mounter mounter, View view, int id) {
         this.mounter = mounter;
         this.view = view;
+        this.id = id;
+    }
+
+    /** The area's view is gone: ends the selection without reporting it. */
+    void remove() {
+        removed = true;
+        clear();
+    }
+
+    /** Reports {@code text}, the selected text, to {@code onSelectionChange} when it changed and JS listens. */
+    private void report(String text) {
+        if (text.equals(reported) || !mounter.wants(id, Native.SELECTION_CHANGE)) return;
+        reported = text;
+        mounter.eventMap(id, Native.SELECTION_CHANGE, new String[] {"text"}, new Object[] {text});
     }
 
     /** Whether the long press selected and the gesture goes on (presses are cancelled). */
@@ -178,6 +198,8 @@ final class SelectableView implements SelectionHandle.Owner {
         mode = null;
         if (m != null) m.finish();
         nativeDestroy(h);
+        if (removed) reported = "";
+        else report("");
     }
 
     /** Whether the screen point is on one of the handles (a touch there keeps the selection). */
@@ -356,6 +378,10 @@ final class SelectableView implements SelectionHandle.Owner {
         // Scrolled away, the ends' rows must not be recycled.
         int[] kept = nativeKept(handle);
         if (kept != null) Native.keepRendered(mounter.handle(), kept);
+        if (mounter.wants(id, Native.SELECTION_CHANGE)) {
+            String text = empty() ? "" : nativeText(handle, this);
+            report(text != null ? text : "");
+        }
         int[] ranges = nativeRanges(handle, this);
         java.util.ArrayList<TextBox> now = new java.util.ArrayList<>();
         if (ranges != null) {

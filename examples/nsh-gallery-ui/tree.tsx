@@ -45,10 +45,10 @@ export function TreeRow(props: { entry: TreeEntry; icon?: IconName; tint?: strin
       ) : props.entry.folder ? (
         <View style={{ width: 16, height: 16 }}>
           <View class="group-aria-expanded:hidden">
-            <Icon name="folder" size={16} tint={colors.accent} />
+            <Icon name="folder" size={16} tint={colors.muted} />
           </View>
           <View class="hidden group-aria-expanded:flex">
-            <Icon name="folder-open" size={16} tint={colors.accent} />
+            <Icon name="folder-open" size={16} tint={colors.muted} />
           </View>
         </View>
       ) : (

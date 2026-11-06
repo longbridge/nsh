@@ -1014,10 +1014,31 @@ function App() {
 mount(App);
 "#;
 
-/// The app's height the field reads.
+/// The app's height the field reads, once the app is laid out at the
+/// height its surface is drawn at. The engine lays the app out first at
+/// the surface's height before the app's first batch, which brings the
+/// menu bar that makes the surface shorter: the field reads that first
+/// height until the engine lays the app out again.
 fn app_height(view: &Entity<AppView>, cx: &mut VisualTestContext) -> f32 {
-    let text = wait_until(view, cx, |t| t.starts_with("h ") && !t.starts_with("h -1"));
-    text.split(' ').nth(1).and_then(|h| h.parse().ok()).unwrap()
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let read = field_text(view, cx)
+            .as_deref()
+            .and_then(|t| t.strip_prefix("h "))
+            .and_then(|t| t.split(' ').next()?.parse::<f32>().ok());
+        let drawn = view.read_with(cx, |view, _| {
+            view.surface().root.state().frame.size.height.0.round()
+        });
+        if read == Some(drawn) {
+            return drawn;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the field reads the height {read:?}, the surface is {drawn} tall"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx: &mut TestAppContext) {

@@ -152,8 +152,10 @@ mod native {
     pub(super) async fn check(sys: System) -> Result<Option<AppUpdate>, JsError> {
         let found = sys.locals.get::<Found>();
         let _operation = begin(&found)?;
-        *found.0.borrow_mut() = None;
+        // A failed check keeps what the last one found, and its download: a
+        // network blip must not lose a verified archive waiting for a restart.
         let Some(host) = sys.updater.clone() else {
+            *found.0.borrow_mut() = None;
             return Ok(None);
         };
         let worker = host.clone();
@@ -181,6 +183,7 @@ mod native {
         })
         .await?;
         let Some((bytes, config, available)) = checked else {
+            *found.0.borrow_mut() = None;
             return Ok(None);
         };
         // Only the desktops install an update (`can_install` below).
@@ -202,19 +205,30 @@ mod native {
                     .filter(|installation| installation.can_install()))
             })
             .await?;
+            let mut found = found.0.borrow_mut();
             if let (Some(installation), Some(dir), true) = (
                 installation,
                 sys.data_dir.clone(),
                 available.sha256.is_some(),
             ) {
                 update.can_install = true;
-                *found.0.borrow_mut() = Some(Rc::new(Pending {
-                    host,
-                    available,
-                    dir: dir.join("updates"),
-                    archive: RefCell::new(None),
-                    installation,
-                }));
+                // The same version again keeps its download; a newer one
+                // replaces it, so a restart always installs the latest.
+                let same = found.as_ref().is_some_and(|pending| {
+                    pending.available.version == available.version
+                        && pending.available.sha256 == available.sha256
+                });
+                if !same {
+                    *found = Some(Rc::new(Pending {
+                        host,
+                        available,
+                        dir: dir.join("updates"),
+                        archive: RefCell::new(None),
+                        installation,
+                    }));
+                }
+            } else {
+                *found = None;
             }
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
