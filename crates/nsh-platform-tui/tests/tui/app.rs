@@ -242,6 +242,40 @@ fn truncated_text_draws_the_ellipsis_in_cells() {
     draw_until(&mut view, &mut terminal, &rx, "ab…");
 }
 
+/// A word at each end of the top row.
+#[component]
+fn Ends() -> impl IntoElement {
+    view().flex_1().child(
+        view()
+            .flex_row()
+            .child(text("start"))
+            .child(view().flex_1())
+            .child(text("end")),
+    )
+}
+
+#[test]
+fn an_app_loaded_before_the_first_draw_shows_laid_out_at_the_drawn_area() {
+    // Loaded before any draw, the app starts on a surface with no size, and
+    // its first layout is for no room. The engine commits that layout before
+    // the first draw here, as a slow machine does: the first frame showing
+    // the app must still be the layout at the terminal's area.
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Ends>(|| ()))).unwrap();
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("the engine commits the first layout");
+    // The wait provokes the order, it is not what the test waits for.
+    std::thread::sleep(Duration::from_millis(200));
+    draw_until(&mut view, &mut terminal, &rx, "end");
+    assert_eq!(
+        super::dock::find(&terminal, "end"),
+        Some((37, 0)),
+        "the first frame showing the app is laid out at 40 Cells\n{}",
+        super::dock::dump(&terminal)
+    );
+}
+
 #[component]
 fn WindowSize() -> impl IntoElement {
     text(move || format!("{}x{}", window().width.0, window().height.0))

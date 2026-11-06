@@ -1847,6 +1847,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
+        // A resize that came while the app started is in the first frame:
+        // reported as a turn reports it, or a platform waiting for the
+        // layout at that size waits until something else wakes the engine.
+        if let Some(size) = state.resized.take() {
+            sink.resized(size);
+        }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
