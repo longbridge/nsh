@@ -1398,3 +1398,137 @@ test("a page's shader whose first frame the browser refuses leaves the change to
   assert.equal(player.shaderViews.size, 0);
   assert.equal(ended, false, "the caller's own motion calls it");
 });
+
+/**
+ * A player on an engine with one native animation of 300 ms, started by
+ * the first frame after `requestFrame` (as a batch that starts one asks
+ * for frames); `ticks` are the times of the frames it got. The page's
+ * animation frames run only when the test says (`frame()`); its clock is
+ * `clock.now`.
+ */
+function animating(t) {
+  const { player } = fakePlayer();
+  const clock = { now: 0 };
+  t.mock.method(performance, "now", () => clock.now);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let frames = [];
+  const saved = [globalThis.requestAnimationFrame, globalThis.cancelAnimationFrame];
+  globalThis.requestAnimationFrame = (f) => frames.push(f);
+  globalThis.cancelAnimationFrame = () => {};
+  t.after(() => ([globalThis.requestAnimationFrame, globalThis.cancelAnimationFrame] = saved));
+  const ticks = [];
+  let start = null;
+  let ended = false;
+  // The graph's: the animation's end, or `now` until a frame starts it.
+  player.wasm.nsh_deadline = (now) => (ended ? -1 : (start ?? now) + (start == null ? 0 : 300));
+  player.wasm.nsh_frame = (now) => {
+    ticks.push(now);
+    start ??= now;
+    if (now - start >= 300) ended = true;
+    else player.requestFrame();
+    return -1;
+  };
+  const frame = () => {
+    const due = frames;
+    frames = [];
+    for (const f of due) f(clock.now);
+  };
+  // Time passes by `ms`: the timers due run, and what the calls into the
+  // engine left for after them (`deadlineSoon`).
+  const pass = async (ms) => {
+    await null;
+    clock.now += ms;
+    t.mock.timers.tick(ms);
+    await null;
+  };
+  return { player, ticks, frame, pass, ended: () => ended };
+}
+
+test("a native animation ends on time while no animation frames come", async (t) => {
+  const { player, ticks, pass, ended } = animating(t);
+  player.requestFrame();
+  // A frame starts it, and one at its end ends it.
+  await pass(50);
+  assert.deepEqual(ticks, [50]);
+  await pass(300);
+  assert.deepEqual(ticks, [50], "not before its end and a little more");
+  await pass(50);
+  assert.deepEqual(ticks, [50, 400]);
+  assert.ok(ended());
+  await pass(1000);
+  assert.deepEqual(ticks, [50, 400], "nothing more once it ended");
+});
+
+test("while animation frames come the page runs no frames of its own", async (t) => {
+  const { player, ticks, frame, pass, ended } = animating(t);
+  player.requestFrame();
+  let frames = 0;
+  for (let i = 0; i < 30 && !ended(); i++) {
+    await pass(16);
+    frame();
+    frames++;
+  }
+  assert.ok(ended());
+  assert.equal(ticks.length, frames, "every frame the browser's");
+  await pass(1000);
+  assert.equal(ticks.length, frames);
+});
+
+test("a dialog comes in and reports it shown without animation frames", () => {
+  presenting(({ player, dialog, timers, names }) => {
+    player.present(dialog);
+    timers();
+    assert.equal(dialog.style.transform, "", "in its place");
+    timers();
+    assert.deepEqual(names(), ["onShow"]);
+  });
+});
+
+test("a page's slide ends on time without animation frames, and once", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { player } = fakePlayer();
+  const animations = [];
+  const screen = (id) => ({
+    _id: id,
+    _screen: { animation: "default" },
+    style: {},
+    animate() {
+      const a = {};
+      animations.push(a);
+      return a;
+    },
+  });
+  const stack = {};
+  const [below, top] = [screen(2), screen(4)];
+  below.parentNode = top.parentNode = stack;
+  let done = 0;
+  player.moveScreens(top, below, false, () => done++);
+  t.mock.timers.tick(300);
+  assert.equal(done, 0, "not before its end");
+  t.mock.timers.tick(100);
+  assert.equal(done, 1);
+  animations[0].onfinish();
+  assert.equal(done, 1, "its animation's end, later, is the same end");
+});
+
+test("a page's shader ends on time without animation frames", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { player } = shaderPlayer();
+  Object.assign(player, { renderShader: () => true, shaderDraws: () => true, freeTextures() {} });
+  const stack = { getBoundingClientRect: () => ({ width: 390, height: 844 }), append() {} };
+  const saved = globalThis.document;
+  globalThis.document = { createElement: () => ({ style: {}, append() {}, remove() {} }) };
+  let ended = 0;
+  try {
+    assert.equal(player.shaderNav(stack, {}, { layer: shaderLayer(2), ms: 350 }, false, () => ended++), true);
+  } finally {
+    globalThis.document = saved;
+  }
+  t.mock.timers.tick(350);
+  assert.equal(ended, 0, "not before its end");
+  t.mock.timers.tick(100);
+  assert.equal(ended, 1);
+  assert.equal(stack._navOverlay, null);
+  t.mock.timers.tick(1000);
+  assert.equal(ended, 1);
+});

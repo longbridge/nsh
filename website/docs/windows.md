@@ -168,6 +168,10 @@ The `cursor` style follows updates while the mouse rests over a view. When a bat
 Windows applies the new shape or `"none"` after the whole batch, using the view under the pointer.
 The title bar and resize borders keep their system cursors.
 
+A TSX app opens windows of its own with [`Window.open`](../modules/nsh-desktop.md#windowopen): each is a top-level
+window with its own taskbar button, drawn by the app's engine and running in its one JS runtime, so it shares the
+app's signals and modules directly. Closing the main window closes them and ends the app.
+
 ### Keyboard
 
 | Keys | Do |

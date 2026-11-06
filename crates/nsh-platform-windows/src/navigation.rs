@@ -62,7 +62,7 @@ use crate::{
     geom::{Mat4, rect},
     input::{KeyEvent, Modifiers},
     render::{DrawCx, rect_f},
-    surface::Surface,
+    surface::{Next, Surface},
     view::{Hosted, NshView},
 };
 
@@ -909,14 +909,15 @@ impl Nav {
         self.ticking = true;
         surface.on_frame(|surface, now| {
             let Ok(mut nav) = surface.nav.try_borrow_mut() else {
-                return true;
+                return Next::At(now);
             };
             nav.tick(surface, now);
-            if nav.transitions.is_empty() {
-                nav.ticking = false;
-                false
-            } else {
-                true
+            match nav.transitions.deadline(now) {
+                Some(at) => Next::At(at),
+                None => {
+                    nav.ticking = false;
+                    Next::Done
+                }
             }
         });
     }
@@ -1458,6 +1459,9 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
 
 /// `ModalConfig`.
 pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &ModalConfig) {
+    if crate::app_window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
@@ -1498,6 +1502,9 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
 
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
+    if crate::app_window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     let m = nav.modals.entry(id).or_default();
@@ -1533,8 +1540,31 @@ pub(crate) fn focus_scope(surface: &Surface) -> NshView {
     surface.nav.borrow().focus_scope(surface)
 }
 
+/// Modal `view` is shown in a window of its own (`Window.open`) instead:
+/// it leaves the surface's modals at once, without events, and the field
+/// it took the keyboard from gets it back.
+pub(crate) fn release(surface: &Rc<Surface>, view: &NshView) {
+    let mut nav = surface.nav.borrow_mut();
+    let id = view.id();
+    nav.order.retain(|&m| m != id);
+    nav.presenting.retain(|&m| m != id);
+    let restore = nav.modals.remove(&id).and_then(|m| m.restore);
+    drop(nav);
+    view.unparent();
+    set_fade(view, 1.0);
+    if let Some(field) = restore
+        && field.attached()
+        && crate::text_input::focused(surface).is_none()
+    {
+        crate::text_input::focus(&field);
+    }
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
+    if crate::app_window::removed(surface, view) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     match nav.modals.get_mut(&id) {

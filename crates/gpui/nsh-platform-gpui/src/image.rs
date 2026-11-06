@@ -1902,7 +1902,7 @@ fn loaded(
         (events, id, image.fade.is_some())
     };
     if fades {
-        surface.on_frame(move |surface, now| fade_tick(surface, id, generation, now));
+        surface.on_draw(move |surface, now| fade_tick(surface, id, generation, now));
     }
     view.changed();
     match &result {

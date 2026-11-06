@@ -841,6 +841,39 @@ pub fn frame(host: &impl ScrollHost, now: f64) -> bool {
     busy
 }
 
+/// When the view's motion next comes to something (ms, the clock
+/// [`frame`] is given): a glide's or an eased move's end, a mouse wheel's
+/// rest; what a surface that draws no frames (a hidden window) runs
+/// [`frame`] at, so the scroll ends and reports it on time without
+/// frames. `None` while nothing runs that ends by itself (the indicator's
+/// fade and the refresh spinner only draw).
+pub fn deadline(host: &impl ScrollHost, now: f64) -> Option<f64> {
+    let (phase, rate) = host.scroll(|s, _| (s.live.phase, rate(&s.behavior)))?;
+    let end = match phase {
+        Phase::Glide { velocity, last } => {
+            // It slows below `STOP` then, or meets an edge before.
+            let speed = velocity.abs();
+            if speed < STOP || !(0.0..1.0).contains(&rate) {
+                last
+            } else {
+                last + ((STOP / speed).ln() / rate.ln()).max(0.0) as f64
+            }
+        }
+        Phase::Animate {
+            start, duration, ..
+        } => start + duration,
+        Phase::Wheel {
+            last,
+            gesture: false,
+            ..
+        } => last + WHEEL_IDLE,
+        _ => return None,
+    };
+    // A millisecond past it: a frame there finds it ended whatever the
+    // rounding.
+    Some(end.max(now) + 1.0)
+}
+
 /// The view left the window during its frames: it stops (a later move
 /// starts again) and reports where it is.
 pub fn detached(host: &impl ScrollHost) {
@@ -1960,6 +1993,50 @@ mod tests {
             true
         }
         fn start_ticking(&self) {}
+    }
+
+    #[test]
+    fn a_glide_and_an_eased_move_end_at_their_deadlines() {
+        let host = TestHost {
+            state: std::cell::RefCell::new(scroll_state((300.0, 100_000.0), false)),
+            redraws: std::cell::Cell::new(0),
+        };
+        assert_eq!(deadline(&host, 0.0), None);
+        for phase in [
+            Phase::Glide {
+                velocity: 2.0,
+                last: 0.0,
+            },
+            Phase::Animate {
+                from: 0.0,
+                to: 400.0,
+                start: 0.0,
+                duration: ANIMATION,
+                momentum: false,
+                end: true,
+            },
+        ] {
+            host.state.borrow_mut().y = Points(0.0);
+            host.state.borrow_mut().live.phase = phase;
+            let mut now = 0.0;
+            let mut frames = 0;
+            while let Some(next) = deadline(&host, now) {
+                now = next;
+                frame(&host, now);
+                frames += 1;
+                assert!(frames < 5, "{:?}", host.state.borrow().live.phase);
+            }
+            assert!(matches!(host.state.borrow().live.phase, Phase::Idle));
+            let y = host.state.borrow().y.0;
+            match phase {
+                // Where frames would have taken it.
+                Phase::Glide { .. } => assert!(
+                    (y - projected(Points(0.0), 2.0, 0.998).0).abs() < 6.0,
+                    "{y}"
+                ),
+                _ => assert_eq!(y, 400.0),
+            }
+        }
     }
 
     #[test]
