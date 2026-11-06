@@ -8,7 +8,7 @@ group: platforms
 # 打包
 
 `nsh package` 把应用变成可以安装的产物：用于 iOS 模拟器的 `.app`、用于 iOS 真机的已签名 `.ipa`、用于 Android 的已签名
-`.apk`、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录和 `.zip`，或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
+`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录和 `.zip`，或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
 
 - **Rust 应用**（`nsh.json` 写明 `"root"`）在自己的目录里打包。`nsh` 以 release 模式为目标构建 runner，编译进你的 crate 并挂载根组件，
   不带 QuickJS：需要 Cargo、该平台的 Rust 目标（`rustup target add …`），Android 还需要 NDK。
@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`，见下文“目标 API 级别”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -81,6 +81,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <password>` | Android：keystore 密码；也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
 | `--abi <abi>` | Android：APK 包含的 ABI，可重复或用逗号分隔（默认：`arm64-v8a` 和 `armeabi-v7a`）。 |
+| `--format <apk \| aab>` | Android：写出 APK（默认，直接安装）或用于 Google Play 的 Android App Bundle（见下文“Google Play：App Bundle”）。 |
 | `--run` | 构建完成后安装并启动：在 iOS 模拟器中，或在 `adb` 能看到的 Android 设备或模拟器上；macOS、Linux 和 Windows 应用在本机启动；Web 站点在本机提供服务并在浏览器中打开。不适用于 `--target ios`。 |
 
 ## iOS 模拟器
@@ -129,7 +130,7 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35，要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
+应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
 加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
 
 ```sh
@@ -149,6 +150,31 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android \
 ```
 
 建议使用环境变量而不是 `--keystore-password`，以免密码留在 shell 历史记录中。
+
+### 目标 API 级别
+
+`nsh.json` 中的 `android.targetSdk` 设置应用的目标 API 级别（默认 35，最低 28）。应用也会针对这个级别编译，所以 SDK 中需要有对应的
+platform（`sdkmanager "platforms;android-36"`）：
+
+```json
+{
+  "android": { "targetSdk": 36 }
+}
+```
+
+### Google Play：App Bundle
+
+Google Play 接收 Android App Bundle，而不是 APK。`--format aab` 用同一个应用写出 `.nsh/out/<Name>.aab` 代替 APK，不需要 Gradle 或
+bundletool；Google Play 会据此为每台设备生成要安装的 APK（每个 ABI 一个）。bundle 使用 JDK 中的 `jarsigner` 签名，签名选项与
+`--keystore` 相同：这个密钥就是你在 Play 应用签名中登记的上传密钥。
+
+```sh
+NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
+  --keystore release.jks --key-alias upload
+```
+
+`--run` 安装的是 APK，所以不能与 `--format aab` 同时使用；要在设备上试用 bundle，请使用
+[bundletool](https://github.com/google/bundletool)（先 `build-apks`，再 `install-apks`）。
 
 ## macOS
 

@@ -12,7 +12,8 @@
 // the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
 // images' presses (`onImagePress`), and the static functions
 // (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`; emphasis
-// beside CJK text read by the CJK-friendly rule). Each
+// beside CJK text read by the CJK-friendly rule, a tag that names no
+// element read as text). Each
 // document's texts are its own, so the script finds them. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
@@ -128,6 +129,7 @@ function App() {
       <Text>{`CJK emphasis: ${cjk.type === "paragraph" ? cjk.content.map((i) => i.type).join(",") : cjk.type}`}</Text>
       <Text>{`Math off: ${TextView.plainText(TextView.parse("Math $x$", { math: false }))}`}</Text>
       <Text>{`From HTML: ${TextView.plainText(TextView.parseHtml("<p>Hi <i>there</i></p>"))}`}</Text>
+      <Text>{`Unknown tag: ${TextView.plainText(TextView.parse("<US tech> up"))}`}</Text>
     </View>
   );
 }

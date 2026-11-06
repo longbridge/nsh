@@ -528,6 +528,10 @@ struct PackageArgs {
     /// arm64-v8a and armeabi-v7a; with --run also the device's).
     #[arg(long, value_delimiter = ',', value_parser = crate::android::ABIS)]
     abi: Vec<String>,
+    /// Android: what to write, an APK (installed directly) or an Android
+    /// App Bundle (`aab`, uploaded to Google Play).
+    #[arg(long, value_enum, default_value_t)]
+    format: crate::android::Format,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
     /// machine at the address it prints).
@@ -858,6 +862,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 key_alias,
                 keystore_password,
                 abi,
+                format,
                 run,
             } = *args;
             let mut config = package::read_config(&entry)?;
@@ -881,6 +886,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                     )
                 }),
                 abis: &abi,
+                format,
                 run,
             })
         }
