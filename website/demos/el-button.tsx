@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { Button, Switch } from "nsh/base";
+import { Button, Switch, Toggle } from "nsh/base";
 import { button, buttonText, desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`;
@@ -23,7 +23,7 @@ function App() {
       onPressDown={() => pressing.set(true)}
       onPressUp={() => pressing.set(false)}
       disabled={disabled()}
-      {...button("accent")}
+      {...button("accent", { disabled })}
     >
       <Text style={buttonText("accent")}>Pressed {presses()}×</Text>
     </Button>
@@ -42,20 +42,22 @@ function App() {
       <Text style={label()}>{wide() ? (disabled() ? "Enable it" : "Disable it") : disabled() ? "Enable the button above" : "Disable the button above"}</Text>
     </Switch>
   );
-  const toggle = (name: string, on: () => boolean, flip: () => void, text: () => object, glyph: string) => (
-    <Button
-      selected={on()}
-      onPress={flip}
+  // On / off formatting is a `Toggle` (a button is an action): the
+  // secondary button's look, sunk while pressed.
+  const toggle = (name: string, on: () => boolean, set: (on: boolean) => void, text: () => object, glyph: string) => (
+    <Toggle
+      pressed={on()}
+      onChange={({ pressed }) => set(pressed)}
       accessibilityLabel={name}
       {...button("secondary", { on, align: "flex-start", style: { width: size.control, paddingHorizontal: 0 } })}
     >
-      <Text style={{ ...text(), color: buttonText("secondary", { on }).color }}>{glyph}</Text>
-    </Button>
+      <Text style={{ ...text(), color: buttonText("secondary").color }}>{glyph}</Text>
+    </Toggle>
   );
   const toggles = () => (
     <>
-      {toggle("Bold", bold, () => bold.set(!bold()), () => ({ ...label(), fontWeight: "800" }), "B")}
-      {toggle("Italic", italic, () => italic.set(!italic()), () => ({ ...label(), fontStyle: "italic" }), "I")}
+      {toggle("Bold", bold, (on) => bold.set(on), () => ({ ...label(), fontWeight: "800" }), "B")}
+      {toggle("Italic", italic, (on) => italic.set(on), () => ({ ...label(), fontStyle: "italic" }), "I")}
     </>
   );
   const caption = (text: string) => <Text style={{ fontSize: 12, color: ui().muted }}>{text}</Text>;
@@ -77,7 +79,7 @@ function App() {
                 </View>
               </View>
               <View style={{ gap: 8 }}>
-                {caption("selected: toggles")}
+                {caption("on / off: Toggle")}
                 <View style={{ flexDirection: "row", gap: 8 }}>{toggles()}</View>
               </View>
             </Stage>
@@ -85,7 +87,7 @@ function App() {
               <Panel title="press · disabled">
                 <Text style={{ fontSize: 13, color: ui().text }}>{pressState()}</Text>
               </Panel>
-              <Panel title="selected">
+              <Panel title="Toggle pressed">
                 <Text style={{ fontSize: 13, color: ui().text }}>
                   bold {String(bold())} · italic {String(italic())}
                 </Text>
@@ -102,7 +104,7 @@ function App() {
 
             {disabler()}
 
-            <Text style={{ color: ui().muted, marginTop: 6 }}>selected: toggles</Text>
+            <Text style={{ color: ui().muted, marginTop: 6 }}>on / off: Toggle</Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
               {toggles()}
               <Text style={{ color: ui().muted, alignSelf: "center", flex: 1 }}>

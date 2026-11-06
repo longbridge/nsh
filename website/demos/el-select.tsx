@@ -57,19 +57,21 @@ const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 /** The trigger: the shared button's look, the chosen title at the start and a chevron in a lane as wide as it. */
 function Trigger(props: { title?: string; placeholder: string; open: boolean; disabled?: boolean; clearable?: boolean }) {
   const look = button("secondary", {
+    disabled: () => !!props.disabled,
     style: () => ({
       flexDirection: "row",
       justifyContent: "space-between",
       gap: 8,
       ...(desktop ? { width: 260 } : {}),
-      // Open: the border stays lit while the list is up; disabled, dimmed.
+      // Open: the border stays lit while the list is up. Disabled, dimmed
+      // here: the select is disabled, not this view, so its `disabledStyle`
+      // does not apply.
       ...(props.open ? { borderColor: ui().faint } : {}),
       ...(props.disabled ? { opacity: 0.4 } : {}),
     }),
   });
   return (
-    // No hover while disabled.
-    <View {...look} hoverStyle={props.disabled ? undefined : look.hoverStyle}>
+    <View {...look}>
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: props.title ? ui().text : ui().muted }}>
         {props.title ?? props.placeholder}
       </Text>
@@ -172,7 +174,7 @@ function App() {
               <Button
                 disabled={region() === null}
                 onPress={() => region.set(null)}
-                {...button("secondary", { size: "sm", style: { marginTop: 6 } })}
+                {...button("secondary", { size: "sm", disabled: () => region() === null, style: { marginTop: 6 } })}
               >
                 <Text style={buttonText("secondary", { size: "sm" })}>Clear region</Text>
               </Button>

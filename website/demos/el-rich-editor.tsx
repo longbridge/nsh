@@ -23,7 +23,7 @@ function App() {
 
   const action = (label: string, run: () => void) => (
     <View onPress={run} role="button" accessibilityLabel={label} {...button("secondary", { size: "sm" })}>
-      <Text style={buttonText()}>{label}</Text>
+      <Text style={buttonText("secondary", { size: "sm" })}>{label}</Text>
     </View>
   );
 

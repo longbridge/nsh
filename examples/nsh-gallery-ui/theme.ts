@@ -71,7 +71,7 @@ export interface Palette {
   accentFill: string;
   /** Text on the accent fill. */
   onAccent: string;
-  /** The main action's button: light on the dark page, dark on the light one. */
+  /** The main action's fill (the theme's `primary`): the citrus, in both appearances. */
   light: string;
   /** Text on `light`. */
   onLight: string;
