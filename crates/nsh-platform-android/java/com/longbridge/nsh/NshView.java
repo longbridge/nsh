@@ -785,7 +785,16 @@ public class NshView extends FrameLayout {
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
             lifecycle,
-        }, dark, locale.toLanguageTag(), timeZone);
+            // 24-hour time: the user's setting, else the locale's.
+            android.text.format.DateFormat.is24HourFormat(getContext()) ? 1 : 0,
+        }, dark, locale.toLanguageTag(), timeZone,
+                // The user's list (an app's own language first, Android 13's
+                // per-app language included), after the embedding app's own.
+                (hostLocale != null ? hostLocale.toLanguageTag() + "," : "") + c.getLocales().toLanguageTags(),
+                // The system's, whatever the embedding app's language: Android
+                // 14 keeps the first day of the week and the temperature unit
+                // in its extension.
+                java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
     }
 
     /** The system's time zone's ID (`timeZone()`). */
@@ -794,13 +803,16 @@ public class NshView extends FrameLayout {
     /**
      * The system's time zone changed (the user's setting, or a new zone with
      * automatic time zones): the broadcast names it, before the process's
-     * default zone may have caught up.
+     * default zone may have caught up. Or the time changed, as when the user
+     * switches 24-hour time (`hourCycle()`).
      */
-    private final android.content.BroadcastReceiver timeZoneChanged = new android.content.BroadcastReceiver() {
+    private final android.content.BroadcastReceiver timeChanged = new android.content.BroadcastReceiver() {
         @Override
         public void onReceive(Context context, android.content.Intent intent) {
-            String zone = intent.getStringExtra(android.content.Intent.EXTRA_TIMEZONE);
-            timeZone = zone != null ? zone : java.util.TimeZone.getDefault().getID();
+            if (android.content.Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())) {
+                String zone = intent.getStringExtra(android.content.Intent.EXTRA_TIMEZONE);
+                timeZone = zone != null ? zone : java.util.TimeZone.getDefault().getID();
+            }
             publishEnvironment(getRootWindowInsets());
         }
     };
@@ -958,10 +970,11 @@ public class NshView extends FrameLayout {
             if (state != null) activityState(activity, state);
         }
         // The zone may have changed while the view was detached. The
-        // broadcast is the system's alone: no export flag is needed.
+        // broadcasts are the system's alone: no export flag is needed.
         timeZone = java.util.TimeZone.getDefault().getID();
-        getContext().registerReceiver(timeZoneChanged,
-                new android.content.IntentFilter(android.content.Intent.ACTION_TIMEZONE_CHANGED));
+        android.content.IntentFilter time = new android.content.IntentFilter(android.content.Intent.ACTION_TIMEZONE_CHANGED);
+        time.addAction(android.content.Intent.ACTION_TIME_CHANGED);
+        getContext().registerReceiver(timeChanged, time);
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
     }
@@ -971,7 +984,7 @@ public class NshView extends FrameLayout {
         super.onDetachedFromWindow();
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
         if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
-        getContext().unregisterReceiver(timeZoneChanged);
+        getContext().unregisterReceiver(timeChanged);
     }
 
     /** `BackHandler.exitApp()`: what the back button does without the app. */

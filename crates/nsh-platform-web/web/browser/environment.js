@@ -2,7 +2,8 @@ export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
-    lifecycle: "active", timeZone: "UTC" };
+    lifecycle: "active", timeZone: "UTC", languages: ["en-US"],
+    hourCycle: "h12", firstDayOfWeek: 7, measurementSystem: "us", temperatureUnit: "fahrenheit" };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
   const tokens = reactive.signal(0);
   const insets = reactive.context(() => fields.safeArea());
@@ -23,6 +24,8 @@ export function createEnvironment(reactive, invoke, dom) {
   const device = {
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
+    languages: () => fields.languages(), hourCycle: () => fields.hourCycle(), firstDayOfWeek: () => fields.firstDayOfWeek(),
+    measurementSystem: () => fields.measurementSystem(), temperatureUnit: () => fields.temperatureUnit(),
     timeZone: () => fields.timeZone(), lifecycle: () => fields.lifecycle(), platform,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
@@ -42,8 +45,11 @@ export function createEnvironment(reactive, invoke, dom) {
         for (const [name, signal] of Object.entries(fields)) {
           const value = name === "colorScheme" && appearance !== "system" ? appearance : next[name];
           const previous = reactive.untracked(signal);
-          const same = previous && value && typeof value === "object"
-            ? Object.keys(value).every(key => value[key] === previous[key]) : value === previous;
+          // A part is written when it changed (an object or the languages'
+          // array: one of its members, or their number).
+          const keys = value && typeof value === "object" ? Object.keys(value) : null;
+          const same = previous && keys
+            ? keys.length === Object.keys(previous).length && keys.every(key => value[key] === previous[key]) : value === previous;
           if (!same) signal.set(value);
         }
       });

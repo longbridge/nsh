@@ -11,6 +11,15 @@
 //!   root view's effective appearance (the window's, the system's), live;
 //! - the locale (`Intl`'s default): `NSLocale.currentLocale` (the region
 //!   format of System Settings), live;
+//! - the preferred languages (`languages()`): `NSLocale.preferredLanguages`
+//!   (System Settings' list, the app's own language first when the user
+//!   chose one for it), read again with the other settings, as on
+//!   `NSCurrentLocaleDidChangeNotification`;
+//! - the regional preferences (`hourCycle()` and the like): System
+//!   Settings' time format (the hours of `NSDateFormatter`'s format for the
+//!   `j` template, which 24-hour time changes), `NSCalendar`'s first weekday,
+//!   `NSLocale`'s measurement system and the `AppleTemperatureUnit` default,
+//!   over the region's; read again with the other settings;
 //! - the time zone (`timeZone()`): `NSTimeZone.systemTimeZone`'s name,
 //!   live (`NSSystemTimeZoneDidChangeNotification`, after which
 //!   Foundation's cached zone is reset);
@@ -52,7 +61,10 @@ use nsh_core::{
     Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
     geometry::px, platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Idiom, Lifecycle, Locale, Os, TimeZone};
+use nsh_engine::{
+    ColorScheme, Edges, Environment, HourCycle, Idiom, Languages, Lifecycle, Locale,
+    MeasurementSystem, Os, RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
+};
 use objc2::{
     AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
@@ -71,11 +83,12 @@ use objc2_app_kit::{
     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
 };
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSCurrentLocaleDidChangeNotification, NSData, NSDictionary,
-    NSKeyValueObservingOptions, NSLocale, NSLocaleLanguageDirection, NSNotification,
-    NSNotificationCenter, NSObject, NSObjectNSKeyValueObserverRegistration, NSObjectProtocol,
-    NSOperationQueue, NSProcessInfo, NSPropertyListReadOptions, NSPropertyListSerialization,
-    NSRange, NSString, NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSURL, ns_string,
+    NSArray, NSAttributedString, NSCalendar, NSCurrentLocaleDidChangeNotification, NSData,
+    NSDateFormatter, NSDictionary, NSKeyValueObservingOptions, NSLocale, NSLocaleLanguageDirection,
+    NSLocaleMeasurementSystem, NSNotification, NSNotificationCenter, NSObject,
+    NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo,
+    NSPropertyListReadOptions, NSPropertyListSerialization, NSRange, NSString,
+    NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSURL, NSUserDefaults, ns_string,
 };
 
 use crate::surface::Surface;
@@ -285,6 +298,8 @@ fn update(surface: &Surface) {
     let mut env: Environment = surface.environment.get();
     env.color_scheme = color_scheme(surface);
     env.locale = current_locale();
+    env.languages = preferred_languages(env.locale);
+    env.regional = regional_preferences();
     env.font_scale = 1.0;
     env.reduce_motion = workspace.accessibilityDisplayShouldReduceMotion();
     env.screen_reader = workspace.isVoiceOverEnabled();
@@ -379,6 +394,61 @@ fn pixel_ratio(surface: &Surface) -> f32 {
 fn current_locale() -> Locale {
     let identifier = NSLocale::currentLocale().localeIdentifier().to_string();
     Locale::parse(&identifier).unwrap_or_default()
+}
+
+/// The user's preferred languages, most preferred first (`languages()`);
+/// `locale` alone when the list names none.
+fn preferred_languages(locale: Locale) -> Languages {
+    let tags: Vec<String> = NSLocale::preferredLanguages()
+        .iter()
+        .map(|tag| tag.to_string())
+        .collect();
+    Languages::parse(tags.iter().map(String::as_str)).unwrap_or(Languages::one(locale))
+}
+
+/// The user's regional preferences (`hourCycle()` and the like): System
+/// Settings' time format, first day of the week, measurement system and
+/// temperature unit, over the region's.
+fn regional_preferences() -> RegionalPreferences {
+    let locale = NSLocale::currentLocale();
+    let mut preferences = RegionalPreferences::parse(&locale.localeIdentifier().to_string());
+    // The hours of the user's time format, which 24-hour time changes.
+    let hours =
+        NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("j"), 0, Some(&locale));
+    if let Some(cycle) = hours.and_then(|format| HourCycle::of_pattern(&format.to_string())) {
+        preferences.hour_cycle = cycle;
+    }
+    // From 1 for Sunday to 7 for Saturday.
+    let first = match NSCalendar::currentCalendar().firstWeekday() {
+        1 => Some(Weekday::Sunday),
+        n => u8::try_from(n)
+            .ok()
+            .and_then(|n| Weekday::from_number(n.wrapping_sub(1))),
+    };
+    if let Some(day) = first {
+        preferences.first_day_of_week = day;
+    }
+    // SAFETY: a key Foundation defines.
+    let system = locale.objectForKey(unsafe { NSLocaleMeasurementSystem });
+    match system
+        .and_then(|s| s.downcast::<NSString>().ok())
+        .map(|s| s.to_string())
+        .as_deref()
+    {
+        Some("Metric") => preferences.measurement_system = MeasurementSystem::Metric,
+        Some("U.S.") => preferences.measurement_system = MeasurementSystem::Us,
+        Some("U.K.") => preferences.measurement_system = MeasurementSystem::Uk,
+        _ => {}
+    }
+    // Set once the user picks one.
+    let unit =
+        NSUserDefaults::standardUserDefaults().stringForKey(ns_string!("AppleTemperatureUnit"));
+    match unit.map(|u| u.to_string()).as_deref() {
+        Some("Celsius") => preferences.temperature_unit = TemperatureUnit::Celsius,
+        Some("Fahrenheit") => preferences.temperature_unit = TemperatureUnit::Fahrenheit,
+        _ => {}
+    }
+    preferences
 }
 
 /// Whether the user's first language is written right to left (as React

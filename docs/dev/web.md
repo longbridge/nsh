@@ -390,7 +390,8 @@ browserslist queries). `nsh.js` gives every import it does not know a stub that 
 ## The environment
 
 `nsh.js` reports what the page knows with `nsh_environment(json)` before the app starts and whenever it changes (only
-when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `timeZone`
+when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `languages` (`navigator.languages`, the locale
+first), `regional` (the locale's hour cycle and first day of the week from `Intl`, the rest the region's), `timeZone`
 (`Intl.DateTimeFormat().resolvedOptions().timeZone`), `lifecycle` (`background` while `document.visibilityState` is
 `hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`, else the locale's script),
 `reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read through a

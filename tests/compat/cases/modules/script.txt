@@ -137,6 +137,8 @@ expect Scheme: light
 expect Lifecycle: active
 expect Time zone: UTC
 expect Intl local time: its zone
+expect Languages: en-US
+expect Regional: h12, week from 7, us, fahrenheit
 tap id:dark
 expect Scheme: dark
 absent Scheme: light
@@ -156,6 +158,11 @@ covers [nsh] fontScale
 covers [nsh] windowSize
 covers [nsh] lifecycle
 covers [nsh] timeZone
+covers [nsh] languages
+covers [nsh] hourCycle
+covers [nsh] firstDayOfWeek
+covers [nsh] measurementSystem
+covers [nsh] temperatureUnit
 # mod-host-channel
 tap id:case-mod-host-channel
 # no embedding app: no parameters, posts go nowhere and calls reject at

@@ -23,7 +23,8 @@ use nsh_core::{
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
-    Idiom, Lifecycle, Locale, MountSink, Policy, Root, TimeZone,
+    HourCycle, Idiom, Languages, Lifecycle, Locale, MountSink, Policy, RegionalPreferences, Root,
+    TimeZone,
 };
 
 use crate::{
@@ -1044,8 +1045,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_resize(
 
 /// `values`: safe area top, right, bottom, left, keyboard height, keyboard
 /// animation duration, font scale, right to left (1), reduce motion (1),
-/// density, screen reader (1), API level, idiom (0 phone, 1 pad, 3 TV).
-/// `locale`: `Locale.getDefault()`'s language tag.
+/// density, screen reader (1), API level, idiom (0 phone, 1 pad, 3 TV),
+/// app state (0 resumed, 1 paused, 2 stopped), 24-hour time (1).
+/// `locale`: `Locale.getDefault()`'s language tag; `regional`: the format
+/// locale's, with Android 14's regional preferences as its extension.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_environment(
     mut env: JNIEnv<'_>,
@@ -1055,10 +1058,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     dark: jboolean,
     locale: JString<'_>,
     time_zone: JString<'_>,
+    languages: JString<'_>,
+    regional: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let mut v = [0f32; 14];
+    let mut v = [0f32; 15];
     if env.get_float_array_region(&values, 0, &mut v).is_err() {
         return;
     }
@@ -1095,6 +1100,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     }
     if let Ok(name) = env.get_string(&time_zone) {
         environment.time_zone = TimeZone::parse(&String::from(name)).unwrap_or_default();
+    }
+    if let Ok(tags) = env.get_string(&languages) {
+        environment.languages = Languages::parse(String::from(tags).split(','))
+            .unwrap_or(Languages::one(environment.locale));
+    }
+    if let Ok(tag) = env.get_string(&regional) {
+        let mut preferences = RegionalPreferences::parse(&String::from(tag));
+        // The user's 24-hour time, the region's cycle where they agree.
+        let twelve = v[14] == 0.0;
+        if preferences.hour_cycle.twelve_hour() != twelve {
+            preferences.hour_cycle = if twelve {
+                HourCycle::H12
+            } else {
+                HourCycle::H23
+            };
+        }
+        environment.regional = preferences;
     }
     environment.color_scheme = if dark != 0 {
         ColorScheme::Dark

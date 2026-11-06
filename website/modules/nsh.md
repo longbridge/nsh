@@ -854,17 +854,17 @@ const toggle = () => {
 
 ## Device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `time_zone()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the time zone and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `languages()`, `hour_cycle()`, `first_day_of_week()`, `measurement_system()`, `temperature_unit()`, `time_zone()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the preferred languages, the regional preferences, the time zone and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size, the language or the region's settings, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Lifecycle, Os, TimeZone},
-    prelude::*, // window, dark, font_scale, locale, time_zone, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
+    platform::{Appearance, HourCycle, Idiom, Lifecycle, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday},
+    prelude::*, // window, dark, font_scale, locale, languages, hour_cycle, first_day_of_week, measurement_system, temperature_unit, time_zone, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, timeZone, windowSize } from "nsh";
+import { colorScheme, firstDayOfWeek, fontScale, hourCycle, languages, lifecycle, locale, measurementSystem, openUrl, pixelRatio, platform, setColorScheme, temperatureUnit, timeZone, windowSize } from "nsh";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -922,6 +922,46 @@ const locale: Accessor<string>;
 ```
 
 The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. Rust: `locale() -> Locale` (`locale().as_str()` is the tag). `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
+
+### languages
+
+```ts
+const languages: Accessor<readonly string[]>;
+```
+
+The user's preferred languages as BCP 47 tags, most preferred first (`["de-DE", "en-US"]`): the system's list, with the embedding app's own language first when it sets one. Never empty. Reactive: it changes when the user changes the list. Rust: `languages() -> Languages` (`iter()`, `first()`, `as_slice()`, each a `Locale`). Show the app's text in the first of them it has a translation for: the others are its fallbacks ([Device and environment](../docs/device-and-environment.md#preferred-languages)). `locale()` is the region format, which can differ (English text, German dates). Headless tests have `[locale]` unless `open` sets `languages`.
+
+### hourCycle
+
+```ts
+const hourCycle: Accessor<"h11" | "h12" | "h23" | "h24">;
+```
+
+Whether the user has 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"` (`12:30 PM`), `"h23"` (`00:30`), and the rarer `"h11"` (`0:30 PM`) and `"h24"` (`24:30`). The system's setting, else the region's. Reactive. Rust: `hour_cycle() -> HourCycle` (`twelve_hour()` for AM and PM). `Intl` writes times in the locale's own hour cycle: pass `hourCycle()` as its `hourCycle` option to write them as the user reads them ([Device and environment](../docs/device-and-environment.md#regional-preferences)). `TimeField`'s and `DatePicker`'s `hourCycle` is `"h12"` for `"h11"` and `"h12"`, `"h23"` for the others. Headless tests have the locale's region's unless `open` sets `hourCycle`.
+
+### firstDayOfWeek
+
+```ts
+const firstDayOfWeek: Accessor<1 | 2 | 3 | 4 | 5 | 6 | 7>;
+```
+
+The day the user's weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A calendar's first column. The system's setting, else the region's (7 in the US, 1 in Germany, 6 in Egypt). Reactive. Rust: `first_day_of_week() -> Weekday` (`number()`). `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for Sunday: pass `firstDayOfWeek() % 7`. Headless tests have the locale's region's unless `open` sets `firstDayOfWeek`.
+
+### measurementSystem
+
+```ts
+const measurementSystem: Accessor<"metric" | "us" | "uk">;
+```
+
+The units the user measures lengths, weights and volumes in: `"metric"`, `"us"` (feet, miles, pounds, gallons) or `"uk"` (metric, with miles and pints). The system's setting, else the region's. Reactive. Rust: `measurement_system() -> MeasurementSystem`. Headless tests have the locale's region's unless `open` sets `measurementSystem`.
+
+### temperatureUnit
+
+```ts
+const temperatureUnit: Accessor<"celsius" | "fahrenheit">;
+```
+
+The unit the user reads temperatures in: `"celsius"` or `"fahrenheit"`. The system's setting, else the region's (Fahrenheit in the US and a few others). Reactive. Rust: `temperature_unit() -> TemperatureUnit`. Headless tests have the locale's region's unless `open` sets `temperatureUnit`.
 
 ### timeZone
 

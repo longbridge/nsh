@@ -8,12 +8,15 @@ use std::time::Duration;
 use nsh_core::{
     Dialog, ResolvedTextStyle,
     geometry::{Point, Points, Size},
-    platform::{ColorScheme, Lifecycle, TimeZone},
+    platform::{ColorScheme, Languages, Lifecycle, TimeZone},
 };
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
-use crate::headless::{DialogAnswer, Headless};
+use crate::{
+    headless::{DialogAnswer, Headless},
+    module::RegionalPreferences,
+};
 
 /// An app a test opened, driven by steps and read by queries.
 pub(crate) trait Driver: Send {
@@ -74,6 +77,18 @@ pub(crate) trait Driver: Send {
     fn set_time_zone(&mut self, zone: TimeZone) -> Result<(), String> {
         let _ = zone;
         Err(headless_only("setTimeZone"))
+    }
+    /// The user's preferred languages, as the system reports them
+    /// (`languages()`).
+    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
+        let _ = languages;
+        Err(headless_only("setLanguages"))
+    }
+    /// The user's regional preferences that `preferences` names, as the
+    /// system reports them (`hourCycle()` and the like).
+    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
+        let _ = preferences;
+        Err(headless_only("setRegionalPreferences"))
     }
     /// The system hands the app a link that opens it (`openWithUrl`).
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
@@ -233,6 +248,16 @@ impl Driver for Headless {
         self.set_environment(&format!("setTimeZone({zone})"), |e| {
             e.time_zone = zone;
         })
+    }
+    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
+        self.set_environment(&format!("setLanguages({languages:?})"), |e| {
+            e.languages = languages;
+        })
+    }
+    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
+        let pins = preferences.pins("setRegionalPreferences")?;
+        let what = format!("setRegionalPreferences({})", preferences.label());
+        self.set_environment(&what, |e| pins.apply(e))
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

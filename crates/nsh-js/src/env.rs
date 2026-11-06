@@ -1,6 +1,6 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, time zone, lifecycle) written when the platform reports a
+//! reduced motion, pixel ratio, locale, languages, regional preferences, time zone, lifecycle) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -45,9 +45,14 @@ enum Part {
     Locale,
     Lifecycle,
     TimeZone,
+    Languages,
+    HourCycle,
+    FirstDayOfWeek,
+    MeasurementSystem,
+    TemperatureUnit,
 }
 
-const PARTS: usize = 12;
+const PARTS: usize = 17;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -369,6 +374,32 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
+    if changed(&|p| p.languages == next.languages) {
+        let mut tags: Vec<JsValue> = next
+            .languages
+            .iter()
+            .map(|l| string(cx, l.as_str()))
+            .collect();
+        // SAFETY: the array takes the strings.
+        let array = unsafe { qjs::JS_NewArrayFrom(cx, tags.len() as c_int, tags.as_mut_ptr()) };
+        writes.push((Part::Languages, array));
+    }
+    let regional = &next.regional;
+    if changed(&|p| p.regional.hour_cycle == regional.hour_cycle) {
+        writes.push((Part::HourCycle, string(cx, regional.hour_cycle.name())));
+    }
+    if changed(&|p| p.regional.first_day_of_week == regional.first_day_of_week) {
+        let day = f32::from(regional.first_day_of_week.number());
+        writes.push((Part::FirstDayOfWeek, number(day)));
+    }
+    if changed(&|p| p.regional.measurement_system == regional.measurement_system) {
+        let system = regional.measurement_system.name();
+        writes.push((Part::MeasurementSystem, string(cx, system)));
+    }
+    if changed(&|p| p.regional.temperature_unit == regional.temperature_unit) {
+        let unit = regional.temperature_unit.name();
+        writes.push((Part::TemperatureUnit, string(cx, unit)));
+    }
     if changed(&|p| p.time_zone == next.time_zone) {
         writes.push((Part::TimeZone, string(cx, next.time_zone.as_str())));
     }
@@ -639,6 +670,46 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::value(
             "The user's locale as a BCP 47 tag (`\"en-US\"`, `\"zh-Hans-CN\"`), which\n`Intl` formats for by default (reactive): the system's, unless the\nembedding app set its own.",
             "Accessor<string>",
+        ),
+    ),
+    (
+        "languages",
+        Export::Value(|cx| accessor(cx, Part::Languages)),
+        Ts::value(
+            "The user's preferred languages as BCP 47 tags, most preferred first\n(reactive): the system's list (`[\"de-DE\", \"en-US\"]`), with the embedding\napp's own language first when it sets one. Show the app's text in the\nfirst it has, the others are its fallbacks. `[locale()]` in headless tests\nunless `open` sets `languages`.",
+            "Accessor<readonly string[]>",
+        ),
+    ),
+    (
+        "hourCycle",
+        Export::Value(|cx| accessor(cx, Part::HourCycle)),
+        Ts::value(
+            "Whether the user has 12- or 24-hour time (reactive), as `Intl` names its\nhour cycles: `\"h12\"` (`12:30 PM`), `\"h23\"` (`00:30`), and the rarer\n`\"h11\"` (`0:30 PM`) and `\"h24\"` (`24:30`). The system's setting, else the\nregion's; pass it as `Intl.DateTimeFormat`'s `hourCycle` to write times as\nthe user reads them. `TimeField`'s and `DatePicker`'s `hourCycle` is\n`\"h12\"` for `\"h11\"` and `\"h12\"`, `\"h23\"` for the others. The locale's\nregion's in headless tests unless `open` sets `hourCycle`.",
+            "Accessor<\"h11\" | \"h12\" | \"h23\" | \"h24\">",
+        ),
+    ),
+    (
+        "firstDayOfWeek",
+        Export::Value(|cx| accessor(cx, Part::FirstDayOfWeek)),
+        Ts::value(
+            "The day the user's weeks start on (reactive), as ISO 8601 numbers days\n(and `Intl.Locale`'s `firstDay`): 1 for Monday to 7 for Sunday. A\ncalendar's first column. The system's setting, else the region's (7 in\nthe US, 1 in Germany). `Calendar`'s and `DatePicker`'s `firstDayOfWeek`\ncount from 0 for Sunday: pass `firstDayOfWeek() % 7`. The locale's\nregion's in headless tests unless `open` sets `firstDayOfWeek`.",
+            "Accessor<1 | 2 | 3 | 4 | 5 | 6 | 7>",
+        ),
+    ),
+    (
+        "measurementSystem",
+        Export::Value(|cx| accessor(cx, Part::MeasurementSystem)),
+        Ts::value(
+            "The units the user measures lengths, weights and volumes in (reactive):\n`\"metric\"`, `\"us\"` (feet, miles, pounds, gallons) or `\"uk\"` (metric,\nwith miles and pints). The system's setting, else the region's. The\nlocale's region's in headless tests unless `open` sets\n`measurementSystem`.",
+            "Accessor<\"metric\" | \"us\" | \"uk\">",
+        ),
+    ),
+    (
+        "temperatureUnit",
+        Export::Value(|cx| accessor(cx, Part::TemperatureUnit)),
+        Ts::value(
+            "The unit the user reads temperatures in (reactive): `\"celsius\"` or\n`\"fahrenheit\"`. The system's setting, else the region's. The locale's\nregion's in headless tests unless `open` sets `temperatureUnit`.",
+            "Accessor<\"celsius\" | \"fahrenheit\">",
         ),
     ),
     (

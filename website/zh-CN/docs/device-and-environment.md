@@ -21,6 +21,8 @@ demo: guide-device
 | `cx.insets()` | `safeAreaInsets()`（`nsh`） | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh`） | 软键盘的高度和动画时长。 |
 | `locale()` | `locale()`（`nsh`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
+| `languages()` | `languages()`（`nsh`） | 用户的偏好语言，按偏好从高到低排列（`["de-DE", "en-US"]`）（[偏好语言](#偏好语言)）。 |
+| `hour_cycle()`、`first_day_of_week()`、`measurement_system()`、`temperature_unit()` | `hourCycle()`、`firstDayOfWeek()`、`measurementSystem()`、`temperatureUnit()`（`nsh`） | 12 小时制或 24 小时制、每周的第一天、度量单位和温度单位（[地区偏好](#地区偏好)）。 |
 | `time_zone()` | `timeZone()`（`nsh`） | 设备的时区，即系统给它的名称（`"Europe/Berlin"`）（[时区](#时区)）。 |
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
@@ -248,6 +250,80 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
 
+## 偏好语言
+
+`languages()` 是用户的偏好语言列表，按偏好从高到低排列，BCP 47 标签：系统的列表（手机设置中的语言列表、桌面的界面语言、Web 上浏览器的语言）。用其中第一个有翻译的语言显示应用的文字，并沿列表回退：偏好瑞士德语、然后德语、然后英语的用户，在一个有德语和英语的应用中看到德语文字。`locale()` 是另一回事，它是数字和日期遵循的区域格式，可以是另一种（英文文字、德国日期）。列表从不为空，用户修改它时，读取它的地方会随之更新。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
+
+fn text_language() -> &'static str {
+    languages()
+        .iter()
+        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
+        .unwrap_or("en")
+}
+```
+
+```tsx tabs
+import { languages } from "nsh";
+
+const TRANSLATED = ["en", "de", "zh"];
+
+const textLanguage = () =>
+  languages().map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
+```
+
+显示在原生应用中、且该应用设置了自己语言的应用，会把那个语言排在最前。测试中，`open` 的 `languages` 设置这个列表（否则是 `[locale]`），`app.setLanguages(["ja-JP", "en-US"])` 修改它（[测试](./testing-and-trace.md#操作步骤)）。
+
+## 地区偏好
+
+除了语言，系统还保存几项用户如何读时间、星期和度量的设置（iPhone 和 Mac 上的“语言与地区”、Android 的地区偏好、Windows 的“区域”），应用以响应式的方式读取它们：
+
+- `hour_cycle()`（TSX：`hourCycle()`）：12 小时制或 24 小时制，用 `Intl` 对小时周期的命名：`h12`（`12:30 PM`）、`h23`（`00:30`），以及较少见的 `h11`（`0:30 PM`）和 `h24`（`24:30`）。
+- `first_day_of_week()`（TSX：`firstDayOfWeek()`）：每周从哪一天开始，即日历的第一列；TSX 按 ISO 8601 编号，1 是星期一，7 是星期日。
+- `measurement_system()`（TSX：`measurementSystem()`）：`metric`（公制）、`us`（英尺、英里、磅、加仑）或 `uk`（公制，但距离用英里、容量用品脱）。
+- `temperature_unit()`（TSX：`temperatureUnit()`）：`celsius` 或 `fahrenheit`。
+
+用户做了设置时，各项是系统的设置，否则是所在地区自己的（按 Unicode CLDR 的数据：美国是 12 小时制、每周从星期日开始，德国是 24 小时制、每周从星期一开始）。用户修改它们时，读取它们的地方会随之更新。
+
+```rust tabs
+use nsh_core::{platform::TemperatureUnit, prelude::*};
+
+/// 一个摄氏温度，用用户的单位书写。
+fn temperature(celsius: f32) -> String {
+    match temperature_unit() {
+        TemperatureUnit::Celsius => format!("{celsius:.0} °C"),
+        TemperatureUnit::Fahrenheit => format!("{:.0} °F", celsius * 9.0 / 5.0 + 32.0),
+    }
+}
+
+/// 从用户的第一天开始的日历列：1 是星期一，7 是星期日。
+fn week_columns() -> [u8; 7] {
+    let first = first_day_of_week().number();
+    std::array::from_fn(|i| (first - 1 + i as u8) % 7 + 1)
+}
+```
+
+```tsx tabs
+import { firstDayOfWeek, hourCycle, temperatureUnit } from "nsh";
+
+const time = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hourCycle() });
+
+const temperature = (celsius: number) =>
+  temperatureUnit() === "fahrenheit" ? `${Math.round((celsius * 9) / 5 + 32)} °F` : `${Math.round(celsius)} °C`;
+
+// 从用户的第一天开始的日历列：1 是星期一，7 是星期日。
+const weekColumns = () => Array.from({ length: 7 }, (_, i) => ((firstDayOfWeek() - 1 + i) % 7) + 1);
+```
+
+`Intl` 按区域设置自己的小时周期书写时间：像上面那样把 `hourCycle()` 作为它的 `hourCycle` 选项传入，就能按用户的习惯书写。在 Web 上，浏览器不提供这些用户设置：小时周期和每周的第一天是浏览器按其语言给出的，单位是其地区的。测试中，`open` 的 `hourCycle`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit` 设置它们（否则是区域设置所在地区的），`app.setRegionalPreferences({ hourCycle: "h23" })` 修改它们（[测试](./testing-and-trace.md#操作步骤)）。
+
+基础组件显示应用传给它们的值，用它们自己的形式。`Calendar` 和 `DatePicker` 的 `firstDayOfWeek` 从 `0`（星期日）到 `6`（星期六）给星期编号：用户的第一天是 `firstDayOfWeek() % 7`（Rust：`first_day_of_week().number() % 7`）。`TimeField` 和 `DatePicker` 的 `hourCycle` 是 `"h12"` 或 `"h23"`：`hourCycle()` 为 `"h11"` 或 `"h12"` 时用户的是 `"h12"`，否则是 `"h23"`（Rust：`hour_cycle().twelve_hour()` 时为 `HourCycle::H12`）。
+
 ## 时区
 
 `time_zone()`（TSX：`timeZone()`）是设备的时区，即系统给它的名称：`Europe/Berlin`、`America/New_York` 这样的 IANA 名称、`UTC`，或系统使用偏移量时区时的名称（Android 上的 `GMT+01:00`）。用户修改设置或设备到了另一个时区时它会变化，读取它的地方随之更新：标出时区的时钟、按用户时区显示的时间列表、和创建时所在时区一起保存的日期。
@@ -269,7 +345,7 @@ import { timeZone } from "nsh";
 
 ## 在嵌入它的应用中
 
-嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`languages()`（宿主应用的语言排在最前）、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
 
 ## 在后台
 
@@ -397,7 +473,7 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 按用户的区域格式进行格式化。
 
 在浏览器中（[Web 运行时](./web.md)），`platform.os` 为 `"web"`，`platform.version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
-`"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`timeZone()`、`lifecycle()`（标签页隐藏时为
+`"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`languages()`（浏览器的首选语言）、区域偏好（浏览器按其语言给出的值）、`timeZone()`、`lifecycle()`（标签页隐藏时为
 `"background"`，失去焦点时为 `"inactive"`）、`reduceMotion()`、`fontScale()`（浏览器的文字大小）、`pixelRatio()`、
 安全区域和键盘高度都来自浏览器，并实时跟随。
 
