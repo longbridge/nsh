@@ -387,6 +387,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // with its window kept hidden; an embedding app keeps its own
         // lifecycle.
         DesktopCommand::Quit => crate::app::quit_app(),
+        // Quits as above, then the runner starts the app again.
+        DesktopCommand::Restart => crate::app::restart_app(),
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
         // The menu bar is the system's.
         DesktopCommand::SetMenuBar(_) => {}
