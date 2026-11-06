@@ -15,6 +15,7 @@ mod entry;
 mod init;
 mod logger;
 mod package;
+mod play;
 mod publish_ios;
 mod run;
 mod runtime;
@@ -359,15 +360,16 @@ enum Command {
         #[arg(short, long)]
         out: PathBuf,
     },
-    /// Upload to a store (`publish ios`), or build and sign a package (`.nshpkg`)
+    /// Upload to a store, or build and sign a package (`.nshpkg`)
     /// for apps that embed nsh to verify and run. Metadata comes from
     /// `nsh.json` next to the entry, overridden by the flags below. Given a
     /// package instead of an app, signs it again with this key: only its
-    /// certificate, signing time and signature change.
-    #[command(subcommand_negates_reqs = true, args_conflicts_with_subcommands = true)]
+    /// certificate, signing time and signature change. `nsh publish ios` / `nsh publish android`
+    /// uploads to a store instead.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Publish {
         #[command(subcommand)]
-        destination: Option<PublishDestination>,
+        store: Option<PublishStore>,
         /// The entry module, the app's directory (default: the current one),
         /// whose `App.tsx` is the entry, or a package (`.nshpkg`) to sign again.
         #[arg(default_value = ".")]
@@ -452,6 +454,33 @@ enum Command {
     },
 }
 
+/// The stores `nsh publish` uploads to.
+#[derive(Subcommand, Clone)]
+enum PublishStore {
+    /// Upload an App Store-signed IPA to App Store Connect for TestFlight.
+    Ios(publish_ios::Args),
+    /// Upload an Android App Bundle (`.aab`) to Google Play's internal
+    /// testing track, with a service account's JSON key.
+    Android {
+        /// The bundle (`.aab`) to upload.
+        bundle: PathBuf,
+        /// The app's directory or entry, whose `nsh.json` `id` is the
+        /// package name.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
+        /// The package name on Google Play (default: `nsh.json` `id`).
+        #[arg(long)]
+        package: Option<String>,
+        /// The service account's JSON key; keep it out of the repository.
+        #[arg(long, env = "NSH_PLAY_CREDENTIALS", hide_env_values = true)]
+        credentials: Option<PathBuf>,
+        /// Release as a draft, which Play requires until the app's first
+        /// release is made in Play Console.
+        #[arg(long)]
+        draft: bool,
+    },
+}
+
 /// Arguments of `nsh package`.
 #[derive(Args, Clone)]
 struct PackageArgs {
@@ -504,12 +533,6 @@ struct PackageArgs {
     /// machine at the address it prints).
     #[arg(long)]
     run: bool,
-}
-
-#[derive(Subcommand, Clone)]
-enum PublishDestination {
-    /// Upload an App Store-signed IPA to App Store Connect for TestFlight.
-    Ios(publish_ios::Args),
 }
 
 impl Command {
@@ -574,17 +597,26 @@ fn no_limits_for_rust(
 
 fn run(mut command: Command) -> anyhow::Result<()> {
     if let Command::Publish {
-        destination: Some(PublishDestination::Ios(args)),
-        ..
-    } = &command
+        store: Some(store), ..
+    } = command
     {
-        return publish_ios::publish(args);
+        return match store {
+            PublishStore::Ios(args) => publish_ios::publish(&args),
+            PublishStore::Android {
+                bundle,
+                entry,
+                package,
+                credentials,
+                draft,
+            } => play::publish(&bundle, &entry, package, credentials, draft),
+        };
     }
     // A package given to `nsh publish` has no app to resolve or build.
     if let Command::Publish {
+        store: _,
         entry,
-        key,
-        cert,
+        key: Some(key),
+        cert: Some(cert),
         out,
         id,
         version,
@@ -592,7 +624,6 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         source_map,
         strip_debug,
         min_runtime,
-        ..
     } = &command
         && sign::is_package(entry)
     {
@@ -609,12 +640,7 @@ fn run(mut command: Command) -> anyhow::Result<()> {
                 "{flag} applies to a build: a package signed again keeps its contents as they are"
             );
         }
-        return sign::resign(
-            entry,
-            key.as_deref().context("--key is required")?,
-            cert.as_deref().context("--cert is required")?,
-            out.clone(),
-        );
+        return sign::resign(entry, key, cert, out.clone());
     }
     let mut types = true;
     // The app a test's path is part of.
@@ -926,6 +952,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             out,
         } => sign::certify_key(&root, &key, &apps, days, &out),
         Command::Publish {
+            store: _,
             entry,
             key,
             cert,
@@ -936,17 +963,19 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             source_map,
             strip_debug,
             min_runtime,
-            ..
         } => {
             let mut config = package::read_config(&entry)?;
             config.id = id.or(config.id);
             config.version = version.or(config.version);
             config.build = build.or(config.build);
             config.min_runtime = min_runtime.or(config.min_runtime);
+            let (Some(key), Some(cert)) = (key, cert) else {
+                anyhow::bail!("nsh publish needs --key and --cert");
+            };
             sign::publish(sign::PublishOptions {
                 entry: &entry,
-                key: key.as_deref().context("--key is required")?,
-                cert: cert.as_deref().context("--cert is required")?,
+                key: &key,
+                cert: &cert,
                 out,
                 config,
                 source_map: source_map.unwrap_or(sign::SourceMapOut::Package),
@@ -998,7 +1027,7 @@ mod command_tests {
         assert!(matches!(
             cli.command,
             Command::Publish {
-                destination: Some(super::PublishDestination::Ios(_)),
+                store: Some(super::PublishStore::Ios(_)),
                 ..
             }
         ));
@@ -1014,13 +1043,7 @@ mod command_tests {
                 "key.cert",
             ])
             .unwrap();
-            assert!(matches!(
-                cli.command,
-                Command::Publish {
-                    destination: None,
-                    ..
-                }
-            ));
+            assert!(matches!(cli.command, Command::Publish { store: None, .. }));
         }
         assert!(
             Cli::try_parse_from([
@@ -1052,6 +1075,20 @@ mod command_tests {
             let error = super::run(Cli::try_parse_from(line).unwrap().command).unwrap_err();
             assert!(error.to_string().starts_with(flag), "{flag}: {error}");
         }
+    }
+
+    /// `nsh publish android` is a store upload and needs no signing key;
+    /// `nsh publish` of an app still does.
+    #[test]
+    fn publish_android_is_a_store_upload() {
+        let cli = Cli::try_parse_from(["nsh", "publish", "android", "app.aab", "--draft"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish { store: Some(super::PublishStore::Android { bundle, draft: true, .. }), .. }
+                if bundle == std::path::Path::new("app.aab")
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish", "."]).is_err());
+        assert!(Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--key", "k"]).is_err());
     }
 
     #[test]

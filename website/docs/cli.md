@@ -296,6 +296,24 @@ may name the package read, and only `--key`, `--cert` and `-o` apply.
 | `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
 | `--min-runtime <VERSION>` | The lowest runtime that runs the package, e.g. `0.2.0`; older runtimes refuse it. Default: this CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 
+### nsh publish android
+
+```sh
+nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+```
+
+Uploads an Android App Bundle to Google Play and releases it to the **internal testing** track, in one edit (insert,
+upload, track update, commit; a failed edit is deleted). It never goes further: promote the release to closed, open or
+production testing in Play Console. Signs in as a Google Cloud service account that has release permission for the app
+in Play Console ([Android](./android.md#upload-to-google-play)).
+
+| Flag | Description |
+|---|---|
+| `--entry <DIR>` | The app's directory or entry, whose `nsh.json` `id` is the package name. Default: `.`. |
+| `--package <NAME>` | The package name on Google Play. Default: `nsh.json` `id`. |
+| `--credentials <KEY.json>` | The service account's JSON key. Default: `NSH_PLAY_CREDENTIALS`. Keep it out of the repository. |
+| `--draft` | Release as a draft: Play takes only drafts until the app's first release is made in Play Console. |
+
 ### nsh verify
 
 ```sh
