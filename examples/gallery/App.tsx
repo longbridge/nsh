@@ -509,9 +509,12 @@ function Sidebar() {
           style={
             terminal
               ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
-              : { height: 44, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingLeft: titleBar().left + 12, paddingRight: 10 }
+              : { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: titleBar().left + 16, paddingRight: 10 }
           }
         >
+          {/* The mark at the sidebar's top left, past the window's controls. */}
+          {!terminal && <Logo size={22} />}
+          <View style={{ flex: 1 }} />
           <SidebarToggle />
         </View>
         <Search />
@@ -523,7 +526,6 @@ function Sidebar() {
             terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
           ]}
         >
-          <Logo size={22} />
           {/* Its name over the platform's, as elsewhere: side by side they do not fit a terminal's sidebar. */}
           <View style={{ flex: 1, gap: 0 }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
