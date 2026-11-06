@@ -162,7 +162,8 @@ page and files named after their content.
 
 `<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
 new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
-works from any directory of any host (`https://example.com/apps/counter/`).
+works from any directory of any host (`https://example.com/apps/counter/`). The page resolves them once as it starts,
+so the files still load after the app moves the address to another path.
 
 An app that is opened at its own paths ([links into the app](#links-into-the-app)) names the path its site is served
 under in `nsh.json`:
@@ -303,7 +304,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
 await player.runModule(new URL("./bundle.js", location.href).href);
 ```
 
-`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). The page `nsh package --target web` writes uses all of them.
+`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). Relative URLs, in these options and the app's images alike, resolve against the page's URL as the player is made (`player.baseURL`), so they still load after the page moves the address to another directory. The page `nsh package --target web` writes uses all of them.
 
 `runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are.
 
@@ -421,7 +422,7 @@ The page reports the rest of the environment, and keeps it current:
 
 `fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after NSH has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
 
-- **Relative URLs** resolve against the page's URL (its `<base href>` when it has one), as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
+- **Relative URLs** resolve against the page's URL as the app started (its `<base href>` when it has one), as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
 - **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
 - **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (NSH checks every hop, and browsers do not reveal a redirect before following it).

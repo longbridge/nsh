@@ -138,8 +138,11 @@ build to the same file) and takes `nsh.js` from the crate.
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
-  (`document.baseURI`, `nsh_set_base_url`); the page's script resolves its `app` URLs against it as it starts (and
-  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root
+  (`document.baseURI`, `nsh_set_base_url`) as it starts: the page's script resolves its `app` URLs (and the head's
+  requests are keyed the same way), the `Player` its `assets`, `data` and `assetBase` and the app's relative
+  `asset()` URLs against `player.baseURL`, and `browser/runtime.js` the entry, the chunks and the app realm's
+  `<base>`, so nothing loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
+  (`web::page_base`: a path from the root
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
   added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
@@ -567,10 +570,12 @@ do not follow (`redirect: "manual"` gives an opaque response without status or `
 `follow_redirects` off fails when it is redirected: JS `redirect: "manual"` / `"error"`, and the hops the engine
 follows itself to check each one against restricted capabilities (`access.rs`).
 
-Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI`, which
-`nsh.js` hands over once with `nsh_set_base_url` (the browser's own `fetch` resolves the app's against the page);
+Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI` as the
+player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url` (the browser's own `fetch`
+resolves the app's against the page);
 native hosts have no base and keep rejecting them. `new URL("/x")` without a base throws,
-as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by the browser.
+as in browsers. Relative `<Image>` URLs resolve against `player.baseURL` too (`asset()`), so they load after the
+address moved to another directory.
 
 `Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.

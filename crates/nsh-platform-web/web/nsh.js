@@ -19,7 +19,9 @@
 // wasm-bindgen, which the CLI writes next to it; each player imports an
 // instance of its own), `assetBase` (where `asset:/<path>` is served) or
 // `assets` (a map from `<path>` to its URL, as `nsh package --target web`
-// writes it), `readAsset(uri)` (the bytes of an asset the engine needs at
+// writes it; relative URLs, these and the others, resolve against the
+// page's `document.baseURI` as the player is made: `player.baseURL`),
+// `readAsset(uri)` (the bytes of an asset the engine needs at
 // once, a font: a `Uint8Array` or null), `data` (the URLs of the files the
 // runtime fetches when it first needs them, by name, as `nsh package
 // --target web` writes them: `{ syntaxes: "nsh-syntaxes.<digest>.bin" }`;
@@ -846,7 +848,15 @@ class Player {
 
   constructor(container, options) {
     this.options = options;
-    this.assetBase = options.assetBase ?? "";
+    // The page's URL as the player starts: the runtime's files and the
+    // app's relative URLs resolve against it once, so they still load
+    // after the address moves to another directory (`history.pushState`
+    // to `/sports/football`).
+    this.baseURL = document.baseURI;
+    this.assetBase = new URL(options.assetBase || "./", this.baseURL).href;
+    const resolve = (urls) => urls && Object.fromEntries(Object.entries(urls).map(([key, url]) => [key, new URL(url, this.baseURL).href]));
+    this.assets = resolve(options.assets);
+    this.data = resolve(options.data);
     this.container = container;
     if (!document.getElementById("nsh-style")) {
       const style = document.createElement("style");
@@ -1128,8 +1138,9 @@ class Player {
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
     this.wasm.nsh_app_init?.();
-    // Relative request URLs (`fetch("/api")`) are the page's, as in the browser.
-    this.withStrings([document.baseURI], (p, l) => this.wasm.nsh_set_base_url(p, l));
+    // Relative request URLs (`fetch("/api")`) are the page's, as in the
+    // browser, as it was when the player started.
+    this.withStrings([this.baseURL], (p, l) => this.wasm.nsh_set_base_url(p, l));
     new ResizeObserver(() => this.resized()).observe(this.root);
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
       if (this.options.dark === undefined) this.setDark(e.matches);
@@ -1547,7 +1558,7 @@ class Player {
    * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
-    const url = this.options.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
+    const url = this.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
     let bytes = null;
     try {
       const gate = `nsh_feature_${name}`;
@@ -1922,10 +1933,14 @@ class Player {
     if (!uri) return uri;
     if (uri.startsWith("asset:/")) {
       const path = uri.slice("asset:/".length).replace(/^\/+/, "");
-      return this.options.assets?.[path] ?? this.assetBase + path;
+      return this.assets?.[path] ?? this.assetBase + path;
     }
     // An in-memory image: its bytes came with `image_bytes`.
-    return this.inlineImages.get(uri) ?? uri;
+    const inline = this.inlineImages.get(uri);
+    if (inline) return inline;
+    // A relative URL is the page's as the player started (`baseURL`), as
+    // the app's requests are.
+    return /^[a-z][a-z\d+.-]*:/i.test(uri) ? uri : new URL(uri, this.baseURL).href;
   }
 
   // Mounting ------------------------------------------------------------

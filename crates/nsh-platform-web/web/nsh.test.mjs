@@ -22,6 +22,11 @@ function fakePlayer(options = {}) {
   Object.assign(player, {
     // What the constructor sets that these paths read.
     options: { idiom: "phone", ...options },
+    baseURL: "https://example.test/app/",
+    assetBase: "https://example.test/app/",
+    assets: options.assets,
+    data: options.data,
+    inlineImages: new Map(),
     hostEvents: [],
     fileOperations: new Map(),
     requests: new Map(),
@@ -643,6 +648,17 @@ test("the runtime's data comes from the URL the page names and reaches the engin
   );
   assert.deepEqual(fetched, ["https://example.test/nsh-syntaxes.0123456789.bin"]);
   assert.deepEqual(handed, [["syntaxes", [1, 2, 3], 1]]);
+});
+
+test("relative URLs are the page's as the player started", () => {
+  const { player } = fakePlayer({ assets: { "logo.png": "https://cdn.test/logo.0123456789.png" } });
+  // The address has moved to another directory since (`history.pushState`).
+  assert.equal(player.asset("photos/a.jpg"), "https://example.test/app/photos/a.jpg");
+  assert.equal(player.asset("/photos/a.jpg"), "https://example.test/photos/a.jpg");
+  assert.equal(player.asset("https://photos.test/a.jpg"), "https://photos.test/a.jpg");
+  assert.equal(player.asset("blob:https://example.test/1"), "blob:https://example.test/1");
+  assert.equal(player.asset("asset:/logo.png"), "https://cdn.test/logo.0123456789.png");
+  assert.equal(player.asset("asset:/icons/x.png"), "https://example.test/app/icons/x.png");
 });
 
 test("data that does not load reaches the engine as none", async () => {

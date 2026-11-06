@@ -119,7 +119,8 @@ export function createBrowserHost(player) {
         }
         if (frame) {
           const baseElement = doc.createElement("base");
-          baseElement.href = document.baseURI;
+          // The page's URL as the player started (`player.baseURL`).
+          baseElement.href = player.baseURL;
           doc.head.append(baseElement);
         }
         // Older WebKit takes an import map only before the document's first
@@ -129,12 +130,12 @@ export function createBrowserHost(player) {
         // without them it goes in once the namespaces exist, as one map.
         const early = Object.keys(nativeExports).length > 0;
         const map = { ...moduleMap };
-        const entryURL = new URL(entry, document.baseURI);
+        const entryURL = new URL(entry, player.baseURL);
         // Chunks are named relative to the entry; one given as source (a
         // blob) has them relative to the page.
-        const chunkBase = entryURL.protocol === "blob:" ? new URL(document.baseURI) : entryURL;
+        const chunkBase = entryURL.protocol === "blob:" ? new URL(player.baseURL) : entryURL;
         if (chunkBase === entryURL) map[new URL("bundle.js", entryURL).href] = entryURL.href;
-        for (const [id, url] of Object.entries(chunks)) map[new URL(id, chunkBase).href] = new URL(url, document.baseURI).href;
+        for (const [id, url] of Object.entries(chunks)) map[new URL(id, chunkBase).href] = new URL(url, player.baseURL).href;
         for (const [specifier, names] of Object.entries(nativeExports)) {
           const url = facadeURL(specifier, names, names);
           urls.push(url);
