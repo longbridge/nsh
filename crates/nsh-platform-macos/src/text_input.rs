@@ -2100,7 +2100,7 @@ pub(crate) fn blur(view: &NshView) {
 
 /// Unfocuses whatever input of the surface has focus.
 pub(crate) fn blur_all(surface: &Rc<Surface>) {
-    if let Some(window) = surface.root.ns().window()
+    if let Some(window) = crate::input::event_root(surface).ns().window()
         && editing(surface)
     {
         to_root(&window, surface);
@@ -2112,13 +2112,14 @@ pub(crate) fn blur_all(surface: &Rc<Surface>) {
 /// click (a click elsewhere leaves the focus in the field).
 fn to_root(window: &objc2_app_kit::NSWindow, surface: &Surface) {
     window.makeFirstResponder(None);
-    window.makeFirstResponder(Some(surface.root.ns()));
+    window.makeFirstResponder(Some(crate::input::event_root(surface).ns()));
 }
 
 /// Whether one of the surface's inputs has the keyboard focus (a click
 /// elsewhere leaves it there, as desktops do).
 pub(crate) fn editing(surface: &Surface) -> bool {
-    let root = surface.root.ns();
+    let root = crate::input::event_root(surface);
+    let root = root.ns();
     let Some(responder) = root.window().and_then(|w| w.firstResponder()) else {
         return false;
     };

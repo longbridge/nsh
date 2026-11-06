@@ -335,23 +335,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         DesktopCommand::SetLevel(level) => {
             if let Some(window) = window(surface) {
-                window.setLevel(match level {
-                    WindowLevel::Normal => NSNormalWindowLevel,
-                    WindowLevel::Floating => NSFloatingWindowLevel,
-                    WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
-                });
-                // A desktop widget is a part of the desktop, not a window:
-                // it sits on every space, Mission Control does not list it
-                // (it could never be raised above normal windows anyway)
-                // and Cmd+` cycles past it. Ordinary levels stay managed.
-                window.setCollectionBehavior(match level {
-                    WindowLevel::DesktopIcon => {
-                        NSWindowCollectionBehavior::Stationary
-                            | NSWindowCollectionBehavior::CanJoinAllSpaces
-                            | NSWindowCollectionBehavior::IgnoresCycle
-                    }
-                    _ => NSWindowCollectionBehavior::MoveToActiveSpace,
-                });
+                set_level(&window, *level);
             }
         }
         // The Dock shows apps, not windows (an app leaves it with
@@ -366,9 +350,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 window.makeKeyAndOrderFront(None);
             }
         }
-        // Windows of the app's own (`Window.open`) are not on this backend yet:
-        // the runtime does not send these here.
-        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
+        DesktopCommand::Hide => {
+            if let Some(window) = surface.root.ns().window() {
+                window.orderOut(None);
+            }
+        }
+        // Addressed to a dialog root ([`crate::window`]).
+        DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => {
             // Close after the batch, as Windows posts WM_CLOSE and GTK
             // waits for idle: performClose runs windowWillClose: at once,
@@ -422,8 +410,29 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     }
 }
 
+/// Puts `window` at `level`.
+pub(crate) fn set_level(window: &NSWindow, level: WindowLevel) {
+    window.setLevel(match level {
+        WindowLevel::Normal => NSNormalWindowLevel,
+        WindowLevel::Floating => NSFloatingWindowLevel,
+        WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
+    });
+    // A desktop widget is a part of the desktop, not a window:
+    // it sits on every space, Mission Control does not list it
+    // (it could never be raised above normal windows anyway)
+    // and Cmd+` cycles past it. Ordinary levels stay managed.
+    window.setCollectionBehavior(match level {
+        WindowLevel::DesktopIcon => {
+            NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::IgnoresCycle
+        }
+        _ => NSWindowCollectionBehavior::MoveToActiveSpace,
+    });
+}
+
 /// Moves and sizes the window: a field left out keeps its value.
-fn set_frame(window: &NSWindow, frame: &WindowFrame) {
+pub(crate) fn set_frame(window: &NSWindow, frame: &WindowFrame) {
     let primary_height = NSScreen::screens(MainThreadMarker::from(window))
         .firstObject()
         .map_or(0.0, |s| s.frame().size.height);
@@ -552,7 +561,8 @@ pub(crate) fn mouse_down(surface: &Surface, event: &NSEvent, x: f32, y: f32) -> 
     if !crate::input::window_drag(surface, x, y) {
         return false;
     }
-    let Some(window) = window(surface) else {
+    // The window the press is in: the main one or one of the app's own.
+    let Some(window) = crate::input::event_root(surface).ns().window() else {
         return false;
     };
     if event.clickCount() == 2 {

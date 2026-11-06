@@ -64,6 +64,7 @@ mod tray;
 mod view;
 mod visual;
 mod window_state;
+mod window;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

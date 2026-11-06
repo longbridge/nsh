@@ -454,7 +454,11 @@ pub(crate) fn passes_wheel(surface: &Surface, native: &NSView) -> bool {
 /// Whether the keyboard focus is in one of the surface's web views (the
 /// page has it).
 pub(crate) fn web_focused(surface: &Surface) -> bool {
-    let Some(responder) = surface.root.ns().window().and_then(|w| w.firstResponder()) else {
+    let Some(responder) = crate::input::event_root(surface)
+        .ns()
+        .window()
+        .and_then(|w| w.firstResponder())
+    else {
         return false;
     };
     let Some(focused) = responder.downcast_ref::<NSView>() else {
@@ -560,7 +564,7 @@ pub(crate) fn lend(surface: &Rc<Surface>, top: &NshView, image: &NSView) -> Vec<
                     .is_some_and(|v| v.isDescendantOf(&shown))
             });
             if focused {
-                window.makeFirstResponder(Some(surface.root.ns()));
+                window.makeFirstResponder(Some(crate::input::event_root(surface).ns()));
             }
         }
         // SAFETY: NSView's designated initializer.

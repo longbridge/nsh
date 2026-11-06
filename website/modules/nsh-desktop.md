@@ -109,7 +109,7 @@ chat.focus();
 
 The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
 `close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
-it too. `Window.open` runs on Linux and Windows; on other platforms it throws.
+it too. `Window.open` runs on macOS, Windows and Linux; on other platforms it throws.
 
 ## Application
 
