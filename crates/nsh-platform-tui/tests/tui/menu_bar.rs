@@ -442,3 +442,23 @@ fn undo_from_the_menu_or_its_key_returns_and_undoes_the_field() {
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "value: ");
 }
+
+#[test]
+fn app_quit_ends_the_app_as_a_quit_role_does() {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, Text } from "nsh";
+        import { Application } from "nsh/desktop";
+        mount(() => <Text>ready</Text>);
+        Application.quit();
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    assert!(view.exit_requested(), "{}", screen(&terminal));
+}

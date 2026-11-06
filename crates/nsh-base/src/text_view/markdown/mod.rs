@@ -6,11 +6,13 @@
 //! repaired (`streaming.rs`), TeX's `\(…\)` and `\[…\]` are rewritten as
 //! dollars (`latex.rs`), declared containers are cut out (`container.rs`)
 //! (syntax `markdown-rs` lacks), then each Markdown part is parsed, with
-//! emphasis beside CJK text read as the CJK-friendly rule reads it
-//! (`cjk.rs`), and its tree converted. Definitions and footnotes are
+//! bare URLs ending where CJK text starts (`autolink.rs`) and emphasis
+//! beside CJK text read as the CJK-friendly rule reads it (`cjk.rs`), and
+//! its tree converted. Definitions and footnotes are
 //! collected from the trees first, so references resolve wherever they
 //! stand and footnotes are numbered by their first reference.
 
+mod autolink;
 mod cjk;
 mod container;
 mod latex;
@@ -131,14 +133,27 @@ fn parse_trees<'s>(
 }
 
 /// Markdown `text` parsed (`first`: the document's start). What is inserted
-/// before parsing (marks beside emphasis, escapes of prose `$`) is taken out
+/// before parsing (ends of bare URLs, marks beside emphasis, escapes of
+/// prose `$`) is taken out
 /// of the tree again (`offsets.rs`): its positions are offsets in `text`.
 fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
     let mut inserted = Inserted::default();
+    let mut ends = Vec::new();
+    let ended = if parser.options.mdx {
+        // MDX has no autolink literals.
+        Cow::Borrowed(text)
+    } else {
+        autolink::end_urls(text, &mut ends)
+    };
+    inserted.insert(&ends, autolink::END.len_utf8());
     let mut marks = Vec::new();
-    let mut source = cjk::mark(text, &mut marks);
-    let marked = !marks.is_empty();
+    let marked = match cjk::mark(&ended, &mut marks) {
+        Cow::Owned(marked) => Some(marked),
+        Cow::Borrowed(_) => None,
+    };
+    let mut source = marked.map_or(ended, Cow::Owned);
     inserted.insert(&marks, cjk::MARK.len_utf8());
+    let strip = !ends.is_empty() || !marks.is_empty();
     let mut root = parse_tree(parser, &source, first);
     if parser.options.math {
         // Pairs of `$` that are prose: their opening `$` escaped, the text
@@ -166,7 +181,7 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
         }
     }
     if !inserted.is_empty() {
-        offsets::restore(&mut root, &source, &inserted, marked);
+        offsets::restore(&mut root, &source, &inserted, strip);
     }
     Tree { source: text, root }
 }
@@ -555,7 +570,21 @@ impl<'a> Converter<'a> {
                 tex: math.value.clone(),
             }),
             Node::Html(h) => {
-                if self.parser.options.html {
+                if self.parser.options.html && !self.is_tag(&h.value) {
+                    // `<US tech>` alone on its line: the lines it starts are
+                    // Markdown, the tag text.
+                    if self.depth < MAX_DEPTH {
+                        out.extend(
+                            self.parser
+                                .markdown(&format!("\\{}", h.value.trim_start()))
+                                .blocks,
+                        );
+                    } else {
+                        out.push(Block::Paragraph {
+                            content: literal_lines(&h.value),
+                        });
+                    }
+                } else if self.parser.options.html {
                     out.extend(html::blocks(self.parser, &h.value));
                 } else {
                     out.push(Block::Paragraph {
@@ -681,7 +710,7 @@ impl<'a> Converter<'a> {
         let Node::Html(open) = &nodes[at] else {
             return None;
         };
-        let name = unclosed_element(&open.value)?;
+        let name = unclosed_element(&open.value).filter(|name| self.is_element(name))?;
         let close = matching_close(nodes, at, name)?;
         let Node::Html(close_node) = &nodes[close] else {
             return None;
@@ -758,7 +787,7 @@ impl<'a> Converter<'a> {
         if !self.parser.options.html {
             return None;
         }
-        let name = unclosed_element(&open.value)?;
+        let name = unclosed_element(&open.value).filter(|name| self.is_element(name))?;
         let close = matching_close(nodes, at, name)?;
         let start = nodes[at].position()?.start.offset;
         let end = nodes[close].position()?.end.offset;
@@ -881,7 +910,7 @@ impl<'a> Converter<'a> {
                 });
             }
             Node::Html(h) => {
-                if self.parser.options.html {
+                if self.parser.options.html && self.is_tag(&h.value) {
                     extend(out, html::inlines(self.parser, &h.value));
                 } else {
                     push_text(out, &h.value.replace('\n', " "));
@@ -910,6 +939,29 @@ impl<'a> Converter<'a> {
                 }
             }
         }
+    }
+
+    /// Whether `name` is an element of HTML or of a `tag` extension: a tag
+    /// of another name (`<US tech>`, `</Foo>`) is text.
+    fn is_element(&self, name: &str) -> bool {
+        html::is_element(name)
+            || self.parser.extensions.iter().any(|ext| {
+                ext.tag
+                    .as_deref()
+                    .is_some_and(|tag| tag.eq_ignore_ascii_case(name))
+            })
+    }
+
+    /// Whether HTML `html` is markup: it starts with a tag of an element
+    /// ([`Self::is_element`]), a comment, a declaration or an instruction.
+    fn is_tag(&self, html: &str) -> bool {
+        let inner = html.trim_start().strip_prefix('<').unwrap_or_default();
+        let name = inner.strip_prefix('/').unwrap_or(inner);
+        let len = name
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'-')
+            .count();
+        len == 0 || self.is_element(&name[..len])
     }
 
     /// Node `node` as the text it was written as.

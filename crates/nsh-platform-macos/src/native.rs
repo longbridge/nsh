@@ -1735,7 +1735,8 @@ fn js_string(s: &str) -> String {
     out
 }
 
-/// A web view: the `WKWebView` (when WebKit loads) filling its node's view.
+/// A web view: the `WKWebView` (when WebKit loads) filling its node's view,
+/// made with its first props (`incognito` picks its website data store).
 struct WebHost {
     /// The node's view, which hosts the web view.
     holder: objc2::rc::Weak<ViewObj>,
@@ -1756,16 +1757,37 @@ impl WebHost {
         downloads: Option<PathBuf>,
     ) -> Self {
         let handler = WebHandler::new(surface.mtm, Emitter::new(surface, view), access, downloads);
+        WebHost {
+            holder: objc2::rc::Weak::new(&**view),
+            web: None,
+            handler,
+            props: None,
+            scrolls: true,
+        }
+    }
+
+    /// Makes the `WKWebView`, keeping its website data in memory only
+    /// (a store of its own) when `incognito`.
+    fn make(&mut self, incognito: bool) {
+        let Some(view) = self.holder.load().and_then(|v| NshView::from_ns(&v)) else {
+            return;
+        };
+        let handler = &self.handler;
         let web = webkit().then(|| {
             // SAFETY: WebKit's documented API, sent dynamically; the handler
             // is unregistered when the host is dropped; a WKWebView is an
             // NSView.
             unsafe {
                 let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration")?, new];
+                if incognito {
+                    let store: Retained<AnyObject> =
+                        msg_send![class(c"WKWebsiteDataStore")?, nonPersistentDataStore];
+                    let _: () = msg_send![&config, setWebsiteDataStore: &*store];
+                }
                 let content: Retained<AnyObject> = msg_send![&config, userContentController];
                 let _: () = msg_send![
                     &content,
-                    addScriptMessageHandler: &*handler,
+                    addScriptMessageHandler: &**handler,
                     name: &*NSString::from_str("nsh")
                 ];
                 let alloc: Allocated<AnyObject> = msg_send![class(c"WKWebView")?, alloc];
@@ -1774,23 +1796,17 @@ impl WebHost {
                     initWithFrame: NSRect::ZERO,
                     configuration: &*config
                 ];
-                let _: () = msg_send![&web, setNavigationDelegate: &*handler];
+                let _: () = msg_send![&web, setNavigationDelegate: &**handler];
                 // Transparent by default (WebKit paints white otherwise): a
                 // page without a background shows the view behind it, the
                 // way `backgroundColor` on the node expects.
                 let no: Retained<AnyObject> = msg_send![class(c"NSNumber")?, numberWithBool: false];
                 let _: () = msg_send![&web, setValue: &*no, forKey: &*NSString::from_str("drawsBackground")];
-                crate::surface::quiet(|| fill(view, as_view(&web)));
+                crate::surface::quiet(|| fill(&view, as_view(&web)));
                 Some(web)
             }
         });
-        WebHost {
-            holder: objc2::rc::Weak::new(&**view),
-            web: web.flatten(),
-            handler,
-            props: None,
-            scrolls: true,
-        }
+        self.web = web.flatten();
     }
 
     /// Whether `view` is its `WKWebView`.
@@ -1805,6 +1821,10 @@ impl WebHost {
 
     fn set(&mut self, p: &WebProps) {
         self.scrolls = p.scrollable;
+        if self.props.is_none() {
+            // The core keeps `incognito` from changing once it is made.
+            self.make(p.incognito);
+        }
         let Some(web) = &self.web else { return };
         let old = self.props.take();
         let first = old.is_none();

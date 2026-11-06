@@ -60,6 +60,7 @@ mount(Browser);
 | `userAgent` | `string` | 平台默认 | 用户代理字符串。 |
 | `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
+| `incognito` | `boolean` | `false` | 页面的网站数据（cookie、存储、缓存）只与网页视图同存亡，与应用的数据分开；Android 上网页视图加载时不使用 HTTP 缓存、不保存表单数据（见[网站数据](../docs/web-view-and-video.md#网站数据)）。在网页视图创建时读取。 |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | 仅 iOS：从边缘轻扫以后退和前进。 |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS：双指在触控板上轻扫以后退和前进；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 

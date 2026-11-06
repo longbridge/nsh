@@ -52,6 +52,8 @@
 //! which reads the data from disk; only session cookies (those without an
 //! expiry, which WebKit keeps in memory) end with it, as when a browser
 //! is closed.
+//! An `incognito` web view has an ephemeral `NetworkSession` of its own
+//! instead, made with it: its data stays in memory and goes with it.
 //!
 //! Keys: a focused page gets them first. Escape the page does not use
 //! comes back to the window, where it leaves the page as it leaves a text
@@ -124,7 +126,9 @@ pub(super) struct WebHost {
 }
 
 impl WebHost {
-    pub(super) fn new(surface: &Rc<Surface>, view: &NshView) -> Self {
+    /// Makes the page with its first props: `incognito` gives it an
+    /// ephemeral network session of its own.
+    pub(super) fn new(surface: &Rc<Surface>, view: &NshView, incognito: bool) -> Self {
         let shared = Rc::new(Shared {
             emitter: Emitter {
                 surface: Rc::downgrade(surface),
@@ -136,7 +140,11 @@ impl WebHost {
         });
         let content = UserContentManager::new();
         content.register_script_message_handler(HANDLER, None);
-        let session = session(&surface.native.app_id.borrow());
+        let session = if incognito {
+            NetworkSession::new_ephemeral()
+        } else {
+            session(&surface.native.app_id.borrow())
+        };
         let web = WebView::builder()
             .network_session(&session)
             .user_content_manager(&content)

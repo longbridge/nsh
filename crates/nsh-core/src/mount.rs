@@ -78,6 +78,11 @@ pub struct WebProps {
     pub javascript_enabled: bool,
     /// Swipes go back and forward (iOS).
     pub back_forward_gestures: bool,
+    /// Website data (cookies, storage, the cache) lives only as long as
+    /// the web view, apart from the app's other web views (Android: no
+    /// HTTP cache and no saved form data). Read when the platform makes the
+    /// web view: the core keeps it from changing afterwards.
+    pub incognito: bool,
 }
 
 impl Default for WebProps {
@@ -92,6 +97,7 @@ impl Default for WebProps {
             scrollable: true,
             javascript_enabled: true,
             back_forward_gestures: false,
+            incognito: false,
         }
     }
 }

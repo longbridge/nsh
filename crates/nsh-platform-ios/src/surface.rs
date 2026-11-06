@@ -138,6 +138,8 @@ pub(crate) struct RootViewIvars {
     host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+    /// Links that came before the engine started ([`Surface::url_scheme`]).
+    url_schemes: RefCell<Vec<String>>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -308,6 +310,7 @@ impl RootView {
             host: Cell::default(),
             host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
+            url_schemes: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -765,6 +768,10 @@ impl RootView {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);
+        let links = std::mem::take(&mut *self.ivars().url_schemes.borrow_mut());
+        for url in links {
+            send_url_scheme(&engine.control(), url);
+        }
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
     }
@@ -977,6 +984,16 @@ impl Surface {
         }
     }
 
+    /// Hands `url`, a link the system opened the app with, to the app's
+    /// engine, whose core keeps it until the app listens (`UrlScheme`);
+    /// kept until the engine starts.
+    pub(crate) fn url_scheme(&self, url: String) {
+        match &*self.view.ivars().running.borrow() {
+            Some(running) => send_url_scheme(&running.engine.control(), url),
+            None => self.view.ivars().url_schemes.borrow_mut().push(url),
+        }
+    }
+
     /// Replaces the running app with `app` (state is reset).
     pub fn reload(&self, app: impl Into<App>) {
         let app = app.into();
@@ -991,6 +1008,18 @@ impl Surface {
             *self.view.ivars().pending.borrow_mut() = Some(app);
         }
     }
+}
+
+/// Reports `url` as a link the system opened the app with.
+fn send_url_scheme(control: &nsh_engine::EngineControl, url: String) {
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        nsh_core::EventKind::UrlScheme,
+        nsh_core::EventPayload::Map(vec![(
+            nsh_core::url_scheme::URL,
+            nsh_core::PayloadValue::Str(url),
+        )]),
+    );
 }
 
 impl Drop for Surface {

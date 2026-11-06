@@ -247,6 +247,27 @@ Without `open`, a menu keeps its own state (from `defaultOpen` for `Menu`). With
 it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
 `"contextMenu"` or `"longPress"`.
 
+A `Submenu` keeps its own state, and reports each opening and closing the user asks for in `onOpenChange({ open,
+reason })`: `"hover"` (its item hovered, or another item of its menu), `"triggerPress"` (its item pressed, or Right,
+Return or Space on it), `"cancel"` (Left, Escape, back or its `back` row), or the menu's reason when the whole menu
+closes (`"select"`, `"pressOutside"`, ...). Its items are made as it opens, so an app can start loading them there the
+first time and show them as they arrive. When the app closes the menu itself, nothing is reported.
+
+```tsx
+const recent = signal<string[] | null>(null);
+
+<Submenu
+  trigger={<Text>Open Recent</Text>}
+  onOpenChange={({ open }) => {
+    if (open && recent() === null) loadRecent().then((names) => recent.set(names));
+  }}
+>
+  <Each of={recent() ?? []}>
+    {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
+  </Each>
+</Submenu>
+```
+
 ## Props
 
 ### Menu
@@ -313,6 +334,7 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 | `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | Desktops: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen; a checkable item asks for its other value. |
+| `onOpenChange` (`Submenu`) | `.on_open_change(\|e\| ..)` | It opened or closed as the user asked, with why. |
 
 ## Accessibility
 
