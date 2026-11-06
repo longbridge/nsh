@@ -106,7 +106,7 @@ chat.focus();
 | `frame` | `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
 
 返回的窗口有 `id`、`focus()`（显示窗口，`hide()` 之后也可以，并把它提到最前）、`hide()` 和 `close()`（其内容随之卸载）。
-用户关闭它时，效果和 `close()` 相同；关闭主窗口也会关闭它。`Window.open` 在 Linux 和 Windows 上运行；在其他平台上会抛出异常。
+用户关闭它时，效果和 `close()` 相同；关闭主窗口也会关闭它。`Window.open` 在 macOS、Windows 和 Linux 上运行；在其他平台上会抛出异常。
 
 ## Application
 
