@@ -81,7 +81,7 @@ export function CommandRow(props: { entry: CommandEntry; icon?: IconName; detail
       </View>
       {props.note ? <Text style={{ fontSize: size.detail, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text> : null}
       {desktop && props.entry.shortcutLabel ? <CommandKeys label={props.entry.shortcutLabel} /> : null}
-      {props.entry.checked ? <Icon name="check" size={14} tint={colors.accent} /> : null}
+      {props.entry.checked ? <Icon name="check" size={14} tint={colors.text} /> : null}
     </View>
   );
 }

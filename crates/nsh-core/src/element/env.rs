@@ -15,6 +15,8 @@ pub struct Environment {
     pub safe_area: EdgeInsets,
     /// Space reserved for system controls in a custom desktop title bar.
     pub title_bar: crate::geometry::Edges<crate::geometry::Points>,
+    /// The app's window: its bounds, mode and display (desktops).
+    pub window_state: Option<crate::desktop::WindowState>,
     /// The software keyboard's height, 0 when hidden.
     pub keyboard_height: Points,
     /// How long the keyboard's show / hide animation takes, in milliseconds.
@@ -78,6 +80,7 @@ impl Default for Environment {
             window: crate::geometry::size_pt(0.0, 0.0),
             safe_area: EdgeInsets::default(),
             title_bar: crate::geometry::Edges::default(),
+            window_state: None,
             keyboard_height: Points(0.0),
             keyboard_duration: 0.0,
             dark: false,
