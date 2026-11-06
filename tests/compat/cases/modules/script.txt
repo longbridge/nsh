@@ -80,6 +80,19 @@ tap id:start
 expect Refused: threw RangeError
 expect Speech: end unavailable "" true
 covers [nsh] Speech
+# mod-audio
+tap id:case-mod-audio
+# nothing plays sound there: available() resolves false, a sound's load
+# rejects and a player's play() rejects as its error listener hears
+# "unavailable"; a volume out of range throws a RangeError.
+expect Available: false
+expect Sound: not loaded
+tap id:play
+expect Refused: threw RangeError
+expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Player: rejected, error unavailable, idle true 1.5
+covers [nsh] Sound
+covers [nsh] AudioPlayer
 # mod-notifications
 tap id:case-mod-notifications
 # nothing shows notifications there: the permission is unavailable and nothing

@@ -185,7 +185,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | The scroll indicator shows: the platform's, or the app's [built-in bar](../elements/scrollbar.md#built-in-bars) once it set a theme; an object is a theme of the view's own. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `ref` | `.element_ref(&list)` | `ListRef` | | `scrollToIndex`, `scrollToOffset`, `scrollToEnd`, `scrollTo`. |
 
-The header, footer and empty slots take an element (in TSX also a component: `header={Header}`). They are cells of their own, never recycled, and they are reactive like any other element.
+The header, footer and empty slots take an element (in TSX also a component: `header={Header}`). They are cells of their own, never recycled, and they are reactive like any other element: a slot that is one `<If>` or `<Each>` follows its condition or its items, and a component is called once.
 
 ## Columns and grids
 

@@ -1,9 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, Switch, Toggle } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { button, buttonText, desktop, Inspector, Panel, size, Stage, switchLook, ui, wide } from "./palette";
 
-const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`;
-const thumb = desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5";
 
 function App() {
   const presses = signal(0);
@@ -34,10 +32,7 @@ function App() {
       checked={disabled()}
       onChange={({ checked }) => disabled.set(checked)}
       class={`flex-row items-center gap-2 active:opacity-70 ${desktop && !wide() ? "self-start" : ""}`}
-      trackClass={track}
-      trackStyle={disabled() ? ui().accentFill : ui().inset}
-      thumbClass={thumb}
-      thumbStyle={disabled() ? { backgroundColor: ui().onAccent } : ui().raised}
+      {...switchLook(() => disabled())}
     >
       <Text style={label()}>{wide() ? (disabled() ? "Enable it" : "Disable it") : disabled() ? "Enable the button above" : "Disable the button above"}</Text>
     </Switch>

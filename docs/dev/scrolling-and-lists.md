@@ -47,7 +47,7 @@
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
   below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `alignment` (`bottom`, GPUI's `ListAlignment::Bottom`: rows in reading order, opens at the end with no scroll command to pin, follows it within `follow_end` or a point's rounding, `ListState::anchor_end`; it waits for an appended last row's measurement the window will reach, so one scroll lands on its real size; short content lies at the bottom, `ListState::leading`), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
-  `footer` / `empty` / `separator` (a component or an element), `contentStyle`
+  `footer` / `empty` / `separator` (a component, called once and untracked, or an element; a signal or memo, as `<If>` and `<Each>` are, is the slot's insert's to track: `slot` in `nsh-js` `list.rs`, `web/browser/list.js`), `contentStyle`
   (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
   `onLoadMoreAtStart` + `loadMoreAtStartThreshold` (below), `onViewableItemsChange` +
   `viewabilityConfig` (`itemVisibleThreshold` / `viewAreaCoverageThreshold` / `minimumViewTime`), `keyExtractor`,
@@ -95,7 +95,9 @@
   `refreshing`, `refreshIndicator`, `pullValue`, paging and snapping, `contentInset`, `scrollbar`, `scrollable`,
   `keyboardDismissMode`) and what needs a scroll view of the list's own (`inverted`,
   `maintainVisibleContentPosition`) are ignored there, each warned of once; a zoomable scroll view around it is not
-  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Lists of their
+  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Its props carry
+  `ViewProps::screen_order` (its axis): the platforms read its cells in the order they are on screen, as they read a
+  scroll view's content, since recycled cells are not in their rows' order in the tree. Lists of their
   own pay nothing (`crates/nsh-core/src/core/parent_viewport.rs`).
 - **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`.
 - **Paced binding** (the runtime's lists): what shows binds in the commit that assigns it (the viewport, sticky items,

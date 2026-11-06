@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -1985,6 +1985,124 @@ async fn dictate() -> String {
 > 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"speech": true` 授予语音。没有授予时 `Speech.start` 抛出一个
 > `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`，`resource` 为 `""`。在 Rust 中，会话以
 > `not-allowed` 结束，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+
+## Sound
+
+两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 的音效用 GStreamer、播放器用 GTK 的媒体流（播放器的速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
+
+```rust tabs
+use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
+```
+
+```tsx tabs
+import { AudioPlayer, Sound } from "nsh";
+```
+
+```ts
+declare class Sound {
+  static available(): Promise<boolean>;
+  static load(src: string): Promise<Sound>;
+  play(options?: { volume?: number; rate?: number }): void;
+  stop(): void;
+  readonly duration: number;
+  dispose(): void;
+}
+
+declare class AudioPlayer {
+  constructor(src: string, options?: { volume?: number; rate?: number; loop?: boolean });
+  static available(): Promise<boolean>;
+  on(event: "load", listener: (load: { duration: number }) => void): () => void;
+  on(event: "progress", listener: (progress: { currentTime: number; duration: number }) => void): () => void;
+  on(event: "buffer", listener: (buffer: { buffering: boolean }) => void): () => void;
+  on(event: "end", listener: () => void): () => void;
+  on(event: "error", listener: (error: { code: AudioErrorCode; message: string }) => void): () => void;
+  play(): Promise<void>;
+  preload(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  volume: number;
+  rate: number;
+  loop: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly state: "idle" | "loading" | "playing" | "paused" | "ended";
+  dispose(): void;
+}
+
+type AudioErrorCode =
+  | "not-allowed" | "network" | "decode" | "not-supported"
+  | "quota-exceeded" | "unavailable" | "failed";
+```
+
+| TSX | Rust |
+|---|---|
+| `await Sound.available()` | `audio_available().await -> bool` |
+| `await Sound.load(src)` | `load_sound(src).await -> Result<Sound, AudioFailure>` |
+| `sound.play({ volume, rate })` | `sound.play(volume, rate)` |
+| `new AudioPlayer(src, options)` | `audio_player(src, settings) -> AudioPlayer` |
+| `player.on("progress", ...)` | `player.next().await -> Option<AudioEvent>` |
+| `player.play()` / `pause()` / `seek(s)` | `player.play()` / `pause()` / `seek(duration)`（drop 即关闭） |
+
+### Sound.load
+
+从打包资源的路径（`"sounds/click.wav"`）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+
+### Sound.play
+
+在正在播放的声音之上再起一路播放（同时最多 32 路，超出时最早的一路停止），音量 `volume`（0 到 1）、速率 `rate`（0.5 到 2，音高随之变化）。它没有返回值，设备静音或没有输出时也不会失败——那就是静音。超出范围的值抛出 `RangeError`。`stop()` 停止这个音效的所有播放。
+
+```tsx
+import { Sound, View } from "nsh";
+
+const tap = await Sound.load("sounds/tap.wav");
+
+function Key(props: { label: string }) {
+  return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
+}
+```
+
+### AudioPlayer
+
+播放器在 `play()` 或 `preload()` 之前什么都不加载。它的 `state` 和 `currentTime` 跟随平台的报告：知道时长后来一次 `load`（直播流为 `Infinity`），播放期间以及跳转之后约每秒四次 `progress`，等待数据时 `buffer`，播到结尾时 `end`（循环的播放器则从头再播）。`play()` 在开始播放后 resolve，出错时按 `error` 报告的原因 reject。播放器在 `dispose()` 时停止，或在创建它的一方离开时停止：播放期间请一直持有它。
+
+```tsx
+import { AudioPlayer, signal } from "nsh";
+
+const position = signal(0);
+const voice = new AudioPlayer("https://example.com/messages/42.m4a");
+voice.on("progress", ({ currentTime }) => position.set(currentTime));
+voice.on("end", () => position.set(0));
+await voice.play();
+```
+
+```rust
+use nsh_core::{audio::{AudioEvent, PlayerSettings}, prelude::*};
+
+async fn play_message(url: &str) {
+    let mut player = audio_player(url, PlayerSettings::default());
+    player.play();
+    while let Some(event) = player.next().await {
+        if event == AudioEvent::Ended {
+            break;
+        }
+    }
+}
+```
+
+### 格式
+
+音效和播放器播放平台能解码的格式。WAV 和 AAC（`.m4a`）在所有平台都能播放，适合音效；AAC 和 MP3 适合播放器。
+
+### 嵌入 NSH 的应用
+
+以自己的方式播放声音的宿主应用，给引擎一个 `AudioBackend`（`nsh_core::audio`，`EngineConfig::audio`）：它收到每条 `AudioCommand` 以及对应音效或播放器的 `AudioSink`，可以从任意线程向其报告。此时平台不播放任何声音。
+
+### 测试
+
+`nsh test` 在 headless 运行中把声音交给一个假扬声器：音效按 WAV 解码（时长取自文件头），播放器立即播放其源的一分钟，`app.endAudio()` 让正在播放的播放器播到结尾，`app.audio()` 列出应用发出的请求（`load`、`play`、`open`、`resume`、`seek` 等）。参见[测试](../docs/testing-and-trace.md)。
+
+> [!NOTE]
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，出声需要授权 `"audio": true`。未授权时 `Sound.load` 会 reject、`new AudioPlayer` 会抛出 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`、`permission` 为 `"audio"`、`resource` 为音源。Rust 中加载或播放器以 `not-allowed` 失败。参见[沙箱与 capability](../docs/sandbox-and-capabilities.md)。
 
 ## Storage
 

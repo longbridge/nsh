@@ -51,6 +51,9 @@ nsh-core = { workspace = true, features = ["svg", "loader"] }
 nsh-engine = { workspace = true, features = ["net"] }
 nsh-base.workspace = true
 gtk4.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-audio.workspace = true
 # GIF and WebP (first frame), which GDK cannot decode without gdk-pixbuf loaders;
 # JPEG (and PNG) shrunk to the size a view shows them at.
 image = { workspace = true, features = ["gif", "jpeg", "webp"] }

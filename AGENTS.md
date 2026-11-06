@@ -328,7 +328,8 @@ cd website && bun run dev                                                       
 host it is an empty crate, so always run clippy on platform code with the Catalyst target. Likewise
 `nsh-platform-android` is empty off Android: check it with `cargo xtask android` (which sets up the NDK linker, `CC`,
 `AR` and bindgen's sysroot) and `cargo xtask clippy-android`. `nsh-platform-linux` and its hosts are empty off Linux:
-check them on Linux, with the GTK 4 (≥ 4.14) development packages installed. `nsh-platform-macos` and its hosts are
+check them on Linux, with the GTK 4 (≥ 4.14) and GStreamer (core and base plug-ins, for sounds) development packages
+installed. `nsh-platform-macos` and its hosts are
 empty off macOS (`target_os = "macos"`, not Catalyst). `nsh-platform-windows` and its hosts are empty off Windows:
 check them on Windows, with the MSVC Build Tools, the Windows SDK and LLVM (libclang for QuickJS' bindings);
 `RUST_MIN_STACK=268435456` if rustc overflows its stack on the `windows` crate. The GPUI backend (`crates/gpui`) is
