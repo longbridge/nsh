@@ -2246,7 +2246,10 @@ const report = (v) => text(String(v));
     /// environment reports (a test's, which moves no local time): the
     /// zone `resolvedOptions()` gives formats as local time does, at any
     /// instant. On a machine outside UTC the reported `UTC` is not local
-    /// time; on one in UTC, `+08:00` is not.
+    /// time; on one in UTC, `+08:00` is not. It holds under any `TZ`:
+    /// `Asia/Singapore` (+07:30 at epoch 0), `JST-9`, and
+    /// `CET-1CEST,M3.5.0,M10.5.0/3`, whose summer instant shows a zone
+    /// named by one offset.
     #[test]
     fn intl_names_the_zone_it_formats_local_time_in() {
         let host = Host::new().unwrap();

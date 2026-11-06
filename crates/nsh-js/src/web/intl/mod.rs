@@ -17,7 +17,9 @@
 //! the web), or where that is out of its sight (Windows, Android) as the
 //! platform reports it (`Environment::time_zone`, `timeZone()`), so on a
 //! device `timeZone()` names it too. `resolvedOptions().timeZone` gives the
-//! name and a `timeZone` naming it is local time. A test's zone
+//! name and a `timeZone` naming it is local time; a `TZ` holding a POSIX
+//! rule (`CET-1CEST,M3.5.0,M10.5.0/3`) is named by its text, so its
+//! daylight saving time stays. A test's zone
 //! (`open({ timeZone })`) names the device's zone without moving local
 //! time, so `Intl` keeps naming the machine's. TypeScript declares all of
 //! it in its ECMAScript library (`lib.es2023`), so `globals.d.ts` does not.
@@ -573,10 +575,12 @@ fn local_zone_name(cx: Ctx) -> R<Option<String>> {
 /// What the system tells of the zone local times are computed in.
 #[derive(Debug, PartialEq)]
 enum SystemZone {
-    /// The zone's name (`Europe/Berlin`, `GMT`).
+    /// The zone's name (`Europe/Berlin`, `GMT`), or the `TZ` local times
+    /// follow by its own text (`CET-1CEST,M3.5.0,M10.5.0/3`): a POSIX rule
+    /// names no zone, but a `timeZone` naming it is local time, its
+    /// daylight saving time included, which no offset would be.
     Named(String),
-    /// A zone without a name: the C library follows `TZ`'s POSIX rule
-    /// (`JST-9`).
+    /// A zone without a name: a `TZ` of nothing but its `:`.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Unnamed,
     /// Nothing: the C library reads the system's setting itself (Windows,
@@ -599,9 +603,9 @@ fn system_zone() -> SystemZone {
 /// The zone `TZ` (`tz`, `None` when unset) names, read as the Linux and
 /// GPUI backends read it for `timeZone()` ([`TimeZone::posix`]), else the
 /// system's (`system`, asked only then). A `TZ` naming no zone but the
-/// system's own file (`:/etc/localtime`) is local time without a name: a
-/// POSIX rule (`JST-9`), which the C library follows, or what it cannot
-/// read, which it takes for UTC.
+/// system's own file (`:/etc/localtime`) is named by its text: a POSIX
+/// rule (`JST-9`), which the C library follows, or what it cannot read,
+/// which it takes for UTC.
 #[cfg(not(target_arch = "wasm32"))]
 fn system_zone_of(tz: Option<&str>, system: impl FnOnce() -> Option<TimeZone>) -> SystemZone {
     let mut asked = false;
@@ -612,9 +616,16 @@ fn system_zone_of(tz: Option<&str>, system: impl FnOnce() -> Option<TimeZone>) -
         known = zone.is_some();
         zone
     });
-    let systems = tz.map(|tz| tz.trim().trim_start_matches(':')) == Some("/etc/localtime");
-    if asked && tz.is_some() && !systems {
-        SystemZone::Unnamed
+    let text = tz.map(|tz| {
+        let tz = tz.trim();
+        tz.strip_prefix(':').unwrap_or(tz)
+    });
+    if let Some(text) = text.filter(|text| asked && *text != "/etc/localtime") {
+        if text.is_empty() {
+            SystemZone::Unnamed
+        } else {
+            SystemZone::Named(text.to_owned())
+        }
     } else if known {
         SystemZone::Named(zone.as_str().to_owned())
     } else {
@@ -1258,10 +1269,17 @@ mod tests {
         // Unset, or the system's own file: the system's zone.
         assert_eq!(zone(None), named("Asia/Singapore"));
         assert_eq!(zone(Some(":/etc/localtime")), named("Asia/Singapore"));
-        // A POSIX rule is local time without a name, not the system's zone
-        // (nine hours from Singapore's).
-        assert_eq!(zone(Some("JST-9")), Unnamed);
-        assert_eq!(zone(Some("CET-1CEST,M3.5.0,M10.5.0/3")), Unnamed);
+        // A POSIX rule is local time named by its text, not the system's
+        // zone (nine hours from Singapore's), nor one offset: a `timeZone`
+        // naming it keeps its daylight saving time.
+        for rule in ["JST-9", "<+08>-8", "CET-1CEST,M3.5.0,M10.5.0/3"] {
+            assert_eq!(zone(Some(rule)), named(rule));
+            assert_eq!(zone(Some(&format!(":{rule}"))), named(rule));
+        }
+        // What the C library cannot read (it takes UTC) is named as set,
+        // and a lone `:` is local time without a name.
+        assert_eq!(zone(Some("Not a zone")), named("Not a zone"));
+        assert_eq!(zone(Some(":")), Unnamed);
         // Where nothing tells (Windows, Android), nothing known: the
         // platform's report is asked instead.
         assert_eq!(system_zone_of(None, || None), Unknown);
