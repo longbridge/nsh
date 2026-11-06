@@ -369,6 +369,8 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
   "CGColor",
   "CGColorSpace",
   "CGContext",
+  "CGDirectDisplay",
+  "CGDisplayConfiguration",
   "CGEvent",
   "CGEventTypes",
   "CGGradient",

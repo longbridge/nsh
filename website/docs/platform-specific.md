@@ -103,7 +103,7 @@ What an element means on every platform is a top-level prop (in Rust a method of
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (the window: `set_title`, `set_title_bar`, `title_bar`, `minimize`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_level`, `order_front`, `close_window`; the app: `quit`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (the window: `set_title`, `set_title_bar`, `title_bar`, `minimize`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `set_level`, `order_front`, `close_window`, `window_state`, `displays`; the app: `quit`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
@@ -165,8 +165,9 @@ Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building
 
 | Export | Description |
 |---|---|
-| `Window` | The window: `setTitle`, `setTitleBar({ style: "hidden" })` for a title bar of the app's own, `minimize`, `toggleMaximize`, `toggleFullScreen`, `close`. |
+| `Window` | The window: `setTitle`, `setTitleBar({ style: "hidden" })` for a title bar of the app's own, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setBounds` to open it as the user left it, `close`. |
 | `titleBar` | The hidden title bar's height and the room the system's window controls take (reactive). |
+| `windowState`, `displays` | The window's bounds, mode and display, and the displays (reactive). |
 | `Menu` | `setApplicationMenu(items)` (the menu bar, with shortcuts) and `popup(items, at?)` (context menus). An item's `icon` is an image as `<Image>`'s `src` takes it, so menus show the app's own icon set: an SVG takes the color of the menu's text, a bitmap keeps its colors. macOS and Windows show it; GTK's menus show no icon beside a label. |
 | `isAvailable` | `true` where the window and menu APIs work: macOS, Windows and Linux. Desktop browsers have `platform.desktop` and keep the browser's window and menus. |
 
