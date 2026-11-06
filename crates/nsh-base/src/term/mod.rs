@@ -335,9 +335,41 @@ fn row(
         let cursor = emu.cursor()?;
         (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
     });
+    let backgrounds = line.clone();
     view()
         .h(move || Length::from(props.line_height.get()))
         .justify_center()
+        // The cells' backgrounds fill the whole row, as a terminal's do
+        // (a span's background would only cover the glyphs' ink).
+        .child(dynamic(move || {
+            let cw = cell_width.get();
+            let mut col = 0usize;
+            let mut boxes = Vec::new();
+            for run in backgrounds.get().runs {
+                let cols = text_width(&run.text);
+                if let (_, Some(bg)) = colors(run.style) {
+                    boxes.push(
+                        view()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(Length::from(cw * col as f32))
+                            .w(Length::from(cw * cols as f32))
+                            .bg(bg)
+                            .into_element(),
+                    );
+                }
+                col += cols;
+            }
+            view()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .right_0()
+                .pointer_events(PointerEvents::None)
+                .children(boxes)
+        }))
         .child(dynamic(move || {
             text("").select_text().children(
                 line.get()
@@ -363,20 +395,34 @@ fn row(
         ))
 }
 
+/// How many cells `text` takes (a wide character two).
+fn text_width(text: &str) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    text.chars().map(|c| c.width().unwrap_or(0)).sum()
+}
+
+/// A run's text and cell colors, `None` the defaults, swapped when it is
+/// inverse (the defaults then the theme's, in either appearance).
+fn colors(s: TerminalStyle) -> (Option<AdaptiveColor>, Option<AdaptiveColor>) {
+    let (fg, bg) = (
+        s.fg.map(|c| AdaptiveColor::from(color(c))),
+        s.bg.map(|c| AdaptiveColor::from(color(c))),
+    );
+    if !s.inverse {
+        return (fg, bg);
+    }
+    let theme = theme();
+    (
+        Some(bg.unwrap_or(theme.background)),
+        Some(fg.unwrap_or(theme.foreground)),
+    )
+}
+
 fn run_view(run: TerminalRun) -> AnyElement {
     let s = run.style;
-    let (mut fg, mut bg) = (s.fg.map(color), s.bg.map(color));
-    if s.inverse {
-        let default_fg: Hsla = theme().foreground.light;
-        let default_bg: Hsla = theme().background.light;
-        (fg, bg) = (bg.or(Some(default_bg)), fg.or(Some(default_fg)));
-    }
     let mut el = text(run.text);
-    if let Some(fg) = fg {
+    if let (Some(fg), _) = colors(s) {
         el = el.text_color(fg);
-    }
-    if let Some(bg) = bg {
-        el = el.bg(bg);
     }
     if s.bold {
         el = el.font_weight(FontWeight::BOLD);
