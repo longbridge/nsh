@@ -553,7 +553,7 @@ fn add_files(
     let mut zip = ZipWriter::new(fs::File::create(out)?);
     for i in 0..input.len() {
         let file = input.by_index_raw(i)?;
-        let name = file.name().to_owned();
+        let name = file.name()?.into_owned();
         if layout.linked.is_empty() {
             zip.raw_copy_file(file)?;
         } else if name == "AndroidManifest.xml" {

@@ -100,8 +100,9 @@ struct Ipa {
 impl Ipa {
     fn read(file: &mut File) -> anyhow::Result<Self> {
         let mut zip = zip::ZipArchive::new(file).context("read IPA archive")?;
-        let paths: Vec<_> = zip
-            .file_names()
+        let names = zip.file_names().collect::<Result<Vec<_>, _>>()?;
+        let paths: Vec<String> = names
+            .iter()
             .filter(|name| {
                 let parts: Vec<_> = name.split('/').collect();
                 parts.len() == 3
@@ -109,7 +110,7 @@ impl Ipa {
                     && parts[1].ends_with(".app")
                     && parts[2] == "Info.plist"
             })
-            .map(str::to_owned)
+            .map(ToString::to_string)
             .collect();
         ensure!(
             paths.len() == 1,
