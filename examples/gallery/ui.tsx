@@ -1,7 +1,7 @@
 // Gallery shell and navigation. Reusable components and visual rules live
 // in the repository's internal nsh-gallery-ui layer.
 import type { Bounds, JSX, ScrollProps } from "nsh";
-import { computed, Image, Scroll, signal, Text, View } from "nsh";
+import { Canvas, computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
 import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
@@ -173,6 +173,48 @@ export function ToolButton(props: { icon: IconName; label: string; title?: strin
 
 /** NSH's mark, sharp at any size, in the appearance shown (its dot is dark
  * on light backgrounds); none in the terminal. */
+/** The index's opening, in the banner's composition: the mark, the name and
+ * its slogan in citrus, over the banner's halftone fading in from the top
+ * right. Text only in the terminal, which has no canvas to draw dots on. */
+export function Banner() {
+  return (
+    <View style={{ marginHorizontal: 16, paddingHorizontal: 20, paddingVertical: 22, gap: 14, borderRadius: 16, borderCurve: "continuous", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, overflow: "hidden" }}>
+      {!terminal && (
+        <Canvas
+          style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+          draw={(cx, { width, height }) => {
+            const cell = 12;
+            const dot = alpha(colors.text, isDark() ? 0.3 : 0.24);
+            const lit = colors.accent;
+            for (let y = cell / 2; y < height; y += cell) {
+              for (let x = cell / 2; x < width; x += cell) {
+                // Strongest at the top right, gone before the copy.
+                const d = Math.hypot((width - x) / (width * 0.75), y / (height * 1.3));
+                const k = 1 - d;
+                if (k <= 0) continue;
+                const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+                const r = (0.5 + 1.9 * k) * (0.55 + 0.45 * (n - Math.floor(n)));
+                cx.fillStyle = (n - Math.floor(n)) > 0.95 && k > 0.45 ? lit : dot;
+                cx.beginPath();
+                cx.arc(x, y, r, 0, Math.PI * 2);
+                cx.fill();
+              }
+            }
+          }}
+        />
+      )}
+      <Logo size={44} />
+      <View style={{ gap: 4 }}>
+        <Text style={{ fontSize: 28, fontWeight: "600", letterSpacing: -0.6, color: colors.text }}>Native Shell</Text>
+        <Text style={{ fontSize: 16, color: colors.accent }}>Build once, native everywhere</Text>
+      </View>
+      <Text style={{ fontSize: 13, lineHeight: 19, color: colors.muted }}>Every demo here is native UI from one TSX app, on {platformNames}.</Text>
+    </View>
+  );
+}
+
+const platformNames = "macOS, Windows, Linux, iOS, Android, the web and the terminal";
+
 export function Logo(props: { size: number }) {
   if (terminal) return null;
   return <Image src={isDark() ? logoDark : logoLight} style={{ width: props.size, height: props.size }} />;
