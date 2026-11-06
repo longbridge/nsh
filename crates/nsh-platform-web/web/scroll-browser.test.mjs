@@ -63,11 +63,14 @@ test('a scroll view\'s content takes the reading order it has on screen', { skip
       try {
         if (!CSS.supports('reading-flow', 'source-order')) throw Error('unsupported');
         const style=document.createElement('style'); style.textContent=KEYFRAMES; document.head.append(style);
-        for (const horizontal of [false,true]) {
+        // A list of its own each way, and a list in its parent's viewport:
+        // a plain view whose props say its cells are read in screen order.
+        for (const mode of ['vertical','horizontal','page']) {
+          const horizontal=mode==='horizontal', page=mode==='page';
           const list=document.createElement('div');
-          list.className='nsh-v nsh-scroll';
+          list.className=page?'nsh-v':'nsh-v nsh-scroll';
           list.style.cssText='left:0;top:0;width:300px;height:200px;';
-          list._id=1; list._kind='scroll'; list._horizontal=horizontal;
+          list._id=1; list._kind=page?'view':'scroll'; list._horizontal=horizontal; list._events=new Set();
           list._content=horizontal?[2000,200]:[300,2000];
           document.body.append(list);
           const player=Object.create(Player.prototype);
@@ -81,14 +84,15 @@ test('a scroll view\'s content takes the reading order it has on screen', { skip
             const cell=document.createElement('div'); cell.className='nsh-v'; cell._id=id; cell._kind='view';
             cell.tabIndex=0; player.views.set(id,cell);
           }
+          if (page) player.apply([['vp',1,{pointerEvents:'auto',hitSlop:[0,0,0,0],role:'none',screenOrder:'vertical'}]]);
           player.apply(rows.flatMap(([id,row])=>[['i',1,id,null],['f',id,...frame(row)]]));
           if (list.style.readingFlow!=='source-order') throw Error('reading flow: '+list.style.readingFlow);
-          player.apply([['sticky',1,[[8,120,400]]]]);
+          if (!page) player.apply([['sticky',1,[[8,120,400]]]]);
           player.apply([['f',4,...frame(5)]]);
           const order=[...list.children].filter(c=>c._id!==undefined||c._list)
             .sort((a,b)=>Number(a.style.readingOrder)-Number(b.style.readingOrder))
             .map(c=>(c._list?c.firstElementChild:c)._id);
-          if (order.join()!=='6,8,2,4' || !list.querySelector('.nsh-track')) throw Error('reading order: '+order.join());
+          if (order.join()!=='6,8,2,4' || (!page && !list.querySelector('.nsh-track'))) throw Error('reading order: '+order.join());
           // The DOM, which is the paint order, is left alone.
           const dom=[...list.querySelectorAll('[tabindex]')].map(c=>c._id);
           if (dom.join()!=='2,4,6,8') throw Error('dom order: '+dom.join());

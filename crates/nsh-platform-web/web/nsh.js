@@ -1921,7 +1921,7 @@ class Player {
     if (!READING_ORDER || !parent) return;
     // A sticky cell is in a track among the other cells.
     const host = parent._list ? parent.parentNode : parent;
-    if (host && (host._kind === "scroll" || host.classList.contains("nsh-layer"))) (this.readingHosts ??= new Set()).add(host);
+    if (host && (host._kind === "scroll" || host._screenOrder || host.classList.contains("nsh-layer"))) (this.readingHosts ??= new Set()).add(host);
   }
 
   /** Tab and screen readers go through a scroll view's content in the
@@ -1933,8 +1933,8 @@ class Player {
    * animations and reload frames inside them). */
   orderReading() {
     for (const host of this.readingHosts) {
-      const scroll = host._kind === "scroll" ? host : host.parentNode;
-      const horizontal = !!scroll?._horizontal;
+      const scroll = host._kind === "scroll" || host._screenOrder ? host : host.parentNode;
+      const horizontal = scroll?._screenOrder ? scroll._screenOrder === "horizontal" : !!scroll?._horizontal;
       const kids = [];
       for (const child of host.children) {
         const f = (child._list ? child.firstElementChild : child)?._frame;
@@ -2436,6 +2436,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._props = props;
+    // A list in its parent's viewport: its cells are read in screen order.
+    if (el._screenOrder !== props.screenOrder) {
+      el._screenOrder = props.screenOrder;
+      this.readingChanged(el);
+    }
     if (props.testID) el.dataset.testid = props.testID;
     else delete el.dataset.testid;
     const pe = props.pointerEvents;
