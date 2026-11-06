@@ -1823,6 +1823,12 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 `show` 的结果表示系统是否接收了这条通知；没有权限时为 `false`。应用在前台时通知照常显示。用相同的 `id` 再次显示会替换旧通知，`Notifications.close(id)` 用于移除。
 
+`silent: true` 让通知显示时不发声、不振动，与 Web 的 `Notification` 一致；默认播放系统提示音。Apple 平台显示不带声音的通知，Android 把它放进不提醒的分组（无声音、振动和弹出横幅），Windows 显示静音的 toast，Linux 附带通知服务的 `suppress-sound` 提示，Web 把 `silent` 交给浏览器。
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
 ### Notifications.on
 
 `press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。

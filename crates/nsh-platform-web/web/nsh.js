@@ -5674,7 +5674,7 @@ class Player {
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
-      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3]); break;
+      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
@@ -6100,11 +6100,11 @@ class Player {
 
   // `Notifications.show`: replaces the one of the same id (`tag`). Android's
   // browsers have the class but throw: only a service worker shows there.
-  showNotification(request, id, title, body) {
+  showNotification(request, id, title, body, silent) {
     let shown = false;
     if (window.Notification.permission === "granted") {
       try {
-        const notification = new window.Notification(title, { body, tag: id });
+        const notification = new window.Notification(title, { body, tag: id, silent });
         notification.onclick = () => {
           window.focus();
           notification.close();

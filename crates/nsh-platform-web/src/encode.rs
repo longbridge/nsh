@@ -1491,6 +1491,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str(&notification.id)
                     .str(&notification.title)
                     .str(&notification.body)
+                    .bool(notification.silent)
                     .end(),
                 N::Close(name) => out
                     .item("cmd")

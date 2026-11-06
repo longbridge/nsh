@@ -101,7 +101,7 @@ expect Permission: unknown
 tap id:notify
 expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
-expect Shown: false
+expect Shown: false false
 covers [nsh] Notifications
 # mod-url-scheme
 tap id:case-mod-url-scheme
