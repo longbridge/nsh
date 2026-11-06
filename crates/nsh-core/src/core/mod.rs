@@ -4474,6 +4474,20 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::Semantic(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.semantic != value {
+                    props.semantic = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
+            Prop::Href(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.href != value {
+                    props.href = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::WindowDrag(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.window_drag != value {

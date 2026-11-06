@@ -436,6 +436,35 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
 
+### The page's markup
+
+On the web each view is an HTML element. `semantic` names the element a view or text is drawn as, so search engines
+and screen readers see the page's headings, paragraphs, links and landmarks; its layout, styles and events stay the
+view's. The other platforms draw the view as they always do.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `semantic` | `.semantic(Semantic::H1)` | `"h1"` … `"h6"`, `"p"`, `"a"`, `"nav"`, `"header"`, `"footer"`, `"main"`, `"article"`, `"section"`, `"aside"`, `"ul"`, `"ol"`, `"li"`, `"strong"`, `"em"`, `"blockquote"`, `"figure"`, `"figcaption"`, `"time"`, `"address"` | The HTML element the web draws the view as. |
+| `href` | `.href(url)` | `string` | Where a `semantic="a"` view links to: a URL, or a path of the site. Crawlers follow it; a click with a modifier key or the middle button opens it as a browser link does, and a plain press is the view's `onPress`. |
+
+```rust tabs
+use nsh_core::{Semantic, prelude::*};
+
+view()
+    .semantic(Semantic::A)
+    .href("/notes/q3-earnings")
+    .on_press(move || routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").semantic(Semantic::H2))
+```
+
+```tsx tabs
+<View semantic="a" href="/notes/q3-earnings" onPress={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text semantic="h2">Q3 earnings</Text>
+</View>
+```
+
+[The web](../docs/web.md#search-engines) shows a whole site built this way.
+
 ### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh.md#animation) that move on the UI thread, with no

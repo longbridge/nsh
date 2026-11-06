@@ -13611,6 +13611,61 @@ fn window_drag_is_a_view_prop() {
     ));
 }
 
+/// `semantic` and `href` reach the platform in the view's props (the web
+/// draws the view as that HTML element), and clearing them sends the props
+/// again.
+#[test]
+fn semantic_and_href_are_view_props() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Semantic(Some(crate::Semantic::A)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Href(Some("/notes/q3".into())),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props }
+            if props.semantic == Some(crate::Semantic::A)
+                && props.href.as_deref() == Some("/notes/q3")
+    )));
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Semantic(None),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Href(None),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.semantic.is_none() && props.href.is_none()
+    )));
+}
+
 /// `focusable={false}` reaches the platform in the view's props.
 #[test]
 fn focusable_is_a_view_prop() {

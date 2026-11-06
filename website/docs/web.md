@@ -455,6 +455,32 @@ The [gallery](/gallery) loads each demo this way: `lazy` (in `examples/gallery/u
 const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 ```
 
+## Search engines
+
+A site published with `nsh package --target web` is a site search engines index and link previews read: its views
+carry the document's structure, each page of a stack has a URL of its own, and each page sets the document's title
+and description. The app stays one app: the same code draws the same screens on the phones and the desktops.
+
+### Headings, paragraphs and links
+
+`semantic` draws a view or a text as the HTML element it names, and `href` gives a link view its target
+([the page's markup](../elements/index.md#the-pages-markup)). The element keeps the view's layout, styles and events,
+so the page looks and behaves as before, and its markup reads as a document:
+
+```tsx
+<View semantic="article">
+  <Text semantic="h1">{note.title}</Text>
+  <Text semantic="time">{note.date}</Text>
+  <Each of={note.body}>{(paragraph) => <Text semantic="p">{paragraph()}</Text>}</Each>
+  <View semantic="a" href="/" onPress={() => nav.pop()}>
+    <Text>All notes</Text>
+  </View>
+</View>
+```
+
+A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, and a
+click with a modifier key or the middle button opens it in a new tab.
+
 ## Limits
 
 The browser decides these, and the web backend follows it:

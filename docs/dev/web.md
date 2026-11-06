@@ -828,6 +828,23 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   Headless `nsh test` runs the same module for each app a test opens (`nsh_testing` `page_host.rs`,
   `docs/dev/tooling.md` "Headless runs").
 
+## Search engines
+
+A site published with `nsh package --target web` can be read by search engines and link previews as server-rendered
+HTML is: its views carry the document's structure, its pages are URLs, and its head says what each page is.
+Prerendering (writing each URL's first screen as static HTML ahead of time, or on demand as incremental static
+regeneration does) is a tool of the site's own beside NSH; `examples/seo-site` is one (`server.mjs`, `render.mjs`).
+
+**Semantic elements.** A view's or text's `semantic` (`Prop::Semantic`, `ViewProps::semantic`, the `Semantic`
+enum) and `href` (`Prop::Href`) go to the web in the view's props (`encode.rs` `props_json`). `nsh.js` `retag`
+replaces the view's element by one of that tag (`h1`, `p`, `a`, `nav`, ...), carrying its attributes, children and
+fields and taking its place in `views`; views whose element is a control of its own (images, scroll views, canvases,
+inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the browser's margins, fonts, colors, underlines
+and list markers off those tags, so the view looks as a `div` does. A link view gets `href` and is not draggable; a
+plain click on it stays the app's (`onPress`; the root's `click` listener prevents the browser's navigation), a click
+with a modifier key or the middle button opens `href` as the browser does. The other backends store the props and
+draw nothing differently.
+
 ## Not implemented
 
 Platform services other than the theme color, dialogs, the clipboard and the host; image download progress; a web

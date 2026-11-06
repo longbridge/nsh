@@ -375,6 +375,33 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
 
+### 页面的标记
+
+在 Web 上，每个视图都是一个 HTML 元素。`semantic` 指定视图或文本绘制成的元素，让搜索引擎和屏幕阅读器看到页面的标题、段落、链接和地标区域；布局、样式和事件仍是视图自己的。其他平台照常绘制视图。
+
+| 属性 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `semantic` | `.semantic(Semantic::H1)` | `"h1"` … `"h6"`、`"p"`、`"a"`、`"nav"`、`"header"`、`"footer"`、`"main"`、`"article"`、`"section"`、`"aside"`、`"ul"`、`"ol"`、`"li"`、`"strong"`、`"em"`、`"blockquote"`、`"figure"`、`"figcaption"`、`"time"`、`"address"` | Web 将视图绘制成的 HTML 元素。 |
+| `href` | `.href(url)` | `string` | `semantic="a"` 的视图链接到的地址：一个 URL，或站点内的路径。爬虫会跟随它；按住修饰键点击或用鼠标中键点击时，像浏览器链接一样打开它，普通按压则是视图的 `onPress`。 |
+
+```rust tabs
+use nsh_core::{Semantic, prelude::*};
+
+view()
+    .semantic(Semantic::A)
+    .href("/notes/q3-earnings")
+    .on_press(move || routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").semantic(Semantic::H2))
+```
+
+```tsx tabs
+<View semantic="a" href="/notes/q3-earnings" onPress={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text semantic="h2">Q3 earnings</Text>
+</View>
+```
+
+[Web](../docs/web.md#搜索引擎) 展示了用这种方式构建的完整站点。
+
 ### 驱动动画值的手势
 
 这些属性把手势绑定到[原生动画值](../modules/nsh.md#animation)，值在 UI 线程上变化，每帧都不经过应用代码。参见[触摸与手势](../docs/touch-and-gestures.md)。

@@ -1290,6 +1290,64 @@ pub enum KeyboardDismissMode {
     Interactive,
 }
 
+/// What a view is in a document (`semantic`): the HTML element the web
+/// draws it as, so search engines and readers of the page's markup see
+/// headings, paragraphs, links and landmarks. Only the web reads it; the
+/// layout, styles and events stay the view's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum Semantic {
+    /// A heading of the first level (`<h1>`).
+    H1,
+    /// A heading of the second level (`<h2>`).
+    H2,
+    /// A heading of the third level (`<h3>`).
+    H3,
+    /// A heading of the fourth level (`<h4>`).
+    H4,
+    /// A heading of the fifth level (`<h5>`).
+    H5,
+    /// A heading of the sixth level (`<h6>`).
+    H6,
+    /// A paragraph (`<p>`).
+    P,
+    /// A link (`<a>`), to the view's `href`.
+    A,
+    /// Navigation links (`<nav>`).
+    Nav,
+    /// The header of the page or a section (`<header>`).
+    Header,
+    /// The footer of the page or a section (`<footer>`).
+    Footer,
+    /// The page's main content (`<main>`).
+    Main,
+    /// A self-contained composition (`<article>`).
+    Article,
+    /// A section of a document (`<section>`).
+    Section,
+    /// Content aside from the main content (`<aside>`).
+    Aside,
+    /// An unordered list (`<ul>`).
+    Ul,
+    /// An ordered list (`<ol>`).
+    Ol,
+    /// An item of a list (`<li>`).
+    Li,
+    /// Strong importance (`<strong>`).
+    Strong,
+    /// Emphasis (`<em>`).
+    Em,
+    /// A quotation (`<blockquote>`).
+    Blockquote,
+    /// A figure (`<figure>`).
+    Figure,
+    /// A figure's caption (`<figcaption>`).
+    Figcaption,
+    /// A date or time (`<time>`).
+    Time,
+    /// Contact information (`<address>`).
+    Address,
+}
+
 /// Which point of a page a snapping scroll view aligns to its start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum SnapAlignment {
@@ -2614,6 +2672,16 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `semantic`: what the view is in a document, the HTML element the web
+    /// draws it as (`"h1"`, `"p"`, `"a"`, `"nav"`, ...); the other
+    /// platforms keep the view as it is.
+    #[prop(js = "semantic")]
+    Semantic(Option<Semantic>),
+    /// `href`: where a `semantic="a"` view links to, a URL or a path of the
+    /// site, so crawlers follow it and the browser opens it in a new tab;
+    /// a press still reaches the view's `onPress` (the web).
+    #[prop(js = "href")]
+    Href(Option<Arc<str>>),
     /// `windowDrag` (desktops): pressing the view drags the window, as its
     /// title bar would (double-clicking maximizes it); `false` keeps a part
     /// of a draggable view clickable. The nearest view that sets it

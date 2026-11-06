@@ -1800,6 +1800,20 @@ pub trait Interactive: Element {
         self
     }
 
+    /// What the view is in a document: the HTML element the web draws it
+    /// as (a heading, a paragraph, a link, a landmark), for search engines
+    /// and readers of the page's markup. The other platforms ignore it.
+    fn semantic(mut self, semantic: crate::Semantic) -> Self {
+        super::host::set(self.node(), Prop::Semantic(Some(semantic)));
+        self
+    }
+
+    /// Where a [`Semantic::A`](crate::Semantic::A) view links to (the web).
+    fn href(mut self, href: impl Into<Arc<str>>) -> Self {
+        super::host::set(self.node(), Prop::Href(Some(href.into())));
+        self
+    }
+
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.

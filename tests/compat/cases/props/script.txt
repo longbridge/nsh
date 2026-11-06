@@ -369,6 +369,21 @@ covers [props] accessibilityValue
 covers [props] accessibilityElementsHidden
 covers [props] importantForAccessibility
 covers [props] accessibilityActions
+# props-view-semantic
+tap id:case-props-view-semantic
+expect Notes
+expect Presses: 0
+# The element each is in a document, and a link's target.
+prop id:article semantic article
+prop id:heading semantic h1
+prop id:paragraph semantic p
+prop id:link semantic a
+prop id:link href /notes/q3
+covers [props] semantic
+covers [props] href
+# A press on a link is the view's.
+tap id:link
+expect Presses: 1
 # props-view-styling
 tap id:case-props-view-styling
 # `style`: an object, and a nested list merged left to right.

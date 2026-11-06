@@ -819,6 +819,13 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
+    // The HTML element the view is drawn as (`semantic`), and a link's target.
+    if let Some(tag) = p.semantic {
+        let _ = write!(s, ",\"semantic\":{}", json_str(enum_name(&tag)));
+    }
+    if let Some(h) = &p.href {
+        let _ = write!(s, ",\"href\":{}", json_str(h));
+    }
     // Unset leaves it to the presses (`ViewProps::focus_stop`).
     if let Some(focusable) = p.focusable {
         let _ = write!(s, ",\"focusable\":{focusable}");

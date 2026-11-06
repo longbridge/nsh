@@ -95,9 +95,9 @@ pub use crate::{
         ModalPresentation, ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp,
         PasteBehavior, PasteEvent, PastedFile, PayloadValue, PointerType, PressEvent, Prop,
         ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp,
-        ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
-        WebInput, WebKey, WebLoad, WebSource,
+        ScrollbarSetting, Semantic, SnapAlignment, StatusBarConfig, StatusBarSetting,
+        StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        TransitionFallback, Viewability, WebInput, WebKey, WebLoad, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,
