@@ -169,6 +169,40 @@ pub(crate) fn perform(surface: &Surface, sender: &ProtocolObject<dyn NSDraggingI
     true
 }
 
+/// A drag entering an input's text view (a text area, a field's editor).
+/// AppKit offers a drag to the deepest view registered for one of its
+/// types, and a text view registers for files to insert their paths: local
+/// files over an input inside a file drop target go to that target, as
+/// anywhere else in it (`Some`); any other drag stays the text view's
+/// (`None`), text drags included.
+pub(crate) fn text_entered(
+    surface: &Surface,
+    sender: &ProtocolObject<dyn NSDraggingInfo>,
+) -> Option<NSDragOperation> {
+    Some(begin(surface, sender)).filter(|operation| *operation == NSDragOperation::Copy)
+}
+
+/// A drag moving over an input's text view: [`text_entered`].
+pub(crate) fn text_updated(
+    surface: &Surface,
+    sender: &ProtocolObject<dyn NSDraggingInfo>,
+) -> Option<NSDragOperation> {
+    if !surface.file_drop.offered.get() {
+        return None;
+    }
+    Some(update(surface, sender)).filter(|operation| *operation == NSDragOperation::Copy)
+}
+
+/// A drop on an input's text view: whether the target around it took the
+/// files (`Some`), or `None` for the text view to handle ([`text_entered`]).
+pub(crate) fn text_performed(
+    surface: &Surface,
+    sender: &ProtocolObject<dyn NSDraggingInfo>,
+) -> Option<bool> {
+    (surface.file_drop.offered.get() && target(surface, sender).is_some())
+        .then(|| perform(surface, sender))
+}
+
 fn read_uris(sender: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
     let board = sender.draggingPasteboard();
     let kind = NSString::from_str("public.file-url");

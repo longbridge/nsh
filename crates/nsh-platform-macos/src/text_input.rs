@@ -64,9 +64,9 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSEvent,
-    NSEventModifierFlags, NSEventType, NSFocusRingType, NSFontAttributeName,
-    NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
+    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
+    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
     NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate, NSTextInputClient,
     NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
@@ -1026,8 +1026,68 @@ define_class!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        /// Files dragged over the text go to the file drop target around
+        /// the input ([`crate::file_drop::text_entered`]).
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            area_surface(self)
+                .and_then(|surface| crate::file_drop::text_entered(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), draggingEntered: sender] })
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            area_surface(self)
+                .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), draggingUpdated: sender] })
+        }
+
+        #[unsafe(method(draggingExited:))]
+        fn dragging_exited(&self, sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+            if let Some(surface) = area_surface(self) {
+                crate::file_drop::clear(&surface);
+            }
+            // SAFETY: NSTextView's own method.
+            let _: () = unsafe { msg_send![super(self), draggingExited: sender] };
+        }
+
+        #[unsafe(method(prepareForDragOperation:))]
+        fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            area_surface(self)
+                .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                .is_some()
+                // SAFETY: NSTextView's own method.
+                || unsafe { msg_send![super(self), prepareForDragOperation: sender] }
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            area_surface(self)
+                .and_then(|surface| crate::file_drop::text_performed(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), performDragOperation: sender] })
+        }
+
+        #[unsafe(method(draggingEnded:))]
+        fn dragging_ended(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) {
+            if let Some(surface) = area_surface(self) {
+                crate::file_drop::clear(&surface);
+            }
+            if NSTextView::class().responds_to(sel!(draggingEnded:)) {
+                // SAFETY: NSTextView's own method, when it has one.
+                let _: () = unsafe { msg_send![super(self), draggingEnded: sender] };
+            }
+        }
     }
 );
+
+/// The surface of text area `area`, for its drags.
+fn area_surface(area: &TextArea) -> Option<Rc<Surface>> {
+    area.ivars().get()?.surface.upgrade()
+}
 
 /// A test's paste (`nsh test --target macos`): `content` on a pasteboard of
 /// its own (the machine's clipboard stays as it was), pasted into the
@@ -1149,8 +1209,68 @@ define_class!(
             // SAFETY: NSTextView's own method.
             unsafe { msg_send![super(self), validateUserInterfaceItem: item] }
         }
+
+        /// Files dragged over the text go to the file drop target around
+        /// the input ([`crate::file_drop::text_entered`]).
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            editor_surface(self)
+                .and_then(|surface| crate::file_drop::text_entered(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), draggingEntered: sender] })
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            editor_surface(self)
+                .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), draggingUpdated: sender] })
+        }
+
+        #[unsafe(method(draggingExited:))]
+        fn dragging_exited(&self, sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+            if let Some(surface) = editor_surface(self) {
+                crate::file_drop::clear(&surface);
+            }
+            // SAFETY: NSTextView's own method.
+            let _: () = unsafe { msg_send![super(self), draggingExited: sender] };
+        }
+
+        #[unsafe(method(prepareForDragOperation:))]
+        fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            editor_surface(self)
+                .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                .is_some()
+                // SAFETY: NSTextView's own method.
+                || unsafe { msg_send![super(self), prepareForDragOperation: sender] }
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            editor_surface(self)
+                .and_then(|surface| crate::file_drop::text_performed(&surface, sender))
+                // SAFETY: NSTextView's own method.
+                .unwrap_or_else(|| unsafe { msg_send![super(self), performDragOperation: sender] })
+        }
+
+        #[unsafe(method(draggingEnded:))]
+        fn dragging_ended(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) {
+            if let Some(surface) = editor_surface(self) {
+                crate::file_drop::clear(&surface);
+            }
+            if NSTextView::class().responds_to(sel!(draggingEnded:)) {
+                // SAFETY: NSTextView's own method, when it has one.
+                let _: () = unsafe { msg_send![super(self), draggingEnded: sender] };
+            }
+        }
     }
 );
+
+/// The surface of the input field `editor` edits, for its drags.
+fn editor_surface(editor: &FieldEditor) -> Option<Rc<Surface>> {
+    field_ctx(editor)?.surface.upgrade()
+}
 
 /// The input of the field `editor` edits (its delegate, while it edits).
 fn field_ctx(editor: &FieldEditor) -> Option<Ctx> {
