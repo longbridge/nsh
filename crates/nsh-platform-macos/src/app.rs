@@ -186,6 +186,12 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The app this view runs owns the process's notifications: banners
+    /// show while it is in front, presses come to it and the Dock's badge is
+    /// its (`nsh`'s `Notifications`). An embedding app that has a
+    /// notification center delegate of its own keeps it. Without it the
+    /// permission is `unavailable` and nothing shows. [`run_app`] sets it.
+    pub notifications: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -213,6 +219,7 @@ impl Default for AppOptions {
             data_dir: None,
             cache: Default::default(),
             storage: None,
+            notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
     }
@@ -291,6 +298,9 @@ impl AppView {
         container.addSubview(root);
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
+        if options.notifications {
+            crate::notifications::enable();
+        }
         let view = Rc::new(AppView {
             surface,
             container,
@@ -524,7 +534,7 @@ define_class!(
         // Before launching finishes, or a press that starts the app is lost.
         #[unsafe(method(applicationWillFinishLaunching:))]
         fn will_finish_launching(&self, _notification: &NSNotification) {
-            crate::notifications::install();
+            crate::notifications::enable();
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -675,7 +685,8 @@ fn name_app(name: &str) {
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
 /// The caller can finish cleanup or relaunch after this function returns.
-pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+    options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     // A background app is Prohibited: AppKit does not activate it. An

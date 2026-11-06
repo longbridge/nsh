@@ -63,7 +63,8 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)) and `updater`, which makes desktop packages update themselves
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `ios` and `macos` (the `Info.plist` keys and entitlements
+of their packages, [below](#infoplist-keys-and-entitlements)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
 every key. Unknown keys are an error.
 
@@ -113,7 +114,8 @@ Writes `.nsh/out/<Name>.ipa`, ready for TestFlight, App Store upload tools or di
 profile). What happens:
 
 - The provisioning profile is copied into the app as `embedded.mobileprovision`.
-- The entitlements come from the profile. NSH checks that the profile's application identifier covers the app's `id`
+- The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
+  ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`
   (wildcard profiles such as `TEAMID.*` or `TEAMID.com.example.*` work) and stops with an error otherwise.
 - The app is signed with `codesign` using the identity, then zipped into an `.ipa` (`Payload/<Name>.app`).
 
@@ -212,6 +214,63 @@ and `nsh.<digest>.wasm` (a Rust app's engine and crate; for a TSX app the runtim
 so hosts can cache them for good. Deploy the directory to any web server or CDN; `--run` serves it on
 `http://127.0.0.1:4173/` for you to open. Cache headers and embedding: [Web](./web.md#publish-an-app).
 
+## Info.plist keys and entitlements
+
+NSH writes the `Info.plist` of iOS and macOS packages, and signs them. An app adds keys of its own, such as export
+compliance, an App Store category or App Transport Security exceptions, and entitlements, such as associated domains,
+under `ios` and `macos` in `nsh.json`:
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "ITSAppUsesNonExemptEncryption": false,
+      "LSApplicationCategoryType": "public.app-category.finance",
+      "NSAppTransportSecurity": {
+        "NSExceptionDomains": { "example.com": { "NSIncludesSubdomains": true } }
+      }
+    },
+    "entitlements": {
+      "com.apple.developer.associated-domains": ["applinks:example.com"]
+    }
+  },
+  "macos": {
+    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" },
+    "entitlements": { "com.apple.security.network.client": true }
+  }
+}
+```
+
+Values are written as property list values: strings, numbers (integers or reals), booleans, arrays and objects
+(dictionaries); `null` is an error. A key the app sets replaces NSH's default, so an app may also reword the usage
+descriptions NSH adds or narrow the orientations.
+
+NSH keeps the keys it sets from other `nsh.json` keys or that the packaged app depends on. Setting one is an error that
+says what to set instead:
+
+| Keys | Set from |
+|---|---|
+| `CFBundleIdentifier` | `id` |
+| `CFBundleName`, `CFBundleDisplayName` | `name` |
+| `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
+| `CFBundleURLTypes` | `deepLinks` |
+| iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
+| iOS: `UIUserInterfaceStyle` | `appearance` |
+| iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
+| `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `MinimumOSVersion`, `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `LSMinimumSystemVersion`, `NSPrincipalClass` | the package itself |
+| Entitlements: `application-identifier`, `com.apple.application-identifier`, `com.apple.developer.team-identifier` | `id` and the provisioning profile |
+
+Entitlements:
+
+- **iOS devices** are signed with the entitlements the provisioning profile grants, each of the app's in place of the
+  profile's value. Every entitlement the app names must be one the profile grants, with a value it covers (a profile
+  grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
+  entitlement, so enable its capability for the app's identifier and download the profile again.
+- **The iOS simulator** is signed with the app's entitlements as they are.
+- **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
+  `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
+  `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+
 ## Icons
 
 Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or with `--icon`:
@@ -232,8 +291,9 @@ Without an icon, the system shows its default.
 ## Camera, Bluetooth and other hardware
 
 NSH has no API for the camera, video recording, Bluetooth or location, and `nsh package` cannot make an app that uses
-them: NSH writes the app's `Info.plist` and Android manifest, `nsh.json` has no key that adds to them, and a packaged
-Android app cannot add Java code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
+them: NSH's runtime has no code that reaches this hardware, `nsh.json` adds keys to `Info.plist`
+([above](#infoplist-keys-and-entitlements)) but none to the Android manifest, and a packaged Android app cannot add Java
+code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
 protected hardware without a usage description in `Info.plist`, and the Android manifest of a packaged app declares
 only `INTERNET`.
 

@@ -211,6 +211,23 @@ mod imp {
         view::{Hosted, NshView},
     };
 
+    /// `load()`'s headers, for the document request only (wry adds them
+    /// to no subresource or later navigation). `WebLoad` already refused
+    /// names that are not tokens and values with line breaks.
+    fn headers(load: &nsh_core::WebLoad) -> wry::http::HeaderMap {
+        use wry::http::{HeaderMap, HeaderName, HeaderValue};
+        let mut map = HeaderMap::new();
+        for (name, value) in &load.headers {
+            if let (Ok(name), Ok(value)) = (
+                HeaderName::from_bytes(name.as_bytes()),
+                HeaderValue::from_bytes(value.as_bytes()),
+            ) {
+                map.append(name, value);
+            }
+        }
+        map
+    }
+
     /// What wry only takes when it builds a web view.
     #[derive(Clone, PartialEq)]
     struct BuildKey {
@@ -341,7 +358,7 @@ mod imp {
         }
 
         /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-        /// `injectJavaScript()` and `postMessage()`.
+        /// `injectJavaScript()`, `postMessage()` and `load()`.
         pub(crate) fn command(&self, command: &Command) {
             let webview = self.built.borrow().as_ref().map(|b| b.webview.clone());
             let Some(webview) = webview else {
@@ -357,6 +374,7 @@ mod imp {
                 Command::StopLoading => webview.evaluate_script("window.stop();"),
                 Command::InjectJavaScript(js) => webview.evaluate_script(js),
                 Command::PostMessage(data) => webview.evaluate_script(&post_message(data)),
+                Command::Load(load) => webview.load_url_with_headers(&load.src, headers(load)),
                 _ => Ok(()),
             };
             if let Err(err) = result {

@@ -162,6 +162,10 @@ closes the retained window, stops the engine and returns from `run_app`.
 `nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
 
 
+`AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
+its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
+app's stay yours; `run_app` sets it.
+
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
 cache directory and 256 MiB of images by default).

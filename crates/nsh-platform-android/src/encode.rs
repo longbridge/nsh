@@ -574,6 +574,17 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(9);
                         e.string(data);
                     }
+                    // `WebBox.load`: the URL, then the headers' count and
+                    // each name and value.
+                    Command::Load(load) => {
+                        e.int(46);
+                        e.string(load.src);
+                        e.int(load.headers.len() as i32);
+                        for (name, value) in load.headers {
+                            e.string(name);
+                            e.string(value);
+                        }
+                    }
                     Command::Seek(seconds) => {
                         e.int(10);
                         e.float(seconds as f32);

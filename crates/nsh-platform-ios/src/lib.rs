@@ -44,12 +44,8 @@ mod shader;
 // Sound (`Sound`, `AudioPlayer`), shared with macOS.
 #[path = "../../nsh-platform-macos/src/audio.rs"]
 mod audio;
-// The Speech framework's recognizer, shared with macOS.
-#[path = "../../nsh-platform-macos/src/speech.rs"]
-mod speech;
-// The notification center, shared with macOS.
-#[path = "../../nsh-platform-macos/src/notifications.rs"]
-mod notifications;
+// The Speech framework's recognizer and the notification center, shared with macOS.
+use nsh_platform_apple::{notifications, speech};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

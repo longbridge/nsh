@@ -1645,7 +1645,8 @@ impl Mounter {
                 | Command::GoForward
                 | Command::StopLoading
                 | Command::InjectJavaScript(_)
-                | Command::PostMessage(_)),
+                | Command::PostMessage(_)
+                | Command::Load(_)),
                 Native::Web(web),
             ) => web.command(&c),
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),

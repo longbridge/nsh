@@ -145,6 +145,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The app this view runs owns the process's notifications (`nsh`'s
+    /// `Notifications`). On Linux the desktop portal knows the app by
+    /// [`app_id`](Self::app_id) either way, so notifications show without it
+    /// too; [`run_app`] sets it, as on macOS and Windows.
+    pub notifications: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -167,6 +172,7 @@ impl Default for AppOptions {
             data_dir: None,
             cache: Default::default(),
             storage: None,
+            notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
     }
@@ -406,7 +412,8 @@ fn initial_environment() -> Environment {
 }
 
 /// Runs `source` in a window until it is closed.
-pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
+pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
+    options.notifications = true;
     prefer_gl_on_nvidia();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's

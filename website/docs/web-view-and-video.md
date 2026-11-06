@@ -98,7 +98,7 @@ Events:
 
 ### A browser with back and forward
 
-The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)`, `post_message` / `postMessage(data)` and `send_input` / `sendInput(input)` ([below](#input-as-the-users-own)):
+The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)`, `post_message` / `postMessage(data)`, `load` / `load({ src, headers })` ([below](#signed-in-pages-request-headers)) and `send_input` / `sendInput(input)` ([below](#input-as-the-users-own)):
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -286,6 +286,31 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### Signed-in pages: request headers
+
+To show a page of a service the app has signed in to, send the credential as a header of the page's request rather than in its URL, where history, logs and `Referer` would keep it. The ref's `load` loads a page with headers on that one request:
+
+```rust tabs
+use nsh_core::{WebLoad, prelude::*};
+
+fn open(web: &ElementRef, token: &str) {
+    let headers = vec![("Authorization".to_owned(), format!("Bearer {token}"))];
+    if let Some(load) = WebLoad::new("https://docs.example.com/", headers) {
+        web.load(load);
+    }
+}
+```
+
+```tsx tabs
+web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer ${token}` } });
+```
+
+- Only the page's own request carries the headers: not its images, scripts or other subresources, not its later navigations and not a `reload()`, so a credential reaches no other host the page uses. A page that needs it again (a link, a reload) is loaded again with `load`, with values made for that request (a DPoP proof is bound to its URL).
+- The page then shows as one from `src` does; a later change of the `src` prop loads that page instead.
+- Its host must be one `webview.hosts` allows ([`webview`](./sandbox-and-capabilities.md#webview)), as for `src`; otherwise nothing loads and the core logs which host to add.
+- A header whose name is not an HTTP token or whose value holds a line break throws a `TypeError` (`WebLoad::new` returns `None`), so one header cannot start another. NSH logs the headers' names, never their values.
+- macOS, iOS, Mac Catalyst, Android, Windows, Linux and the GPUI backend send the headers; the browser backend cannot (an iframe has no way to) and does nothing.
 
 ### Input as the user's own
 
