@@ -262,7 +262,7 @@ view()
 | `filter` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`（不写颜色时用文字颜色，与 CSS 相同）；多个之间用空格分隔 | `.brightness(n)`、`.contrast(n)`、`.grayscale(n)`、`.hue_rotate(angle)`、`.invert(n)`、`.saturate(n)`、`.sepia(n)`、`.blur(px(..))` |
 | `backdropFilter` | 作用于视图背后内容的滤镜：`"blur(10px)"`（毛玻璃） | `.backdrop_blur(px(10.0))`、`.backdrop_saturate(n)` 等 |
 | `glassEffect` | `"regular"` 或 `"clear"`，在 iOS 26、macOS 26 及更高版本绘制 Apple 的 Liquid Glass；`"none"`（默认值）使用 `backdropFilter` | `.glass_effect(GlassEffect::Regular)` |
-| `glassTintColor` | 在 macOS 上，玻璃材质染上的颜色；`null`（默认值）使用材质自身的颜色 | `.glass_tint_color(..)` |
+| `glassTintColor` | 在 iOS 26 和 macOS 26 上，玻璃材质染上的颜色；`null`（默认值）恢复系统默认 | `.glass_tint_color(color)` / `.glass_tint_color(None)` |
 | `mixBlendMode` | 视图与其背后内容的混合方式：`"multiply"`、`"screen"`、`"overlay"` 等 | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -316,16 +316,26 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
 ```
 
-`glassTintColor` 在 macOS 上给这层玻璃染色：`null`（或移除该键）恢复材质自身的颜色；没有 `glassEffect` 时不产生效果。iOS 的玻璃不着色。Rust 使用 `.glass_tint_color(..)`。
+`glassTintColor` 在 iOS 26 和 macOS 26 上给玻璃染色：`null`（或移除该键）恢复系统默认。
+显式透明色仍是 tint，不等于重置。没有 `glassEffect` 时不产生效果，更早系统的模糊回退不变。
+Rust 可以直接传颜色，也可以绑定 `Signal<Option<AdaptiveColor>>`：
+
+```rust
+let tint = signal(Some(AdaptiveColor::rgb(0xffd278, 0xffd278)));
+let panel = view().glass_effect(GlassEffect::Regular).glass_tint_color(tint);
+// 在相应的界面操作中：
+tint.set(None); // 恢复原生默认值
+tint.set(Some(AdaptiveColor::rgb(0x5080ff, 0x5080ff)));
+```
 
 ```tsx
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular", glassTintColor: "rgba(255, 210, 120, 0.35)" }} />
 ```
 
-在 macOS 上，`macos={{ backdrop: { material, blending, state } }}` 选择独立的 `NSVisualEffectView` 材质，不需要模糊滤镜。`material` 可取 `"titlebar"`、`"selection"`、`"menu"`、`"popover"`（默认）、`"sidebar"`、`"header-view"`、`"sheet"`、`"window-background"`、`"hud-window"`、`"full-screen-ui"`、`"tool-tip"`、`"content-background"`、`"under-window-background"` 或 `"under-page-background"`；`blending` 为 `"within-window"`（默认）或 `"behind-window"`；`state` 为 `"follows-window-active-state"`、`"active"`（默认）或 `"inactive"`。显式背景优先于 `glassEffect` 和 `backdropFilter`；不设置时，macOS 26 及更高版本使用玻璃，其他版本使用模糊。Rust 使用 `.macos_backdrop(backdrop)`，该结构体标注了 `#[non_exhaustive]`：从 `MacOsBackdrop::default()` 开始，再设置 `material`、`blending` 和 `state`；`None`（默认）保留回退行为。`"behind-window"` 只有在透明窗口中才能显示窗口背后的内容，而只有自己用 `AppOptions { transparent: true, .. }` 打开 `run_app` 窗口的 Rust 宿主才能创建这样的窗口：标准宿主和 runner（`nsh run`、`nsh-macos-app`）保持窗口不透明，混合方式本身也不会让窗口透明。嵌入的 `AppView` 由宿主窗口决定。
+在 macOS 上，`macos={{ backdrop: { material, blending, state } }}` 选择独立的 `NSVisualEffectView` 材质，不需要模糊滤镜。`material` 可取 `"titlebar"`、`"selection"`、`"menu"`、`"popover"`（默认）、`"sidebar"`、`"headerView"`、`"sheet"`、`"windowBackground"`、`"hudWindow"`、`"fullScreenUI"`、`"toolTip"`、`"contentBackground"`、`"underWindowBackground"` 或 `"underPageBackground"`；`blending` 为 `"withinWindow"`（默认）或 `"behindWindow"`；`state` 为 `"followsWindowActiveState"`、`"active"`（默认）或 `"inactive"`。显式背景优先于 `glassEffect` 和 `backdropFilter`；不设置时，macOS 26 及更高版本使用玻璃，其他版本使用模糊。Rust 使用 `.macos_backdrop(backdrop)`，该结构体标注了 `#[non_exhaustive]`：从 `MacOsBackdrop::default()` 开始，再设置 `material`、`blending` 和 `state`；`None`（默认）保留回退行为。`"behindWindow"` 只有在透明窗口中才能显示窗口背后的内容，而只有自己用 `AppOptions { transparent: true, .. }` 打开 `run_app` 窗口的 Rust 宿主才能创建这样的窗口：标准宿主和 runner（`nsh run`、`nsh-macos-app`）保持窗口不透明，混合方式本身也不会让窗口透明。嵌入的 `AppView` 由宿主窗口决定。
 
 ```tsx
-<View macos={{ backdrop: { material: "hud-window", blending: "behind-window" } }} style={{ height: 64 }} />
+<View macos={{ backdrop: { material: "hudWindow", blending: "behindWindow" } }} style={{ height: 64 }} />
 ```
 
 ### 渐进式模糊
@@ -481,7 +491,7 @@ view()
 | `tintColor` | `tint-*` | 重新给 `<Image>` 的不透明像素上色（模板图片、图标） |
 | `borderCurve` | | `"continuous"`：与边平滑衔接的圆角，与系统自身的圆角一致（Apple 的连续圆角） |
 | `glassEffect` | | 在 iOS 26 和 macOS 26 上于视图背后绘制 Apple 的 Liquid Glass，其他平台使用 `backdropFilter` |
-| `glassTintColor` | | 该玻璃在 macOS 上的染色（未设置时使用材质自身的颜色；iOS 的玻璃不着色） |
+| `glassTintColor` | | 该玻璃在 iOS 26 和 macOS 26 上的染色；`null` 恢复原生默认值 |
 | `writingDirection` | | 文字的基础方向：`"auto"`（默认，按内容判断，与平台自带的文字控件一致）、`"ltr"` 或 `"rtl"`；布局方向由 `direction` 设置 |
 | `textAlignVertical` | | 文字比 `<Text>` 的框矮时的位置：`"top"`（默认）、`"center"` 或 `"bottom"` |
 | `textAlign: "auto"` | | 文字的自然一侧，由其方向决定（默认） |

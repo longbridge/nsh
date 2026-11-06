@@ -165,7 +165,7 @@ belong to the app, which owns retention and its storage budget.
   so what the app leaves unpainted shows what is behind the window. Only a custom Rust host that builds `AppOptions`
   itself can ask for it: the development host `nsh-macos-host` (`nsh run` builds it), `nsh-macos-app`'s `setup` (the
   packaged TSX runner and the Rust runner `nsh` generates) keep `AppOptions::default()`'s `false`, so their windows
-  stay opaque, and a `macos={{ backdrop: { blending: "behind-window" } }}` material does not make one transparent by
+  stay opaque, and a `macos={{ backdrop: { blending: "behindWindow" } }}` material does not make one transparent by
   itself. An embedded `AppView` paints no surface background either, but never changes its host's window — the
   embedding app makes that window nonopaque itself.
 
@@ -347,14 +347,14 @@ password required right after sleep) to run tests that way.
   (`multiplyBlendMode` … `plusD` / `plusL`), set on the view's own layer — its content, fill and clipped-child layers
   are its sublayers — and cleared for `normal`; a change never moves it between layers (`visual.rs`).
 - **Backdrops.** `macos={{ backdrop: { material, blending, state } }}` puts an `NSVisualEffectView` below the view with
-  that AppKit material, blending and state (AppKit's own roles: titlebar … under-page-background; defaults popover,
-  within-window, active), whether or not a `backdropFilter` blur is set. Without it, `glassEffect` puts an
+  that AppKit material, blending and state (AppKit's own roles: titlebar … underPageBackground; defaults popover,
+  withinWindow, active), whether or not a `backdropFilter` blur is set. Without it, `glassEffect` puts an
   `NSGlassEffectView` there on macOS 26 and later (looked up at run time, `setStyle:` regular / clear,
   `setCornerRadius:` the shared radius, `glassTintColor` as its `tintColor` where the class has the setter); before,
-  the `backdropFilter: blur()` blur stands in (an `NSVisualEffectView` with the popover material and within-window
+  the `backdropFilter: blur()` blur stands in (an `NSVisualEffectView` with the popover material and withinWindow
   blending, whose radius AppKit picks, or a radius-exact `PlainBlur` under a mask), and glass alone draws
   nothing. The effect views are the view's first subview and refuse `hitTest:`, so they never take input. A material
-  blending `behind-window` shows what is behind the window only where the window is nonopaque:
+  blending `behindWindow` shows what is behind the window only where the window is nonopaque:
   `AppOptions::transparent`, or an embedding app's own nonopaque window. The blending itself never makes a window
   transparent, and no host or runner nsh ships sets `transparent` (a standard `nsh run` or packaged app keeps an
   opaque window). In-process screenshots cannot show backdrop effects or blend modes (`renderInContext:` and

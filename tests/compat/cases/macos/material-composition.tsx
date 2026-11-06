@@ -2,9 +2,9 @@ import { type MacOsBackdrop, Text, View, signal } from "nsh";
 
 export default function MaterialComposition() {
   const backdrop = signal<MacOsBackdrop | undefined>({
-    material: "hud-window",
-    blending: "behind-window",
-    state: "follows-window-active-state",
+    material: "hudWindow",
+    blending: "behindWindow",
+    state: "followsWindowActiveState",
   });
   const tint = signal<string | undefined>("#ff000080");
   const wide = signal(false);

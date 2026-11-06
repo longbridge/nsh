@@ -31,7 +31,7 @@
   `InputStyle`), `selectionColor` (inputs and selectable texts), `tintColor` (`<Image>`; class `tint-*`),
   `borderCurve` (`continuous` corners, class `corner-squircle`; the web draws them with CSS `corner-shape: superellipse()` fitted to the native curve, where the browser has it), `glassEffect` (Apple's
   Liquid Glass on iOS 26 / macOS 26, the `backdropFilter` elsewhere), `glassTintColor` (the tint of that
-  glass on macOS), `writingDirection` (a text's base direction, from
+  glass on iOS 26 and macOS 26), `writingDirection` (a text's base direction, from
   its content by default as the platforms' text views do, beside `direction`, the layout's), `textAlignVertical` (where
   text shorter than its `<Text>` box sits); value forms past CSS's:
   `transform` lists, `translate` / `scale` pairs, shadows' layers (`{ x, y, blur, spread, color, inset }`),
@@ -241,8 +241,8 @@
   the radius approximates strength as a fraction of the material, rather than a Gaussian radius; macOS takes
   an explicit `macos={{ backdrop }}` instead (below), and blurs with `NSVisualEffectView` otherwise), `glassEffect`
   (Apple's Liquid Glass, drawn in the `backdropFilter`'s place on iOS 26 and macOS 26 and later (`UIGlassEffect`, `NSGlassEffectView`, both looked up at run time) and nowhere else, so give a glass
-  view a blur to fall back to), `glassTintColor` (the tint of the native glass on macOS; `null` clears it, it draws
-  nothing without `glassEffect`, and iOS draws its glass untinted), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
+  view a blur to fall back to), `glassTintColor` (the tint of the native glass on iOS 26 and macOS 26;
+  `null` restores its native default, an explicit transparent color remains a tint, and the earlier-system blur fallback is unchanged), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
   filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
   duration, delay, easing) and `animation*` (Tailwind's `spin` / `ping` / `pulse` / `bounce`), `display: grid` with
   `gridTemplateColumns/Rows` (line names: `grid.rs` turns them into taffy's `grid_template_*_names`, one set per

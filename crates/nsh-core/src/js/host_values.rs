@@ -109,21 +109,14 @@ impl HostValue for ListContentStyle {
 /// `macos={{ backdrop }}`: `{ material, blending, state }`, each field
 /// falling back to its default when left out or unknown.
 impl HostValue for MacOsBackdrop {
-    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
         if !input.is_object() {
             return None;
         }
-        let name = |key| input.field(key).and_then(|v| v.as_string());
         Some(MacOsBackdrop {
-            material: name("material")
-                .and_then(|s| MacOsBackdropMaterial::parse(&s))
-                .unwrap_or_default(),
-            blending: name("blending")
-                .and_then(|s| MacOsBackdropBlending::parse(&s))
-                .unwrap_or_default(),
-            state: name("state")
-                .and_then(|s| MacOsBackdropState::parse(&s))
-                .unwrap_or_default(),
+            material: field::<MacOsBackdropMaterial, _>(input, "material", cx).unwrap_or_default(),
+            blending: field::<MacOsBackdropBlending, _>(input, "blending", cx).unwrap_or_default(),
+            state: field::<MacOsBackdropState, _>(input, "state", cx).unwrap_or_default(),
         })
     }
 

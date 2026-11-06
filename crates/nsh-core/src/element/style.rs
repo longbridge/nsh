@@ -741,6 +741,21 @@ impl Declaration {
 type Entries = Vec<(Variant, Declaration)>;
 
 crate::static_reactive!(AdaptiveColor: AdaptiveColor, Hsla, Rgba, Color);
+
+// Static colors keep the same ergonomics where the native default is also
+// a value. Optional signals and closures use IntoReactive's existing path.
+macro_rules! optional_reactive_colors {
+    ($($source:ty),*) => {$(
+        impl IntoReactive<Option<AdaptiveColor>> for $source {
+            fn into_reactive(self) -> Reactive<Option<AdaptiveColor>> {
+                Reactive::Static(Some(self.into()))
+            }
+        }
+    )*};
+}
+
+optional_reactive_colors!(AdaptiveColor, Hsla, Rgba, Color);
+
 crate::static_reactive!(Length: Length, Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
 crate::static_reactive!(DefiniteLength: Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
 crate::static_reactive!(AbsoluteLength: Points, Rems, AbsoluteLength);
@@ -2925,12 +2940,16 @@ pub trait Styled: Sized {
         self
     }
 
-    /// The tint of the glass material (`glassTintColor`): the color the
-    /// native glass takes on. Has no effect without `glassEffect`.
-    fn glass_tint_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
-        self.style().bind_value(color, |s, color: AdaptiveColor| {
-            s.color(&[StyleKey::GlassTintColor], color);
-        });
+    /// The tint of the glass material (`glassTintColor`). A color tints the
+    /// native glass; `None` restores its default. Bind an optional adaptive
+    /// color to set and clear the tint; static colors can be passed directly.
+    /// Has no effect without `glassEffect`.
+    fn glass_tint_color(mut self, color: impl IntoReactive<Option<AdaptiveColor>>) -> Self {
+        self.style()
+            .bind_value(color, |s, color: Option<AdaptiveColor>| match color {
+                Some(color) => s.color(&[StyleKey::GlassTintColor], color),
+                None => s.value(StyleKey::GlassTintColor, PropertyValue::Color(None)),
+            });
         self
     }
 

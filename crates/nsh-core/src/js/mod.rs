@@ -162,11 +162,15 @@ mod tests {
         assert!(
             elements.contains("export interface MacOsBackdrop {\n  material?: MacOsBackdropMaterial;\n  blending?: MacOsBackdropBlending;\n  state?: MacOsBackdropState;\n}")
         );
-        assert!(elements.contains("export type MacOsBackdropMaterial = \"titlebar\" | \"selection\" | \"menu\" | \"popover\" | \"sidebar\" | \"header-view\" | \"sheet\" | \"window-background\" | \"hud-window\" | \"full-screen-ui\" | \"tool-tip\" | \"content-background\" | \"under-window-background\" | \"under-page-background\";"));
+        assert!(elements.contains("export type MacOsBackdropMaterial = \"titlebar\" | \"selection\" | \"menu\" | \"popover\" | \"sidebar\" | \"headerView\" | \"sheet\" | \"windowBackground\" | \"hudWindow\" | \"fullScreenUI\" | \"toolTip\" | \"contentBackground\" | \"underWindowBackground\" | \"underPageBackground\";"));
+        assert!(
+            elements.contains(
+                "export type MacOsBackdropBlending = \"withinWindow\" | \"behindWindow\";"
+            )
+        );
         assert!(elements.contains(
-            "export type MacOsBackdropBlending = \"within-window\" | \"behind-window\";"
+            "export type MacOsBackdropState = \"followsWindowActiveState\" | \"active\" | \"inactive\";"
         ));
-        assert!(elements.contains("export type MacOsBackdropState = \"follows-window-active-state\" | \"active\" | \"inactive\";"));
         for (interface, prop) in [
             ("HostProps", "  onPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),

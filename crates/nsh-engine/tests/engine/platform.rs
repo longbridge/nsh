@@ -616,9 +616,11 @@ const MATERIAL_APP: &str = r##"import { mount, View } from "nsh";
 mount(
   () => (
     <View
-      macos={{ backdrop: { material: "sidebar", blending: "behind-window", state: "inactive" } }}
+      macos={{ backdrop: { material: "sidebar", blending: "behindWindow", state: "inactive" } }}
       style={{ backdropFilter: "blur(20px)", glassEffect: "regular", glassTintColor: "#ff0000" }}
-    />
+    >
+      <View macos={{ backdrop: { material: "popover" } }} />
+    </View>
   ),
 );
 "##;
@@ -642,10 +644,14 @@ fn macos_props_apply_on_macos_through_the_mount() {
     backdrop.material = MacOsBackdropMaterial::Sidebar;
     backdrop.blending = MacOsBackdropBlending::BehindWindow;
     backdrop.state = MacOsBackdropState::Inactive;
-    assert_eq!(
-        macos.iter().find_map(|style| style.macos_backdrop),
-        Some(backdrop)
-    );
+    let backdrops = macos
+        .iter()
+        .filter_map(|style| style.macos_backdrop)
+        .collect::<Vec<_>>();
+    // The JS values, in the API's camel case, reach the platform.
+    assert!(backdrops.contains(&backdrop));
+    // Fields left out (blending and state here) keep their defaults.
+    assert!(backdrops.contains(&MacOsBackdrop::default()));
     assert_eq!(
         macos.iter().find_map(|style| style.glass_tint_color),
         Some(Color(0xff00_00ff))

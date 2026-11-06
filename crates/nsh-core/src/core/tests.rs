@@ -4942,14 +4942,100 @@ fn macos_backdrop_decodes_and_survives_restyling() {
             .expect("a macOS backdrop prop")
             .expect("a value")
     };
+    // Its fields default to AppKit's popover material, within the window,
+    // active.
+    assert_eq!(
+        MacOsBackdrop::default(),
+        MacOsBackdrop {
+            material: MacOsBackdropMaterial::Popover,
+            blending: MacOsBackdropBlending::WithinWindow,
+            state: MacOsBackdropState::Active,
+        }
+    );
+    // Every material AppKit's roles name decodes from the API's camel case.
+    for (name, material) in [
+        ("titlebar", MacOsBackdropMaterial::Titlebar),
+        ("selection", MacOsBackdropMaterial::Selection),
+        ("menu", MacOsBackdropMaterial::Menu),
+        ("popover", MacOsBackdropMaterial::Popover),
+        ("sidebar", MacOsBackdropMaterial::Sidebar),
+        ("headerView", MacOsBackdropMaterial::HeaderView),
+        ("sheet", MacOsBackdropMaterial::Sheet),
+        ("windowBackground", MacOsBackdropMaterial::WindowBackground),
+        ("hudWindow", MacOsBackdropMaterial::HudWindow),
+        ("fullScreenUI", MacOsBackdropMaterial::FullScreenUI),
+        ("toolTip", MacOsBackdropMaterial::ToolTip),
+        (
+            "contentBackground",
+            MacOsBackdropMaterial::ContentBackground,
+        ),
+        (
+            "underWindowBackground",
+            MacOsBackdropMaterial::UnderWindowBackground,
+        ),
+        (
+            "underPageBackground",
+            MacOsBackdropMaterial::UnderPageBackground,
+        ),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "material",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material,
+                ..MacOsBackdrop::default()
+            })),
+            "{name}"
+        );
+    }
+    for (name, blending) in [
+        ("withinWindow", MacOsBackdropBlending::WithinWindow),
+        ("behindWindow", MacOsBackdropBlending::BehindWindow),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "blending",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material: MacOsBackdropMaterial::default(),
+                blending,
+                state: MacOsBackdropState::default(),
+            })),
+            "{name}"
+        );
+    }
+    for (name, state) in [
+        (
+            "followsWindowActiveState",
+            MacOsBackdropState::FollowsWindowActiveState,
+        ),
+        ("active", MacOsBackdropState::Active),
+        ("inactive", MacOsBackdropState::Inactive),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "state",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material: MacOsBackdropMaterial::default(),
+                blending: MacOsBackdropBlending::default(),
+                state,
+            })),
+            "{name}"
+        );
+    }
     // The host prop's object names AppKit's roles, blending and state.
     let prop = decode(HostTestValue::object([
-        ("material", HostTestValue::String("hud-window")),
-        ("blending", HostTestValue::String("behind-window")),
-        (
-            "state",
-            HostTestValue::String("follows-window-active-state"),
-        ),
+        ("material", HostTestValue::String("hudWindow")),
+        ("blending", HostTestValue::String("behindWindow")),
+        ("state", HostTestValue::String("followsWindowActiveState")),
     ]));
     let backdrop = MacOsBackdrop {
         material: MacOsBackdropMaterial::HudWindow,
@@ -4957,13 +5043,28 @@ fn macos_backdrop_decodes_and_survives_restyling() {
         state: MacOsBackdropState::FollowsWindowActiveState,
     };
     assert_eq!(prop, Prop::MacOsBackdrop(Some(backdrop)));
-    // Left out (or unknown) fields take their defaults.
+    // Left out fields take their defaults.
     assert_eq!(
-        decode(HostTestValue::object([(
-            "material",
-            HostTestValue::String("unknown"),
-        )])),
+        decode(HostTestValue::Object(Vec::new())),
         Prop::MacOsBackdrop(Some(MacOsBackdrop::default()))
+    );
+    // An unknown name, the kebab case the API no longer writes included,
+    // and a field of another type keep the default: a prop never fails.
+    for value in [
+        HostTestValue::String("unknown"),
+        HostTestValue::String("hud-window"),
+        HostTestValue::String("behind-window"),
+        HostTestValue::Number(1.0),
+    ] {
+        assert_eq!(
+            decode(HostTestValue::object([("material", value)])),
+            Prop::MacOsBackdrop(Some(MacOsBackdrop::default()))
+        );
+    }
+    // A value that is not an object clears the prop, as null does.
+    assert_eq!(
+        decode(HostTestValue::String("hudWindow")),
+        Prop::MacOsBackdrop(None)
     );
 
     let mut c = core();
@@ -15162,6 +15263,67 @@ mod views {
             _ => None,
         });
         assert!(style.is_some(), "{:#?}", batch.items);
+    }
+
+    #[component]
+    fn OptionalGlassTint() -> impl IntoElement {
+        let step = stored(0_u8);
+        let tint = signal(Some(AdaptiveColor::rgb(0xff0000, 0x00ff00)));
+        view()
+            .size_10()
+            .glass_effect(crate::GlassEffect::Regular)
+            .backdrop_blur(px(12.0))
+            .glass_tint_color(rgb(0xaabbcc))
+            .glass_tint_color(tint)
+            .on_press(move |_: &()| {
+                step.with(|value| *value += 1);
+                tint.set(match step.get() {
+                    1 => None,
+                    2 => Some(AdaptiveColor::TRANSPARENT),
+                    _ => Some(AdaptiveColor::rgb(0x0000ff, 0xffff00)),
+                });
+            })
+    }
+
+    #[test]
+    fn an_optional_tint_restores_native_default_without_losing_glass() {
+        for dark in [false, true] {
+            let mut c = core();
+            c.set_class_environment(crate::tailwind::ClassEnvironment {
+                dark,
+                ..Default::default()
+            });
+            c.mount_root(&Root::new::<OptionalGlassTint>(|| ()));
+            let mut batch = c.commit().unwrap();
+            let host = root_host(&batch);
+            let expected = [
+                Some(if dark {
+                    Color(0x00ff00ff)
+                } else {
+                    Color(0xff0000ff)
+                }),
+                None,
+                Some(Color::TRANSPARENT),
+                Some(if dark {
+                    Color(0xffff00ff)
+                } else {
+                    Color(0x0000ffff)
+                }),
+            ];
+            for (step, tint) in expected.into_iter().enumerate() {
+                if step != 0 {
+                    assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+                    batch = c.commit().unwrap();
+                }
+                let style = view_style_of(&batch, host).unwrap();
+                assert_eq!(style.glass_tint_color, tint, "dark={dark}, step={step}");
+                assert_eq!(style.glass_effect, crate::GlassEffect::Regular);
+                assert_eq!(
+                    style.effects.as_ref().unwrap().backdrop_filters,
+                    [crate::Filter::Blur(px(12.0))]
+                );
+            }
+        }
     }
 
     /// A track whose color moves between two theme colors natively.

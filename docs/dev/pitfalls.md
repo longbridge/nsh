@@ -522,7 +522,7 @@ Things that were found the hard way. Read the section of the area you change bef
   agent's input posts to the application's queue (`synth.rs`).
 - `CALayer.backgroundFilters` (iOS's backdrop blur) do nothing in AppKit windows, `layerUsesCoreImageFilters` or
   not, and Core Image is not even loaded (`CIFilter` is missing) unless something links it. Backdrop blur is an
-  `NSVisualEffectView` with within-window blending; it needs `wantsLayer` set when created, or it has no layer to order
+  `NSVisualEffectView` with withinWindow blending; it needs `wantsLayer` set when created, or it has no layer to order
   and clip until AppKit makes one.
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
   outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface

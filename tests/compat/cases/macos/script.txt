@@ -183,12 +183,12 @@ covers [nsh] WebView
 # material-composition
 tap id:case-material-composition
 expect Material composition
-prop id:material-surface macos.backdrop material=hud-window blending=behind-window state=follows-window-active-state
+prop id:material-surface macos.backdrop material=hudWindow blending=behindWindow state=followsWindowActiveState
 style id:material-surface glassTintColor #ff000080
 style id:material-surface glassEffect regular
 style id:material-surface mixBlendMode color
 tap id:material-restyle
-prop id:material-surface macos.backdrop material=hud-window blending=behind-window state=follows-window-active-state
+prop id:material-surface macos.backdrop material=hudWindow blending=behindWindow state=followsWindowActiveState
 style id:material-surface glassTintColor #ff000080
 tap id:material-change
 prop id:material-surface macos.backdrop material=sidebar state=inactive

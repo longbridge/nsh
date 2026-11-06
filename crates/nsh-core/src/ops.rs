@@ -2622,7 +2622,7 @@ pub enum Prop {
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
     /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
-    /// (default `popover` / `within-window` / `active`; `None`: none).
+    /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]
     MacOsBackdrop(Option<crate::MacOsBackdrop>),
     /// An accessibility property.
