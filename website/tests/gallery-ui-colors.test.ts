@@ -85,3 +85,51 @@ test('every allowed file still exists and says why', () => {
     expect(reason.length).toBeGreaterThan(0);
   }
 });
+
+// The demos' switches take the shared look (`switchLook`): a track and a
+// thumb styled in place would be another copy of it, as the nine inline
+// ones were (their knob ran 2 points past the track with a pointer).
+
+/** Each `<Switch ...>` opening tag in a source: up to the `>` outside braces. */
+function switchTags(source: string): string[] {
+  const tags: string[] = [];
+  for (const match of source.matchAll(/<Switch\b/g)) {
+    let depth = 0;
+    let i = match.index + match[0].length;
+    for (; i < source.length; i++) {
+      const c = source[i];
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      else if (depth === 0 && c === '/' && source[i + 1] === '/') i = source.indexOf('\n', i);
+      else if (depth === 0 && c === '>') break;
+    }
+    tags.push(source.slice(match.index, i + 1));
+  }
+  return tags;
+}
+
+/** What is wrong with a switch's tag: styled parts, or no shared look. */
+function switchViolations(tag: string): string[] {
+  const found = [...tag.matchAll(/\b(track|thumb)(Class|Style)=/g)].map((m) => `sets ${m[1]}${m[2]}`);
+  if (!/\{\.\.\.switchLook\(/.test(tag)) found.push('does not spread switchLook(..)');
+  return found;
+}
+
+test('the switch guard finds styled parts and a missing look', () => {
+  const styled = '<Switch checked={on()} trackClass="w-9" thumbStyle={{ x: 1 }}>\n  <Text>a</Text>\n</Switch>';
+  expect(switchTags(styled)).toHaveLength(1);
+  expect(switchViolations(switchTags(styled)[0])).toEqual(['sets trackClass', 'sets thumbStyle', 'does not spread switchLook(..)']);
+  const shared = '<Switch\n  onChange={({ checked }) => on.set(checked)}\n  {...switchLook(() => on())}\n  // a note > here\n  hitSlop={0}\n>';
+  expect(switchTags(shared)).toEqual([shared]);
+  expect(switchViolations(shared)).toEqual([]);
+});
+
+test('the demos\' switches spread the shared look', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    for (const tag of switchTags(readFileSync(join(root, file), 'utf8'))) {
+      for (const what of switchViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+  }
+  expect(report).toEqual([]);
+});
