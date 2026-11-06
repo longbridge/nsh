@@ -65,6 +65,7 @@ const components: DemoEntry[] = [
   { name: "Toast", detail: terminal ? "Notes on the bottom row that close by themselves, by their action or Escape" : "Notes that close by themselves, by their action, back or a swipe", icon: "bell", screen: lazy(() => import("./demos/Overlays").then((m) => m.ToastDemo)) },
   { name: "Toggle", detail: "A text toolbar, a segmented view switcher, a favorite star, sizes, a locked group", icon: "controls", screen: lazy(() => import("./demos/ToggleDemo").then((m) => m.ToggleDemo)) },
   { name: "Toolbar", detail: "A text editor's formatting bar, a media player's transport, a vertical tool palette, a locked review bar", icon: "sliders", screen: lazy(() => import("./demos/ToolbarDemo").then((m) => m.ToolbarDemo)) },
+  { name: "Terminal", detail: "A shell's colors, a progress bar redrawn in place, the keys typed sent back", icon: "terminal", screen: lazy(() => import("./demos/TerminalDemo").then((m) => m.TerminalDemo)) },
   { name: "Tooltip", detail: "A label while the pointer rests on an element, or pinned by the app", icon: "tooltip", screen: lazy(() => import("./demos/Overlays").then((m) => m.TooltipDemo)) },
   { name: "Tree", detail: "A project explorer, a settings sidebar, 10 100 items that stay fast, a read-only outline", icon: "tree", screen: lazy(() => import("./demos/TreeDemo").then((m) => m.TreeDemo)) },
 ];
@@ -76,7 +77,7 @@ const purposes: [string, string[]][] = [
   ["Navigation", ["NavStack", "Tabs", "Pagination", "Accordion", "Collapsible", "Carousel", "Tree"]],
   ["Overlays", ["Popover", "HoverCard", "Menu", "Tooltip", "Sheet", "Toast"]],
   ["Data", ["Avatar", "Progress", "DataTable", "Plot", "DiffView"]],
-  ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Dock", "Resizable"]],
+  ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Terminal", "Dock", "Resizable"]],
 ];
 
 const byName = new Map(components.map((d) => [d.name, d]));

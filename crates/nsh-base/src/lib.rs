@@ -66,6 +66,8 @@ mod switch;
 mod syntax;
 mod table;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
 pub mod terminal;
 pub mod text_view;
 
@@ -92,6 +94,12 @@ use nsh_core::element::{ComponentSpec, Registry};
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
 pub use nsh_core::element::{Input, input};
 
+#[cfg(feature = "term")]
+pub use crate::term::{
+    Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,
+    TerminalEmulatorEvent, TerminalEmulatorFactory, TerminalEvent, TerminalLine, TerminalModes,
+    TerminalProps, TerminalRun, TerminalSize, TerminalStyle, VtEmulator, terminal,
+};
 pub use crate::{
     accordion::{
         Accordion, AccordionElement, AccordionEvent, AccordionHeader, AccordionHeaderElement,
@@ -330,6 +338,8 @@ pub mod parts {
         ("resizable", resizable),
         #[cfg(feature = "plot")]
         ("plot", plot),
+        #[cfg(feature = "term")]
+        ("term", term),
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
@@ -452,6 +462,12 @@ pub mod parts {
         rich_editor::js::register(registry);
     }
 
+    /// `Terminal`.
+    #[cfg(feature = "term")]
+    pub fn term(registry: &mut Registry) {
+        registry.register::<crate::Terminal>();
+    }
+
     /// `DataTable`.
     pub fn data_table(registry: &mut Registry) {
         registry.register::<DataTable>();
@@ -570,6 +586,7 @@ mod tests {
                 "TableHeader",
                 "TableRow",
                 "Tabs",
+                "Terminal",
                 "TextView",
                 "TimeField",
                 "Toast",

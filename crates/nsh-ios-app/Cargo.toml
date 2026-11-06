@@ -16,7 +16,7 @@ name = "nsh-ios-app"
 path = "src/main.rs"
 
 [features]
-default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto"]
+default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto"]
 # JS apps (the bundle in the app). Without it the runner runs a Rust app
 # only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-ios/js"]
@@ -27,6 +27,7 @@ shader = ["nsh-platform-ios/shader"]
 editor = ["nsh-platform-ios/editor"]
 rich-editor = ["nsh-platform-ios/rich-editor"]
 plot = ["nsh-platform-ios/plot"]
+term = ["nsh-platform-ios/term"]
 highlight = ["nsh-platform-ios/highlight"]
 math = ["nsh-platform-ios/math"]
 zlib = ["nsh-platform-ios/zlib"]

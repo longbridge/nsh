@@ -30,6 +30,7 @@ import BasePopups from "./base-popups";
 import BaseMenuChecked from "./base-menu-checked";
 import BasePlot from "./base-plot";
 import BaseProgress from "./base-progress";
+import BaseTerminal from "./base-terminal";
 import BaseTable from "./base-table";
 import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
@@ -99,6 +100,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-collapsible-reveal": BaseCollapsibleReveal,
   "base-plot": BasePlot,
   "base-progress": BaseProgress,
+  "base-terminal": BaseTerminal,
   "base-combobox": BaseCombobox,
   "base-command": BaseCommand,
   "base-date-picker": BaseDatePicker,

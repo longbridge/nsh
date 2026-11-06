@@ -31,6 +31,9 @@
       "execute": [
         "echo",
         "cat",
+        "sh",
+        "bash",
+        "zsh",
         "cmd.exe",
         "claude",
         "codex"
