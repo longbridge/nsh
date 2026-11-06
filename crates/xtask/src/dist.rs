@@ -28,7 +28,13 @@
 //! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
 //! (`docs/dev/web.md`).
 
-use std::{env, fs, path::Path, process::Command};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fs,
+    path::Path,
+    process::Command,
+};
 
 use anyhow::Context as _;
 
@@ -143,19 +149,22 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // the browser's JavaScript engine: the linkable one `nsh package` links
     // each published app's from (only what the app uses), and the
     // development host's (hot updates, `nsh test --target web`). They build
-    // to the same file, copied in turn. They need a clang that targets
-    // wasm32: without one the distribution is made without them, as with
-    // the Android runtimes without an SDK.
-    let web = Command::new("clang")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok();
+    // to the same file, copied in turn. They need a C compiler that can
+    // actually target wasm32: without one the distribution is made without
+    // them, as with the Android runtimes without an SDK. The compiler is
+    // the one the build will use, which docs/dev/web.md lets a macOS
+    // developer set to an LLVM toolchain outside PATH.
+    let compiler = wasm_cc(|key| env::var_os(key));
+    let web = wasm_compiles(&compiler, |command| {
+        command.status().is_ok_and(|status| status.success())
+    });
     if web {
         web_runtimes(&root, &out, &release)?;
     } else {
-        term::warn("no clang for wasm32: the distribution has no web runtime");
+        term::warn(
+            "no working wasm32 C compiler (set CC_wasm32_unknown_unknown): \
+             the distribution has no web runtime",
+        );
     }
 
     // Android runtimes. Windows machines often have no Android SDK: the
@@ -202,6 +211,46 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     }
     term::note(out.strip_prefix(&root).unwrap_or(&out).display());
     Ok(())
+}
+
+/// The C compiler a wasm32 build uses: the documented per-target override,
+/// then `CC`, then the `clang` the build defaults to (`docs/dev/web.md`).
+fn wasm_cc(get: impl Fn(&str) -> Option<OsString>) -> OsString {
+    for key in ["CC_wasm32_unknown_unknown", "CC"] {
+        if let Some(value) = get(key) {
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+    OsString::from("clang")
+}
+
+/// Whether `compiler` can actually produce a wasm32 object. `clang
+/// --version` is not an answer: Apple's clang has no WebAssembly target, and
+/// a process that starts but exits nonzero still has an `Ok` status.
+fn wasm_compiles(compiler: &OsStr, run: impl Fn(&mut Command) -> bool) -> bool {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = env::temp_dir().join(format!(
+        "nsh-wasm-probe-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    if fs::create_dir_all(&dir).is_err() {
+        return false;
+    }
+    let source = dir.join("probe.c");
+    let object = dir.join("probe.o");
+    let ok = fs::write(&source, "int nsh_wasm_probe(void) { return 0; }\n").is_ok()
+        && run(Command::new(compiler)
+            .args(["--target=wasm32-unknown-unknown", "-c"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&object)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()));
+    let _ = fs::remove_dir_all(&dir);
+    ok
 }
 
 /// The web runtimes: the linkable one and the development host's, the same
@@ -445,9 +494,13 @@ pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Read as _};
+    use std::{
+        ffi::{OsStr, OsString},
+        fs,
+        io::Read as _,
+    };
 
-    use super::{AAR_KEEP_RULES, make_aar};
+    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles};
 
     #[test]
     fn an_aar_carries_the_rules_that_keep_the_runtime() {
@@ -468,5 +521,43 @@ mod tests {
         assert_eq!(rules, AAR_KEEP_RULES);
         assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_configured_wasm_compiler_is_probed_not_a_bare_clang() {
+        // docs/dev/web.md: a macOS developer points this at an LLVM clang
+        // outside PATH. Looking for `clang` on PATH instead would skip the
+        // web runtimes even though the build has a working toolchain.
+        let compiler = wasm_cc(|key| {
+            (key == "CC_wasm32_unknown_unknown").then(|| OsString::from("/opt/llvm/bin/clang"))
+        });
+        assert_eq!(compiler, OsString::from("/opt/llvm/bin/clang"));
+        assert!(wasm_compiles(&compiler, |command| {
+            assert_eq!(command.get_program(), OsStr::new("/opt/llvm/bin/clang"));
+            true
+        }));
+        assert_eq!(
+            wasm_cc(|key| (key == "CC").then(|| OsString::from("cc"))),
+            OsString::from("cc")
+        );
+        assert_eq!(wasm_cc(|_| None), OsString::from("clang"));
+    }
+
+    #[test]
+    fn a_compiler_without_wasm32_is_not_enough() {
+        // `clang --version` would have passed: the probe must require an
+        // actual successful wasm32 compile.
+        assert!(!wasm_compiles(OsStr::new("clang"), |_| false));
+        assert!(wasm_compiles(OsStr::new("clang"), |_| true));
+    }
+
+    #[test]
+    fn a_compiler_that_cannot_run_is_not_enough() {
+        // The old guard's `.is_ok()` also accepted a process that never
+        // started, or started and exited nonzero.
+        let missing = std::env::temp_dir().join("nsh-no-such-clang");
+        assert!(!wasm_compiles(missing.as_os_str(), |command| {
+            command.status().is_ok_and(|status| status.success())
+        }));
     }
 }
