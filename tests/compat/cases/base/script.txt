@@ -726,9 +726,11 @@ tap text:ShareItem
 expect MailItem
 expect BackRow
 absent NewItem
+expect Log: share true triggerPress
 tap text:BackRow
 expect NewItem
 absent MailItem
+expect Log: share false cancel
 # A disabled one does not open.
 tap text:LockedItem
 absent HiddenItem
@@ -761,6 +763,7 @@ covers [props] MenuItem.closeOnSelect
 covers [events] MenuItem.onSelect
 covers [props] Submenu.trigger
 covers [props] Submenu.back
+covers [events] Submenu.onOpenChange
 # The context menu: a finger held on its trigger.
 touch start text:HoldArea 5 5
 wait 600

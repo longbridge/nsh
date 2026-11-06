@@ -154,8 +154,8 @@ pub use crate::{
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
-        context_menu, menu, menu_item, menu_separator, submenu,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
+        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
