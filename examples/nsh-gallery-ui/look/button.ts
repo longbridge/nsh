@@ -26,8 +26,8 @@ export interface ButtonLookOptions {
   /** Default `regular`. */
   size?: Live<ButtonSize | undefined>;
   /** Shown as chosen: what it opens is open (a menu's or a popover's
-   * trigger), or it is the current one of a few. A raised button keeps its
-   * pressed look, a ghost the neutral `accent` fill, a filled one its
+   * trigger), or it is the current one of a few. A raised button takes the
+   * `on` fill, a ghost the neutral `accent` fill, a filled one its
    * pressed shade; no hover while selected. */
   selected?: Live<boolean | undefined>;
   /** No hover and no press feedback; dimmed to 40% (`disabledStyle`). */
@@ -84,7 +84,9 @@ function rest(kind: ButtonKind, selected: boolean): ViewStyle {
     };
   }
   if (kind === "ghost") return { backgroundColor: selected ? token("accent") : ghostFill(), borderColor: "transparent" };
-  return selected ? finish.pressed : finish.raised;
+  // Selected stays on: `on`, apart from rest and from hover in both
+  // appearances (a sunk `pressed` is a press's, too faint to hold).
+  return selected ? finish.on : finish.raised;
 }
 
 /**

@@ -17,6 +17,7 @@ export * from "./theme";
 export * from "./look/button";
 export * from "./look/press";
 export * from "./look/switch";
+export * from "./look/tool";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -436,8 +437,8 @@ export function Button(props: {
   flex?: number;
   size?: ButtonSize;
   /** Shown as chosen: what it opens is open (a menu's or a popover's
-   * trigger), or it is on. A ghost button keeps the hover's `accent` fill, a
-   * raised one its pressed look, a filled one its pressed shade. */
+   * trigger), or the current one of a few. A ghost button keeps the hover's
+   * `accent` fill, a raised one the `on` fill, a filled one its pressed shade. */
   selected?: boolean;
   onPress: () => void;
 }) {
