@@ -54,7 +54,7 @@ if (update?.canInstall) {
 
 `update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
 
-`installAndRestart` 会结束当前进程，需要保存的内容请先保存。如果失败，应用保持原样。
+`installAndRestart` 会结束当前进程，需要保存的内容请先保存。如果失败，应用保持原样。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
 
 ## 发布新版本
 

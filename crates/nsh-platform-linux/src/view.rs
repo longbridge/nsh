@@ -363,7 +363,34 @@ mod imp {
         type Interfaces = (gtk::AccessibleRange,);
     }
 
-    impl AccessibleImpl for NshView {}
+    // Screen readers go through a scroll view's content, and a list's
+    // cells in its parent's viewport, in the order they are on screen
+    // (`super::NshView::reading_children`): a list recycles its cells, so
+    // their widgets are not in their rows' order, and the widgets' order
+    // is the order they paint in, so it stays.
+    impl AccessibleImpl for NshView {
+        fn first_accessible_child(&self) -> Option<gtk::Accessible> {
+            match self.obj().reading_children() {
+                Some(kids) => kids.first().map(|w| w.clone().upcast()),
+                None => self.parent_first_accessible_child(),
+            }
+        }
+
+        fn next_accessible_sibling(&self) -> Option<gtk::Accessible> {
+            let obj = self.obj();
+            let kids = obj
+                .parent()
+                .and_downcast::<super::NshView>()
+                .and_then(|parent| parent.reading_children());
+            let Some(kids) = kids else {
+                return self.parent_next_accessible_sibling();
+            };
+            let at = kids
+                .iter()
+                .position(|w| w == obj.upcast_ref::<gtk::Widget>())?;
+            kids.get(at + 1).map(|w| w.clone().upcast())
+        }
+    }
 
     impl AccessibleRangeImpl for NshView {
         fn set_current_value(&self, _value: f64) -> bool {
@@ -467,6 +494,14 @@ mod imp {
     }
 
     impl WidgetImpl for NshView {
+        fn focus(&self, direction: gtk::DirectionType) -> bool {
+            let view = self.obj();
+            crate::key_focus::offer(&view);
+            let moved = self.parent_focus(direction);
+            crate::key_focus::offered(&view);
+            moved
+        }
+
         fn measure(&self, _orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             // The core sizes every view; GTK's own sizing never applies.
             (0, 0, -1, -1)
@@ -570,7 +605,8 @@ impl NshView {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         let view: NshView = glib::Object::new();
         *view.imp().state.borrow_mut() = ViewState::new(id, kind);
-        // Views never take keyboard focus themselves; hosted fields do.
+        // Only while Tab or `focus()` picks them (`key_focus`); hosted fields
+        // take it as usual.
         view.set_focusable(false);
         view
     }
@@ -594,6 +630,33 @@ impl NshView {
     /// Kind.
     pub(crate) fn kind(&self) -> ViewKind {
         self.state().kind
+    }
+
+    /// Its child widgets in the order screen readers go through them, when
+    /// that is not the tree's: a scroll view's, and a list's in its parent's
+    /// viewport (`ViewProps::screen_order`), as they are on screen, along
+    /// its axis, then across it ([`nsh_core::scroll::reading_order`]: a
+    /// list's recycled cells are not in their rows' order); `None` for any
+    /// other view, or one holding a widget that is not a view.
+    pub(crate) fn reading_children(&self) -> Option<Vec<gtk::Widget>> {
+        let axis = {
+            let s = self.state();
+            match &s.scroll {
+                Some(scroll) if scroll.horizontal => nsh_core::geometry::Axis::Horizontal,
+                Some(_) => nsh_core::geometry::Axis::Vertical,
+                None => s.props.screen_order?,
+            }
+        };
+        let mut kids = Vec::new();
+        let mut child = self.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            let view = widget.clone().downcast::<NshView>().ok()?;
+            let origin = view.state().frame.origin;
+            kids.push((origin, widget));
+        }
+        nsh_core::scroll::reading_order(axis, &mut kids, |(origin, _)| *origin);
+        Some(kids.into_iter().map(|(_, widget)| widget).collect())
     }
 
     /// Something it draws changed.
@@ -722,7 +785,54 @@ impl NshView {
 
 #[cfg(test)]
 mod tests {
-    use super::{exact_damage, snap};
+    use gtk4::{self as gtk, prelude::*};
+    use nsh_core::{
+        ViewKind,
+        geometry::{Axis, bounds, point, px, size},
+    };
+
+    use super::{NshView, exact_damage, snap};
+
+    /// A list's recycled cells are read in the order they show, not in the
+    /// order their widgets were made in: a scroll view's content, and a
+    /// list's in its parent's viewport (`ViewProps::screen_order`), go to
+    /// screen readers in screen order; a plain view's children keep the
+    /// tree's.
+    #[test]
+    fn a_scroll_views_content_is_read_in_screen_order() {
+        crate::gtk_test::run(|| {
+            let read = |view: &NshView| {
+                let mut ids = Vec::new();
+                let mut at = view.first_accessible_child();
+                while let Some(next) = at {
+                    let cell = next.downcast::<NshView>().expect("a view");
+                    ids.push(cell.id());
+                    at = cell.next_accessible_sibling();
+                }
+                ids
+            };
+            for (kind, screen_order) in [
+                (ViewKind::Scroll, None),
+                (ViewKind::View, Some(Axis::Vertical)),
+                (ViewKind::View, None),
+            ] {
+                let list = NshView::new(2, kind);
+                list.state_mut().props.screen_order = screen_order;
+                for (id, y) in [(4, 160.0), (6, 200.0), (8, 80.0), (10, 120.0)] {
+                    let cell = NshView::new(id, ViewKind::View);
+                    cell.state_mut().frame =
+                        bounds(point(px(0.0), px(y)), size(px(100.0), px(40.0)));
+                    cell.insert_before(&list, None::<&gtk::Widget>);
+                }
+                let expected = if kind == ViewKind::Scroll || screen_order.is_some() {
+                    [8, 10, 4, 6]
+                } else {
+                    [4, 6, 8, 10]
+                };
+                assert_eq!(read(&list), expected, "{kind:?} {screen_order:?}");
+            }
+        });
+    }
 
     #[test]
     fn snap_lands_on_device_pixels() {

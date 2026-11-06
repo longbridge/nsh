@@ -28,7 +28,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Lifecycle, Locale, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Os},
     time::Instant,
 };
 
@@ -47,6 +47,8 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The displays (desktops), as the platform reports them.
+    displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
 }
 
 impl Ambient {
@@ -63,6 +65,7 @@ struct EnvSignals {
     window: Memo<Size<Points>>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
+    window_state: Memo<Option<crate::desktop::WindowState>>,
     keyboard_height: Memo<Points>,
     keyboard_duration: Memo<f32>,
     dark: Memo<bool>,
@@ -72,6 +75,7 @@ struct EnvSignals {
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
 }
@@ -90,6 +94,7 @@ impl EnvSignals {
                 window: part!(window),
                 safe_area: part!(safe_area),
                 title_bar: part!(title_bar),
+                window_state: part!(window_state),
                 keyboard_height: part!(keyboard_height),
                 keyboard_duration: part!(keyboard_duration),
                 dark: part!(dark),
@@ -99,6 +104,7 @@ impl EnvSignals {
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
             }
@@ -138,6 +144,25 @@ impl super::Runtime {
                 with_data(|d| d.ambient.env = Some(signals));
             }
         }
+    }
+
+    /// The displays now: what read them runs again.
+    pub(crate) fn set_displays(&self, displays: Arc<[crate::desktop::Display]>) {
+        let _entered = self.enter();
+        let signal = displays_signal();
+        if signal.with_untracked(|d| **d != *displays) {
+            signal.set(displays);
+        }
+    }
+
+    /// `bounds` fitted on the displays now (`set_window_bounds`), without
+    /// subscribing to them.
+    pub(crate) fn fit_window_bounds(
+        &self,
+        bounds: crate::desktop::WindowBounds,
+    ) -> crate::desktop::WindowBounds {
+        let _entered = self.enter();
+        displays_signal().with_untracked(|d| bounds.fit_on_displays(d))
     }
 
     /// The design tokens now: what read them runs again.
@@ -180,7 +205,7 @@ fn env<T: Clone + 'static>(part: impl FnOnce(&EnvSignals) -> Memo<T>) -> T {
         .get()
 }
 
-fn executor() -> Rc<Executor> {
+pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
@@ -267,6 +292,23 @@ pub fn round_to_nearest_pixel(points: Points) -> Points {
 /// The user's locale (TS: what `Intl` formats for by default).
 pub fn locale() -> Locale {
     env(|e| e.locale)
+}
+
+/// The user's locale settings (TS: `localeSettings()`): the preferred
+/// languages, most preferred first (the app shows its text in the first it
+/// has, the others are its fallbacks; an embedding app's own language comes
+/// first), the device's time zone as the system names it
+/// (`Europe/Berlin`), and the regional preferences: 12- or 24-hour time,
+/// the first day of the week, the measurement system and the temperature
+/// unit, each the system's setting, else the region's. Reading it
+/// subscribes, so what shows them follows the user's settings and travels;
+/// a `computed` of one of them changes only with it. `nsh_base`'s
+/// `TimeField` and `DatePicker` take their `HourCycle::H12` where
+/// [`HourCycle::twelve_hour`](crate::platform::HourCycle::twelve_hour),
+/// else `H23`; its `Calendar` and `DatePicker` count their
+/// `first_day_of_week` from 0 for Sunday: pass `number() % 7`.
+pub fn locale_settings() -> LocaleSettings {
+    env(|e| e.locale_settings)
 }
 
 /// Whether the app is in use: in the foreground, visible without the
@@ -732,6 +774,16 @@ pub fn next_notification_press() -> Answer<String> {
     act(Action::Notification(super::NotificationAction::NextPress(
         slot,
     )));
+    answer
+}
+
+/// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
+/// URL of a scheme the app claims (`nsh.json` `schemes`), those
+/// that came before anything listened first, the one that launched the app
+/// included ([`crate::url_scheme`]). To await in a task.
+pub fn next_url_scheme_open() -> Answer<String> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextUrlSchemeOpen(slot));
     answer
 }
 
@@ -1423,6 +1475,25 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
 
 pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
+}
+
+pub(crate) fn window_state() -> Option<crate::desktop::WindowState> {
+    env(|e| e.window_state)
+}
+
+pub(crate) fn displays() -> Vec<crate::desktop::Display> {
+    displays_signal().with(|d| d.to_vec())
+}
+
+/// The displays' signal, made empty on first use (whatever reads it before
+/// the platform reports displays follows them when it does).
+fn displays_signal() -> Signal<Arc<[crate::desktop::Display]>> {
+    if let Some(signal) = with_data(|d| d.ambient.displays) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(Arc::from(Vec::new())));
+    with_data(|d| d.ambient.displays = Some(signal));
+    signal
 }
 
 /// The views' menu handlers.

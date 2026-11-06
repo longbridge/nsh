@@ -80,6 +80,19 @@ tap id:start
 expect Refused: threw RangeError
 expect Speech: end unavailable "" true
 covers [nsh] Speech
+# mod-audio
+tap id:case-mod-audio
+# nothing plays sound there: available() resolves false, a sound's load
+# rejects and a player's play() rejects as its error listener hears
+# "unavailable"; a volume out of range throws a RangeError.
+expect Available: false
+expect Sound: not loaded
+tap id:play
+expect Refused: threw RangeError
+expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Player: rejected, error unavailable, idle true 1.5
+covers [nsh] Sound
+covers [nsh] AudioPlayer
 # mod-notifications
 tap id:case-mod-notifications
 # nothing shows notifications there: the permission is unavailable and nothing
@@ -90,25 +103,39 @@ expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
 expect Shown: false
 covers [nsh] Notifications
+# mod-url-scheme
+tap id:case-mod-url-scheme
+# the domain claims `compat`: no link opened it, and the listener stops.
+expect Links: none
+expect Listener: listening
+tap id:stop-links
+expect Listener: stopped
+covers [nsh] UrlScheme
 # mod-desktop
 tap id:case-mod-desktop
-# no title bar area, the window and menu functions do nothing, and a popup
+# no title bar area, the window, app and menu functions do nothing, and a popup
 # closes at once.
 expect Desktop: false
 expect Title bar: 0 0 0
+expect Window state: null displays 0
 expect Calls: not called
 expect Popup: not shown
 tap id:window
-expect Calls: window done, close function, minimize function
+expect Calls: window done, close function, minimize function, setBounds function
 tap id:menu
 expect Calls: menu done
 expect Popup: closed
+tap id:application
+expect Calls: application done, quit function
 tap id:toggles
 expect Calls: toggles done
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
+covers [nsh/desktop] windowState
+covers [nsh/desktop] displays
 covers [nsh/desktop] Window
 covers [nsh/desktop] Menu
+covers [nsh/desktop] Application
 # mod-device
 tap id:case-mod-device
 # iOS phone at 1 pixel per point, in the light scheme.
@@ -124,6 +151,10 @@ expect Font scale: 1
 expect Window: 390x844
 expect Scheme: light
 expect Lifecycle: active
+expect Time zone: UTC
+expect Intl local time: its zone
+expect Languages: en-US
+expect Regional: h12, week from 7, us, fahrenheit
 tap id:dark
 expect Scheme: dark
 absent Scheme: light
@@ -142,6 +173,7 @@ covers [nsh] setColorScheme
 covers [nsh] fontScale
 covers [nsh] windowSize
 covers [nsh] lifecycle
+covers [nsh] localeSettings
 # mod-host-channel
 tap id:case-mod-host-channel
 # no embedding app: no parameters, posts go nowhere and calls reject at

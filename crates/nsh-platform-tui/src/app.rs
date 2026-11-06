@@ -344,6 +344,7 @@ impl AppView {
         }
         self.surface.engine = Some(engine);
         self.surface.inbox = inbox;
+        self.surface.laid_out = viewport;
         Ok(())
     }
 
@@ -1441,6 +1442,7 @@ impl AppView {
                 Message::Batch(batch) => self.apply_batch(batch),
                 Message::Error(error) => errors.push(error),
                 Message::Frame => self.surface.request_frame(),
+                Message::Resized(size) => self.surface.laid_out = size,
                 Message::Focused(moved) => self.keyboard.caught_up(moved),
                 #[cfg(feature = "dev")]
                 Message::Reload => {
@@ -1531,14 +1533,6 @@ impl AppView {
         if let Some(engine) = &self.surface.engine {
             crate::navigation::report_shown(&mut self.tree, &engine.control());
         }
-        self.surface.animate(&mut self.tree);
-        let drawing = started.map(|start| {
-            let now = Instant::now();
-            if let Some(perf) = &mut self.perf {
-                perf.pending.apply = now.duration_since(start);
-            }
-            now
-        });
         let capabilities = &self.options.capabilities;
         // The terminal's own colors give its surfaces (OSC 11 and 10, at
         // 256 colors or more); the bandless look elsewhere.
@@ -1547,83 +1541,112 @@ impl AppView {
             capabilities.background_color,
             capabilities.foreground_color,
         );
-        let page = crate::palette::Ground::page(self.environment.color_scheme, capabilities.colors)
-            .with_ramp(ramp);
-        let bands = crate::palette::Bands::new(
-            self.environment.color_scheme,
-            capabilities.colors,
-            capabilities.background_color,
-            capabilities.foreground_color,
-        );
-        let look = render::Look {
-            cells: self.options.cells,
-            page,
-            bands,
-        };
-        render::draw(
-            &mut self.tree,
-            buffer,
-            area,
-            look,
-            &mut self.hits,
-            &mut self.geometry,
-        );
-        let scene = crate::selection::Scene {
-            area,
-            cells: self.options.cells,
-            hits: &self.hits,
-            geometry: &self.geometry,
-            tree: &self.tree,
-        };
-        self.selection.draw(scene, buffer);
-        // A view that moved under the pointer, or away from it, is drawn
-        // again in its new hover state.
-        if let Some(engine) = &self.surface.engine
-            && self.pointer.rehover(&mut crate::input::PointerContext {
+        // An app loaded before the surface had a size starts laid out for
+        // no room, every view at the origin: its views show from the layout
+        // at the drawn area on, which the engine reports a turn or two later.
+        let mut drawing = None;
+        if self.surface.engine.is_none() || self.surface.sized() {
+            self.surface.animate(&mut self.tree);
+            drawing = started.map(|start| {
+                let now = Instant::now();
+                if let Some(perf) = &mut self.perf {
+                    perf.pending.apply = now.duration_since(start);
+                }
+                now
+            });
+            let page =
+                crate::palette::Ground::page(self.environment.color_scheme, capabilities.colors)
+                    .with_ramp(ramp);
+            let bands = crate::palette::Bands::new(
+                self.environment.color_scheme,
+                capabilities.colors,
+                capabilities.background_color,
+                capabilities.foreground_color,
+            );
+            let look = render::Look {
+                cells: self.options.cells,
+                page,
+                bands,
+            };
+            render::draw(
+                &mut self.tree,
+                buffer,
+                area,
+                look,
+                &mut self.hits,
+                &mut self.geometry,
+            );
+            let scene = crate::selection::Scene {
                 area,
                 cells: self.options.cells,
                 hits: &self.hits,
                 geometry: &self.geometry,
-                tree: &mut self.tree,
-                control: &engine.control(),
-            })
-        {
-            self.surface.wake.notify();
-        }
-        if let Some(engine) = &self.surface.engine
-            && self
-                .keyboard
-                .reconcile(&mut self.tree, &self.geometry, &engine.control())
-        {
-            self.surface.wake.notify();
-        }
-        if let Some(engine) = &self.surface.engine {
-            let control = engine.control();
-            for (id, focus) in std::mem::take(&mut self.tree.focus_requests) {
-                // A target scrolled out of sight is focused and revealed,
-                // as keyboard navigation reveals what it moves to.
-                let target = focus
-                    .then(|| {
-                        self.keyboard
-                            .candidates(&self.tree, &self.geometry)
-                            .iter()
-                            .find(|g| g.id == id)
-                            .map(|g| g.frame)
-                    })
-                    .flatten();
-                if let Some(frame) = target {
-                    self.keyboard.focus(Some(id), &mut self.tree, &control);
-                    crate::keyboard::reveal_frame(&mut self.tree, &self.geometry, id, frame);
-                    self.surface.wake.notify();
-                } else if !focus && self.keyboard.focused == Some(id) {
-                    self.keyboard.focus(None, &mut self.tree, &control);
-                    self.surface.wake.notify();
+                tree: &self.tree,
+            };
+            self.selection.draw(scene, buffer);
+            let changes = self.selection.changes(&self.tree, &self.geometry);
+            if let Some(engine) = &self.surface.engine {
+                let control = engine.control();
+                for (id, text, start) in changes {
+                    control.dispatch_event(
+                        id,
+                        nsh_core::EventKind::SelectionChange,
+                        nsh_core::EventPayload::Map(vec![
+                            ("text", nsh_core::PayloadValue::Str(text)),
+                            ("start", nsh_core::PayloadValue::Number(f64::from(start))),
+                        ]),
+                    );
                 }
             }
-            if let Some(id) = self.keyboard.focused
-                && let Some(field) = self.tree.get_mut(id).and_then(|view| view.field.as_mut())
+            // A view that moved under the pointer, or away from it, is drawn
+            // again in its new hover state.
+            if let Some(engine) = &self.surface.engine
+                && self.pointer.rehover(&mut crate::input::PointerContext {
+                    area,
+                    cells: self.options.cells,
+                    hits: &self.hits,
+                    geometry: &self.geometry,
+                    tree: &mut self.tree,
+                    control: &engine.control(),
+                })
             {
-                field.report(id, &control, false);
+                self.surface.wake.notify();
+            }
+            if let Some(engine) = &self.surface.engine
+                && self
+                    .keyboard
+                    .reconcile(&mut self.tree, &self.geometry, &engine.control())
+            {
+                self.surface.wake.notify();
+            }
+            if let Some(engine) = &self.surface.engine {
+                let control = engine.control();
+                for (id, focus) in std::mem::take(&mut self.tree.focus_requests) {
+                    // A target scrolled out of sight is focused and revealed,
+                    // as keyboard navigation reveals what it moves to.
+                    let target = focus
+                        .then(|| {
+                            self.keyboard
+                                .candidates(&self.tree, &self.geometry)
+                                .iter()
+                                .find(|g| g.id == id)
+                                .map(|g| g.frame)
+                        })
+                        .flatten();
+                    if let Some(frame) = target {
+                        self.keyboard.focus(Some(id), &mut self.tree, &control);
+                        crate::keyboard::reveal_frame(&mut self.tree, &self.geometry, id, frame);
+                        self.surface.wake.notify();
+                    } else if !focus && self.keyboard.focused == Some(id) {
+                        self.keyboard.focus(None, &mut self.tree, &control);
+                        self.surface.wake.notify();
+                    }
+                }
+                if let Some(id) = self.keyboard.focused
+                    && let Some(field) = self.tree.get_mut(id).and_then(|view| view.field.as_mut())
+                {
+                    field.report(id, &control, false);
+                }
             }
         }
         self.tree.menus.draw_bar(buffer, ramp);

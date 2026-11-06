@@ -11,7 +11,7 @@ import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
+import { Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
 
 /** `nsh`'s primitives, from the simplest, in the website's order. */
 const primitives: DemoEntry[] = [
@@ -65,6 +65,7 @@ const components: DemoEntry[] = [
   { name: "Toast", detail: terminal ? "Notes on the bottom row that close by themselves, by their action or Escape" : "Notes that close by themselves, by their action, back or a swipe", icon: "bell", screen: lazy(() => import("./demos/Overlays").then((m) => m.ToastDemo)) },
   { name: "Toggle", detail: "A text toolbar, a segmented view switcher, a favorite star, sizes, a locked group", icon: "controls", screen: lazy(() => import("./demos/ToggleDemo").then((m) => m.ToggleDemo)) },
   { name: "Toolbar", detail: "A text editor's formatting bar, a media player's transport, a vertical tool palette, a locked review bar", icon: "sliders", screen: lazy(() => import("./demos/ToolbarDemo").then((m) => m.ToolbarDemo)) },
+  { name: "Terminal", detail: "A shell's colors, a progress bar redrawn in place, the keys typed sent back", icon: "terminal", screen: lazy(() => import("./demos/TerminalDemo").then((m) => m.TerminalDemo)) },
   { name: "Tooltip", detail: "A label while the pointer rests on an element, or pinned by the app", icon: "tooltip", screen: lazy(() => import("./demos/Overlays").then((m) => m.TooltipDemo)) },
   { name: "Tree", detail: "A project explorer, a settings sidebar, 10 100 items that stay fast, a read-only outline", icon: "tree", screen: lazy(() => import("./demos/TreeDemo").then((m) => m.TreeDemo)) },
 ];
@@ -76,7 +77,7 @@ const purposes: [string, string[]][] = [
   ["Navigation", ["NavStack", "Tabs", "Pagination", "Accordion", "Collapsible", "Carousel", "Tree"]],
   ["Overlays", ["Popover", "HoverCard", "Menu", "Tooltip", "Sheet", "Toast"]],
   ["Data", ["Avatar", "Progress", "DataTable", "Plot", "DiffView"]],
-  ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Dock", "Resizable"]],
+  ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Terminal", "Dock", "Resizable"]],
 ];
 
 const byName = new Map(components.map((d) => [d.name, d]));
@@ -129,6 +130,8 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
       { name: "Updater", detail: "nsh/updater: ask for a newer version, download it, replace the app", icon: "system", screen: lazy(() => import("./demos/Updater").then((m) => m.UpdaterDemo)) },
       { name: "Notifications", detail: "Asking for the permission, a notification shown, replaced and pressed, the badge on the app's icon", icon: "spark", screen: lazy(() => import("./demos/NotificationsDemo").then((m) => m.NotificationsDemo)) },
+      { name: "URL scheme", detail: "UrlScheme: nsh-gallery:// links that open the app", icon: "system", screen: lazy(() => import("./demos/UrlSchemeDemo").then((m) => m.UrlSchemeDemo)) },
+      { name: "Tray & shortcuts", detail: "nsh/desktop: an icon in the system tray with its menu, a global shortcut", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },
@@ -176,6 +179,7 @@ function Home() {
     <NavPage title="Gallery" {...header} headerLargeTitle headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ paddingTop: 12, paddingBottom: 40, gap: 28 }}>
+          <Banner />
           <Each of={groups}>
             {(group, g) => (
               <Appear index={g()}>
@@ -320,7 +324,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
         ...(active() && props.focused ? focusRing() : {}),
       }}
     >
-      <Icon name={props.demo.icon} size={15} tint={active() ? colors.accent : colors.muted} />
+      <Icon name={props.demo.icon} size={15} tint={active() ? colors.text : colors.muted} />
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, fontWeight: active() ? "500" : "400", color: colors.text }}>{props.demo.name}</Text>
     </View>
   );
@@ -506,9 +510,12 @@ function Sidebar() {
           style={
             terminal
               ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
-              : { height: 44, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingLeft: titleBar().left + 12, paddingRight: 10 }
+              : { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: titleBar().left + 16, paddingRight: 10 }
           }
         >
+          {/* The mark at the sidebar's top left, past the window's controls. */}
+          {!terminal && <Logo size={22} />}
+          <View style={{ flex: 1 }} />
           <SidebarToggle />
         </View>
         <Search />
@@ -520,7 +527,6 @@ function Sidebar() {
             terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
           ]}
         >
-          <Logo size={22} />
           {/* Its name over the platform's, as elsewhere: side by side they do not fit a terminal's sidebar. */}
           <View style={{ flex: 1, gap: 0 }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>

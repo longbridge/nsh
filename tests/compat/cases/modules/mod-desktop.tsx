@@ -1,10 +1,11 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/desktop`
 // off the desktops (the headless runtime is iOS): `isAvailable` is false,
-// `titleBar()` is all 0, and the window and menu functions are callable
-// and do nothing, so an app that calls them runs on. Its script checks
-// each.
+// `titleBar()` is all 0, `windowState()` is null and `displays()` empty,
+// and the window (`Window.setBounds` too), app and menu functions are
+// callable and do nothing, so an app that calls them runs on. Its script
+// checks each.
 import { Text, View, signal } from "nsh";
-import { Menu, Window, isAvailable, titleBar } from "nsh/desktop";
+import { Application, Menu, Window, displays, isAvailable, titleBar, windowState } from "nsh/desktop";
 
 function App() {
   const calls = signal("not called");
@@ -13,6 +14,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Desktop: ${isAvailable}`}</Text>
       <Text>{`Title bar: ${titleBar().height} ${titleBar().left} ${titleBar().right}`}</Text>
+      <Text>{`Window state: ${windowState()} displays ${displays().length}`}</Text>
       <Text>{`Calls: ${calls()}`}</Text>
       <Text>{`Popup: ${popup()}`}</Text>
       <View
@@ -25,7 +27,11 @@ function App() {
           Window.setLevel("floating");
           Window.setLevel("normal");
           Window.orderFront();
-          calls.set(`window done, close ${typeof Window.close}, minimize ${typeof Window.minimize}`);
+          Window.setBounds({
+            mode: "maximized",
+            bounds: { origin: { x: -3000, y: 10 }, size: { width: 800, height: 600 } },
+          });
+          calls.set(`window done, close ${typeof Window.close}, minimize ${typeof Window.minimize}, setBounds ${typeof Window.setBounds}`);
         }}
       >
         <Text>Window calls</Text>
@@ -45,6 +51,15 @@ function App() {
         }}
       >
         <Text>Menu calls</Text>
+      </View>
+      <View
+        testID="application"
+        onPress={() => {
+          Application.quit();
+          calls.set(`application done, quit ${typeof Application.quit}`);
+        }}
+      >
+        <Text>Application calls</Text>
       </View>
       <View
         testID="toggles"

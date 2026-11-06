@@ -202,12 +202,22 @@ fn character(event: &NSEvent, shift: bool) -> Option<char> {
     }
 }
 
+/// The virtual key codes of F1 to F20.
+const FUNCTION_KEYS: [u16; 20] = [
+    122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
+];
+
 /// F1 to F20, by virtual key code.
 fn function_key(code: u16) -> Option<u8> {
-    const KEYS: [u16; 20] = [
-        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
-    ];
-    KEYS.iter().position(|&k| k == code).map(|i| i as u8 + 1)
+    FUNCTION_KEYS
+        .iter()
+        .position(|&k| k == code)
+        .map(|i| i as u8 + 1)
+}
+
+/// The virtual key code of F`n` (macOS's keyboards end at F20).
+pub(crate) fn function_key_code(n: u8) -> Option<u16> {
+    FUNCTION_KEYS.get(usize::from(n).checked_sub(1)?).copied()
 }
 
 #[cfg(test)]
@@ -218,5 +228,9 @@ mod tests {
         assert_eq!(super::function_key(96), Some(5));
         assert_eq!(super::function_key(90), Some(20));
         assert_eq!(super::function_key(0), None);
+        assert_eq!(super::function_key_code(1), Some(122));
+        assert_eq!(super::function_key_code(20), Some(90));
+        assert_eq!(super::function_key_code(0), None);
+        assert_eq!(super::function_key_code(21), None);
     }
 }

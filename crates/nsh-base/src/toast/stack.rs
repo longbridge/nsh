@@ -152,6 +152,7 @@ fn spring_of(motion: ToastMotion) -> Spring {
         damping: 2.0 * stiffness.sqrt(),
         mass: 1.0,
         velocity: None,
+        frame_rate: None,
     }
 }
 

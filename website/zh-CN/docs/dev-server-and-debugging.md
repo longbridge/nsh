@@ -36,7 +36,7 @@ nsh dev App.tsx --server-only       # server only
 |---|---|
 | `--target <catalyst \| ios \| android \| macos \| linux \| windows \| gpui \| web>` | 在哪里运行。macOS 上默认 `macos`（AppKit 窗口），Linux 上默认 `linux`，Windows 上默认 `windows`。Rust 应用可以在除 `gpui` 之外的所有目标上运行；GPUI 应用嵌入它的根组件（[GPUI](./gpui.md)）。 |
 | `--device <name or UDID>` | 要使用的 iOS 模拟器。默认：已启动的那个，否则使用最新的 iPhone（会自动为你启动）。 |
-| `--port <port>` | 开发服务器端口。默认 8790；如被占用，则使用下一个空闲端口。 |
+| `--port <port>` | 开发服务器端口，并替换该端口上之前的 NSH 会话。默认使用此应用上次的端口并替换它之前的会话，否则使用从 8790 起第一个空闲端口。 |
 | `--release` | 提供 TSX 的 release 构建（压缩、无调试信息、无热更新）。 |
 | `--trace` | 在宿主上记录每次提交（commit）的耗时（TSX 应用）。 |
 
@@ -73,7 +73,7 @@ nsh dev App.tsx
 
 | 参数 | 说明 |
 |---|---|
-| `--port <port>` | 开发服务器端口。默认 8790（如被占用则使用下一个空闲端口）。 |
+| `--port <port>` | 开发服务器端口。规则与 `nsh run` 相同；使用 `--server-only` 时默认 8790，并替换该端口上之前的 NSH 会话。 |
 | `--release` | 提供 release 构建。 |
 
 将宿主连接到打印出的 URL：

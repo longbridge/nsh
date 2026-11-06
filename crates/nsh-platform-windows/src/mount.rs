@@ -477,11 +477,17 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::Load(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {
                     crate::native::command(surface, view, command);
                 }
+            }
+            // A window of the app's own (`Window.open`) shows dialog root
+            // `id`.
+            Command::Desktop(desktop) if id != ROOT_ID => {
+                crate::app_window::command(surface, id, view, desktop);
             }
             other => crate::system::command(surface, id, other),
         }

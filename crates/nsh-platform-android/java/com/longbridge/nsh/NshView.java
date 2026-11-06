@@ -527,6 +527,30 @@ public class NshView extends FrameLayout {
         Notifications.handleIntent(intent);
     }
 
+    /**
+     * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
+     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     *
+     * @param url the URL
+     */
+    public void openUrl(String url) {
+        if (url == null || handle == 0) return;
+        mounter.eventMap(1, Native.URL_SCHEME, new String[] {"url"}, new Object[] {url});
+    }
+
+    /**
+     * Hands the app the URL {@code intent} carries, if it is an {@code ACTION_VIEW} intent with one ({@link #openUrl}).
+     * The activity showing this view calls it from {@code onCreate} (with the launch intent, when it is not being
+     * recreated) and {@code onNewIntent}.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleUrlSchemeIntent(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data != null) openUrl(data.toString());
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {
@@ -761,8 +785,37 @@ public class NshView extends FrameLayout {
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
             lifecycle,
-        }, dark, locale.toLanguageTag());
+            // 24-hour time: the user's setting, else the locale's.
+            android.text.format.DateFormat.is24HourFormat(getContext()) ? 1 : 0,
+        }, dark, locale.toLanguageTag(), timeZone,
+                // The user's list (an app's own language first, Android 13's
+                // per-app language included), after the embedding app's own.
+                (hostLocale != null ? hostLocale.toLanguageTag() + "," : "") + c.getLocales().toLanguageTags(),
+                // The system's, whatever the embedding app's language: Android
+                // 14 keeps the first day of the week and the temperature unit
+                // in its extension.
+                java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
     }
+
+    /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
+    private String timeZone = java.util.TimeZone.getDefault().getID();
+
+    /**
+     * The system's time zone changed (the user's setting, or a new zone with
+     * automatic time zones): the broadcast names it, before the process's
+     * default zone may have caught up. Or the time changed, as when the user
+     * switches 24-hour time (`localeSettings()`'s `hourCycle`).
+     */
+    private final android.content.BroadcastReceiver timeChanged = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, android.content.Intent intent) {
+            if (android.content.Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())) {
+                String zone = intent.getStringExtra(android.content.Intent.EXTRA_TIMEZONE);
+                timeZone = zone != null ? zone : java.util.TimeZone.getDefault().getID();
+            }
+            publishEnvironment(getRootWindowInsets());
+        }
+    };
 
     /** The view's activity reported `state` (`lifecycle()`'s values). */
     private void activityState(Activity activity, int state) {
@@ -916,6 +969,12 @@ public class NshView extends FrameLayout {
             Integer state = lifecycles.state(activity);
             if (state != null) activityState(activity, state);
         }
+        // The zone may have changed while the view was detached. The
+        // broadcasts are the system's alone: no export flag is needed.
+        timeZone = java.util.TimeZone.getDefault().getID();
+        android.content.IntentFilter time = new android.content.IntentFilter(android.content.Intent.ACTION_TIMEZONE_CHANGED);
+        time.addAction(android.content.Intent.ACTION_TIME_CHANGED);
+        getContext().registerReceiver(timeChanged, time);
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
     }
@@ -925,6 +984,7 @@ public class NshView extends FrameLayout {
         super.onDetachedFromWindow();
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
         if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
+        getContext().unregisterReceiver(timeChanged);
     }
 
     /** `BackHandler.exitApp()`: what the back button does without the app. */

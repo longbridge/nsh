@@ -13,7 +13,10 @@ use nsh_core::{
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
-use crate::headless::{DialogAnswer, Headless};
+use crate::{
+    headless::{DialogAnswer, Headless},
+    module::LocaleSettingsOptions,
+};
 
 /// An app a test opened, driven by steps and read by queries.
 pub(crate) trait Driver: Send {
@@ -70,6 +73,17 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
+    /// The user's locale settings that `settings` names, as the system
+    /// reports them (`localeSettings()`).
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let _ = settings;
+        Err(headless_only("setLocaleSettings"))
+    }
+    /// The system hands the app a link that opens it (`openWithUrl`).
+    fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("openWithUrl"))
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
     fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String>;
@@ -103,6 +117,14 @@ pub(crate) trait Driver: Send {
     fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
         let _ = error;
         Err(headless_only("ending a speech session"))
+    }
+    /// What the app asked of the speaker, in order.
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        Err(headless_only("`audio()`"))
+    }
+    /// The players playing reach their end.
+    fn end_audio(&mut self) -> Result<(), String> {
+        Err(headless_only("ending a player"))
     }
     fn texts(&mut self) -> Result<Vec<String>, String>;
     fn count(&mut self, selector: &str) -> Result<usize, String>;
@@ -219,6 +241,14 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let pins = settings.pins("setLocaleSettings")?;
+        let what = format!("setLocaleSettings({})", settings.label());
+        self.set_environment(&what, |e| pins.apply(e))
+    }
+    fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        Headless::open_with_url(self, url)
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
         Headless::run_for(self, time)
     }
@@ -253,6 +283,13 @@ impl Driver for Headless {
     }
     fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
         Headless::end_speech(self, error)
+    }
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        self.catch_up();
+        Ok(Headless::audio_calls(self))
+    }
+    fn end_audio(&mut self) -> Result<(), String> {
+        Headless::end_audio(self)
     }
     fn texts(&mut self) -> Result<Vec<String>, String> {
         self.catch_up();

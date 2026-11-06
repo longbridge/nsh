@@ -1372,7 +1372,7 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
     }
     let view = view.clone();
     let mut frames = 0;
-    surface.on_frame(move |surface, _| {
+    surface.on_draw_frame(move |surface, _| {
         frames += 1;
         if view.attached() {
             set_focus(surface, Some(&view));

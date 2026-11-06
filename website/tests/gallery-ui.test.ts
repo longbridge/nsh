@@ -6,8 +6,11 @@ import { galleryUiCss } from '../../examples/nsh-gallery-ui/css.js';
 
 const root = join(import.meta.dir, '../..');
 const shared = join(root, 'examples/nsh-gallery-ui');
+// As the playground collects them: every module of the shared UI, its
+// subdirectories (`look/`) included, but its tests.
 const realSources = Object.fromEntries([
-  ...readdirSync(shared).filter((name) => /\.(?:ts|tsx|json)$/.test(name))
+  ...readdirSync(shared, { recursive: true, encoding: 'utf8' })
+    .filter((name) => /\.(?:ts|tsx|json)$/.test(name) && !name.startsWith('tests/'))
     .map((name) => [`examples/nsh-gallery-ui/${name}`, readFileSync(join(shared, name), 'utf8')]),
   ['website/demos/palette.ts', readFileSync(join(root, 'website/demos/palette.ts'), 'utf8')],
 ]);
@@ -50,6 +53,15 @@ test('every real palette-based demo can include the shared UI and its theme', ()
       expect(inlined).not.toMatch(/^import\s.*from\s*["']\.\.\/.*nsh-gallery-ui/m);
     }
   }
+});
+
+test('the shared looks in look/ inline with the demos that use them', () => {
+  const source = 'import { buttonLook, buttonLabel, iconButtonLook } from "./palette";\nmount(() => null);';
+  const inlined = inlineGalleryUi(source, realSources);
+  // look/button.ts is its own scope, reached through demo.ts's re-exports.
+  expect(inlined).toContain('const TOUCH_TARGET = 44;');
+  expect(inlined).toMatch(/buttonLook: __nshGalleryModule\d+\.buttonLook/);
+  expect(inlined).toContain('const { buttonLook: buttonLook, buttonLabel: buttonLabel, iconButtonLook: iconButtonLook } =');
 });
 
 test('a demo with only native NSH imports stays as written', () => {
