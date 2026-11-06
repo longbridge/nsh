@@ -3,7 +3,9 @@
 //!
 //! **Sounds** are decoded once, at [`AudioCommand::Load`], by Media
 //! Foundation's source reader into 32-bit float PCM (at most the
-//! `max_duration` the core asked for), and played by XAudio2: one engine
+//! `max_duration` the core asked for) on a decoding thread of the process
+//! ([`decode_off_main`]), so a load never holds up the main thread's frames,
+//! and played by XAudio2: one engine
 //! per surface (made at the first play, so an app that never plays a sound
 //! never opens the output) with a mastering voice, and a source voice per
 //! overlapping play. A voice is reused once its buffer finished, past
@@ -23,17 +25,18 @@
 //! comes from a small thread that wakes the main thread every
 //! [`PROGRESS_INTERVAL`] while the player plays.
 //!
-//! Everything but the notifications' and the ticker's posts runs on the
-//! main thread, as the macOS backend's does; the events go to the root of
-//! the engine (`EventKind::Audio`).
+//! Everything but the decoding and the notifications' and the ticker's
+//! posts runs on the main thread, as the macOS backend's does; the events go
+//! to the root of the engine (`EventKind::Audio`).
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
+        mpsc,
     },
     time::{Duration, Instant},
 };
@@ -41,6 +44,7 @@ use std::{
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
     audio::{AudioCommand, AudioError, AudioEvent, MAX_VOICES, PROGRESS_INTERVAL, PlayerSettings},
+    image::ImageData,
 };
 use nsh_engine::EngineControl;
 use windows::{
@@ -71,7 +75,9 @@ use windows::{
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFSTARTUP_FULL, MFStartup,
             },
         },
-        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+        System::Com::{
+            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+        },
         UI::Shell::SHCreateMemStream,
     },
     core::{BSTR, HSTRING, Interface, PCWSTR, Result, implement},
@@ -92,6 +98,9 @@ pub(crate) struct Speaker {
 #[derive(Default)]
 struct Inner {
     sounds: HashMap<u32, Decoded>,
+    /// Sounds decoding: one unloaded meanwhile is dropped when it is
+    /// decoded.
+    loading: HashSet<u32>,
     /// Before the engine: the voices go before the mastering voice.
     voices: Vec<Voice>,
     /// Made at the first play.
@@ -246,13 +255,7 @@ pub(crate) fn command(
             hint,
             max_duration,
             ..
-        } => match decode(bytes, hint, *max_duration) {
-            Ok((decoded, event)) => {
-                speaker.inner.borrow_mut().sounds.insert(id, decoded);
-                report(control, id, event);
-            }
-            Err(message) => report(control, id, failed(AudioError::Decode, &message)),
-        },
+        } => speaker.load(key, control, id, bytes.clone(), hint.clone(), *max_duration),
         AudioCommand::LoadUrl { .. } => report(
             control,
             id,
@@ -265,7 +268,9 @@ pub(crate) fn command(
         AudioCommand::Stop { .. } => speaker.stop(id),
         AudioCommand::Unload { .. } => {
             speaker.stop(id);
-            speaker.inner.borrow_mut().sounds.remove(&id);
+            let mut inner = speaker.inner.borrow_mut();
+            inner.sounds.remove(&id);
+            inner.loading.remove(&id);
         }
         AudioCommand::Open { src, settings, .. } => {
             let player = Player::new(id, key, src, *settings, base, control.clone());
@@ -294,6 +299,37 @@ fn failed(error: AudioError, message: &str) -> AudioEvent {
     AudioEvent::Failed {
         error,
         message: message.to_owned(),
+    }
+}
+
+/// Work for the decoding thread.
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Runs `job` on the process's decoding thread, made at the first load:
+/// one thread, so many loads at once queue rather than each taking one.
+/// Hands `job` back when there is no such thread.
+fn decode_off_main(job: Job) -> std::result::Result<(), Job> {
+    static QUEUE: OnceLock<Option<mpsc::Sender<Job>>> = OnceLock::new();
+    let queue = QUEUE.get_or_init(|| {
+        let (send, jobs) = mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("nsh-audio-decode".into())
+            .spawn(move || {
+                // SAFETY: COM for this thread, in the multithreaded
+                // apartment Media Foundation's source reader works in; the
+                // thread lives as long as the process, so it is never
+                // uninitialized.
+                let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                for job in jobs {
+                    job();
+                }
+            })
+            .ok()
+            .map(|_| send)
+    });
+    match queue {
+        Some(queue) => queue.send(job).map_err(|e| e.0),
+        None => Err(job),
     }
 }
 
@@ -484,6 +520,58 @@ fn make_output() -> Result<Output> {
 }
 
 impl Speaker {
+    /// Decodes sound `id` off the main thread; the surface `key`'s speaker
+    /// keeps it and reports when it is decoded.
+    fn load(
+        &self,
+        key: u64,
+        control: &EngineControl,
+        id: u32,
+        bytes: ImageData,
+        hint: String,
+        max: Duration,
+    ) {
+        self.inner.borrow_mut().loading.insert(id);
+        let control = control.clone();
+        let job: Job = Box::new(move || {
+            let decoded = decode(&bytes, &hint, max);
+            crate::window::invoke(move || {
+                if let Some(surface) = Surface::by_key(key) {
+                    surface.audio.decoded(&control, id, decoded);
+                }
+            });
+        });
+        // Without the decoding thread, here, as before it existed.
+        if let Err(job) = decode_off_main(job) {
+            job();
+        }
+    }
+
+    /// Keeps a decoded sound, unless it was unloaded while it decoded, and
+    /// reports it.
+    fn decoded(
+        &self,
+        control: &EngineControl,
+        id: u32,
+        decoded: std::result::Result<(Decoded, AudioEvent), String>,
+    ) {
+        let mut inner = self.inner.borrow_mut();
+        if !inner.loading.remove(&id) {
+            return;
+        }
+        match decoded {
+            Ok((decoded, event)) => {
+                inner.sounds.insert(id, decoded);
+                drop(inner);
+                report(control, id, event);
+            }
+            Err(message) => {
+                drop(inner);
+                report(control, id, failed(AudioError::Decode, &message));
+            }
+        }
+    }
+
     fn play(&self, id: u32, volume: f32, rate: f32) {
         let mut guard = self.inner.borrow_mut();
         let inner = &mut *guard;
@@ -1011,7 +1099,67 @@ impl IMFMediaEngineNotify_Impl for Notify_Impl {
 
 #[cfg(test)]
 mod tests {
-    use super::extension;
+    use std::{sync::mpsc, time::Duration};
+
+    use super::{AudioEvent, decode, decode_off_main, extension};
+
+    /// A WAV file of `millis` of a 440 Hz tone: 16-bit mono at 8 kHz.
+    fn wav(millis: u32) -> Vec<u8> {
+        let rate = 8_000u32;
+        let frames = rate * millis / 1000;
+        let data = frames * 2;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        out.extend_from_slice(&1u16.to_le_bytes()); // mono
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data.to_le_bytes());
+        for i in 0..frames {
+            let t = i as f32 / rate as f32;
+            let v = (t * 440.0 * std::f32::consts::TAU).sin() * 8_000.0;
+            out.extend_from_slice(&(v as i16).to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn a_sound_decodes_on_the_decoding_thread() {
+        let (send, receive) = mpsc::channel();
+        let bytes = wav(250);
+        let queued = decode_off_main(Box::new(move || {
+            let decoded =
+                decode(&bytes, "click.wav", Duration::from_secs(5)).map(|(_, event)| event);
+            let _ = send.send((std::thread::current().id(), decoded));
+        }));
+        assert!(queued.is_ok(), "no decoding thread");
+        let (thread, decoded) = receive
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the decoding thread answers");
+        assert_ne!(thread, std::thread::current().id());
+        match decoded {
+            Ok(AudioEvent::Loaded {
+                duration,
+                truncated,
+                ..
+            }) => {
+                assert!(
+                    duration.abs_diff(Duration::from_millis(250)) < Duration::from_millis(20),
+                    "{duration:?}"
+                );
+                assert!(!truncated);
+            }
+            // A Windows without Media Foundation (Server Core, N editions).
+            Err(message) if message.contains("Media Foundation is not available") => {}
+            other => panic!("not decoded: {other:?}"),
+        }
+    }
 
     #[test]
     fn extensions_come_from_names_and_media_types() {
