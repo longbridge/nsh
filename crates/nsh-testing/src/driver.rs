@@ -8,14 +8,14 @@ use std::time::Duration;
 use nsh_core::{
     Dialog, ResolvedTextStyle,
     geometry::{Point, Points, Size},
-    platform::{ColorScheme, Languages, Lifecycle, TimeZone},
+    platform::{ColorScheme, Lifecycle},
 };
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
 use crate::{
     headless::{DialogAnswer, Headless},
-    module::RegionalPreferences,
+    module::LocaleSettingsOptions,
 };
 
 /// An app a test opened, driven by steps and read by queries.
@@ -73,22 +73,11 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
-    /// The device's time zone, as the system reports it (`timeZone()`).
-    fn set_time_zone(&mut self, zone: TimeZone) -> Result<(), String> {
-        let _ = zone;
-        Err(headless_only("setTimeZone"))
-    }
-    /// The user's preferred languages, as the system reports them
-    /// (`languages()`).
-    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
-        let _ = languages;
-        Err(headless_only("setLanguages"))
-    }
-    /// The user's regional preferences that `preferences` names, as the
-    /// system reports them (`hourCycle()` and the like).
-    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
-        let _ = preferences;
-        Err(headless_only("setRegionalPreferences"))
+    /// The user's locale settings that `settings` names, as the system
+    /// reports them (`localeSettings()`).
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let _ = settings;
+        Err(headless_only("setLocaleSettings"))
     }
     /// The system hands the app a link that opens it (`openWithUrl`).
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
@@ -244,19 +233,9 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
-    fn set_time_zone(&mut self, zone: TimeZone) -> Result<(), String> {
-        self.set_environment(&format!("setTimeZone({zone})"), |e| {
-            e.time_zone = zone;
-        })
-    }
-    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
-        self.set_environment(&format!("setLanguages({languages:?})"), |e| {
-            e.languages = languages;
-        })
-    }
-    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
-        let pins = preferences.pins("setRegionalPreferences")?;
-        let what = format!("setRegionalPreferences({})", preferences.label());
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let pins = settings.pins("setLocaleSettings")?;
+        let what = format!("setLocaleSettings({})", settings.label());
         self.set_environment(&what, |e| pins.apply(e))
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {

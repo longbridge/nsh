@@ -28,10 +28,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{
-        Appearance, HourCycle, Idiom, Languages, Lifecycle, Locale, MeasurementSystem, Os,
-        TemperatureUnit, TimeZone, Weekday,
-    },
+    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Os},
     time::Instant,
 };
 
@@ -78,12 +75,7 @@ struct EnvSignals {
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
-    languages: Memo<Languages>,
-    hour_cycle: Memo<HourCycle>,
-    first_day_of_week: Memo<Weekday>,
-    measurement_system: Memo<MeasurementSystem>,
-    temperature_unit: Memo<TemperatureUnit>,
-    time_zone: Memo<TimeZone>,
+    locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
 }
@@ -93,8 +85,8 @@ impl EnvSignals {
         Owner::detached().run(|| {
             let signal = super::signal(env);
             macro_rules! part {
-                ($($field:ident).+) => {
-                    computed(move || signal.with(|e| e.$($field).+))
+                ($field:ident) => {
+                    computed(move || signal.with(|e| e.$field))
                 };
             }
             Self {
@@ -112,12 +104,7 @@ impl EnvSignals {
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
-                languages: part!(languages),
-                hour_cycle: part!(regional.hour_cycle),
-                first_day_of_week: part!(regional.first_day_of_week),
-                measurement_system: part!(regional.measurement_system),
-                temperature_unit: part!(regional.temperature_unit),
-                time_zone: part!(time_zone),
+                locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
             }
@@ -307,48 +294,21 @@ pub fn locale() -> Locale {
     env(|e| e.locale)
 }
 
-/// The user's preferred languages, most preferred first (TS:
-/// `languages()`): the language to show the app's text in is the first the
-/// app has, the others its fallbacks. Reading it subscribes, so texts follow
-/// a change of the system's setting (or of an embedding app's language,
-/// which comes first).
-pub fn languages() -> Languages {
-    env(|e| e.languages)
-}
-
-/// Whether the user has 12- or 24-hour time (TS: `hourCycle()`): the
-/// system's setting, else the region's. Reading it subscribes, so times
-/// follow the setting. `nsh_base`'s `TimeField` and `DatePicker` take
-/// their `HourCycle::H12` where [`HourCycle::twelve_hour`], else `H23`.
-pub fn hour_cycle() -> HourCycle {
-    env(|e| e.hour_cycle)
-}
-
-/// The day the user's weeks start on (TS: `firstDayOfWeek()`): a calendar's
-/// first column. Reading it subscribes, so calendars follow the setting.
-/// `nsh_base`'s `Calendar` and `DatePicker` count their `first_day_of_week`
-/// from 0 for Sunday: pass `number() % 7`.
-pub fn first_day_of_week() -> Weekday {
-    env(|e| e.first_day_of_week)
-}
-
-/// The units the user measures lengths, weights and volumes in (TS:
-/// `measurementSystem()`). Reading it subscribes.
-pub fn measurement_system() -> MeasurementSystem {
-    env(|e| e.measurement_system)
-}
-
-/// The unit the user reads temperatures in (TS: `temperatureUnit()`).
-/// Reading it subscribes.
-pub fn temperature_unit() -> TemperatureUnit {
-    env(|e| e.temperature_unit)
-}
-
-/// The device's time zone, as the system names it (`Europe/Berlin`; TS:
-/// `timeZone()`). Reading it subscribes, so what shows times in it follows
-/// the user's travels and changes in the system's settings.
-pub fn time_zone() -> TimeZone {
-    env(|e| e.time_zone)
+/// The user's locale settings (TS: `localeSettings()`): the preferred
+/// languages, most preferred first (the app shows its text in the first it
+/// has, the others are its fallbacks; an embedding app's own language comes
+/// first), the device's time zone as the system names it
+/// (`Europe/Berlin`), and the regional preferences: 12- or 24-hour time,
+/// the first day of the week, the measurement system and the temperature
+/// unit, each the system's setting, else the region's. Reading it
+/// subscribes, so what shows them follows the user's settings and travels;
+/// a `computed` of one of them changes only with it. `nsh_base`'s
+/// `TimeField` and `DatePicker` take their `HourCycle::H12` where
+/// [`HourCycle::twelve_hour`](crate::platform::HourCycle::twelve_hour),
+/// else `H23`; its `Calendar` and `DatePicker` count their
+/// `first_day_of_week` from 0 for Sunday: pass `number() % 7`.
+pub fn locale_settings() -> LocaleSettings {
+    env(|e| e.locale_settings)
 }
 
 /// Whether the app is in use: in the foreground, visible without the

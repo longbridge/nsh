@@ -46,12 +46,12 @@
 //!   `WindowVisibility::Hidden`: minimized, covered or on another desktop,
 //!   as far as the platform reports it), active while one of the windows
 //!   showing a surface is the active one, inactive otherwise;
-//! - the preferred languages (`languages()`), most preferred first:
+//! - the preferred languages (`localeSettings()`'s), most preferred first:
 //!   `GetUserPreferredUILanguages` on Windows,
 //!   `CFLocaleCopyPreferredLanguages` on macOS, gettext's list on Linux
 //!   (`LANGUAGE`, then the messages' locale, each with its language alone
 //!   after it);
-//! - the time zone (`timeZone()`), as the native backends name it: on
+//! - the time zone (`localeSettings()`'s), as the native backends name it: on
 //!   Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its
 //!   IANA name from the ICU Windows ships; elsewhere the zone `TZ` names
 //!   (`GMT`, `Europe/Berlin`, as the C library reads it), else the zone
@@ -87,7 +87,7 @@ use nsh_core::{
     platform::{Appearance, clipboard},
 };
 use nsh_engine::{
-    ColorScheme, Edges, Environment, Languages, Lifecycle, Locale, RegionalPreferences, TimeZone,
+    ColorScheme, Edges, Environment, Languages, Lifecycle, Locale, LocaleSettings, TimeZone,
 };
 
 use crate::{
@@ -159,9 +159,7 @@ struct Settings {
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
-    languages: Languages,
-    regional: RegionalPreferences,
-    time_zone: TimeZone,
+    locale_settings: LocaleSettings,
     os_version: (u16, u16),
 }
 
@@ -402,9 +400,7 @@ fn update(surface: &Surface) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = settings.locale;
-    env.languages = settings.languages;
-    env.regional = settings.regional;
-    env.time_zone = settings.time_zone;
+    env.locale_settings = settings.locale_settings;
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
     env.rtl = settings.rtl;
@@ -451,18 +447,31 @@ fn posix_locale(var: impl Fn(&str) -> Option<String>) -> Locale {
         .unwrap_or_default()
 }
 
+/// The locale settings of `regional`'s regional preferences, with
+/// `languages` and `time_zone`.
+fn locale_settings(
+    regional: LocaleSettings,
+    languages: Languages,
+    time_zone: TimeZone,
+) -> LocaleSettings {
+    let mut settings = regional;
+    settings.languages = languages;
+    settings.time_zone = time_zone;
+    settings
+}
+
 /// The regional preferences of the POSIX locales: `LC_TIME`'s region's
 /// times and weeks, `LC_MEASUREMENT`'s units (each the first set of
 /// `LC_ALL`, its own and `LANG`), `locale`'s where none is set.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn posix_regional(var: impl Fn(&str) -> Option<String>, locale: Locale) -> RegionalPreferences {
+fn posix_regional(var: impl Fn(&str) -> Option<String>, locale: Locale) -> LocaleSettings {
     let of = |category: &str| {
         ["LC_ALL", category, "LANG"]
             .iter()
             .find_map(|v| var(v).filter(|s| !s.is_empty()))
             .map_or_else(
-                || RegionalPreferences::of(locale),
-                |name| RegionalPreferences::parse(&name),
+                || LocaleSettings::of(locale),
+                |name| LocaleSettings::parse(&name),
             )
     };
     let units = of("LC_MEASUREMENT");
@@ -612,10 +621,12 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: desktop.screen_reader,
             locale,
-            languages: posix_languages(|v| std::env::var(v).ok())
-                .unwrap_or(nsh_engine::Languages::one(locale)),
-            regional,
-            time_zone: posix_time_zone(),
+            locale_settings: super::locale_settings(
+                regional,
+                posix_languages(|v| std::env::var(v).ok())
+                    .unwrap_or(nsh_engine::Languages::one(locale)),
+                posix_time_zone(),
+            ),
             os_version: os_version(),
         }
     }
@@ -790,9 +801,7 @@ mod os {
 mod os {
     use std::ffi::c_void;
 
-    use nsh_engine::{
-        HourCycle, Locale, MeasurementSystem, RegionalPreferences, TimeZone, Weekday,
-    };
+    use nsh_engine::{HourCycle, Locale, LocaleSettings, MeasurementSystem, TimeZone, Weekday};
 
     use super::{Settings, rtl_language, text_scale};
 
@@ -878,19 +887,21 @@ mod os {
             rtl: ui_language().is_some_and(|l| rtl_language(&l)),
             screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
             locale,
-            languages: preferred_languages(locale),
-            regional: regional_preferences(name.as_deref()),
-            time_zone: time_zone(),
+            locale_settings: super::locale_settings(
+                regional_preferences(name.as_deref()),
+                preferred_languages(locale),
+                time_zone(),
+            ),
             os_version: os_version(),
         }
     }
 
-    /// The user's regional preferences (`hourCycle()` and the like): the
-    /// regional format's (`name`'s, with the user's changes to it) time
+    /// The user's regional preferences (`localeSettings()`'s `hourCycle`
+    /// and the like): the regional format's (`name`'s, with the user's changes to it) time
     /// format, first day of the week and measurement system, over the
     /// region's; Windows has no temperature unit setting.
-    fn regional_preferences(name: Option<&str>) -> RegionalPreferences {
-        let mut preferences = RegionalPreferences::parse(name.unwrap_or_default());
+    fn regional_preferences(name: Option<&str>) -> LocaleSettings {
+        let mut preferences = LocaleSettings::parse(name.unwrap_or_default());
         if let Some(cycle) = locale_info(LOCALE_STIMEFORMAT).and_then(|f| HourCycle::of_pattern(&f))
         {
             preferences.hour_cycle = cycle;
@@ -1116,7 +1127,7 @@ mod os {
     use std::ffi::{CStr, c_char, c_void};
 
     use nsh_engine::{
-        HourCycle, Locale, MeasurementSystem, RegionalPreferences, TemperatureUnit, Weekday,
+        HourCycle, Locale, LocaleSettings, MeasurementSystem, TemperatureUnit, Weekday,
     };
 
     use super::{Settings, parse_version, posix_time_zone, rtl_language};
@@ -1183,28 +1194,31 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: universal_access(c"voiceOverOnOffKey"),
             locale,
-            languages: preferred_languages(locale),
-            regional: regional_preferences(),
-            time_zone: posix_time_zone(),
+            locale_settings: super::locale_settings(
+                regional_preferences(),
+                preferred_languages(locale),
+                posix_time_zone(),
+            ),
             os_version: os_version(),
         }
     }
 
-    /// The user's regional preferences (`hourCycle()` and the like), as the
+    /// The user's regional preferences (`localeSettings()`'s `hourCycle`
+    /// and the like), as the
     /// macOS backend reads them: the hours of the time format for the `j`
     /// template (which 24-hour time changes), the calendar's first weekday,
     /// the locale's measurement system and the `AppleTemperatureUnit`
     /// preference, over the region's.
-    fn regional_preferences() -> RegionalPreferences {
+    fn regional_preferences() -> LocaleSettings {
         // SAFETY: what is copied or created is released after its text is
         // read; what is got belongs to the locale, released last.
         unsafe {
             let locale = CFLocaleCopyCurrent();
             if locale.is_null() {
-                return RegionalPreferences::default();
+                return LocaleSettings::default();
             }
             let id = string(CFLocaleGetIdentifier(locale)).unwrap_or_default();
-            let mut preferences = RegionalPreferences::parse(&id);
+            let mut preferences = LocaleSettings::parse(&id);
             let template = CFStringCreateWithCString(std::ptr::null(), c"j".as_ptr(), UTF8);
             if !template.is_null() {
                 let format = CFDateFormatterCreateDateFormatFromTemplate(
@@ -2932,10 +2946,10 @@ mod tests {
         );
         assert_eq!(
             posix_regional(vars(&[("LC_ALL", "en_US"), ("LC_TIME", "de_DE")]), us),
-            RegionalPreferences::EN_US
+            LocaleSettings::default()
         );
         // Nothing set: the locale's.
-        assert_eq!(posix_regional(vars(&[]), us), RegionalPreferences::EN_US);
+        assert_eq!(posix_regional(vars(&[]), us), LocaleSettings::default());
     }
 
     #[test]

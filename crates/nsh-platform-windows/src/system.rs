@@ -22,13 +22,14 @@
 //!   Windows. POSIX variables (`LANG`, `LC_*`) are not looked at: Windows
 //!   programs do not, and shells like Git Bash set `LANG` regardless of
 //!   the user's settings;
-//! - the preferred languages (`languages()`): the user's display languages,
-//!   most preferred first (`GetUserPreferredUILanguages`: Settings > Time &
-//!   language > Language & region), the locale alone when it lists none;
-//! - the regional preferences (`hourCycle()` and the like): the regional
-//!   format's time format, first day of the week and measurement system
-//!   (`GetLocaleInfoEx`, with the user's changes to the format), over the
-//!   region's; Windows has no temperature unit setting: the region's;
+//! - the locale settings (`localeSettings()`): the preferred languages, the
+//!   user's display languages, most preferred first
+//!   (`GetUserPreferredUILanguages`: Settings > Time & language > Language
+//!   & region), the locale alone when it lists none; the regional
+//!   preferences, the regional format's time format, first day of the
+//!   week and measurement system (`GetLocaleInfoEx`, with the user's
+//!   changes to the format), over the region's; Windows has no temperature
+//!   unit setting: the region's; the time zone, below;
 //! - the font scale: Settings > Accessibility > Text size
 //!   (`TextScaleFactor`, 100 to 225 percent);
 //! - reduce motion: Settings > Accessibility > Visual effects > Animation
@@ -48,7 +49,7 @@
 //!   active while the app is the active one (its windows get
 //!   `WM_ACTIVATEAPP`; before the first, the foreground window is the
 //!   process's), inactive otherwise;
-//! - the time zone (`timeZone()`): the zone of the system's setting
+//! - the time zone (`localeSettings()`'s): the zone of the system's setting
 //!   (`GetDynamicTimeZoneInformation`, its Windows key name) by its IANA
 //!   name, which the ICU Windows ships knows
 //!   (`ucal_getTimeZoneIDForWindowsID`, loaded when first needed: `UTC`
@@ -77,8 +78,8 @@ use nsh_core::{
     platform::{Appearance, clipboard},
 };
 use nsh_engine::{
-    ColorScheme, Edges, Environment, HourCycle, Languages, Lifecycle, Locale, MeasurementSystem,
-    RegionalPreferences, TimeZone, Weekday,
+    ColorScheme, Edges, Environment, HourCycle, Languages, Lifecycle, Locale, LocaleSettings,
+    MeasurementSystem, TimeZone, Weekday,
 };
 use windows::{
     Win32::{
@@ -171,8 +172,8 @@ struct Settings {
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
-    languages: Languages,
-    regional: RegionalPreferences,
+    /// All but the time zone, which [`update`] reads ([`time_zone`]).
+    locale_settings: LocaleSettings,
 }
 
 /// Makes the system look dark (or light) from now on (`nsh test
@@ -282,17 +283,17 @@ fn settings() -> Settings {
         rtl: ui_language_rtl(),
         screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
         locale,
-        languages: preferred_languages(locale),
-        regional: regional_preferences(name.as_deref()),
+        locale_settings: locale_settings(locale, name.as_deref()),
     }
 }
 
-/// The user's regional preferences (`hourCycle()` and the like): the
-/// regional format's (`name`'s, with the user's changes to it) time
-/// format, first day of the week and measurement system, over the
-/// region's.
-fn regional_preferences(name: Option<&str>) -> RegionalPreferences {
-    let mut preferences = RegionalPreferences::parse(name.unwrap_or_default());
+/// The user's locale settings (`localeSettings()`) but the time zone: the
+/// display languages (`locale` alone when Windows lists none), and the
+/// regional format's (`name`'s, with the user's changes to it) time format,
+/// first day of the week and measurement system, over the region's.
+fn locale_settings(locale: Locale, name: Option<&str>) -> LocaleSettings {
+    let mut preferences = LocaleSettings::parse(name.unwrap_or_default());
+    preferences.languages = preferred_languages(locale);
     if let Some(cycle) = locale_info(LOCALE_STIMEFORMAT).and_then(|f| HourCycle::of_pattern(&f)) {
         preferences.hour_cycle = cycle;
     }
@@ -323,8 +324,8 @@ fn locale_info(kind: u32) -> Option<String> {
     (len > 1).then(|| String::from_utf16_lossy(&buf[..len as usize - 1]))
 }
 
-/// The user's display languages, most preferred first (`languages()`);
-/// `locale` alone when Windows lists none.
+/// The user's display languages, most preferred first; `locale` alone when
+/// Windows lists none.
 fn preferred_languages(locale: Locale) -> Languages {
     let (mut count, mut len) = (0u32, 0u32);
     // SAFETY: a size query: no buffer, the length written to `len`.
@@ -417,8 +418,8 @@ fn update(surface: &Surface, settings: Settings) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = settings.locale;
-    env.languages = settings.languages;
-    env.regional = settings.regional;
+    env.locale_settings = settings.locale_settings;
+    env.locale_settings.time_zone = time_zone();
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
     env.rtl = settings.rtl;
@@ -430,11 +431,10 @@ fn update(surface: &Surface, settings: Settings) {
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface, env.lifecycle);
-    env.time_zone = time_zone();
     surface.set_environment(env);
 }
 
-/// The system's time zone (`timeZone()`): the setting's Windows zone by its
+/// The system's time zone: the setting's Windows zone by its
 /// IANA name.
 fn time_zone() -> TimeZone {
     let mut info = DYNAMIC_TIME_ZONE_INFORMATION::default();

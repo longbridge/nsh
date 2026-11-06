@@ -4,10 +4,12 @@ test("the environment is what open asks for", async () => {
   const app = await open("./App.tsx", {
     colorScheme: "dark",
     locale: "de_DE",
-    timeZone: "Europe/Berlin",
-    languages: ["de-AT", "de_DE", "en"],
-    hourCycle: "h12",
-    temperatureUnit: "fahrenheit",
+    localeSettings: {
+      timeZone: "Europe/Berlin",
+      languages: ["de-AT", "de_DE", "en"],
+      hourCycle: "h12",
+      temperatureUnit: "fahrenheit",
+    },
     reducedMotion: true,
     platform: "android",
     width: 320,
@@ -40,14 +42,17 @@ test("the defaults are a light iPhone in en-US", async () => {
 });
 
 test("the regional preferences follow the system's", async () => {
-  const app = await open("./App.tsx", { locale: "en_GB", firstDayOfWeek: 7 });
+  const app = await open("./App.tsx", { locale: "en_GB", localeSettings: { firstDayOfWeek: 7 } });
   expect(app.shows("Regional: h23 7 uk celsius")).toBe(true);
-  await app.setRegionalPreferences({ hourCycle: "h12", measurementSystem: "metric" });
+  await app.setLocaleSettings({ hourCycle: "h12", measurementSystem: "metric" });
   expect(app.shows("Regional: h12 7 metric celsius")).toBe(true);
-  await expect(() => app.setRegionalPreferences({ firstDayOfWeek: 8 })).rejects.toThrow(
+  // What it does not name stays.
+  expect(app.shows("Languages: en-GB")).toBe(true);
+  expect(app.shows("Zone: UTC")).toBe(true);
+  await expect(() => app.setLocaleSettings({ firstDayOfWeek: 8 })).rejects.toThrow(
     "8 is not a day of the week",
   );
-  await expect(() => open("./App.tsx", { firstDayOfWeek: 0 })).rejects.toThrow(
+  await expect(() => open("./App.tsx", { localeSettings: { firstDayOfWeek: 0 } })).rejects.toThrow(
     "0 is not a day of the week",
   );
 });
@@ -59,10 +64,12 @@ test("the languages are the locale's unless open lists others", async () => {
 
 test("the languages follow the system's", async () => {
   const app = await open("./App.tsx");
-  await app.setLanguages(["ja-JP", "en-US"]);
+  await app.setLocaleSettings({ languages: ["ja-JP", "en-US"] });
   expect(app.shows("Languages: ja-JP,en-US")).toBe(true);
-  await expect(() => app.setLanguages(["!"])).rejects.toThrow("names no language");
-  await expect(() => open("./App.tsx", { languages: [] })).rejects.toThrow("names no language");
+  await expect(() => app.setLocaleSettings({ languages: ["!"] })).rejects.toThrow("names no language");
+  await expect(() => open("./App.tsx", { localeSettings: { languages: [] } })).rejects.toThrow(
+    "names no language",
+  );
 });
 
 test("the appearance and the viewport change while the app runs", async () => {
@@ -85,15 +92,19 @@ test("the lifecycle follows the system's", async () => {
 
 test("the time zone follows the system's", async () => {
   const app = await open("./App.tsx");
-  await app.setTimeZone("Asia/Tokyo");
+  await app.setLocaleSettings({ timeZone: "Asia/Tokyo" });
   expect(app.shows("Zone: Asia/Tokyo")).toBe(true);
   expect(app.shows("Intl agrees: true")).toBe(true);
-  await expect(() => app.setTimeZone("Not a zone")).rejects.toThrow("is not a time zone");
+  await expect(() => app.setLocaleSettings({ timeZone: "Not a zone" })).rejects.toThrow(
+    "is not a time zone",
+  );
   expect(app.shows("Zone: Asia/Tokyo")).toBe(true);
 });
 
 test("an invalid time zone fails open", async () => {
-  await expect(() => open("./App.tsx", { timeZone: "../zone" })).rejects.toThrow("is not a time zone");
+  await expect(() => open("./App.tsx", { localeSettings: { timeZone: "../zone" } })).rejects.toThrow(
+    "is not a time zone",
+  );
 });
 
 test("an invalid locale fails open", async () => {

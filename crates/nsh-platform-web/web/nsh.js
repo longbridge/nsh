@@ -379,7 +379,7 @@ function timeZoneName() {
 
 /**
  * What the browser knows of the regional preferences of `locale`
- * (`hourCycle()` and the like): its hour cycle and first day of the week,
+ * (`localeSettings()`'s `hourCycle` and the like): its hour cycle and first day of the week,
  * and the locale with its likely region (`de` is `de-Latn-DE`), which has
  * the others. Browsers tell no user settings of them.
  */
@@ -1770,7 +1770,7 @@ class Player {
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
     // `lifecycle()`: hidden (another tab, a minimized window) or without
-    // the focus. `timeZone()` is read again then too: browsers tell no
+    // the focus. The time zone (`localeSettings()`) is read again then too: browsers tell no
     // change of the system's zone, which the user makes away from the page.
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
@@ -1819,7 +1819,7 @@ class Player {
     return {
       idiom: this.idiom,
       locale,
-      // The browser's preferred languages (`languages()`), the locale's
+      // The browser's preferred languages (`localeSettings()`), the locale's
       // first; `languagechange` tells their changes.
       languages: [...new Set([locale, ...languages.filter(Boolean)])],
       regional: regional(locale),

@@ -797,14 +797,14 @@ public class NshView extends FrameLayout {
                 java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
     }
 
-    /** The system's time zone's ID (`timeZone()`). */
+    /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
     private String timeZone = java.util.TimeZone.getDefault().getID();
 
     /**
      * The system's time zone changed (the user's setting, or a new zone with
      * automatic time zones): the broadcast names it, before the process's
      * default zone may have caught up. Or the time changed, as when the user
-     * switches 24-hour time (`hourCycle()`).
+     * switches 24-hour time (`localeSettings()`'s `hourCycle`).
      */
     private final android.content.BroadcastReceiver timeChanged = new android.content.BroadcastReceiver() {
         @Override

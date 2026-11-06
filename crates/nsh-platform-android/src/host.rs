@@ -23,7 +23,7 @@ use nsh_core::{
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
-    HourCycle, Idiom, Languages, Lifecycle, Locale, MountSink, Policy, RegionalPreferences, Root,
+    HourCycle, Idiom, Languages, Lifecycle, Locale, LocaleSettings, MountSink, Policy, Root,
     TimeZone,
 };
 
@@ -1098,25 +1098,29 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();
     }
+    let locale = environment.locale;
+    let settings = &mut environment.locale_settings;
     if let Ok(name) = env.get_string(&time_zone) {
-        environment.time_zone = TimeZone::parse(&String::from(name)).unwrap_or_default();
+        settings.time_zone = TimeZone::parse(&String::from(name)).unwrap_or_default();
     }
     if let Ok(tags) = env.get_string(&languages) {
-        environment.languages = Languages::parse(String::from(tags).split(','))
-            .unwrap_or(Languages::one(environment.locale));
+        settings.languages =
+            Languages::parse(String::from(tags).split(',')).unwrap_or(Languages::one(locale));
     }
     if let Ok(tag) = env.get_string(&regional) {
-        let mut preferences = RegionalPreferences::parse(&String::from(tag));
+        let preferences = LocaleSettings::parse(&String::from(tag));
         // The user's 24-hour time, the region's cycle where they agree.
         let twelve = v[14] == 0.0;
-        if preferences.hour_cycle.twelve_hour() != twelve {
-            preferences.hour_cycle = if twelve {
-                HourCycle::H12
-            } else {
-                HourCycle::H23
-            };
-        }
-        environment.regional = preferences;
+        settings.hour_cycle = if preferences.hour_cycle.twelve_hour() == twelve {
+            preferences.hour_cycle
+        } else if twelve {
+            HourCycle::H12
+        } else {
+            HourCycle::H23
+        };
+        settings.first_day_of_week = preferences.first_day_of_week;
+        settings.measurement_system = preferences.measurement_system;
+        settings.temperature_unit = preferences.temperature_unit;
     }
     environment.color_scheme = if dark != 0 {
         ColorScheme::Dark

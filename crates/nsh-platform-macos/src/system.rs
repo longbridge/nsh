@@ -11,18 +11,17 @@
 //!   root view's effective appearance (the window's, the system's), live;
 //! - the locale (`Intl`'s default): `NSLocale.currentLocale` (the region
 //!   format of System Settings), live;
-//! - the preferred languages (`languages()`): `NSLocale.preferredLanguages`
-//!   (System Settings' list, the app's own language first when the user
-//!   chose one for it), read again with the other settings, as on
-//!   `NSCurrentLocaleDidChangeNotification`;
-//! - the regional preferences (`hourCycle()` and the like): System
-//!   Settings' time format (the hours of `NSDateFormatter`'s format for the
-//!   `j` template, which 24-hour time changes), `NSCalendar`'s first weekday,
-//!   `NSLocale`'s measurement system and the `AppleTemperatureUnit` default,
-//!   over the region's; read again with the other settings;
-//! - the time zone (`timeZone()`): `NSTimeZone.systemTimeZone`'s name,
-//!   live (`NSSystemTimeZoneDidChangeNotification`, after which
-//!   Foundation's cached zone is reset);
+//! - the locale settings (`localeSettings()`), read together with the other
+//!   settings, as on `NSCurrentLocaleDidChangeNotification`: the preferred
+//!   languages, `NSLocale.preferredLanguages` (System Settings' list, the
+//!   app's own language first when the user chose one for it); the regional
+//!   preferences, System Settings' time format (the hours of
+//!   `NSDateFormatter`'s format for the `j` template, which 24-hour time
+//!   changes), `NSCalendar`'s first weekday, `NSLocale`'s measurement system
+//!   and the `AppleTemperatureUnit` default, over the region's; the time
+//!   zone, `NSTimeZone.systemTimeZone`'s name, live
+//!   (`NSSystemTimeZoneDidChangeNotification`, after which Foundation's
+//!   cached zone is reset);
 //! - right to left: the user's first preferred language;
 //! - reduce motion and VoiceOver: `NSWorkspace`'s accessibility settings,
 //!   live;
@@ -65,7 +64,7 @@ use nsh_core::{
 };
 use nsh_engine::{
     ColorScheme, Edges, Environment, HourCycle, Idiom, Languages, Lifecycle, Locale,
-    MeasurementSystem, Os, RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
+    LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
 };
 use objc2::{
     AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -325,8 +324,7 @@ fn update(surface: &Surface) {
     let mut env: Environment = surface.environment.get();
     env.color_scheme = color_scheme(surface);
     env.locale = current_locale();
-    env.languages = preferred_languages(env.locale);
-    env.regional = regional_preferences();
+    env.locale_settings = locale_settings(env.locale);
     env.font_scale = 1.0;
     env.reduce_motion = workspace.accessibilityDisplayShouldReduceMotion();
     env.screen_reader = workspace.isVoiceOverEnabled();
@@ -338,12 +336,11 @@ fn update(surface: &Surface) {
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface.mtm);
-    env.time_zone = time_zone();
     env.window_state = crate::window_state::read(surface);
     surface.set_environment(env);
 }
 
-/// The system's time zone (`timeZone()`): its IANA name.
+/// The system's time zone: its IANA name.
 fn time_zone() -> TimeZone {
     TimeZone::parse(&NSTimeZone::systemTimeZone().name().to_string()).unwrap_or_default()
 }
@@ -424,8 +421,8 @@ fn current_locale() -> Locale {
     Locale::parse(&identifier).unwrap_or_default()
 }
 
-/// The user's preferred languages, most preferred first (`languages()`);
-/// `locale` alone when the list names none.
+/// The user's preferred languages, most preferred first; `locale` alone
+/// when the list names none.
 fn preferred_languages(locale: Locale) -> Languages {
     let tags: Vec<String> = NSLocale::preferredLanguages()
         .iter()
@@ -434,12 +431,15 @@ fn preferred_languages(locale: Locale) -> Languages {
     Languages::parse(tags.iter().map(String::as_str)).unwrap_or(Languages::one(locale))
 }
 
-/// The user's regional preferences (`hourCycle()` and the like): System
+/// The user's locale settings (`localeSettings()`): the preferred languages
+/// (`locale` alone when the list names none), the time zone, and System
 /// Settings' time format, first day of the week, measurement system and
 /// temperature unit, over the region's.
-fn regional_preferences() -> RegionalPreferences {
+fn locale_settings(user_locale: Locale) -> LocaleSettings {
     let locale = NSLocale::currentLocale();
-    let mut preferences = RegionalPreferences::parse(&locale.localeIdentifier().to_string());
+    let mut preferences = LocaleSettings::parse(&locale.localeIdentifier().to_string());
+    preferences.languages = preferred_languages(user_locale);
+    preferences.time_zone = time_zone();
     // The hours of the user's time format, which 24-hour time changes.
     let hours =
         NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("j"), 0, Some(&locale));

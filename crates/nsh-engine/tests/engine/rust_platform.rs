@@ -24,7 +24,7 @@ use nsh_core::{
     element::{AssetFile, AssetKind, Registry, Root},
     geometry::{Bounds, point, size},
     platform::{
-        Idiom, Languages, Lifecycle, Locale, Os, RegionalPreferences, TemperatureUnit, TimeZone,
+        Idiom, Languages, Lifecycle, Locale, LocaleSettings, Os, TemperatureUnit, TimeZone,
     },
     prelude::*,
 };
@@ -385,7 +385,8 @@ fn components_follow_whether_the_app_is_in_use() {
 #[component]
 fn Greeting() -> impl IntoElement {
     view().child(text(move || {
-        let words = languages()
+        let languages = locale_settings().languages;
+        let words = languages
             .iter()
             .find_map(|l| match l.as_str().split('-').next() {
                 Some("de") => Some("Willkommen"),
@@ -393,7 +394,7 @@ fn Greeting() -> impl IntoElement {
                 _ => None,
             })
             .unwrap_or("Welcome");
-        format!("{words} ({})", languages().as_slice().len())
+        format!("{words} ({})", languages.as_slice().len())
     }))
 }
 
@@ -405,39 +406,40 @@ fn components_follow_the_preferred_languages() {
         (&["ja-JP", "fr-FR", "de-DE"][..], "Bienvenue (3)"),
         (&["de_AT", "en-US"][..], "Willkommen (2)"),
     ] {
-        engine.control().set_environment(Environment {
-            languages: Languages::parse(tags.iter().copied()).unwrap(),
-            ..Environment::default()
-        });
+        let mut env = Environment::default();
+        env.locale_settings.languages = Languages::parse(tags.iter().copied()).unwrap();
+        engine.control().set_environment(env);
         let (texts, ..) = until(&rx, shown);
         assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
     }
 }
 
 /// Shows a time, a temperature and the week as the user reads them, and
-/// counts the runs of an effect that reads the hour cycle alone, as a
-/// clock's does.
+/// counts the runs of an effect that reads the hour cycle alone through a
+/// `computed`, as a clock's does.
 #[component]
 fn Forecast() -> impl IntoElement {
     let clock_runs = signal(0);
+    let hour_cycle = computed(|| locale_settings().hour_cycle);
     effect(move || {
-        let _ = hour_cycle();
+        let _ = hour_cycle.get();
         clock_runs.update(|r| *r += 1);
     });
     view().child(text(move || {
-        let time = if hour_cycle().twelve_hour() {
+        let settings = locale_settings();
+        let time = if settings.hour_cycle.twelve_hour() {
             "3 PM"
         } else {
             "15:00"
         };
-        let temperature = match temperature_unit() {
+        let temperature = match settings.temperature_unit {
             TemperatureUnit::Celsius => "20 °C",
             TemperatureUnit::Fahrenheit => "68 °F",
         };
         format!(
             "{time}, {temperature}, weeks from {}, {} units, clock ran {}",
-            first_day_of_week().number(),
-            measurement_system().name(),
+            settings.first_day_of_week.number(),
+            settings.measurement_system.name(),
             clock_runs.get()
         )
     }))
@@ -447,10 +449,10 @@ fn Forecast() -> impl IntoElement {
 fn components_follow_the_regional_preferences() {
     let (engine, rx, _) = start::<Forecast>(Environment::default());
     until(&rx, "3 PM, 68 °F, weeks from 7, us units, clock ran 1");
-    let mut celsius = RegionalPreferences::EN_US;
+    let mut celsius = LocaleSettings::default();
     celsius.temperature_unit = TemperatureUnit::Celsius;
-    let germany = RegionalPreferences::of(Locale::parse("de-DE").unwrap());
-    for (regional, shown) in [
+    let germany = LocaleSettings::of(Locale::parse("de-DE").unwrap());
+    for (settings, shown) in [
         // Only the unit changes: the clock's effect does not run again.
         (celsius, "3 PM, 20 °C, weeks from 7, us units, clock ran 1"),
         (
@@ -459,7 +461,7 @@ fn components_follow_the_regional_preferences() {
         ),
     ] {
         engine.control().set_environment(Environment {
-            regional,
+            locale_settings: settings,
             ..Environment::default()
         });
         let (texts, ..) = until(&rx, shown);
@@ -473,11 +475,11 @@ fn components_follow_the_regional_preferences() {
 fn Zoned() -> impl IntoElement {
     let runs = signal(0);
     effect(move || {
-        let _ = time_zone();
+        let _ = locale_settings().time_zone;
         runs.update(|r| *r += 1);
     });
     view().child(text(move || {
-        format!("{} after {} runs", time_zone(), runs.get())
+        format!("{} after {} runs", locale_settings().time_zone, runs.get())
     }))
 }
 
@@ -492,10 +494,9 @@ fn components_follow_the_time_zone() {
             "America/Argentina/Buenos_Aires after 3 runs",
         ),
     ] {
-        engine.control().set_environment(Environment {
-            time_zone: TimeZone::parse(zone).unwrap(),
-            ..Environment::default()
-        });
+        let mut env = Environment::default();
+        env.locale_settings.time_zone = TimeZone::parse(zone).unwrap();
+        engine.control().set_environment(env);
         let (texts, ..) = until(&rx, shown);
         assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
     }

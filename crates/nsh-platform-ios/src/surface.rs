@@ -376,9 +376,7 @@ impl RootView {
                 _ => Idiom::Phone,
             },
             locale: current_locale(),
-            languages: preferred_languages(),
-            regional: regional_preferences(),
-            time_zone: time_zone(),
+            locale_settings: locale_settings(),
             lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
@@ -1096,7 +1094,7 @@ fn preferred_language_rtl() -> bool {
         })
 }
 
-/// The user's preferred languages (`languages()`), most preferred first:
+/// The user's preferred languages, most preferred first:
 /// `NSLocale.preferredLanguages`, Settings' list (the app's own language
 /// first when the user chose one for it). iOS restarts apps when the user
 /// changes the list, so it is read as the environment is published.
@@ -1109,20 +1107,21 @@ fn preferred_languages() -> nsh_engine::Languages {
         .unwrap_or_else(|| nsh_engine::Languages::one(current_locale()))
 }
 
-/// The user's regional preferences (`hourCycle()` and the like):
-/// Settings' time format (the hours of `NSDateFormatter`'s format for the
-/// `j` template, which 24-hour time changes), `NSCalendar`'s first weekday,
-/// `NSLocale`'s measurement system and the `AppleTemperatureUnit` default,
-/// over the region's.
-fn regional_preferences() -> nsh_engine::RegionalPreferences {
+/// The user's locale settings (`localeSettings()`): the preferred
+/// languages, the time zone, and Settings' time format (the hours of
+/// `NSDateFormatter`'s format for the `j` template, which 24-hour time
+/// changes), `NSCalendar`'s first weekday, `NSLocale`'s measurement system
+/// and the `AppleTemperatureUnit` default, over the region's.
+fn locale_settings() -> nsh_engine::LocaleSettings {
     use nsh_engine::{HourCycle, MeasurementSystem, TemperatureUnit, Weekday};
     use objc2_foundation::{
         NSCalendar, NSDateFormatter, NSLocale, NSLocaleMeasurementSystem, NSString, NSUserDefaults,
         ns_string,
     };
     let locale = NSLocale::currentLocale();
-    let mut preferences =
-        nsh_engine::RegionalPreferences::parse(&locale.localeIdentifier().to_string());
+    let mut preferences = nsh_engine::LocaleSettings::parse(&locale.localeIdentifier().to_string());
+    preferences.languages = preferred_languages();
+    preferences.time_zone = time_zone();
     // The hours of the user's time format, which 24-hour time changes.
     let hours =
         NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("j"), 0, Some(&locale));
@@ -1171,14 +1170,14 @@ fn current_locale() -> nsh_engine::Locale {
     nsh_engine::Locale::parse(&identifier).unwrap_or_default()
 }
 
-/// The app's state as UIApplication reports it now, before its
-/// notifications say more.
-/// The system's time zone (`timeZone()`): its IANA name.
+/// The system's time zone: its IANA name.
 fn time_zone() -> nsh_engine::TimeZone {
     nsh_engine::TimeZone::parse(&NSTimeZone::systemTimeZone().name().to_string())
         .unwrap_or_default()
 }
 
+/// The app's state as UIApplication reports it now, before its
+/// notifications say more.
 fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
     match UIApplication::sharedApplication(mtm).applicationState() {
         UIApplicationState::Active => Lifecycle::Active,

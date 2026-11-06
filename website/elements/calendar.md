@@ -123,7 +123,7 @@ The calendar opens on the month of the value (a range's start), else today's.
 
 `numberOfMonths` shows that many months side by side, from the shown one on; Previous and Next turn them one month at
 a time. `firstDayOfWeek` is the day the weeks start on, `0` Sunday (the default) to `6` Saturday; the user's is
-`firstDayOfWeek() % 7` ([Regional preferences](../docs/device-and-environment.md#regional-preferences)).
+`localeSettings().firstDayOfWeek % 7` ([Regional preferences](../docs/device-and-environment.md#regional-preferences)).
 
 The header holds Previous, two toggles and Next:
 

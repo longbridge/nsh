@@ -67,7 +67,7 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   there too (`web/intl/`): formatted in Rust for the common languages (limits in its module doc), in `Environment::locale` by
   default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`), local time `Date`'s,
   named as the zone the C library computes it in (`TZ`, `/etc/localtime`; on Windows and Android as the platform
-  reports it, `Environment::time_zone`, `timeZone()`).
+  reports it, `LocaleSettings::time_zone`, `localeSettings().timeZone`).
 - **Time**: an engine runs on a `nsh_core::time::Clock` (`EngineConfig::clock`), its thread's while it runs
   (`Clock::enter`): JS's timers, Rust tasks' timers, throttled scroll events, mouse moves and the frames' time read it
   through `nsh_core::time::now()`, `Intl` and `Date` through `unix_ms()`. The system's clock is the default. A manual

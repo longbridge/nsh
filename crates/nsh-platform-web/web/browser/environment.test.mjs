@@ -24,14 +24,18 @@ function environment() {
   return { env, writes };
 }
 
+/** The locale settings the engine sends, `changes` over Vienna's. */
+const settings = (changes = {}) => ({
+  languages: ["de-AT", "en-US"], timeZone: "Europe/Vienna", hourCycle: "h23", firstDayOfWeek: 1,
+  measurementSystem: "metric", temperatureUnit: "celsius", ...changes,
+});
+
 /** What the engine sends (`set_environment` in `src/browser/engine.rs`). */
 const engine = (changes = {}) => ({
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
-  locale: "de-AT", host: false, lifecycle: "active", timeZone: "Europe/Vienna",
-  languages: ["de-AT", "en-US"], hourCycle: "h23", firstDayOfWeek: 1, measurementSystem: "metric",
-  temperatureUnit: "celsius",
+  locale: "de-AT", host: false, lifecycle: "active", localeSettings: settings(),
   platform: { os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
   ...changes,
 });
@@ -74,34 +78,16 @@ test("the lifecycle is the engine's", () => {
   assert.equal(env.api.lifecycle(), "inactive");
 });
 
-test("the time zone is the engine's", () => {
+test("the locale settings are the engine's", () => {
   const { env } = environment();
-  // Before the engine reports, the native environment's default.
-  assert.equal(env.api.timeZone(), "UTC");
+  // Before the engine reports, the native environment's defaults: en-US's
+  // in UTC.
+  assert.deepEqual(env.api.localeSettings(), {
+    languages: ["en-US"], timeZone: "UTC", hourCycle: "h12", firstDayOfWeek: 7,
+    measurementSystem: "us", temperatureUnit: "fahrenheit",
+  });
   env.update(engine());
-  assert.equal(env.api.timeZone(), "Europe/Vienna");
-});
-
-test("the user's languages are the engine's", () => {
-  const { env } = environment();
-  // Before the engine reports, the native environment's default.
-  assert.deepEqual(env.api.languages(), ["en-US"]);
-  env.update(engine());
-  assert.deepEqual(env.api.languages(), ["de-AT", "en-US"]);
-});
-
-test("the user's regional preferences are the engine's", () => {
-  const { env } = environment();
-  // Before the engine reports, the native environment's defaults: en-US's.
-  assert.equal(env.api.hourCycle(), "h12");
-  assert.equal(env.api.firstDayOfWeek(), 7);
-  assert.equal(env.api.measurementSystem(), "us");
-  assert.equal(env.api.temperatureUnit(), "fahrenheit");
-  env.update(engine());
-  assert.equal(env.api.hourCycle(), "h23");
-  assert.equal(env.api.firstDayOfWeek(), 1);
-  assert.equal(env.api.measurementSystem(), "metric");
-  assert.equal(env.api.temperatureUnit(), "celsius");
+  assert.deepEqual(env.api.localeSettings(), settings());
 });
 
 test("a part is written only when it changed", () => {
@@ -117,10 +103,15 @@ test("a part is written only when it changed", () => {
   env.update(engine({ lifecycle: "inactive", locale: "fr-FR" }));
   assert.deepEqual(writes, ["fr-FR", "inactive"]);
   writes.length = 0;
-  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", timeZone: "Asia/Tokyo" }));
-  assert.deepEqual(writes, ["Asia/Tokyo"]);
-  // A language fewer is a change, though the ones left are the same.
+  const tokyo = settings({ timeZone: "Asia/Tokyo" });
+  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", localeSettings: tokyo }));
+  assert.deepEqual(writes, [tokyo]);
+  // The same settings, in a new object with a new array of languages.
   writes.length = 0;
-  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", timeZone: "Asia/Tokyo", languages: ["de-AT"] }));
-  assert.deepEqual(writes, [["de-AT"]]);
+  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", localeSettings: settings({ timeZone: "Asia/Tokyo" }) }));
+  assert.deepEqual(writes, []);
+  // A language fewer is a change, though the ones left are the same.
+  const fewer = settings({ timeZone: "Asia/Tokyo", languages: ["de-AT"] });
+  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", localeSettings: fewer }));
+  assert.deepEqual(writes, [fewer]);
 });

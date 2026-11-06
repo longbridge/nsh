@@ -15,13 +15,14 @@
 //! `Date`'s, and is named as the zone it is computed in: as the C library
 //! computing it reads that zone (`TZ`, `/etc/localtime`; the browser's on
 //! the web), or where that is out of its sight (Windows, Android) as the
-//! platform reports it (`Environment::time_zone`, `timeZone()`), so on a
-//! device `timeZone()` names it too. `resolvedOptions().timeZone` gives the
-//! name and a `timeZone` naming it is local time; a `TZ` holding a POSIX
-//! rule (`CET-1CEST,M3.5.0,M10.5.0/3`) is named by its text, so its
-//! daylight saving time stays. A test's zone
-//! (`open({ timeZone })`) names the device's zone without moving local
-//! time, so `Intl` keeps naming the machine's. TypeScript declares all of
+//! platform reports it (`LocaleSettings::time_zone`, `localeSettings()`'s
+//! `timeZone`), so on a device `localeSettings()` names it too.
+//! `resolvedOptions().timeZone` gives the name and a `timeZone` naming it
+//! is local time; a `TZ` holding a POSIX rule
+//! (`CET-1CEST,M3.5.0,M10.5.0/3`) is named by its text, so its daylight
+//! saving time stays. A test's zone
+//! (`open({ localeSettings: { timeZone } })`) names the device's zone
+//! without moving local time, so `Intl` keeps naming the machine's. TypeScript declares all of
 //! it in its ECMAScript library (`lib.es2023`), so `globals.d.ts` does not.
 //!
 //! Not there: `Collator`, `PluralRules`, `RelativeTimeFormat`,
@@ -601,7 +602,7 @@ fn system_zone() -> SystemZone {
 }
 
 /// The zone `TZ` (`tz`, `None` when unset) names, read as the Linux and
-/// GPUI backends read it for `timeZone()` ([`TimeZone::posix`]), else the
+/// GPUI backends read it for `localeSettings()` ([`TimeZone::posix`]), else the
 /// system's (`system`, asked only then). A `TZ` naming no zone but the
 /// system's own file (`:/etc/localtime`) is named by its text: a POSIX
 /// rule (`JST-9`), which the C library follows, or what it cannot read,
@@ -656,9 +657,9 @@ fn system_zone() -> SystemZone {
     }
 }
 
-/// The device's zone as the platform reports it (`Environment::time_zone`,
-/// `timeZone()`), where it can be local time's ([`may_be_local`]): a
-/// test's zone (`open({ timeZone })`) names the device's zone without
+/// The device's zone as the platform reports it (`LocaleSettings::time_zone`,
+/// `localeSettings()`), where it can be local time's ([`may_be_local`]): a
+/// test's zone (`open({ localeSettings: { timeZone } })`) names the device's zone without
 /// moving local time. `None` before the platform reports one.
 fn reported_zone_name(cx: Ctx) -> R<Option<String>> {
     const HALF_A_YEAR_MS: f64 = 182.0 * 86_400_000.0;

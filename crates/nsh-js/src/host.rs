@@ -2286,10 +2286,9 @@ const report = (v) => text(String(v));
             "#
         );
         for zone in ["UTC", "+08:00", "Asia/Tokyo"] {
-            host.set_environment(&Environment {
-                time_zone: nsh_core::platform::TimeZone::parse(zone).unwrap(),
-                ..Default::default()
-            });
+            let mut env = Environment::default();
+            env.locale_settings.time_zone = nsh_core::platform::TimeZone::parse(zone).unwrap();
+            host.set_environment(&env);
             host.eval_source(&script).unwrap();
         }
         assert_eq!(reported(&host), ["agrees", "agrees", "agrees"]);

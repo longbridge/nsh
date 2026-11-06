@@ -59,8 +59,8 @@ pub use nsh_core::{
     js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HourCycle, HttpBody,
-        HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, MeasurementSystem, Os,
-        RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
+        HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
+        MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -863,17 +863,17 @@ pub struct EngineConfig {
 pub struct EnvironmentPins {
     /// The locale (`Environment::locale`).
     pub locale: Option<nsh_core::platform::Locale>,
-    /// The preferred languages (`Environment::languages`).
+    /// The preferred languages (`LocaleSettings::languages`).
     pub languages: Option<nsh_core::platform::Languages>,
-    /// The hour cycle (`Environment::regional`).
+    /// The hour cycle (`LocaleSettings::hour_cycle`).
     pub hour_cycle: Option<nsh_core::platform::HourCycle>,
-    /// The first day of the week (`Environment::regional`).
+    /// The first day of the week (`LocaleSettings::first_day_of_week`).
     pub first_day_of_week: Option<nsh_core::platform::Weekday>,
-    /// The measurement system (`Environment::regional`).
+    /// The measurement system (`LocaleSettings::measurement_system`).
     pub measurement_system: Option<nsh_core::platform::MeasurementSystem>,
-    /// The temperature unit (`Environment::regional`).
+    /// The temperature unit (`LocaleSettings::temperature_unit`).
     pub temperature_unit: Option<nsh_core::platform::TemperatureUnit>,
-    /// The time zone (`Environment::time_zone`).
+    /// The time zone (`LocaleSettings::time_zone`).
     pub time_zone: Option<nsh_core::platform::TimeZone>,
     /// Whether the user asked for less motion
     /// (`Environment::reduce_motion`).
@@ -888,24 +888,24 @@ impl EnvironmentPins {
         if let Some(locale) = self.locale {
             environment.locale = locale;
         }
+        let settings = &mut environment.locale_settings;
         if let Some(languages) = self.languages {
-            environment.languages = languages;
-        }
-        let regional = &mut environment.regional;
-        if let Some(hour_cycle) = self.hour_cycle {
-            regional.hour_cycle = hour_cycle;
-        }
-        if let Some(day) = self.first_day_of_week {
-            regional.first_day_of_week = day;
-        }
-        if let Some(system) = self.measurement_system {
-            regional.measurement_system = system;
-        }
-        if let Some(unit) = self.temperature_unit {
-            regional.temperature_unit = unit;
+            settings.languages = languages;
         }
         if let Some(time_zone) = self.time_zone {
-            environment.time_zone = time_zone;
+            settings.time_zone = time_zone;
+        }
+        if let Some(hour_cycle) = self.hour_cycle {
+            settings.hour_cycle = hour_cycle;
+        }
+        if let Some(day) = self.first_day_of_week {
+            settings.first_day_of_week = day;
+        }
+        if let Some(system) = self.measurement_system {
+            settings.measurement_system = system;
+        }
+        if let Some(unit) = self.temperature_unit {
+            settings.temperature_unit = unit;
         }
         if let Some(reduce_motion) = self.reduce_motion {
             environment.reduce_motion = reduce_motion;
@@ -1060,7 +1060,7 @@ enum Message {
     Resize(Size<Points>),
     /// A component's task was woken: it runs in the loop.
     Wake,
-    /// Boxed: with the languages and the time zone held inline, an
+    /// Boxed: with the locale settings held inline, an
     /// environment is several times the size of every other message, and
     /// it changes rarely.
     Environment(Box<Environment>),
@@ -3046,9 +3046,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         os_version: env.os_version,
         idiom: env.idiom,
         locale: env.locale,
-        languages: env.languages,
-        regional: env.regional,
-        time_zone: env.time_zone,
+        locale_settings: env.locale_settings,
         apple_keyboard: env.apple_keyboard,
         ctrl_for_command: env.ctrl_for_command,
         host: env.host,
