@@ -52,7 +52,7 @@ export function homeCopy(locale: string): Home {
 export function homeLanguages(): { code: string; name: string; href: string }[] {
   return [
     { code: 'en', name: 'English', href: url('') },
-    { code: 'zh-CN', name: '中文', href: url('zh-CN') },
+    { code: 'zh-CN', name: '简体中文', href: url('zh-CN') },
     ...machineLocales.map(({ code, name }) => ({ code, name, href: url(code) })),
   ];
 }
