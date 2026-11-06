@@ -253,7 +253,7 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 | `CFBundleIdentifier` | `id` |
 | `CFBundleName`、`CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
-| `CFBundleURLTypes` | `deepLinks` |
+| `CFBundleURLTypes` | `schemes` |
 | iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
 | iOS：`UIUserInterfaceStyle` | `appearance` |
 | iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
