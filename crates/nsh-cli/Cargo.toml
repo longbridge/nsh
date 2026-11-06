@@ -67,3 +67,5 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 # The syntaxes file the web runtime fetches must be a dump its syntect reads.
 syntect.workspace = true
+# Pages loaded at the app's paths resolve their files as browsers do.
+url.workspace = true
