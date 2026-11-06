@@ -64,7 +64,7 @@ mount(App);
 
 ### 属性
 
-在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`、`incognito`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -76,6 +76,7 @@ mount(App);
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
 | `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `userAgent` | `string` | | 浏览器的 user agent 字符串。 |
+| `incognito` | `boolean` | `false` | 页面的网站数据只与网页视图同存亡，各平台的做法见[下文](#网站数据)。在网页视图创建时读取。 |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS：滑动在页面历史中前进后退。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 
@@ -358,6 +359,31 @@ import { signal, WebView } from "nsh";
 const input = signal(false);
 WebView.inputAvailable().then((available) => input.set(available));
 ```
+
+### 网站数据
+
+网页视图把页面的网站数据（cookie、local storage、IndexedDB、缓存）和应用的放在一起，所以在一个网页视图里登录，下一个网页视图里、
+应用重启后也还是登录状态。显示应用不信任的页面（别人生成的 HTML、一次性的登录页）的网页视图加上 `incognito`：它的页面使用一份
+自己的存储，只在内存里，随网页视图一起销毁。
+
+```rust tabs
+web_view("https://example.com/preview").incognito(true).flex_1()
+```
+
+```tsx tabs
+<WebView src="https://example.com/preview" incognito style={{ flex: 1 }} />
+```
+
+`incognito` 在网页视图创建时读取，所以在 Rust 里它接收一个值；在 TSX 里之后再改它，网页视图保留原来的存储并打印一条警告。
+要切换，就显示一个新的网页视图。各平台这样保存它的存储：
+
+| 平台 | incognito 网页视图的存储 |
+|---|---|
+| iOS、macOS | 自己的一份非持久 `WKWebsiteDataStore`。 |
+| Linux | 自己的一份临时 WebKit 网络会话。 |
+| Windows | InPrivate 模式的 WebView2 控制器。同时打开的 incognito 网页视图共用一份内存中的存储，最后一个关闭时清空。 |
+| Android | cookie 和网页存储属于整个应用，所有网页视图共用，网页视图关闭后仍然保留。incognito 网页视图加载时不使用 HTTP 缓存，也不保存表单数据。 |
+| Web | 浏览器为页面所在源保存的存储，和任何 `iframe` 一样。 |
 
 ### 网页视图可以显示哪些网站
 

@@ -60,6 +60,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 | `userAgent` | `.user_agent(..)` | `string` | | 浏览器的 user agent 字符串。 |
 | `javaScriptEnabled` | `.java_script_enabled(..)` | `boolean` | `true` | 页面可以运行脚本。 |
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动页面。 |
+| `incognito` | `.incognito(bool)` | `boolean` | `false` | 页面的网站数据（cookie、存储、缓存）只与网页视图同存亡，与应用的数据分开；Android 上网页视图加载时不使用 HTTP 缓存、不保存表单数据（见[网站数据](../docs/web-view-and-video.md#网站数据)）。在网页视图创建时读取。 |
 
 | `ios` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|
