@@ -49,8 +49,8 @@ function App() {
       <View
         testID="application"
         onPress={() => {
-          DesktopApplication.quit();
-          calls.set(`application done, quit ${typeof DesktopApplication.quit}`);
+          Application.quit();
+          calls.set(`application done, quit ${typeof Application.quit}`);
         }}
       >
         <Text>Application calls</Text>
