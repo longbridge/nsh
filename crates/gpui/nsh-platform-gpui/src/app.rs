@@ -194,8 +194,8 @@ impl Default for AppOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CloseRequest {
-    /// Quit the app: the reserved quit key (Ctrl+Q, Cmd+Q on macOS) or a
-    /// menu item with the `quit` role.
+    /// Quit the app: the reserved quit key (Ctrl+Q, Cmd+Q on macOS), a
+    /// menu item with the `quit` role, or `Application.quit()`.
     Quit,
     /// Close the window: Ctrl+W (Cmd+W on macOS) the app does not bind, a
     /// menu item with the `close` role, `Window.close()`, or the window's
@@ -455,8 +455,9 @@ impl AppView {
 
     /// Hands the quit and close requests of the window the view owns
     /// ([`AppView::own_window`]) to `f`, which decides: the reserved quit
-    /// key, Ctrl+W, the `quit` and `close` menu roles, `Window.close()` and
-    /// the window's close button no longer quit or close by themselves.
+    /// key, Ctrl+W, the `quit` and `close` menu roles, `Application.quit()`,
+    /// `Window.close()` and the window's close button no longer quit or
+    /// close by themselves.
     /// `f` runs on the main thread after the event that asked; it quits
     /// with `cx.quit()` or closes with `window.remove_window()` when the
     /// embedding app is ready to. Replaces the handler set before.

@@ -1,10 +1,10 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/desktop`
 // off the desktops (the headless runtime is iOS): `isAvailable` is false,
-// `titleBar()` is all 0, and the window and menu functions are callable
-// and do nothing, so an app that calls them runs on. Its script checks
+// `titleBar()` is all 0, and the window, app and menu functions are
+// callable and do nothing, so an app that calls them runs on. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import { Menu, Window, isAvailable, titleBar } from "nsh/desktop";
+import { Application, Menu, Window, isAvailable, titleBar } from "nsh/desktop";
 
 function App() {
   const calls = signal("not called");
@@ -45,6 +45,15 @@ function App() {
         }}
       >
         <Text>Menu calls</Text>
+      </View>
+      <View
+        testID="application"
+        onPress={() => {
+          Application.quit();
+          calls.set(`application done, quit ${typeof Application.quit}`);
+        }}
+      >
+        <Text>Application calls</Text>
       </View>
       <View
         testID="toggles"
