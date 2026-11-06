@@ -33,6 +33,7 @@ notify.workspace = true
 log.workspace = true
 libc.workspace = true
 ureq.workspace = true
+ring.workspace = true
 nsh-updater.workspace = true
 serde.workspace = true
 tungstenite.workspace = true

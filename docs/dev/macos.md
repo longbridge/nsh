@@ -312,7 +312,8 @@ Explicit application Quit and `quit_app()` always take the stop-and-return
 path, including while the window is hidden. `quit_app()` dispatches to the main
 thread and only affects the standalone runner; an embedded host retains its own
 application lifecycle. The Rust core's `close_window()` remains a window-close
-request, so hosts using retention must use `quit_app()` for Exit/relaunch.
+request; an Exit or relaunch uses `quit_app()` from the host, or the app's
+`quit()` (TS: `Application.quit()`), which takes the same path.
 
 Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while

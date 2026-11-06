@@ -24,7 +24,7 @@ use objc2_app_kit::{
     NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
 };
 
 use crate::{
@@ -498,6 +498,34 @@ struct Running {
 
 thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
+    /// Links that came before the app's engine started.
+    static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Hands `url`, a link the system opened the app with, to the running
+/// app's engine, whose core keeps it until the app listens; keeps it until
+/// the engine starts.
+fn url_scheme(url: String) {
+    let mut url = Some(url);
+    RUNNING.with(|running| {
+        if let Some(running) = running.borrow().as_ref() {
+            running.view.surface().control(|control| {
+                if let Some(url) = url.take() {
+                    control.dispatch_event(
+                        nsh_core::ROOT_ID,
+                        nsh_core::EventKind::UrlScheme,
+                        nsh_core::EventPayload::Map(vec![(
+                            nsh_core::url_scheme::URL,
+                            nsh_core::PayloadValue::Str(url),
+                        )]),
+                    );
+                }
+            });
+        }
+    });
+    if let Some(url) = url {
+        URL_SCHEMES.with(|links| links.borrow_mut().push(url));
+    }
 }
 
 define_class!(
@@ -533,6 +561,31 @@ define_class!(
         #[unsafe(method(applicationWillFinishLaunching:))]
         fn will_finish_launching(&self, _notification: &NSNotification) {
             crate::notifications::enable();
+        }
+
+        // The links of the schemes the app claims (`CFBundleURLTypes`), the
+        // one that launched it included.
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
+            for url in urls.iter() {
+                if let Some(url) = url.absoluteString() {
+                    url_scheme(url.to_string());
+                }
+            }
+            // A link opened while the app runs brings it forward.
+            app.activate();
+            let window = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .map(|running| running.window.clone())
+            });
+            if let Some(window) = window {
+                if window.isMiniaturized() {
+                    window.deminiaturize(None);
+                }
+                window.makeKeyAndOrderFront(None);
+            }
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -768,6 +821,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
+    for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
+        url_scheme(url);
+    }
     app.run();
     stop_running();
     app.setDelegate(None);

@@ -159,6 +159,7 @@ standalone session alive when its window closes. Closing hides the window;
 reopening from the Dock shows that same window and engine. For an explicit Exit
 or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
+The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while
 `nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
 
 

@@ -809,6 +809,11 @@ pub enum DesktopCommand {
     OrderFront,
     /// Closes the window (the app ends with its last window).
     Close,
+    /// Quits the app, as its `quit` menu role does: its windows close and
+    /// its run ends, also when closing the window would leave it running
+    /// (a window kept hidden, a tray icon). A view embedded in another app
+    /// leaves the app's lifecycle to that app.
+    Quit,
     /// Hides the window; [`DesktopCommand::OrderFront`] shows it again.
     Hide,
     /// Shows the dialog root the command is addressed to in a window of its

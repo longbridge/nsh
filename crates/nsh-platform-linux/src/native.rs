@@ -276,8 +276,9 @@ impl NativeState {
 /// What a native view holds.
 enum Host {
     Video(VideoHost),
+    /// A web view; `None` until its first props make it.
     #[cfg(feature = "webview")]
-    Web(web::WebHost),
+    Web(Option<web::WebHost>),
     /// A web view's placeholder (kept by the view).
     #[cfg(not(feature = "webview"))]
     Web,
@@ -290,7 +291,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
     let host = match view.kind() {
         ViewKind::Video => Host::Video(VideoHost::new(surface, view)),
         #[cfg(feature = "webview")]
-        ViewKind::WebView => Host::Web(web::WebHost::new(surface, view)),
+        ViewKind::WebView => Host::Web(None),
         #[cfg(not(feature = "webview"))]
         ViewKind::WebView => {
             static WARNED: AtomicBool = AtomicBool::new(false);
@@ -330,6 +331,22 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
 
 /// `NativeProps`.
 pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) {
+    // A web view is made with its first props (`incognito` picks its
+    // network session; the core keeps it from changing afterwards),
+    // outside the hosts' borrow.
+    #[cfg(feature = "webview")]
+    if let NativeProps::WebView(p) = props {
+        let unmade = matches!(
+            surface.native.hosts.borrow().get(&view.id()),
+            Some(Host::Web(None))
+        );
+        if unmade {
+            let web = web::WebHost::new(surface, view, p.incognito);
+            if let Some(Host::Web(slot)) = surface.native.hosts.borrow_mut().get_mut(&view.id()) {
+                *slot = Some(web);
+            }
+        }
+    }
     let mut hosts = surface.native.hosts.borrow_mut();
     match (hosts.get_mut(&view.id()), props) {
         (Some(Host::Video(video)), NativeProps::Video(p)) => {
@@ -337,7 +354,7 @@ pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) 
             video.set(view, p, base.as_ref());
         }
         #[cfg(feature = "webview")]
-        (Some(Host::Web(web)), NativeProps::WebView(p)) => web.set(view, p),
+        (Some(Host::Web(Some(web))), NativeProps::WebView(p)) => web.set(view, p),
         // Nothing to configure on the placeholder.
         #[cfg(not(feature = "webview"))]
         (Some(Host::Web), NativeProps::WebView(_)) => {}
@@ -398,7 +415,7 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
         _ => {
             // Outside the hosts' borrow: WebKit may call back at once.
             let web = match surface.native.hosts.borrow().get(&view.id()) {
-                Some(Host::Web(web)) => Some(web.web()),
+                Some(Host::Web(Some(web))) => Some(web.web()),
                 _ => None,
             };
             if let Some(web) = web {
