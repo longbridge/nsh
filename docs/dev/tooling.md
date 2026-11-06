@@ -379,7 +379,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   fed the mount items' animation ops and scroll values, its finished animations reported (`animations_finished`); a
   step is quiet only when no animation that ends by itself runs;
 - a back (`Headless::back`, and the app's `Command::Back`) does what `nsh-platform-macos`'s `default_back` does: in the
-  newest modal, else the screen, the innermost stack that can go back pops its top screen (hidden in the model until
+  newest modal, else the screen, the innermost stack that can go back and is laid out with a size
+  (`nsh_core::navigation::shown_in_layout`) pops its top screen (hidden in the model until
   the app removes it, `onDismiss`) or asks it (`preventBack`: `onBackRequest`); else the newest modal gets
   `onRequestClose`, and `onDismiss` when it is `dismissible`;
 - dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else
@@ -584,7 +585,8 @@ takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down
 real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation that ends by itself ran for 100 ms (`Native::animating`:
-the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s; 2 s at most; the web's page counts its own
+the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s, and on macOS a view's
+transitions but not its keyframes repeating forever, `animate-ping`'s or `animate-spin`'s, which have no `Live::deadline`; 2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG

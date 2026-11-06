@@ -904,7 +904,8 @@ impl Screen {
 
     /// What going back does now, as a platform's back does it: in the
     /// newest modal (else the whole screen) the innermost stack that can go
-    /// back pops its top screen, or asks it when it prevents going back;
+    /// back and is laid out with a size (`shown_in_layout`) pops its top
+    /// screen, or asks it when it prevents going back;
     /// without one, the newest modal asks to close.
     pub(crate) fn back_target(&self) -> Back {
         let attached = self.attached();
@@ -927,6 +928,11 @@ impl Screen {
                 self.kind(*id) == Some(ViewKind::Stack)
                     && modal.is_none_or(|m| self.is_inside(*id, m))
                     && can_go_back(*id)
+                    && nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(*id), |id| self.nodes.get(id)?.parent)
+                            .filter(|id| *id != ROOT)
+                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
+                    )
             })
             .collect();
         let innermost = stacks

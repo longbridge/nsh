@@ -43,8 +43,8 @@ function Person(props: {
   );
 }
 
-const TEAM = ["Ada Lovelace", "Grace Hopper", "Alan Turing"];
-const MEMBERS = ["Ada Lovelace", "Grace Hopper", "Alan Turing", "Katherine Johnson", "Edsger Dijkstra", "Barbara Liskov", "Donald Knuth", "Frances Allen", "Radia Perlman", "Ken Thompson"];
+const TEAM = ["Jason Lee", "Sunli", "Floyd Wang"];
+const MEMBERS = ["Jason Lee", "Sunli", "Floyd Wang", "Alan Turing", "Edsger Dijkstra", "Barbara Liskov", "Donald Knuth", "Frances Allen", "Radia Perlman", "Ken Thompson"];
 
 function App() {
   const presence = signal<Presence[]>(["online", "busy", "away"]);
@@ -93,7 +93,7 @@ function App() {
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
               >
-                <Person name={name} side={side} src={i === 2 ? undefined : avatarPortrait(name)} label={`${name}, ${presence()[i]}`} onStatus={(s) => log(`${name}: ${s}`)}>
+                <Person name={name} side={side} src={avatarPortrait(name)} label={`${name}, ${presence()[i]}`} onStatus={(s) => log(`${name}: ${s}`)}>
                   <View
                     class={reduceMotion() ? "" : "transition-colors duration-200"}
                     style={{ position: "absolute", right: -1, bottom: -1, width: 11, height: 11, borderRadius: 6, borderWidth: 2, borderColor: surface(), backgroundColor: dotColor(presence()[i]) }}
@@ -120,7 +120,7 @@ function App() {
               <Each of={MEMBERS.slice(0, members())}>
                 {(name, i) => (
                   <View style={{ marginLeft: i() === 0 ? 0 : -side / 4 }}>
-                    <Person name={name()} side={side} ring src={i() % 3 === 2 ? undefined : avatarPortrait(name())} />
+                    <Person name={name()} side={side} ring src={avatarPortrait(name())} />
                   </View>
                 )}
               </Each>

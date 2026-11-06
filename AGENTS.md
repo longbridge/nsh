@@ -605,6 +605,14 @@ Every pull-request workflow also handles `merge_group: checks_requested`, so Git
 combined commit. Queue runs execute the full workflow without PR path filters; Compat always builds on a queue
 run. Website deployment runs only on pushes and manual dispatches. `.github/ci/paths.py` checks the queue
 trigger alongside the dependency paths.
+Runners are the bottleneck, so a run takes one only when its result can still matter. Every pull-request
+workflow takes `pull_request` `types: [opened, synchronize, reopened, ready_for_review, closed]` (`paths.py` checks
+it), and its jobs skip drafts and the `closed` event: a draft runs nothing until it is marked ready, and closing or
+merging a pull request starts a run that runs nothing but takes its concurrency group, cancelling the runs it still
+has queued or running. The jobs that build (all but `CI paths`) are debounced: they name the environment
+`ci-debounce` with `deployment: false`, whose wait timer holds them a few minutes without a runner, so a push
+followed by another within that time cancels the first run before it starts. Each workflow's concurrency group is
+the ref, with `cancel-in-progress` (Website's pushes to `main` queue instead: each one deploys).
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'

@@ -32,8 +32,13 @@ Every other language is machine translated in
 [longbridge/nsh-website-translates](https://github.com/longbridge/nsh-website-translates),
 which also lists the languages and runs the translation. The published root clones
 it to `translations/` (git-ignored); older versions, pull requests and local builds
-do without. Each translated page says it is a machine translation and links to the
-English; a page with no translation shows the English, not indexed.
+do without. The home page is translated too: its words are `src/home/en.json`
+(Chinese beside it in `zh-CN.json`), and each language's `home.json` there holds
+them in the same keys, so `/<code>` is the home page in that language. Keep
+numbers, commands and code out of these files (they stay in `Home.astro`), and
+give a new string to both English and Chinese. Each translated page says it is a
+machine translation and links to the English; a page with no translation shows
+the English, not indexed.
 A language the registry marks `"dir": "rtl"` (Arabic) is laid out mirrored:
 the site's styles use logical properties (`margin-inline-start`,
 `inset-inline-end`, `text-align: start`), so keep to them; code, demos and

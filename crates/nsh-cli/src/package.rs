@@ -292,6 +292,8 @@ pub(crate) struct PackageOptions<'a> {
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
     pub(crate) run: bool,
+    /// The web: the URL the site's files are served from (`--asset-url`).
+    pub(crate) asset_url: Option<&'a str>,
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -385,6 +387,12 @@ pub(crate) fn release_name_and_id(
 }
 
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
+    if options.asset_url.is_some() && options.target != PackageTarget::Web {
+        bail!("--asset-url is where a web site's files are served from: package with --target web");
+    }
+    if let Some(url) = options.asset_url {
+        crate::web::check_asset_url(url)?;
+    }
     if options.target == PackageTarget::Gpui {
         let instead = PackageTarget::desktop()
             .and_then(|t| clap::ValueEnum::to_possible_value(&t))
