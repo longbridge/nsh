@@ -532,8 +532,9 @@ impl ListState {
 
     /// The items changed: `removed` items at `at` were replaced by
     /// `inserted` new ones. Measurements and cells follow the items that
-    /// stay, and when the change is above the first visible item the
-    /// visible content keeps its place.
+    /// stay, and when the change is above the first visible item of a list
+    /// scrolled past its start, the visible content keeps its place
+    /// ([`Self::visible_anchor`]).
     pub(super) fn splice(&mut self, at: u32, removed: u32, inserted: u32) {
         let at = at.min(self.count);
         let removed = removed.min(self.count - at);
@@ -616,16 +617,21 @@ impl ListState {
     }
 
     /// The first visible item and where it is in the viewport, for a
-    /// change that should keep it in place. An inverted list at its start
-    /// (item 0 in view at the bottom) keeps its distance from the end
-    /// instead, so what arrives there shows. In its parent's viewport, only
-    /// while the list's start is scrolled past (when it shows, the content
-    /// below it moves instead).
+    /// change that should keep it in place: only while the list is
+    /// scrolled past its start, as a browser's scroll anchoring. At the
+    /// start, rows that arrive above the first show and push it down (a
+    /// filter widened, a feed's new post), unless the list loads pages at
+    /// its start: the page it prepends must not show, or the next would be
+    /// asked for at once. An inverted list at its start (item 0 in view at
+    /// the bottom) keeps its distance from the end instead, so what
+    /// arrives there shows. In its parent's viewport, only while the
+    /// list's start is scrolled past (when it shows, the content below it
+    /// moves instead).
     fn visible_anchor(&self) -> Option<(u32, f32)> {
         (self.count > 0
             && self.viewport > 0.0
             && self.keeps_visible_rows()
-            && (!self.parent || self.offset > 0.0))
+            && (self.offset > 0.0 || (!self.parent && self.loads_at_start)))
             .then(|| {
                 let top = self.natural_offset();
                 let body = self.blocks().body;
@@ -2378,6 +2384,25 @@ mod tests {
         assert_eq!(binds.iter().map(|b| b.1).collect::<Vec<_>>(), [93, 92, 91]);
     }
 
+    /// A list at its start shows the rows that arrive above its first one,
+    /// as a browser does; scrolled past it, the visible rows keep their
+    /// place; loading pages at its start, they keep it there too.
+    #[test]
+    fn a_list_at_its_start_shows_the_rows_inserted_above_the_first() {
+        let mut l = list(10, 50.0, 400.0);
+        l.splice(0, 0, 3);
+        assert_eq!((l.offset, l.take_splice_anchor()), (0.0, 0.0));
+        l.offset = 100.0;
+        l.splice(0, 0, 2);
+        assert_eq!((l.offset, l.take_splice_anchor()), (200.0, 100.0));
+        // The page a list loads at its start prepends must not show, or
+        // the list would ask for the next at once.
+        let mut l = list(10, 50.0, 400.0);
+        l.loads_at_start = true;
+        l.splice(0, 0, 3);
+        assert_eq!((l.offset, l.take_splice_anchor()), (150.0, 150.0));
+    }
+
     #[test]
     fn splices_tell_bound_cells_their_index_and_forget_gone_items() {
         let mut l = list(100, 50.0, 400.0);
@@ -2392,12 +2417,11 @@ mod tests {
         l.splice(0, 0, 1);
         binds.clear();
         l.update_window(&mut binds);
-        // Every bound cell learns its new index, at once (the anchoring
-        // scroll keeps them in place). The anchoring scroll is the core's,
-        // not a step of the user's: the cells waiting below it, and the new
-        // row above, still wait.
+        // Every bound cell learns its new index, at once, and the new row
+        // binds with them: the list is at its start, so the row shows. The
+        // cells waiting below still wait: nothing of the user's moved.
         let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
-        assert_eq!(now, (1..=8).collect::<Vec<_>>(), "{binds:?}");
+        assert_eq!(now, [1, 2, 3, 4, 5, 6, 7, 8, 0], "{binds:?}");
         assert!(l.has_paced());
         // The data shrinks under the cells still waiting: none is asked
         // for an item that is gone.

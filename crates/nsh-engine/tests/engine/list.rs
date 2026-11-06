@@ -646,6 +646,9 @@ mount(App);
 
 /// A row added above keeps every cell on its row in every batch: cells
 /// whose item moved learn their new index in the commit of the change.
+/// The list is at its start, so the new row shows at once, in a cell the
+/// window no longer needs at its far end; no cell shows a neighbour's
+/// row meanwhile.
 #[test]
 fn prepending_a_row_never_shows_a_cell_with_its_neighbours_row() {
     let app = rows_app(100, "", "rows.update((r) => [{ label: \"new\" }, ...r]);");
@@ -661,8 +664,9 @@ fn prepending_a_row_never_shows_a_cell_with_its_neighbours_row() {
     let mut wrong = Vec::new();
     paced.settle(|paced, _| {
         for (id, text) in &before {
-            if paced.texts.get(id) != Some(text) {
-                wrong.push((text.clone(), paced.texts.get(id).cloned()));
+            let now = paced.texts.get(id);
+            if now != Some(text) && now.map(String::as_str) != Some("new") {
+                wrong.push((text.clone(), now.cloned()));
             }
         }
     });

@@ -241,6 +241,8 @@ user is reading.
 
 ## Platform notes
 
-- Inserting items above the visible rows keeps the visible rows in place on both platforms.
+- Inserting items above the visible rows keeps the visible rows in place on both platforms while the list is scrolled
+  past its start; at its start the new items show, as in a browser. A list with `onLoadMoreAtStart` keeps its rows in
+  place at its start too, so the page it prepends waits above them.
 - Horizontal lists in right-to-left layouts are mirrored natively.
 - Sticky headers are pinned natively on every scroll frame.

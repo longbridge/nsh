@@ -10,7 +10,9 @@
   (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
   `EndDrag`, `onMomentumStart` / `End` (a glide caught by a new drag ends with `onMomentumEnd`). Snapping is decided
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
-  the velocity. Lists keep the visible rows in place when items are inserted above them (`splice`).
+  the velocity. Lists scrolled past their start keep the visible rows in place when items are inserted above them
+  (`splice`), as a browser's scroll anchoring does; at their start the rows that arrive show, unless the list loads
+  pages at its start (`onLoadMoreAtStart`: the page it prepends keeps the rows in place there too).
 - **Input**: fingers (and pens) drag scroll views; on the desktop backends and the web the mouse never does (dragging
   the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
   indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). On Linux, Windows and desktop Web, the indicator shows while scrolling or when the pointer reaches its draggable thumb;
@@ -71,8 +73,8 @@
   opens: only once the user scrolled it (an offset report that is not a pending scroll's, beyond a point of
   rounding) or a scroll command moved it (`initialScrollIndex`, `scrollToIndex`, ...; `ListState::pin`), so a list
   opening at its newest item asks for nothing, and one opening at item 2 with `initialScrollIndex` does. The page
-  the app prepends keeps the visible rows in place (`splice`), so the list leaves the zone and the next approach
-  fires again. The `onLoadMoreAtStart` listener also opts an inverted list
+  the app prepends keeps the visible rows in place (`splice`, at the start too), so the list leaves the zone and the
+  next approach fires again. The `onLoadMoreAtStart` listener also opts an inverted list
   into what that needs (rule 4 of `compatibility.md`: inverted lists without it behave as before): it keeps its
   distance from the end (the bottom) only while it is at its start, where item 0 shows (a chat's new message);
   scrolled away from it, a splice or a measurement before the viewport keeps the visible rows in place as on other
