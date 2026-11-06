@@ -2494,6 +2494,12 @@ impl<M: TextEngine> Core<M> {
                     self.deny("trusted web view input is not granted: add `\"input\": true` to capabilities.webview in nsh.json".into());
                     continue;
                 }
+                // As a `src` the capability does not allow: the page is
+                // not loaded, so its headers go nowhere.
+                Command::Load(load) if !self.access.allows_webview(&load.src) => {
+                    self.deny(not_granted("the web page", &load.src, "webview.hosts"));
+                    continue;
+                }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
                     self.deny("the status bar is not granted: add `\"statusBar\": true` to capabilities in nsh.json".into());
                     continue;

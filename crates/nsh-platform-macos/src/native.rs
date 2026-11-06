@@ -1902,7 +1902,7 @@ impl Drop for WebHost {
 }
 
 /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-/// `injectJavaScript()` and `postMessage()`.
+/// `injectJavaScript()`, `postMessage()` and `load()`.
 fn web_command(web: &AnyObject, command: &Command) {
     let script = match command {
         Command::InjectJavaScript(js) => Some(js.to_string()),
@@ -1934,8 +1934,33 @@ fn web_command(web: &AnyObject, command: &Command) {
             (Command::StopLoading, _) => {
                 let _: () = msg_send![web, stopLoading];
             }
+            (Command::Load(load), _) => web_load(web, load),
             _ => {}
         }
+    }
+}
+
+/// `load()`: the page's request with the app's headers. Only this request
+/// carries them; WebKit makes its subresources' and later navigations'
+/// requests itself.
+fn web_load(web: &AnyObject, load: &nsh_core::WebLoad) {
+    let (Some(url), Some(cls)) = (
+        NSURL::URLWithString(&NSString::from_str(&load.src)),
+        class(c"NSMutableURLRequest"),
+    ) else {
+        return;
+    };
+    // SAFETY: Foundation's and WebKit's documented API.
+    unsafe {
+        let request: Retained<AnyObject> = msg_send![cls, requestWithURL: &*url];
+        for (name, value) in &load.headers {
+            let _: () = msg_send![
+                &request,
+                setValue: &*NSString::from_str(value),
+                forHTTPHeaderField: &*NSString::from_str(name)
+            ];
+        }
+        let _: Option<Retained<AnyObject>> = msg_send![web, loadRequest: &*request];
     }
 }
 

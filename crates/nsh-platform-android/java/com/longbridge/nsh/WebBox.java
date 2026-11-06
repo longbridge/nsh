@@ -130,6 +130,14 @@ final class WebBox extends WidgetBox {
         }
     }
 
+    /**
+     * Command 46 of `Mounter.command` (`load()`): `url` with `headers` on its
+     * own request; WebView sends them with no subresource or later navigation.
+     */
+    void load(String url, java.util.Map<String, String> headers) {
+        web.loadUrl(url, headers);
+    }
+
     void destroy() {
         web.stopLoading();
         web.destroy();

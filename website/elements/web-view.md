@@ -108,6 +108,7 @@ and long names are shortened to 200 bytes while preserving an extension that fit
 | `stopLoading()` | `stop_loading()` | Stops loading. |
 | `injectJavaScript(script)` | `inject_java_script(script)` | Runs JavaScript in the page. |
 | `postMessage(data)` | `post_message(data)` | Sends a string to the page, which receives a `message` event on `window`. |
+| `load({ src, headers })` | `load(WebLoad::new(src, headers)?)` | Loads `src` with `headers` (e.g. `Authorization`) on the page's own request only, not its subresources or later navigations ([guide](../docs/web-view-and-video.md#signed-in-pages-request-headers)). |
 
 ## Messaging
 

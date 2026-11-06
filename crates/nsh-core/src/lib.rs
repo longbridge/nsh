@@ -95,7 +95,7 @@ pub use crate::{
         ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp,
         ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
         SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
-        WebInput, WebKey, WebSource,
+        WebInput, WebKey, WebLoad, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,
