@@ -860,9 +860,9 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
   /* Light: the site is white; the hero keeps the banners' pale green, the
      tinted bands and the closing answer it, and panels on a green band are
      white with a green hairline. */
-  :global(html.light) .home { --halftone: radial-gradient(circle, rgb(86 118 66 / 30%) 1.1px, transparent 1.6px); }
-  :global(html.light) :is(.hero, .closing) { background: #f6f8f4; }
-  :global(html.light) .band--tinted { background: #f2f5ef; --code-bg: #ffffff; --border: #dbe3d7; --line: #e6ece3; }
+  :global(html.light) .home { --halftone: radial-gradient(circle, rgb(52 60 78 / 20%) 1.1px, transparent 1.6px); }
+  :global(html.light) :is(.hero, .closing) { background: linear-gradient(180deg, #f6f7f9, #fbfbfc); }
+  :global(html.light) .band--tinted { background: #f7f8fa; --code-bg: #ffffff; --border: #e2e4e9; --line: #e9ebef; }
   .band { border-top: 1px solid var(--line); }
   .band__inner { position: relative; width: min(1280px, calc(100% - 3rem)); margin: 0 auto; padding: var(--section-gap) 0; }
   .band--tinted { background: var(--band-tinted); }
@@ -956,6 +956,11 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
   .term .s { background: #2a2d33; }
   .term .g { color: var(--citrus); }
   .term .u { text-decoration: underline; text-decoration-color: #6a7078; }
+  /* Light: the terminal follows the page, as the live frames beside it do. */
+  :global(html.light) .term { background: #f7f8fa; color: #24262a; }
+  :global(html.light) .term .d { color: #868b94; }
+  :global(html.light) .term .u { text-decoration-color: #b4b8bf; }
+  :global(html.light) .term .s { background: #e6e8ec; }
 
   .code { min-width: 0; margin: 0; }
   .code pre, .ways pre { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--code-bg); color: var(--code-fg); overflow-x: auto; white-space: pre; }
