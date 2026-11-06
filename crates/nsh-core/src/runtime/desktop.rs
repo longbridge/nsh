@@ -4,7 +4,7 @@
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
+    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowBounds, WindowFrame, WindowLevel},
     element::{JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
@@ -101,6 +101,19 @@ impl Window {
             animated: frame.animated,
         };
         desktop(cx, DesktopCommand::SetFrame(frame));
+    }
+
+    /// Restores a window saved earlier: puts it in `bounds.mode` with its
+    /// windowed bounds `bounds.bounds` (points, screen coordinates, as
+    /// `windowState()` reports them), restored to the bounds, then
+    /// maximized or in full screen when the mode says so; doing it again
+    /// changes nothing. The bounds are first fitted on the displays there
+    /// are now: unchanged when the window's title bar can still be taken on
+    /// one, else centered on the primary display, no larger than it.
+    /// `setFrame` moves and sizes the window as it is. A view embedded in
+    /// another app's window leaves its window to that app.
+    pub(crate) fn set_bounds(bounds: WindowBounds, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetBounds(bounds));
     }
 
     /// Sets the window's level on macOS and Windows: `"normal"` restores the

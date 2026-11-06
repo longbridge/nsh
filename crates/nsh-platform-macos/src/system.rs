@@ -21,6 +21,8 @@
 //!   activation, hiding and occlusion notifications. An embedded surface
 //!   follows the embedding app's, which is the application;
 //! - the pixel ratio: the window's backing scale factor;
+//! - the window's bounds, mode and display ([`crate::window_state`]), and
+//!   the displays, sent again when they change;
 //! - the OS version: `NSProcessInfo.operatingSystemVersion`.
 //!
 //! The font scale is 1 (macOS has no text size setting apps follow), the
@@ -59,12 +61,13 @@ use objc2_app_kit::{
     NSAccessibilityPriorityLevel, NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSAppearance,
     NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication,
     NSApplicationDidBecomeActiveNotification, NSApplicationDidChangeOcclusionStateNotification,
-    NSApplicationDidHideNotification, NSApplicationDidResignActiveNotification,
-    NSApplicationDidUnhideNotification, NSApplicationOcclusionState,
-    NSAttributedStringAppKitDocumentFormats, NSAttributedStringDocumentFormats,
-    NSBitmapImageFileType, NSBitmapImageRep, NSDocumentTypeDocumentAttribute,
-    NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType, NSModalResponse, NSPasteboard,
-    NSPasteboardTypeRTF, NSPasteboardTypeRTFD, NSPasteboardTypeString, NSScreen, NSWorkspace,
+    NSApplicationDidChangeScreenParametersNotification, NSApplicationDidHideNotification,
+    NSApplicationDidResignActiveNotification, NSApplicationDidUnhideNotification,
+    NSApplicationOcclusionState, NSAttributedStringAppKitDocumentFormats,
+    NSAttributedStringDocumentFormats, NSBitmapImageFileType, NSBitmapImageRep,
+    NSDocumentTypeDocumentAttribute, NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType,
+    NSModalResponse, NSPasteboard, NSPasteboardTypeRTF, NSPasteboardTypeRTFD,
+    NSPasteboardTypeString, NSScreen, NSWorkspace,
     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
 };
 use objc2_foundation::{
@@ -125,6 +128,7 @@ define_class!(
 /// The window or its screen changed (scale, ...).
 pub(crate) fn window_changed(surface: &Rc<Surface>) {
     crate::chrome::window_changed(surface);
+    crate::window_state::watch(surface);
     update(surface);
 }
 
@@ -193,32 +197,41 @@ fn install(mtm: MainThreadMarker) {
     };
     // Whether the app is in use (`lifecycle`).
     // SAFETY: as above.
-    let observers = observers
+    let observers = observers.into_iter().chain(
+        unsafe {
+            [
+                NSApplicationDidBecomeActiveNotification,
+                NSApplicationDidResignActiveNotification,
+                NSApplicationDidHideNotification,
+                NSApplicationDidUnhideNotification,
+                NSApplicationDidChangeOcclusionStateNotification,
+            ]
+        }
         .into_iter()
-        .chain(
+        .map(|name| {
+            // SAFETY: as above.
             unsafe {
-                [
-                    NSApplicationDidBecomeActiveNotification,
-                    NSApplicationDidResignActiveNotification,
-                    NSApplicationDidHideNotification,
-                    NSApplicationDidUnhideNotification,
-                    NSApplicationDidChangeOcclusionStateNotification,
-                ]
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(name),
+                    None,
+                    Some(&queue),
+                    &block,
+                )
             }
-            .into_iter()
-            .map(|name| {
-                // SAFETY: as above.
-                unsafe {
-                    NSNotificationCenter::defaultCenter()
-                        .addObserverForName_object_queue_usingBlock(
-                            Some(name),
-                            None,
-                            Some(&queue),
-                            &block,
-                        )
-                }
-            }),
-        )
+        }),
+    );
+    // The displays: plugged in, unplugged, arranged again.
+    let screens = RcBlock::new(|_: NonNull<NSNotification>| screens_changed());
+    // SAFETY: as above.
+    let observers = observers
+        .chain([unsafe {
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(NSApplicationDidChangeScreenParametersNotification),
+                None,
+                Some(&queue),
+                &screens,
+            )
+        }])
         .collect();
     // VoiceOver posts no notification: its setting is observed.
     // SAFETY: NSObject's initializer.
@@ -253,6 +266,21 @@ fn system_changed() {
     }
 }
 
+/// The displays changed: every surface's engine gets them, and its
+/// window's state (its display's visible bounds) is read again.
+fn screens_changed() {
+    let surfaces: Vec<Rc<Surface>> = SYSTEM.with(|s| {
+        let mut s = s.borrow_mut();
+        s.surfaces.retain(|w| w.strong_count() > 0);
+        s.surfaces.iter().filter_map(Weak::upgrade).collect()
+    });
+    for surface in surfaces {
+        let displays = crate::window_state::displays(surface.mtm);
+        surface.control(|c| c.set_displays(displays));
+        crate::window_state::changed(&surface);
+    }
+}
+
 /// The embedding app set its locale or text size
 /// ([`crate::AppView::set_locale`]): the system's settings are read again,
 /// with the host's over them.
@@ -278,6 +306,7 @@ fn update(surface: &Surface) {
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface.mtm);
+    env.window_state = crate::window_state::read(surface);
     surface.set_environment(env);
 }
 

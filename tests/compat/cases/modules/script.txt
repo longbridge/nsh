@@ -104,10 +104,11 @@ tap id:case-mod-desktop
 # closes at once.
 expect Desktop: false
 expect Title bar: 0 0 0
+expect Window state: null displays 0
 expect Calls: not called
 expect Popup: not shown
 tap id:window
-expect Calls: window done, close function, minimize function
+expect Calls: window done, close function, minimize function, setBounds function
 tap id:menu
 expect Calls: menu done
 expect Popup: closed
@@ -117,6 +118,8 @@ tap id:toggles
 expect Calls: toggles done
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
+covers [nsh/desktop] windowState
+covers [nsh/desktop] displays
 covers [nsh/desktop] Window
 covers [nsh/desktop] Menu
 covers [nsh/desktop] Application
