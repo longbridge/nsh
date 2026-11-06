@@ -542,8 +542,11 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, x: f32, y: f32) -> bo
     if crate::text_input::focused(surface).is_some() {
         return false;
     }
-    let root = &surface.root;
-    let (w, h) = surface.size();
+    let root = &surface.input_root();
+    let (w, h) = {
+        let s = root.state();
+        (s.frame.size.width.0, s.frame.size.height.0)
+    };
     let (x, y) = if x >= 0.0 && y >= 0.0 && x < w && y < h {
         (x, y)
     } else {

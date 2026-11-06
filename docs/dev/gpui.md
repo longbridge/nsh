@@ -179,7 +179,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   window itself (its bounds, a GPUI Kit `Root` around the view) calls `AppView::own_window` in the window's build
   closure, best with the window opened with `titlebar_options`: the app's title, title bar, application menu and window
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
-  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `Window.close()`, the close
+  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `WindowRef.close()`, the close
   button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
   nothing here, restarting is the host's. `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
@@ -212,7 +212,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
 | Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions, a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`) in the order they are on screen (as Tab: a list's recycled cells are not in their rows' order); the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
 | Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0. The app's state (`lifecycle()`) from the window's activation and visibility (`observe_window_activation`, `observe_window_visibility`): `background` while the surface's window is not presented (`WindowVisibility::Hidden`), `active` while one of the windows showing a surface is the active one, `inactive` otherwise. The preferred languages (`localeSettings()`'s `languages`): `GetUserPreferredUILanguages` on Windows, `CFLocaleCopyPreferredLanguages` on macOS, gettext's `LANGUAGE` / `LC_ALL` / `LC_MESSAGES` / `LANG` with their fallbacks on Linux. The regional preferences (`localeSettings()`'s `hourCycle` and the like), over the region's (`LocaleSettings::parse`): on macOS the hours of `CFDateFormatterCreateDateFormatFromTemplate`'s `j` format, `CFCalendar`'s first weekday, `kCFLocaleMeasurementSystem` and the `AppleTemperatureUnit` preference; on Windows the regional format's `LOCALE_STIMEFORMAT`, `LOCALE_IFIRSTDAYOFWEEK` and `LOCALE_IMEASURE`; on Linux the regions of `LC_TIME` (times, weeks) and `LC_MEASUREMENT` (units), with the settings portal's `clock-format` (`org.gnome.desktop.interface`, live) over the hour cycle. The time zone (`localeSettings()`'s `timeZone`) as the native backends name it: on Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its IANA name from the ICU Windows ships (loaded at run time), elsewhere the zone `TZ` names when it names one (`GMT`, `Europe/Berlin`; a POSIX rule such as `JST-9` names none: `TimeZone::posix`), else the zone `/etc/localtime` links to (else `/etc/timezone`); read again whenever a window becomes the active one (GPUI reports no change of it). |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Window.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access. A menu item's `icon` (`menus.rs`: not the bar's titles) draws in those rows, in a column of its own that moves a level's labels; it loads when its level first shows and comes in with a redraw, an SVG painted in the row's text color and a bitmap as it is. GPUI's native menu bar on macOS shows none, as `gpui::MenuItem` has no image |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Menu.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access. A menu item's `icon` (`menus.rs`: not the bar's titles) draws in those rows, in a column of its own that moves a level's labels; it loads when its level first shows and comes in with a redraw, an SVG painted in the row's text color and a bitmap as it is. GPUI's native menu bar on macOS shows none, as `gpui::MenuItem` has no image |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
 | File drops | `file_drop.rs` | GPUI makes a drag from another application an internal drag of `ExternalPaths` that only its own elements hear, and the surface's hitbox blocks the mouse for those behind it: while a drag is active the `AppView` lays a layer over the surface whose drag moves and drop pick the destination (the closest `onFileDrop` listener under the pointer, within its modal: `input::file_drop_target`) and deliver absolute paths as `file:` URLs; moving between destinations leaves one and enters the next, and leaving the window, dropping, removal or disablement clear it. The first report after a drag enters is the platform's next move (the layer comes with the drag's frame) |
 | Networking | `nsh_engine::net` | ureq, the stack Windows and Linux use |
@@ -316,20 +316,27 @@ and Windows.
 - **Dev logs** (feature `dev`): the log forwarder is per process (`dev.rs`' `CLIENT` / `CONNECTED`), so with several
   `AppView`s connected to dev servers every view's logs go to the most recent session.
 
-### Programmatic window frame and level
+### Windows
 
-The host chooses window bounds and level when opening a GPUI window.
-`Window.setFrame` resizes a standalone window's content (`Window::resize`; a
-size it leaves out keeps the window's, each side at least 1 point, since
-Wayland's `wp_viewport` rejects a smaller one as a fatal error) and ignores the
-origin and `animated`: GPUI cannot move a window, and Wayland windows cannot
-place themselves. A maximized or full-screen window keeps its size. With
-server-side decorations GPUI cannot see that a tiling compositor has tiled the
-window, so there the compositor's tile wins over the size. `Window.setLevel` leaves
-the host's level intact. Embedded views leave their host's window alone.
+The main window is the one the surface fills (`chrome.rs`): the window protocol's attributes and requests on the
+root node act on it when the surface is standalone (`open_app_window`, `run_app`, `AppView::own_window`); an
+embedded view leaves its host's window alone. Runners read the app's `window` options (`bundle.main_window`) before
+they open it, so its first frame has them, and open it where it was kept with `restoreBounds`.
 
-`Window.orderFront` activates a standalone window through a main-thread
-window update, including while it is minimized and no frames are drawn. macOS
-restores miniaturized windows before activation; Windows restores minimized
-windows through GPUI. Linux window managers decide whether to grant activation.
-Embedded views leave window activation to their host.
+Windows of the app's own (`<Window>`, `Window.open`) are GPUI windows the backend opens itself (`window.rs`): its
+built-in window backend, which a host replaces with `AppOptions::windows`. Each shows one root of the app's single
+engine; its input, focus, keys, drawing, accessibility tree, native components and web views run in that window,
+popups and dialogs opened in it show in it, and it shows with its first frame. Kinds map
+to GPUI's: `normal` and `dialog` to a normal window (a dialog belongs to its parent, a modal one holds the
+parent's input), `panel` to a floating one, `popup` and `overlay` to a pop-up one. The attributes and requests GPUI
+has calls for go through GPUI; the others go to the native window under it (`window/native.rs`: AppKit's window
+on macOS, the Win32 window on Windows; levels, workspaces, showing and hiding, moving, ownership and the like). The
+close, Escape and blur policies are answered on the main thread; states, close presses and title bar areas are
+reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
+on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
+buttons and the frame's edges.
+
+What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
+workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; hiding minimizes);
+Windows keeps the title bar a window opened with and applies size limits when the window opens; progress shows
+nowhere; close presses from the taskbar, the system menu or Alt+F4 are reported as the close button's.

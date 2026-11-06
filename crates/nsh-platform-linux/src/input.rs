@@ -60,6 +60,7 @@ use gtk4::{self as gtk, gdk, glib, glib::translate::ToGlibPtr, graphene, prelude
 use nsh_core::{
     Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, NodeId, PayloadValue,
     PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
@@ -117,6 +118,9 @@ pub(crate) struct Input {
     /// a window of the app's own (`Window.open`), or `None` for the
     /// surface's root.
     window_root: RefCell<Option<NshView>>,
+    /// A primary press on a view marked `windowControl`: its button acts
+    /// when the press is released over the same view.
+    control_press: RefCell<Option<(NshView, WindowControl)>>,
     /// The pointers that are down.
     pointers: RefCell<Vec<Pointer>>,
     /// Two fingers pinching / rotating on the touchscreen.
@@ -264,6 +268,7 @@ pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
     input.window_press.borrow_mut().take();
+    input.control_press.borrow_mut().take();
     input.pointers.borrow_mut().clear();
     input.two.borrow_mut().take();
     input.pinch.borrow_mut().take();
@@ -480,7 +485,21 @@ fn set_cursor(view: &NshView, over_link: bool) {
 
 /// The root view events are picked in: the window's the event being
 /// handled happened in.
-fn event_root(surface: &Surface) -> NshView {
+/// Simulated input goes to the window whose root view is `root` (`None`:
+/// the surface's), as a real event in it would.
+#[cfg(feature = "dev")]
+pub(crate) fn set_event_root(surface: &Surface, root: Option<NshView>) {
+    *surface.input.window_root.borrow_mut() = root;
+}
+
+/// The window the event being handled happened in.
+pub(crate) fn event_window(surface: &Surface) -> Option<gtk::Window> {
+    event_root(surface).root().and_downcast::<gtk::Window>()
+}
+
+/// The root view of the window the event being handled (or the last one)
+/// happened in.
+pub(crate) fn event_root(surface: &Surface) -> NshView {
     surface
         .input
         .window_root
@@ -596,6 +615,18 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             release_buttons(surface);
             return glib::Propagation::Stop;
         }
+        // A frameless window's resize edge: the window manager resizes it.
+        T::ButtonPress
+            if button() == Some(gdk::BUTTON_PRIMARY) && window_resize(surface, x, y).is_some() =>
+        {
+            if let (Some(edge), Some(window)) =
+                (window_resize(surface, x, y), event_window(surface))
+            {
+                crate::window::begin_resize(surface, &window, event, edge);
+            }
+            release_buttons(surface);
+            return glib::Propagation::Stop;
+        }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) && window_drag(surface, x, y) => {
             up(surface, Key::Mouse, x, y, time, true);
             *surface.input.window_press.borrow_mut() =
@@ -608,6 +639,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
+            *surface.input.control_press.borrow_mut() = window_control(surface, x, y);
             down(surface, Key::Mouse, x, y, time, event.modifier_state())
         }
         T::ButtonPress
@@ -635,7 +667,22 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                 up(surface, Key::Mouse, x, y, time, false);
                 return glib::Propagation::Stop;
             }
-            up(surface, Key::Mouse, x, y, time, false)
+            up(surface, Key::Mouse, x, y, time, false);
+            // An app-drawn window button acts as the system's.
+            let pressed = surface.input.control_press.borrow_mut().take();
+            if let Some((view, control)) = pressed
+                && window_control(surface, x, y).is_some_and(|(v, _)| v == view)
+                && let Some(window) = event_window(surface)
+            {
+                // Not inside the event's handling: closing may destroy the
+                // window.
+                let weak = Rc::downgrade(surface);
+                glib::idle_add_local_once(move || {
+                    if let Some(surface) = weak.upgrade() {
+                        crate::window::control(&surface, &window, control);
+                    }
+                });
+            }
         }
         T::MotionNotify => {
             let pending = surface.input.window_press.borrow_mut().take();
@@ -943,6 +990,47 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
         }
     }
     false
+}
+
+/// The view marked `windowControl` pressing `(x, y)` (root coordinates)
+/// presses, and its button: the nearest view that sets it, unless a text
+/// field or a hosted widget is nearer.
+fn window_control(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowControl)> {
+    let hit = pick(&event_root(surface), x, y)?;
+    if hit.native.is_some() {
+        return None;
+    }
+    for view in chain(&hit.view) {
+        let s = view.state();
+        if let Some(control) = s.props.window_control {
+            drop(s);
+            return Some((view, control));
+        }
+        if s.kind == ViewKind::Input {
+            return None;
+        }
+    }
+    None
+}
+
+/// The edge pressing `(x, y)` (root coordinates) resizes the window by:
+/// the nearest view that sets `windowResize`, unless a text field, a
+/// hosted widget or a view with press or touch handlers is nearer.
+fn window_resize(surface: &Surface, x: f32, y: f32) -> Option<ResizeEdge> {
+    let hit = pick(&event_root(surface), x, y)?;
+    if hit.native.is_some() {
+        return None;
+    }
+    for view in chain(&hit.view) {
+        let s = view.state();
+        if let Some(edge) = s.props.window_resize {
+            return Some(edge);
+        }
+        if s.kind == ViewKind::Input || has_press(s.events) || s.events.contains(EventKind::Touch) {
+            return None;
+        }
+    }
+    None
 }
 
 /// What is under a point.

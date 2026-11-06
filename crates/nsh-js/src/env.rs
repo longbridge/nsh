@@ -76,6 +76,8 @@ pub(crate) struct Env {
     /// The tokens the app's theme file gives ([`set_theme_tokens`]), taken
     /// in when the entry hands the theme to the renderer ([`take_theme`]).
     theme: RefCell<ThemeTokens>,
+    /// The displays the platform reported last.
+    displays: RefCell<Vec<Display>>,
 }
 
 impl Default for Env {
@@ -90,6 +92,7 @@ impl Default for Env {
             tokens_signal: Cell::new(UNDEFINED),
             tokens_version: Cell::new(0),
             theme: RefCell::new(ThemeTokens::default()),
+            displays: RefCell::default(),
         }
     }
 }
@@ -432,7 +435,10 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
         writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
     if changed(&|p| p.window_state == next.window_state) {
-        writes.push((Part::WindowState, to_js(cx, &next.window_state)));
+        writes.push((
+            Part::WindowState,
+            crate::window::state_value(cx, next.window_state.as_ref()),
+        ));
     }
     // The layout direction follows the user's language.
     // SAFETY: the state's renderer, by shared reference.
@@ -442,6 +448,8 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
             reactive::set_signal(cx, e.signals[part as usize].get(), value);
         }
     });
+    // The main window's listeners (`WindowRef.on`).
+    crate::window::main_changed(cx, next.window_state);
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -453,8 +461,16 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
 
 /// Takes in the displays the platform reports.
 pub(crate) fn set_displays(cx: *mut JsContext, displays: &[Display]) -> Result<(), ()> {
+    *env(cx).displays.borrow_mut() = displays.to_vec();
     let value = to_js(cx, &displays.to_vec());
-    reactive::set_signal(cx, env(cx).signals[Part::Displays as usize].get(), value);
+    let state = current(cx).window_state;
+    reactive::batch_with(cx, || {
+        reactive::set_signal(cx, env(cx).signals[Part::Displays as usize].get(), value);
+        // The windows' states name their displays: those objects change too.
+        let main = crate::window::state_value(cx, state.as_ref());
+        reactive::set_signal(cx, env(cx).signals[Part::WindowState as usize].get(), main);
+        crate::window::displays_changed(cx);
+    });
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -483,7 +499,7 @@ pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), (
 
 /// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
 /// when it fails (it does not for the environment's plain objects).
-fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
+pub(crate) fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
     let host = crate::classes::host_outside_calls(cx);
     let converted = value
         .to_js(&host)
@@ -497,13 +513,18 @@ fn accessor(cx: *mut JsContext, part: Part) -> JsValue {
     unsafe { qjs::JS_DupValue(cx, env(cx).accessors[part as usize].get()) }
 }
 
-/// `titleBar()` (`nsh/desktop`): the hidden title bar's area (owned).
+/// The main window's hidden title bar area accessor (owned).
 pub(crate) fn title_bar(cx: *mut JsContext) -> JsValue {
     accessor(cx, Part::TitleBar)
 }
 
-/// `windowState()` (`nsh/desktop`): the window's bounds, mode and display
-/// (owned).
+/// The displays the platform reported last.
+pub(crate) fn display_list(cx: *mut JsContext) -> Vec<Display> {
+    env(cx).displays.borrow().clone()
+}
+
+/// The main window's state accessor (owned): `WindowRef.state()` of the
+/// main window.
 pub(crate) fn window_state(cx: *mut JsContext) -> JsValue {
     accessor(cx, Part::WindowState)
 }

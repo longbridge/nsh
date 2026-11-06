@@ -363,6 +363,7 @@ fn generated(module: &str) -> String {
     match module {
         "nsh/animated" => nsh_core::js::animation::declarations(),
         "nsh/canvas" => nsh_core::js::canvas::declarations(),
+        "nsh/desktop" => nsh_core::desktop::window::declarations(),
         _ => String::new(),
     }
 }

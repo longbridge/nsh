@@ -168,14 +168,14 @@ impl super::Runtime {
         }
     }
 
-    /// `bounds` fitted on the displays now (`set_window_bounds`), without
-    /// subscribing to them.
-    pub(crate) fn fit_window_bounds(
+    /// `placement` fitted on the displays now (`setPlacement`, a restored
+    /// window's), without subscribing to them.
+    pub(crate) fn fit_window_placement(
         &self,
-        bounds: crate::desktop::WindowBounds,
-    ) -> crate::desktop::WindowBounds {
+        placement: crate::desktop::WindowPlacement,
+    ) -> crate::desktop::WindowPlacement {
         let _entered = self.enter();
-        displays_signal().with_untracked(|d| bounds.fit_on_displays(d))
+        displays_signal().with_untracked(|d| placement.fit_on_displays(d))
     }
 
     /// The design tokens now: what read them runs again.
