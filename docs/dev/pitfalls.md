@@ -540,6 +540,13 @@ Things that were found the hard way. Read the section of the area you change bef
   draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
+- While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
+  occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
+  keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and
+  `kCGSSessionOnConsoleKey` tell it (`system::screen_locked`). Not yet verified on a locked machine: that a lock posts
+  `NSApplicationDidChangeOcclusionStateNotification` only after the session dictionary says locked (else a test's
+  `lifecycle()` reads `background` until the next environment change), and that `WKWebView` takes a press handed to
+  `mouseDown:` directly in an inactive app outside `sendInput` (`agent::mouse`).
 
 ## Windows, Win32
 
