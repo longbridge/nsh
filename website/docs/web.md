@@ -173,7 +173,8 @@ under in `nsh.json`:
 
 The page then has a `<base href="/apps/counter/">`, and loads at `https://example.com/apps/counter/sports/football` as at
 `https://example.com/apps/counter/`. `"base": "/"` is a site at the host's root. `nsh package --target web --run` serves
-the site under that path.
+the site under that path. The path's segments are ASCII letters, digits, `-`, `.`, `_` and `~`, with other characters
+percent-encoded as browsers send them (`/%E5%BA%94%E7%94%A8/` for `/应用/`).
 
 ### Runtime size
 

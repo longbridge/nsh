@@ -52,6 +52,9 @@ impl SiteServer {
     /// `dir/index.html`, and `/` goes there. The path is taken from the
     /// root with a `/` at its end and no empty segments (`apps//counter`
     /// is `/apps/counter/`), the form the page's `<base href>` must have.
+    /// Requests match it as browsers send paths, percent-encoded
+    /// (`/%E5%BA%94%E7%94%A8/` for `/应用/`), the form `nsh.json`
+    /// `web.base` takes.
     pub fn start_at(addr: SocketAddr, dir: PathBuf, base: &str) -> io::Result<SiteServer> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)

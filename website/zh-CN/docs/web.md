@@ -177,7 +177,7 @@ nsh package App.tsx --target web --run
 { "web": { "base": "/apps/counter/" } }
 ```
 
-页面随之带上 `<base href="/apps/counter/">`，在 `https://example.com/apps/counter/sports/football` 和在 `https://example.com/apps/counter/` 一样能加载。`"base": "/"` 表示站点位于主机的根路径。`nsh package --target web --run` 在这个路径下提供站点。
+页面随之带上 `<base href="/apps/counter/">`，在 `https://example.com/apps/counter/sports/football` 和在 `https://example.com/apps/counter/` 一样能加载。`"base": "/"` 表示站点位于主机的根路径。`nsh package --target web --run` 在这个路径下提供站点。路径的各段由 ASCII 字母、数字、`-`、`.`、`_` 和 `~` 组成，其他字符按浏览器发送时的方式做百分号编码（`/应用/` 写作 `/%E5%BA%94%E7%94%A8/`）。
 
 ### 运行时大小
 

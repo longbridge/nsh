@@ -313,22 +313,22 @@ pub(crate) fn link(
 }
 
 /// `nsh.json` `web.base`: a path from the host's root, ending in `/` (one
-/// is added). It goes into the page's `<base href>` as it is, so it holds
-/// only what a path can (no query, fragment, quotes or `..`), and no empty
-/// segment (`/apps//counter/`): browsers keep one in the URLs they resolve,
-/// where [`nsh_dev::SiteServer::start_at`] and hosts collapse it.
+/// is added), in the form browsers send it: segments that are
+/// [sent as written](is_sent_as_written). The page's `<base href>`, the
+/// address `--run` prints and the path [`nsh_dev::SiteServer::start_at`]
+/// matches requests against are then one string, which a browser neither
+/// encodes (`/应用/` is `/%E5%BA%94%E7%94%A8/`) nor normalizes (`/a/%2e/`
+/// is `/a/`); it has no empty segment either (`/a//`), which hosts collapse.
 fn page_base(base: Option<&str>) -> anyhow::Result<Option<String>> {
     let Some(base) = base else { return Ok(None) };
-    let valid = base.starts_with('/')
-        && !base.contains("//")
-        && !base.contains(['?', '#', '\\', '"', '\'', '<', '>', '&'])
-        && !base.chars().any(char::is_whitespace)
-        && !base
-            .split('/')
-            .any(|segment| segment == "." || segment == "..");
+    let segments = base
+        .strip_prefix('/')
+        .map(|path| path.strip_suffix('/').unwrap_or(path));
+    let valid = base == "/" || segments.is_some_and(|path| path.split('/').all(is_sent_as_written));
     if !valid {
         bail!(
-            "nsh.json web.base: {base:?} is not a path from the host's root, as \"/apps/counter/\""
+            "nsh.json web.base: {base:?} is not a path from the host's root as browsers send it \
+             (ASCII letters, digits, `-`, `.`, `_`, `~` and %XX escapes), as \"/apps/counter/\""
         );
     }
     Ok(Some(if base.ends_with('/') {
@@ -336,6 +336,33 @@ fn page_base(base: Option<&str>) -> anyhow::Result<Option<String>> {
     } else {
         format!("{base}/")
     }))
+}
+
+/// Whether browsers send a path segment as it is written: not empty, not a
+/// dot segment, and only unreserved characters (RFC 3986) and
+/// percent-escapes, none of a `.` (the URL parser reads `%2e` as a dot).
+fn is_sent_as_written(segment: &str) -> bool {
+    if segment.is_empty() || segment == "." || segment == ".." {
+        return false;
+    }
+    let bytes = segment.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => i += 1,
+            b'%' => match bytes.get(i + 1..i + 3) {
+                Some(hex)
+                    if hex.iter().all(u8::is_ascii_hexdigit)
+                        && !hex.eq_ignore_ascii_case(b"2e") =>
+                {
+                    i += 3
+                }
+                _ => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// Whether `name` is the export of a part of `nsh/base`, of a standard
@@ -1801,15 +1828,38 @@ mod tests {
             page_base(Some("/apps/counter/")).unwrap().as_deref(),
             Some("/apps/counter/")
         );
+        // What the page, `--run` and the server take is what a browser
+        // resolves the base to.
+        let host = url::Url::parse("http://127.0.0.1:4173/sports/football").unwrap();
+        for base in [
+            "/",
+            "/apps/counter/",
+            "/%E5%BA%94%E7%94%A8/counter/",
+            "/v1.2/a-b_c~d/",
+            "/apps/a%2fb/",
+        ] {
+            let page = page_base(Some(base)).unwrap().unwrap();
+            assert_eq!(host.join(&page).unwrap().path(), page, "{base}");
+        }
         for base in [
             "apps/",
+            "//",
             "//cdn.example.com/",
             "/apps//counter/",
             "/apps/counter//",
             "https://example.com/",
             "/a/../b/",
+            "/a/./b/",
+            "/apps/%2e/counter/",
+            "/apps/%2E%2E/counter/",
+            "/apps/.%2e/counter/",
+            "/应用/counter/",
+            "/a%zz/",
+            "/a%e/",
             "/a b/",
             "/a?x/",
+            "/a#x/",
+            "/a\\b/",
             "/a\"><script>/",
         ] {
             assert!(page_base(Some(base)).is_err(), "{base}");
@@ -2287,8 +2337,10 @@ mod tests {
             let missing: Vec<_> = loaded.iter().filter(|(_, status)| *status != 200).collect();
             assert!(missing.is_empty(), "{path}: {missing:?}");
         };
-        // `web.base`, at the host's root and under a path.
-        for base in ["/", "/apps/counter/"] {
+        // `web.base`, at the host's root and under a path, one of them
+        // percent-encoded (`/应用/counter/`), as `package` takes it.
+        for base in ["/", "/apps/counter", "/%E5%BA%94%E7%94%A8/counter/"] {
+            let base: &str = &page_base(Some(base)).unwrap().unwrap();
             write(Some(base));
             let server =
                 nsh_dev::SiteServer::start_at("127.0.0.1:0".parse().unwrap(), dir.clone(), base)
