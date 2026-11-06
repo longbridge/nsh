@@ -80,6 +80,10 @@ trusted: every limit and check is enforced in Rust, never in JS.
   checks answer them as the system would with nothing there (an empty clipboard, no picked files, `open_url` `false`)
   and an `Err` with the message for `fetch`.
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
+  A URL that parsers read differently (`access::read_url`: a backslash before the query, which WHATWG's parser, the
+  web views', ends the host at and Foundation's `NSURL` keeps in the user info; an ASCII control character; a host
+  with percent-encoding or a WHATWG forbidden host code point) names no one host, port or path: only a grant of every
+  host with no port or path covers it (`*`, or no `capabilities`), and `parse_url` gives `None` for it.
 - **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
   declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an

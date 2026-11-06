@@ -8514,8 +8514,8 @@ fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
 
 /// The message for a refused URL.
 fn not_granted(what: &str, uri: &str, capability: &str) -> String {
-    let host = crate::access::parse_url(uri).map_or_else(|| uri.to_owned(), |u| u.host);
-    format!("{what} {uri} is not granted: add `{host}` to capabilities.{capability} in nsh.json")
+    let advice = crate::access::grant_advice(uri, capability);
+    format!("{what} {uri} is not granted: {advice}")
 }
 
 /// Applies one property to a control.

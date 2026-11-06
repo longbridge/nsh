@@ -154,7 +154,10 @@ An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
-`https://api.example.com@evil.io/` is checked as `evil.io`.
+`https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
+granted only by `*` in `hosts` (or a `*` rule with no port or path): one with a backslash before its query (write
+`%5C`), a control character, or a host with percent-encoding or a character hosts cannot contain (a space, `<`, `>`,
+`^`, `|`, or `[` / `]` outside an IPv6 address).
 
 A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so

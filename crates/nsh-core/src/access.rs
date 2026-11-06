@@ -98,6 +98,11 @@ impl HostPattern {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether it is `*`, which covers every host.
+    fn is_any(&self) -> bool {
+        self.0 == "*"
+    }
 }
 
 /// A finer HTTP grant: a host, narrowed by any of methods, schemes, a port,
@@ -156,6 +161,18 @@ impl HttpGrant {
                         tail.is_empty() || prefix.ends_with('/') || tail.starts_with('/')
                     })
                 }))
+    }
+
+    /// Whether it grants `method` on every host, port and path of `scheme`:
+    /// all a URL that parsers read differently can be held to.
+    fn allows_anywhere(&self, method: &str, scheme: &str) -> bool {
+        self.host.is_any()
+            && (self.methods.is_empty()
+                || self.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
+            && (self.schemes.is_empty() || self.schemes.iter().any(|s| s == scheme))
+            && self.port.is_none()
+            && self.paths.is_empty()
+            && self.path_prefixes.is_empty()
     }
 }
 
@@ -415,27 +432,76 @@ pub struct UrlParts<'a> {
 }
 
 /// Splits an absolute URL into scheme, host and path; `None` when it has no
-/// `scheme://host`.
+/// `scheme://host`, or when URL parsers would read it differently: a
+/// backslash before the query, an ASCII control character, or a host with
+/// percent-encoding or a forbidden host code point.
 pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
-    let (scheme, rest) = url.split_once("://")?;
+    read_url(url).ok()
+}
+
+/// What a refusal of `url` advises: the host to add to
+/// `capabilities.{capability}`, or, for a URL without parts, how to write
+/// it, since adding the URL itself would never grant it.
+pub(crate) fn grant_advice(url: &str, capability: &str) -> String {
+    match parse_url(url) {
+        Some(parts) => format!(
+            "add `{}` to capabilities.{capability} in nsh.json",
+            parts.host
+        ),
+        None => NO_HOST_ADVICE.to_owned(),
+    }
+}
+
+/// [`grant_advice`] for a URL without parts.
+const NO_HOST_ADVICE: &str = "it names no host a grant could add: write it as an http(s) URL with a host, a backslash as `%5C` and no control characters";
+
+/// Why [`read_url`] gives no parts.
+enum Unread {
+    /// No `scheme://host`.
+    NotUrl,
+    /// A URL parsers read as different hosts, ports or paths, with its
+    /// lower-case scheme: only a grant of every host covers it.
+    Ambiguous(String),
+}
+
+/// [`parse_url`], saying why a string has no parts.
+fn read_url(url: &str) -> Result<UrlParts<'_>, Unread> {
+    let (scheme, rest) = url.split_once("://").ok_or(Unread::NotUrl)?;
     if scheme.is_empty()
         || !scheme
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
     {
-        return None;
+        return Err(Unread::NotUrl);
+    }
+    let scheme = scheme.to_ascii_lowercase();
+    // WHATWG's parser (the web views') ends the host at a backslash and reads
+    // one in the path as `/`, and it drops tab, LF and CR; Foundation's
+    // `NSURL` (native media loads) keeps a backslash in the user info. Before
+    // the query, one could name a host or path here other than the one that
+    // loads; in the query no parser reads it as a host or path.
+    let head = url.split(['?', '#']).next().unwrap_or(url);
+    if head.contains('\\') || url.bytes().any(|b| b.is_ascii_control()) {
+        return Err(Unread::Ambiguous(scheme));
     }
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, path) = rest.split_at(end);
     // User info ends at the last `@`: `https://good.com@evil.com/` is evil.com.
     let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
     let host = if let Some(v6) = host_port.strip_prefix('[') {
-        format!("[{}]", v6.split_once(']')?.0)
+        format!("[{}]", v6.split_once(']').ok_or(Unread::NotUrl)?.0)
     } else {
         host_port.split(':').next().unwrap_or_default().to_owned()
     };
     if host.is_empty() {
-        return None;
+        return Err(Unread::NotUrl);
+    }
+    // WHATWG's parser decodes a host's percent-encoding and refuses its
+    // forbidden host code points: a host with either is not the one granted.
+    if host.contains(['%', ' ', '<', '>', '^', '|'])
+        || (!host_port.starts_with('[') && host.contains(['[', ']']))
+    {
+        return Err(Unread::Ambiguous(scheme));
     }
     let port = if host_port.starts_with('[') {
         host_port
@@ -443,16 +509,15 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
             .and_then(|(_, rest)| rest.strip_prefix(':'))
             .map(str::parse::<u16>)
             .transpose()
-            .ok()?
     } else {
         host_port
             .split_once(':')
             .map(|(_, port)| port.parse::<u16>())
             .transpose()
-            .ok()?
-    };
-    Some(UrlParts {
-        scheme: scheme.to_ascii_lowercase(),
+    }
+    .map_err(|_| Unread::NotUrl)?;
+    Ok(UrlParts {
+        scheme,
         host: host.to_ascii_lowercase().trim_end_matches('.').to_owned(),
         path: if path.is_empty() { "/" } else { path },
         port,
@@ -850,6 +915,17 @@ impl Capabilities {
             || self.network.http.iter().any(|g| g.allows(method, url))
     }
 
+    /// Whether `method` may reach every host, port and path of `scheme`.
+    fn allows_http_anywhere(&self, method: &str, scheme: &str) -> bool {
+        matches!(scheme, "http" | "https" | "ws" | "wss")
+            && (self.network.hosts.iter().any(HostPattern::is_any)
+                || self
+                    .network
+                    .http
+                    .iter()
+                    .any(|g| g.allows_anywhere(method, scheme)))
+    }
+
     fn allows_host(&self, name: &str) -> bool {
         self.host.iter().any(|g| match g.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix),
@@ -863,6 +939,15 @@ impl Capabilities {
                 .webview
                 .as_ref()
                 .is_some_and(|hosts| hosts.iter().any(|h| h.matches(&url.host)))
+    }
+
+    /// Whether a web view may show every host of `scheme`.
+    fn allows_webview_anywhere(&self, scheme: &str) -> bool {
+        matches!(scheme, "http" | "https")
+            && self
+                .webview
+                .as_ref()
+                .is_some_and(|hosts| hosts.iter().any(HostPattern::is_any))
     }
 }
 
@@ -1291,10 +1376,14 @@ impl Access {
         if url.starts_with("asset:") {
             return true;
         }
-        let Some(parts) = parse_url(url) else {
-            return false;
-        };
-        self.each(|c| c.allows_http(method, &parts))
+        match read_url(url) {
+            Ok(parts) => self.each(|c| c.allows_http(method, &parts)),
+            // Whatever host a parser reads, a grant of every host covers it.
+            Err(Unread::Ambiguous(scheme)) => {
+                self.each(|c| c.allows_http_anywhere(method, &scheme))
+            }
+            Err(Unread::NotUrl) => false,
+        }
     }
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
@@ -1340,10 +1429,11 @@ impl Access {
         if url == "about:blank" {
             return self.allows_webviews();
         }
-        let Some(parts) = parse_url(url) else {
-            return false;
-        };
-        self.each(|c| c.allows_webview(&parts))
+        match read_url(url) {
+            Ok(parts) => self.each(|c| c.allows_webview(&parts)),
+            Err(Unread::Ambiguous(scheme)) => self.each(|c| c.allows_webview_anywhere(&scheme)),
+            Err(Unread::NotUrl) => false,
+        }
     }
 
     /// Whether a web view's ref may give its page trusted input
@@ -2009,6 +2099,162 @@ mod tests {
         // User info does not fool the host check.
         assert!(!a.allows_http("GET", "https://api.example.org@evil.io/"));
         assert!(a.allows_http("GET", "https://user:pw@api.example.org:8443/"));
+    }
+
+    /// URLs that parsers read differently: WHATWG's (the web views') ends the
+    /// host at a backslash, reads one in the path as `/` and drops tab, LF
+    /// and CR, Foundation's `NSURL` keeps a backslash in the user info,
+    /// and WHATWG's decodes a host's percent-encoding and refuses spaces in
+    /// it. Granting one would let the app load a host or path it is not
+    /// granted wherever another parser loads it.
+    #[test]
+    fn urls_that_parsers_read_as_different_hosts_are_refused() {
+        let hosts = r#"["docs.example.com", "*.docs.example.com"]"#;
+        let a = Access {
+            declared: caps(&format!(
+                r#"{{ "network": {{ "hosts": {hosts} }}, "webview": {{ "hosts": {hosts} }} }}"#
+            )),
+            granted: None,
+        };
+        for url in [
+            // WHATWG: bank.example; the check read docs.example.com.
+            "https://bank.example\\@docs.example.com/",
+            "https://bank.example:443\\@docs.example.com/",
+            "https://[::1]\\@docs.example.com/",
+            // WHATWG: bank.example; the check read a subdomain.
+            "https://bank.example\\.docs.example.com/",
+            // Foundation's NSURL: bank.example; WHATWG: docs.example.com.
+            "https://docs.example.com\\@bank.example/",
+            // WHATWG: the path is `/b`; the check read `/a\..\b`.
+            "https://docs.example.com/a\\..\\b",
+            // WHATWG drops these or refuses the URL; the check read a subdomain.
+            "https://bank.example\0.docs.example.com/",
+            "https://bank.example\t.docs.example.com/",
+            "https://bank.example\n.docs.example.com/",
+            "https://bank.example .docs.example.com/",
+            "https://bank.example[.docs.example.com/",
+            "https://x]y.docs.example.com/",
+            // WHATWG: bank.example.docs.example.com, decoded.
+            "https://bank%2Eexample.docs.example.com/",
+        ] {
+            assert!(!a.allows_webview(url), "{url:?}");
+            assert!(!a.allows_http("GET", url), "{url:?}");
+            assert!(!a.allows_media(url), "{url:?}");
+        }
+        assert!(!a.allows_websocket("wss://bank.example\\@docs.example.com/"));
+        // What every parser reads alike is unchanged: an escaped backslash,
+        // a backslash in the query (WHATWG keeps it there), user info.
+        for url in [
+            "https://docs.example.com/a%5Cb",
+            "https://x.docs.example.com/?q=C:\\x#a\\b",
+            "https://user:pw@docs.example.com/a b",
+        ] {
+            assert!(a.allows_webview(url), "{url:?}");
+            assert!(a.allows_http("GET", url), "{url:?}");
+        }
+        // Nor does it refuse what an app without capabilities loads.
+        let all = Access {
+            declared: Capabilities::all(),
+            granted: None,
+        };
+        let query = url::Url::parse("wss://x.example/?q=a\\b").unwrap();
+        assert!(all.allows_websocket(query.as_str()), "{query}");
+        assert!(all.allows_media("https://x.example/i.png?p=a\\b"));
+    }
+
+    /// A URL that parsers read differently names no one host, port or path:
+    /// a grant of every host covers it (an app without `capabilities`, `*`),
+    /// a narrower grant or a rule narrowing the port or path does not, and
+    /// what is no URL stays refused.
+    #[test]
+    fn only_grants_of_every_host_cover_ambiguous_urls() {
+        let url = "https://x.example/a\\b.png";
+        let all = Access {
+            declared: Capabilities::all(),
+            granted: None,
+        };
+        let any = Access {
+            declared: caps(r#"{ "network": { "hosts": ["*"] }, "webview": { "hosts": ["*"] } }"#),
+            granted: None,
+        };
+        for a in [&all, &any] {
+            assert!(a.allows_http("GET", url));
+            assert!(a.allows_media(url));
+            assert!(a.allows_webview(url));
+            assert!(!a.allows_http("GET", "ftp://x.example/a\\b"));
+            assert!(!a.allows_webview("file://x.example/a\\b"));
+            assert!(!a.allows_webview("not a url"));
+            assert!(!a.allows_http("GET", "https://"));
+        }
+        let rule = |rule: &str| Access {
+            declared: caps(&format!(r#"{{ "network": {{ "http": [{rule}] }} }}"#)),
+            granted: None,
+        };
+        let methods = rule(r#"{ "host": "*", "methods": ["get"], "schemes": ["https"] }"#);
+        assert!(methods.allows_http("GET", url));
+        assert!(!methods.allows_http("POST", url));
+        assert!(!methods.allows_http("GET", "http://x.example/a\\b.png"));
+        for narrowed in [
+            r#"{ "host": "*", "port": 443 }"#,
+            r#"{ "host": "*", "pathPrefix": "/a" }"#,
+            r#"{ "host": "*", "paths": ["/a/b.png"] }"#,
+            r#"{ "host": "x.example" }"#,
+        ] {
+            assert!(!rule(narrowed).allows_http("GET", url), "{narrowed}");
+        }
+    }
+
+    /// A URL the check grants names a granted host for WHATWG's parser too,
+    /// the web views' (`url`'s): the check may refuse more, never less.
+    #[test]
+    fn granted_urls_are_granted_hosts_for_whatwg() {
+        let pattern = |p: &str| HostPattern::new(p).unwrap();
+        let granted = [pattern("docs.example.com"), pattern("*.docs.example.com")];
+        let a = Access {
+            declared: caps(
+                r#"{ "webview": { "hosts": ["docs.example.com", "*.docs.example.com"] } }"#,
+            ),
+            granted: None,
+        };
+        for url in [
+            "https://docs.example.com/a",
+            "https://DOCS.Example.COM/",
+            "https://docs.example.com./",
+            "https://x.docs.example.com:8443/",
+            "https://user:pw@docs.example.com/",
+            "https://docs.example.com#@bank.example/",
+            "https://docs.example.com?@bank.example/",
+            "https://docs.example.com:pass@bank.example/",
+            "https://docs.example.com%2F@bank.example/",
+            "https://bank.example\\@docs.example.com/",
+            "https://bank.example:443\\@docs.example.com/",
+            "https://[::1]\\@docs.example.com/",
+            "https://bank.example\\.docs.example.com/",
+            "https://docs.example.com\\@bank.example/",
+            "https://bank.example\0.docs.example.com/",
+            "https://bank.example\t.docs.example.com/",
+            "https://docs.example.com\n.bank.example/",
+            "https://bank%2Eexample.docs.example.com/",
+            "https://docs\u{FF0E}example\u{FF0E}com/",
+            "https://d\u{043E}cs.example.com/",
+            "https:\\\\docs.example.com\\",
+            " https://docs.example.com/",
+            "https://docs.example.com /",
+            "https://bank.example .docs.example.com/",
+            "https://bank.example^.docs.example.com/",
+            "https://bank.example[.docs.example.com/",
+            "https://x]y.docs.example.com/",
+            "https://a@bank.example@docs.example.com/",
+            "https://..docs.example.com/",
+            "HTTPS://DOCS.EXAMPLE.COM/",
+            "https://x.docs.example.com/?q=C:\\x",
+        ] {
+            if a.allows_webview(url) {
+                let whatwg = url::Url::parse(url).unwrap_or_else(|e| panic!("{url:?}: {e}"));
+                let host = whatwg.host_str().unwrap_or_default().trim_end_matches('.');
+                assert!(granted.iter().any(|p| p.matches(host)), "{url:?}: {host}");
+            }
+        }
     }
 
     #[test]

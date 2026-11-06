@@ -7447,6 +7447,21 @@ fn refused_urls_fail_and_send_nothing() {
     );
 }
 
+/// A refusal names the host to grant, or, for a URL no host grant can
+/// cover, how to write it: adding the URL itself would never grant it.
+#[test]
+fn refusals_name_the_host_to_grant_or_how_to_write_the_url() {
+    let refusal = |uri| super::not_granted("the web page", uri, "webview.hosts");
+    assert!(
+        refusal("https://docs.example.com/a").contains("add `docs.example.com` to capabilities")
+    );
+    for uri in ["https://bank.example\\@docs.example.com/", "not a url"] {
+        let message = refusal(uri);
+        assert!(!message.contains("add `"), "{message}");
+        assert!(message.contains("%5C"), "{message}");
+    }
+}
+
 #[test]
 fn refused_web_view_html_fails() {
     let mut c = core();
