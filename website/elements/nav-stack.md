@@ -203,6 +203,7 @@ const depth = () => nav.routes().length;
 |---|---|---|---|
 | `state` | the pages are its children | `NavStackState<R>` | The state that holds the routes (`createNavStack`). Required. |
 | `children` | `.child(..)` | `(route: R, index: Accessor<number>) => JSX.Element` | Renders a route. Return a `<NavPage>` for its options. Required. |
+| `linking` | | `NavStackLinking<R>` | On the web, each page is a URL of the site: `path(route)` gives a route's path, `routes(path)` the routes a path opens, bottom to top (`null` keeps the stack's own). See [the web](../docs/web.md#a-url-for-each-page). |
 | `style`, `class` | style methods | | The stack's style; usually `flex: 1`. |
 | `testID` | `.test_id(..)` | `string` | Finds the stack in tests and `nsh test --trace`. |
 
@@ -384,6 +385,7 @@ To turn off only the swipe gesture and keep the back buttons, use `popOnSwipe={f
 - **Mac Catalyst**: as on iOS.
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: each page shows its `header` at the top and its content
   below it. Escape, Alt+Left and a mouse's back button go back on the desktops, the browser's back button on the web.
+  With `linking`, each page of the stack has its own URL in the browser's address bar and history.
 
 For content shown over the stack and its header, such as a sheet or a full-screen flow, use a
 [Dialog](./dialog.md).

@@ -515,6 +515,19 @@ covers [nsh/base] NavStack
 covers [nsh/base] NavPage
 covers [nsh/base] Button
 covers [props] NavStack.state
+# base-nav-stack-linking
+tap id:case-base-nav-stack-linking
+# Off the web a linked stack keeps its own routes and never asks `linking`
+# (in a browser its pages are the page's URLs: docs/dev/web.md).
+expect Linked routes: home
+expect Linked home
+tap text:Open q3
+expect Note q3
+expect Linked routes: home > q3
+tap text:Back
+absent Note q3
+expect Linked routes: home
+expect Linking asked: 0
 # base-safe-area-keyboard
 tap id:case-base-safe-area-keyboard
 # insets and no keyboard; a page's and a dialog's insets are what the

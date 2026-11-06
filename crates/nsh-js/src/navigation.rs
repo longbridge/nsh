@@ -130,8 +130,22 @@ export interface NavStackState<R> {
   remove(route: R): void;
 }
 
+/** How a `<NavStack>`'s routes and the page's URL follow each other on the
+ * web: each page the stack shows is a URL of the site, the browser's history
+ * holds one entry per page, and opening a URL opens the pages it names. */
+export interface NavStackLinking<R> {
+  /** The URL path of the page showing `route` (`"/"`, `"/stock/AAPL"`),
+   * relative to the site's base. */
+  path(route: R): string;
+  /** The routes a path opens, bottom to top (`"/stock/AAPL"` → the home
+   * page, then the stock's); `null` keeps the stack's own routes. */
+  routes(path: string): R[] | null;
+}
+
 export interface NavStackProps<R> {
   state: NavStackState<R>;
+  /** The page's URL follows the routes, and opens them (the web). */
+  linking?: NavStackLinking<R>;
   /** Finds the stack in tests and `nsh test --trace`. */
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -468,7 +482,8 @@ unsafe extern "C" fn stack(
         Err(e) => return e,
     };
     let result = (|| -> Result<(), JsValue> {
-        dom::spread_except(cx, node, props, &["state", "children"])?;
+        // `linking` is the web's (the page's URL); native stacks keep their routes.
+        dom::spread_except(cx, node, props, &["state", "children", "linking"])?;
         let navigator = get(cx, props, c"state");
         let entries = get(cx, navigator, ENTRIES);
         free(cx, navigator);

@@ -5133,12 +5133,50 @@ class Player {
   syncHistory() {
     const depth = this.backDepth();
     const have = this.historyDepth;
-    for (let i = have + 1; i <= depth; i++) history.pushState(this.historyState(i), "");
+    // A linked stack's pages are URLs of the site: the entry the page is at
+    // takes its page's path (a replaced page, a deep link's first page), and
+    // each entry pushed the path of its own.
+    if (depth >= have) {
+      const url = this.routeURL(have);
+      if (url && url !== location.href) history.replaceState(this.historyState(have), "", url);
+    }
+    for (let i = have + 1; i <= depth; i++) history.pushState(this.historyState(i), "", this.routeURL(i));
     if (depth < have) {
       this.ignoredPops++;
       history.go(depth - have);
     }
     this.historyDepth = depth;
+  }
+
+  /** The site's base: where the page's relative URLs and a linked stack's paths start. */
+  siteBase() {
+    return new URL(".", document.baseURI);
+  }
+
+  /** The path of the page's URL from the site's base (`"/"` there,
+   * `"/stock/AAPL"`), which a linked `NavStack` opens; null when the app is
+   * not the page. */
+  routePath() {
+    if (!this.history) return null;
+    const base = this.siteBase().pathname;
+    const path = location.pathname;
+    return `/${path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, "")}`;
+  }
+
+  /** The paths of a linked `NavStack`'s pages, bottom to top (`linking`):
+   * the history's entries become their URLs. */
+  setRoutePaths(paths) {
+    if (!this.history) return;
+    this.routePaths = paths;
+    this.syncHistorySoon();
+  }
+
+  /** The URL of the history's entry `depth` (a modal over the pages keeps the top page's). */
+  routeURL(depth) {
+    const paths = this.routePaths;
+    if (!paths?.length) return undefined;
+    const path = paths[Math.min(depth, paths.length - 1)];
+    return new URL(path.replace(/^\//, ""), this.siteBase()).href;
   }
 
   popState(e) {

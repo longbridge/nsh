@@ -1,7 +1,11 @@
 // Route state is held by the shared Rust reactive graph. Stack transitions,
 // layout, back handling and modal surfaces remain in the Rust core/platform.
-export function createNavigation(reactive, dom, environment, animation) {
-  const { signal, computed, untracked, split, batch } = reactive;
+// `pageRoutes` (`page.js`): the page's URL for a stack's `linking`; null
+// when the app is not the page.
+export function createNavigation(reactive, dom, environment, animation, pageRoutes) {
+  const { signal, computed, effect, untracked, split, batch } = reactive;
+  // The first linked stack opens the page's URL; later ones keep theirs.
+  let opened = false;
   const rt = dom.rt, pages = new WeakSet(), popped = new WeakMap();
   const except = (props, keys) => split(props, keys)[1];
   function createNavStack(routes) {
@@ -51,8 +55,21 @@ export function createNavigation(reactive, dom, environment, animation) {
   }
   function NavStack(props) {
     const node = rt.element("stack");
-    rt.spread(node, except(props, ["state", "children"]));
+    rt.spread(node, except(props, ["state", "children", "linking"]));
     const entries = props.state.__nshEntries;
+    const linking = props.linking;
+    if (linking && pageRoutes) {
+      if (!opened) {
+        opened = true;
+        const routes = untracked(() => linking.routes(pageRoutes.initialPath()));
+        if (Array.isArray(routes) && routes.length) untracked(() => props.state.setRoutes(routes));
+      }
+      // Each page's path, bottom to top: the history's entries' URLs.
+      effect(() => {
+        const paths = entries().map(entry => String(linking.path(entry.route)));
+        untracked(() => pageRoutes.setPaths(paths));
+      });
+    }
     const rows = rt.each(entries, (read, index) => {
       const entry = untracked(read);
       const rendered = untracked(() => props.children(entry.route, index));

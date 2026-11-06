@@ -432,6 +432,29 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 按压链接触发的是应用的 `onPress`，应用照常导航；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时在新标签页中打开它。
 
+### 每个页面一个 URL
+
+`NavStack` 的 `linking` 让栈中的每个页面成为站点的一个 URL：地址栏显示顶部的页面，浏览器历史中每个页面各有一条记录，直接打开的 URL（搜索结果、分享的链接）会打开它指定的页面。`path` 给出路由的路径，`routes` 给出一个路径打开的路由，自底向上，因此后退按钮会回到用户预期的地方：
+
+```tsx
+const nav = createNavStack<Route>([{ name: "home" }]);
+
+const linking = {
+  path: (route: Route) => (route.name === "note" ? `/notes/${route.slug}` : "/"),
+  routes: (path: string): Route[] | null => {
+    const match = /^\/notes\/([\w-]+)$/.exec(path);
+    if (match) return [{ name: "home" }, { name: "note", slug: match[1] }];
+    return path === "/" ? [{ name: "home" }] : null;
+  },
+};
+
+<NavStack state={nav} linking={linking}>
+  {(route) => (route.name === "note" ? <NotePage slug={route.slug} /> : <Home />)}
+</NavStack>
+```
+
+路径从站点发布到的目录算起（发布在 `https://example.com/research/` 的站点中，`/notes/q3` 即 `https://example.com/research/notes/q3`）。第一个设置了 `linking` 的栈会打开页面的 URL；`routes` 返回 `null` 时保留栈自己的路由。让托管服务对应用的每个路径都返回站点的 `index.html`（单页站点的回退方式），并带上指明站点目录的 `<base href>`（`<base href="/research/">`），这样直接打开的 URL 也能加载应用的文件、打开对应的页面。手机和桌面上，栈的路由保持原样。
+
 ### 标题和描述
 
 [`nsh/web`](../modules/nsh-web.md) 的 `Head` 在挂载期间设置页面的 `<head>`：标题、描述、规范 URL、语言、更多 `<meta>`（Open Graph、Twitter 卡片、`robots`）以及结构化数据。每个页面放一个 head，描述正在显示的页面；最后挂载的 head 设置的内容生效：

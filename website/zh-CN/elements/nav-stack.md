@@ -192,6 +192,7 @@ const depth = () => nav.routes().length;
 |---|---|---|---|
 | `state` | 页面即它的子元素 | `NavStackState<R>` | 保存路由的状态（`createNavStack`）。必填。 |
 | `children` | `.child(..)` | `(route: R, index: Accessor<number>) => JSX.Element` | 渲染一个路由。返回 `<NavPage>` 以设置它的选项。必填。 |
+| `linking` | | `NavStackLinking<R>` | 在 Web 上，每个页面都是站点的一个 URL：`path(route)` 给出路由的路径，`routes(path)` 给出一个路径打开的路由，自底向上（`null` 保留栈自己的路由）。见 [Web](../docs/web.md#每个页面一个-url)。 |
 | `style`、`class` | 样式方法 | | 栈的样式；通常为 `flex: 1`。 |
 | `testID` | `.test_id(..)` | `string` | 在测试和 `nsh test --trace` 中找到这个栈。 |
 
@@ -365,6 +366,6 @@ function EditNote() {
 - **iOS**：`UINavigationController`，带系统标题栏、返回按钮和侧滑返回；`headerLargeTitle` 是 UIKit 的大标题。转场进行期间到达的栈变化会在转场结束时应用。
 - **Android**：带工具栏的页面栈。系统返回键弹出顶部页面，在支持的 Android 版本上带预测性返回；向上箭头给屏幕阅读器的描述是下面那个页面的 `headerBackTitle`，否则为系统的描述。要自己处理返回键，见 [`BackHandler`](../modules/nsh-mobile.md#backhandler) 中的 `BackHandler`。
 - **Mac Catalyst**：与 iOS 相同。
-- **桌面平台（macOS、Windows、Linux、GPUI）和 Web**：每个页面在顶部显示它的 `header`，内容位于其下方。桌面平台上 Escape、Alt+左方向键和鼠标的后退键返回，Web 上是浏览器的后退按钮。
+- **桌面平台（macOS、Windows、Linux、GPUI）和 Web**：每个页面在顶部显示它的 `header`，内容位于其下方。桌面平台上 Escape、Alt+左方向键和鼠标的后退键返回，Web 上是浏览器的后退按钮。设置 `linking` 后，栈中每个页面在浏览器的地址栏和历史记录中都有自己的 URL。
 
 要在栈及其标题栏之上显示内容，比如 sheet 或全屏流程，使用 [Dialog](./dialog.md)。

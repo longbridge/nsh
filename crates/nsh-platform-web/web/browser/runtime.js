@@ -225,7 +225,7 @@ export function createBrowserHost(player) {
         configureAPIs(nsh, modules, dom, active, env);
         const page = createWebPage(reactive, player);
         const base = modules.exports.get("nsh/base");
-        if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
+        if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api, page.routes));
 
         const namespaces = new Map([...modules.exports, ...createStandard(call, active)]);
         const mobile = namespaces.get("nsh/mobile") ?? {};

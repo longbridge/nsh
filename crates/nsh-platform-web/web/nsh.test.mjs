@@ -1551,3 +1551,27 @@ test("a mouse makes a desktop at any width, a touch screen a tablet or a phone (
     globalThis.screen = saved.screen;
   }
 });
+
+test("a linked stack's pages are paths from the site's base, a modal over them keeps the top one's", () => {
+  const { player } = fakePlayer();
+  const saved = { document: globalThis.document, location: globalThis.location };
+  globalThis.document = { baseURI: "https://notes.example.com/app/" };
+  globalThis.location = { pathname: "/app/notes/q3", href: "https://notes.example.com/app/notes/q3" };
+  try {
+    // An app in another page's iframe is not the page: no paths.
+    player.history = false;
+    assert.equal(player.routePath(), null);
+    player.history = true;
+    // The path the page opened at, from the directory the site is published to.
+    assert.equal(player.routePath(), "/notes/q3");
+    // No linked stack: the entries keep the page's URL.
+    assert.equal(player.routeURL(1), undefined);
+    player.routePaths = ["/", "/notes/q3"];
+    assert.equal(player.routeURL(0), "https://notes.example.com/app/");
+    assert.equal(player.routeURL(1), "https://notes.example.com/app/notes/q3");
+    assert.equal(player.routeURL(2), "https://notes.example.com/app/notes/q3");
+  } finally {
+    globalThis.document = saved.document;
+    globalThis.location = saved.location;
+  }
+});

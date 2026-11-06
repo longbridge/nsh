@@ -854,6 +854,15 @@ one wins key by key, `meta` by `name` / `property`), the elements the heads made
 and `document.title` / `<html lang>` fall back to what the page had before. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 
+**URLs.** `NavStack`'s `linking` (`{ path(route), routes(path) }`, declared in `nsh-js`'s `navigation.rs`; the
+QuickJS stack leaves it out of the view's props and ignores it) is read by the browser runtime's `NavStack`
+(`web/browser/navigation.js`) when the player owns the page's history (`Player.history`: not in another page's
+iframe; `page.js` hands it `routes`). The first linked stack opens the page's path (`Player.routePath`: the URL's
+path from the site's base) with `routes(path)` through `setRoutes`; then an effect sends the paths of its pages,
+bottom to top, to `Player.setRoutePaths`. `syncHistory` gives each history entry its page's URL (`routeURL`: a
+modal's entry keeps the top page's): pushed entries carry theirs, and the entry the page is at is replaced when its
+path changes (a replaced page, a deep link's first page). Back and forward stay the history's own (`popState`).
+
 ## Not implemented
 
 Platform services other than the theme color, dialogs, the clipboard and the host; image download progress; a web
