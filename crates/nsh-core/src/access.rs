@@ -1299,10 +1299,12 @@ impl Access {
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
     /// Relative and `asset:` URIs are the app's own files; `data:` URIs and
-    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has.
+    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has; a
+    /// `file:` URL is a file path, as an absolute path is.
     pub fn allows_media(&self, uri: &str) -> bool {
         if !uri.contains("://")
             || uri.starts_with("asset:")
+            || uri.starts_with("file:")
             || uri.starts_with("data:")
             || uri.starts_with("blob:")
         {
@@ -1893,6 +1895,9 @@ mod tests {
         assert!(!access.allows_media("https://example.com/a.png"));
         assert!(access.allows_media("asset:/logo.png"));
         assert!(access.allows_media("logo.png"));
+        assert!(access.allows_media("/home/a/logo.png"));
+        assert!(access.allows_media("file:///home/a/logo.png"));
+        assert!(access.allows_media("data:image/png;base64,iVBORw0KGgo="));
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());

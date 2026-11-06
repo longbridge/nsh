@@ -160,7 +160,7 @@ editor.run(command("toggleBold"));
 
 `StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`RichLink`（Tiptap 的 `Link`）、`Highlight`、`Subscript`、`Superscript`、`RichTextStyle`（Tiptap 的 `TextStyle`）、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
 
-每个扩展都加入 Tiptap 的命令，由 `command(name, args)` 运行：`toggleBold`、`setItalic`、`unsetStrike`、`toggleHeading({ level })`、`setParagraph`、`toggleBlockquote`、`toggleBulletList`、`toggleOrderedList`、`toggleTaskList`、`toggleCodeBlock({ language })`、`setHardBreak`、`setHorizontalRule`、`setImage({ src })`、`toggleHighlight({ color })`、`setTextAlign("center")`、`unsetTextAlign`，以及下文的链接、字数统计与建议命令。
+每个扩展都加入 Tiptap 的命令，由 `command(name, args)` 运行：`toggleBold`、`setItalic`、`unsetStrike`、`toggleHeading({ level })`、`setParagraph`、`toggleBlockquote`、`toggleBulletList`、`toggleOrderedList`、`toggleTaskList`、`toggleCodeBlock({ language })`、`setHardBreak`、`setHorizontalRule`、`setImage({ src })`、`toggleHighlight({ color })`、`setTextAlign("center")`、`unsetTextAlign`，以及下文的链接、字数统计与建议命令。图片的 `src` 与 `Image` 接受的相同（URL、文件路径或 `file:` URL、`data:` URI）；不设 `width` 和 `height` 时按原始尺寸显示，只设其一时按该边和图片的宽高比显示。
 
 列表切换作用于整个列表，如同文字处理软件的列表按钮：在项目符号列表中执行 `toggleOrderedList` 会把它的每一层（包括嵌套列表）都改为编号列表，而列表自身的切换会把选中的块从它们所在的每一层列表中移出。
 
