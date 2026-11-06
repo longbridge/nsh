@@ -6,11 +6,13 @@
 //! repaired (`streaming.rs`), TeX's `\(…\)` and `\[…\]` are rewritten as
 //! dollars (`latex.rs`), declared containers are cut out (`container.rs`)
 //! (syntax `markdown-rs` lacks), then each Markdown part is parsed, with
-//! emphasis beside CJK text read as the CJK-friendly rule reads it
-//! (`cjk.rs`), and its tree converted. Definitions and footnotes are
+//! bare URLs ending where CJK text starts (`autolink.rs`) and emphasis
+//! beside CJK text read as the CJK-friendly rule reads it (`cjk.rs`), and
+//! its tree converted. Definitions and footnotes are
 //! collected from the trees first, so references resolve wherever they
 //! stand and footnotes are numbered by their first reference.
 
+mod autolink;
 mod cjk;
 mod container;
 mod latex;
@@ -131,14 +133,27 @@ fn parse_trees<'s>(
 }
 
 /// Markdown `text` parsed (`first`: the document's start). What is inserted
-/// before parsing (marks beside emphasis, escapes of prose `$`) is taken out
+/// before parsing (ends of bare URLs, marks beside emphasis, escapes of
+/// prose `$`) is taken out
 /// of the tree again (`offsets.rs`): its positions are offsets in `text`.
 fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
     let mut inserted = Inserted::default();
+    let mut ends = Vec::new();
+    let ended = if parser.options.mdx {
+        // MDX has no autolink literals.
+        Cow::Borrowed(text)
+    } else {
+        autolink::end_urls(text, &mut ends)
+    };
+    inserted.insert(&ends, autolink::END.len_utf8());
     let mut marks = Vec::new();
-    let mut source = cjk::mark(text, &mut marks);
-    let marked = !marks.is_empty();
+    let marked = match cjk::mark(&ended, &mut marks) {
+        Cow::Owned(marked) => Some(marked),
+        Cow::Borrowed(_) => None,
+    };
+    let mut source = marked.map_or(ended, Cow::Owned);
     inserted.insert(&marks, cjk::MARK.len_utf8());
+    let strip = !ends.is_empty() || !marks.is_empty();
     let mut root = parse_tree(parser, &source, first);
     if parser.options.math {
         // Pairs of `$` that are prose: their opening `$` escaped, the text
@@ -166,7 +181,7 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
         }
     }
     if !inserted.is_empty() {
-        offsets::restore(&mut root, &source, &inserted, marked);
+        offsets::restore(&mut root, &source, &inserted, strip);
     }
     Tree { source: text, root }
 }

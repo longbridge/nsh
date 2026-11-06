@@ -234,6 +234,108 @@ fn positions_are_offsets_in_the_text_given() {
 }
 
 #[test]
+fn bare_urls_end_at_cjk_text() {
+    let url = |url: &str| link(url, vec![t(url)]);
+    assert_eq!(
+        blocks("https://example.com。下一句"),
+        vec![p(vec![url("https://example.com"), t("。下一句")])]
+    );
+    assert_eq!(
+        blocks("详见 https://a.dev/docs，然后看www.b.dev"),
+        vec![p(vec![
+            t("详见 "),
+            url("https://a.dev/docs"),
+            t("，然后看www.b.dev"),
+        ])]
+    );
+    assert_eq!(
+        blocks("www.a.dev很好"),
+        vec![p(vec![
+            link("http://www.a.dev", vec![t("www.a.dev")]),
+            t("很好")
+        ])]
+    );
+    // Curly quotes, trailing punctuation, a second URL after CJK text.
+    assert_eq!(
+        blocks("见“https://a.dev/x”。或 https://b.dev.。"),
+        vec![p(vec![
+            t("见“"),
+            url("https://a.dev/x"),
+            t("”。或 "),
+            url("https://b.dev"),
+            t(".。"),
+        ])]
+    );
+    assert_eq!(
+        blocks("https://a.dev中https://b.dev"),
+        vec![p(vec![url("https://a.dev"), t("中"), url("https://b.dev")])]
+    );
+    // Emphasis closing after the URL.
+    assert_eq!(
+        blocks("**来源：https://x.dev**。后面"),
+        vec![p(vec![
+            strong(vec![t("来源："), url("https://x.dev")]),
+            t("。后面"),
+        ])]
+    );
+    // A path with CJK characters ends there; angle brackets and links keep
+    // the whole URL.
+    assert_eq!(
+        blocks("https://zh.wikipedia.org/wiki/中文"),
+        vec![p(vec![url("https://zh.wikipedia.org/wiki/"), t("中文")])]
+    );
+    assert_eq!(
+        blocks("<https://zh.wikipedia.org/wiki/中文> [维基](https://zh.wikipedia.org/wiki/中文)"),
+        vec![p(vec![
+            url("https://zh.wikipedia.org/wiki/中文"),
+            t(" "),
+            link("https://zh.wikipedia.org/wiki/中文", vec![t("维基")]),
+        ])]
+    );
+    // Code keeps its text; positions are offsets in the text given.
+    assert_eq!(
+        blocks("`https://a.dev中`"),
+        vec![p(vec![code("https://a.dev中")])]
+    );
+    assert_eq!(
+        node_sources("https://example.com。下一句"),
+        vec![
+            "Root: https://example.com。下一句",
+            "Paragraph: https://example.com。下一句",
+            "Link: https://example.com",
+            "Text: https://example.com",
+            "Text: 。下一句",
+        ]
+    );
+}
+
+#[test]
+fn bare_urls_beside_latin_text_are_githubs() {
+    let url = |url: &str| link(url, vec![t(url)]);
+    assert_eq!(
+        blocks(
+            "See https://example.com/a?b#c. Or www.example.com/path, (https://x.dev/a_(b)) café"
+        ),
+        vec![p(vec![
+            t("See "),
+            url("https://example.com/a?b#c"),
+            t(". Or "),
+            link(
+                "http://www.example.com/path",
+                vec![t("www.example.com/path")]
+            ),
+            t(", ("),
+            url("https://x.dev/a_(b)"),
+            t(") café"),
+        ])]
+    );
+    assert_eq!(
+        blocks("https://a.dev/é/ü"),
+        vec![p(vec![url("https://a.dev/é/ü")])]
+    );
+}
+
+#[test]
 fn emphasis_beside_latin_text_is_commonmarks() {
     // CommonMark's examples, unchanged.
     assert_eq!(blocks("a**\"foo\"**"), vec![p(vec![t("a**\"foo\"**")])]);
