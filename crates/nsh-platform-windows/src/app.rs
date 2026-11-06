@@ -173,6 +173,13 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The app this view runs owns the process's notifications: the process
+    /// takes [`app_id`](Self::app_id) as its AppUserModelID (also what the
+    /// taskbar groups its windows by), registers it with
+    /// [`title`](Self::title) and [`icon`](Self::icon) for toasts and hears
+    /// their presses (`nsh`'s `Notifications`). Without it the permission is
+    /// `unavailable` and nothing shows. [`run_app`] sets it.
+    pub notifications: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -198,6 +205,7 @@ impl Default for AppOptions {
             data_dir: None,
             cache: Default::default(),
             storage: None,
+            notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
     }
@@ -244,10 +252,12 @@ impl AppView {
     pub fn new(parent: Option<HWND>, options: AppOptions) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
-        if parent.is_none() {
-            // A window of its own is the app's, also when a host makes it
-            // instead of `run_app`: toasts need the app's id.
-            crate::notifications::start_app(&options.app_id, &options.title);
+        if options.notifications {
+            crate::notifications::start_app(
+                &options.app_id,
+                &options.title,
+                options.icon.as_deref(),
+            );
         }
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
@@ -440,7 +450,8 @@ fn initial_environment() -> Environment {
 /// thread-local destructors instead, they would run inside `ExitProcess`,
 /// after the graphics DLLs and their driver threads are gone, and the
 /// process would end with a stray exit code.
-pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+    options.notifications = true;
     /// The app, moved to the UI thread.
     struct Job(AppSource, AppOptions);
     // SAFETY: the options hold `Rc`s (the native components), so they are

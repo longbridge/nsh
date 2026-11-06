@@ -23,7 +23,6 @@ use nsh_core::{
     GradientSize, ViewStyle,
     geometry::{Points, px},
 };
-
 use objc2::{
     DefinedClass as _, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Allocated, Retained},

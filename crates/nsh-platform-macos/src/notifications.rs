@@ -9,6 +9,12 @@
 //! works. A bundle that macOS does not trust (no signature) gets an error
 //! from the framework, reported as `unavailable` too.
 //!
+//! On macOS the process's notifications are the app's only when it owns
+//! them ([`enable`]: `AppOptions::notifications`, which `run_app` sets): an
+//! embedding app that did not hand them over keeps them, and the permission
+//! is `unavailable`, nothing shows and the badge stays the embedding app's.
+//! On iOS they are always the app's.
+//!
 //! [`install`] makes this file the notification center's delegate before
 //! the app finishes launching, so a press that starts the app is not lost
 //! (it waits in `PRESSES` until the app listens), and banners show while
@@ -16,7 +22,11 @@
 //! it: its notifications and their presses stay its own, and presses of the
 //! ones NSH showed go to that delegate.
 
-use std::{cell::RefCell, ffi::CStr, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::CStr,
+    sync::OnceLock,
+};
 
 use block2::{DynBlock, RcBlock};
 use dispatch2::DispatchQueue;
@@ -45,6 +55,16 @@ thread_local! {
     static PRESSES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The delegate; the center does not retain it.
     static DELEGATE: RefCell<Option<Retained<Delegate>>> = const { RefCell::new(None) };
+    /// The process's notifications are the app's ([`enable`]).
+    static ENABLED: Cell<bool> = const { Cell::new(cfg!(target_os = "ios")) };
+}
+
+/// Makes the process's notifications the app's and becomes the notification
+/// center's delegate ([`install`]). On the main thread.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
+pub(crate) fn enable() {
+    ENABLED.set(true);
+    install();
 }
 
 define_class!(
@@ -88,6 +108,16 @@ define_class!(
 
 /// Applies `command`, reporting through `control`. On the main thread.
 pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
+    if !ENABLED.get() {
+        match command {
+            NotificationCommand::Permission { id, .. } => {
+                answer_permission(control, *id, NotificationPermission::Unavailable)
+            }
+            NotificationCommand::Show { id, .. } => answer_shown(control, *id, false),
+            _ => {}
+        }
+        return;
+    }
     match command {
         NotificationCommand::SetBadge(count) => set_badge(*count),
         NotificationCommand::Permission { id, ask } => match center() {
@@ -121,12 +151,12 @@ pub(crate) fn command(control: &EngineControl, command: &NotificationCommand) {
 }
 
 /// Becomes the notification center's delegate unless the app has one (or
-/// this already is). On the main thread: `run_app` calls it before the app
-/// finishes launching, where a press can start it; an embedded [`AppView`]
-/// when it is made.
-///
-/// [`AppView`]: crate::AppView
+/// this already is). On the main thread, before the app finishes launching,
+/// where a press can start it.
 pub(crate) fn install() {
+    if !ENABLED.get() {
+        return;
+    }
     let Some(center) = center() else { return };
     // SAFETY: a documented property.
     let current: Option<Retained<AnyObject>> = unsafe { msg_send![&*center, delegate] };

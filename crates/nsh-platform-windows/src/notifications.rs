@@ -5,11 +5,10 @@
 //! NSH apps are not packaged, so the system knows them by nothing but what
 //! the process says. Toasts of an unpackaged app need:
 //! - an AppUserModelID: the app's id, the one the taskbar groups it by
-//!   ([`start`]). A top-level `AppView` a host makes is the app too
-//!   ([`start_app`]) unless the process set an id of its own. A surface
-//!   embedded in another app's window has none of its own: its notifications
-//!   stay the embedding app's, the permission is `unavailable` and nothing
-//!   shows;
+//!   ([`start`]), set only for a view that owns the process's notifications
+//!   (`AppOptions::notifications`, [`start_app`]; `run_app` sets it).
+//!   Without it the notifications stay the embedding app's, the permission
+//!   is `unavailable` and nothing shows;
 //! - the id's registration, `HKCU\Software\Classes\AppUserModelId\<id>`, with
 //!   the name and icon toasts show and the COM class that hears presses. Written when
 //!   the app first asks about notifications ([`register`]), not on every
@@ -58,7 +57,7 @@ use windows::{
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, CoCreateInstance, CoRegisterClassObject,
-                CoTaskMemFree, IClassFactory, IClassFactory_Impl, REGCLS_MULTIPLEUSE,
+                IClassFactory, IClassFactory_Impl, REGCLS_MULTIPLEUSE,
             },
             Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW},
         },
@@ -68,7 +67,7 @@ use windows::{
                 INotificationActivationCallback, INotificationActivationCallback_Impl,
                 NOTIFICATION_USER_INPUT_DATA,
             },
-            Shell::{GetCurrentProcessExplicitAppUserModelID, ITaskbarList3, TaskbarList},
+            Shell::{ITaskbarList3, TaskbarList},
             WindowsAndMessaging::{
                 CreateIconIndirect, DestroyIcon, GA_ROOT, GetAncestor, HICON, ICONINFO, IsIconic,
                 RegisterWindowMessageW, SM_CXSMICON, SW_RESTORE, SetForegroundWindow, ShowWindow,
@@ -107,22 +106,17 @@ thread_local! {
     static BADGE: Cell<u32> = const { Cell::new(0) };
 }
 
-/// [`start`] for the first top-level window of a process that has no
-/// AppUserModelID yet: `run_app`'s, or one a host makes itself
-/// (`AppView::new` with no parent). A host that set an id of its own keeps
-/// it, and its toasts stay its own.
-pub(crate) fn start_app(id: &str, name: &str) {
+/// Makes the process the app `id` ([`start`]) for an [`AppView`] that owns
+/// its notifications (`AppOptions::notifications`), once per process: the
+/// first such view's app wins.
+///
+/// [`AppView`]: crate::AppView
+pub(crate) fn start_app(id: &str, name: &str, icon: Option<&Path>) {
     if APP.with(|app| app.borrow().is_some()) {
         return;
     }
-    // SAFETY: no arguments; the string it returns is freed below.
-    if let Ok(current) = unsafe { GetCurrentProcessExplicitAppUserModelID() } {
-        // SAFETY: allocated by the shell for the caller.
-        unsafe { CoTaskMemFree(Some(current.0 as *const _)) };
-        return;
-    }
     crate::system::set_app_id(id);
-    start(id, name, None);
+    start(id, name, icon);
 }
 
 /// Makes the process the app `id`, named `name`, for toasts, and starts
