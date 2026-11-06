@@ -13985,6 +13985,98 @@ mod views {
         assert_eq!(texts(&c.commit().unwrap()), ["log 3"]);
     }
 
+    /// Rebuilds a text with fresh bindings, then with static values, then
+    /// without its optional style and label.
+    #[component]
+    fn ReboundText() -> impl IntoElement {
+        let run = signal(0_u8);
+        let current = signal(None::<Signal<bool>>);
+        view()
+            .child(text("break").on_press(move || {
+                current.get_untracked().unwrap().set(true);
+            }))
+            .child(text("switch").on_press(move || run.update(|n| *n += 1)))
+            .child(dynamic(move || {
+                let at = run.get();
+                if at >= 4 {
+                    return text("fine").into_element();
+                }
+                if at == 3 {
+                    return text("fine")
+                        .text_color(rgb(0x808080))
+                        .label("fine")
+                        .into_element();
+                }
+                let bad = signal(false);
+                current.set(Some(bad));
+                text(move || if bad.get() { "bad" } else { "fine" })
+                    .text_color(move || {
+                        if bad.get() {
+                            rgb(0xff0000)
+                        } else {
+                            rgb(0x808080)
+                        }
+                    })
+                    .style_when(bad, |s| s.opacity(0.5))
+                    .label(move || if bad.get() { "bad" } else { "fine" })
+                    .into_element()
+            }))
+    }
+
+    #[test]
+    fn reused_nodes_diff_against_their_latest_bound_values() {
+        let mut c = core();
+        c.mount_root(&Root::of::<ReboundText>());
+        let batch = c.commit().unwrap();
+        let (break_it, switch, line) = (
+            text_node(&batch, "break"),
+            text_node(&batch, "switch"),
+            text_node(&batch, "fine"),
+        );
+        assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+        assert!(
+            c.commit().is_none(),
+            "unchanged bindings send no mount items"
+        );
+        for _ in 0..2 {
+            assert!(c.component_event(break_it, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().unwrap();
+            assert!(batch.items.iter().any(|i| matches!(i,
+                MountItem::Text { id, text, .. }
+                    if *id == line && text.text == "bad" && text.spans[0].style.color == crate::Color(0xff0000ff)
+            )));
+            assert!(batch.items.iter().any(|i| matches!(i,
+                MountItem::AccessibilityLabel { id, label } if *id == line && label.as_deref() == Some("bad")
+            )));
+
+            assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().expect("the new run resets the bound values");
+            assert!(batch.items.iter().any(|i| matches!(i,
+                MountItem::Text { id, text, .. }
+                    if *id == line && text.text == "fine" && text.spans[0].style.color == crate::Color(0x808080ff)
+            )), "the reused text resets its content and color: {:?}", batch.items);
+            assert!(batch.items.iter().any(|i| matches!(i,
+                MountItem::AccessibilityLabel { id, label } if *id == line && label.as_deref() == Some("fine")
+            )));
+            assert_eq!(view_style_of(&batch, line).unwrap().opacity, 1.0);
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Create { .. } | MountItem::Delete { .. })),
+                "the node is reused"
+            );
+        }
+        // Static values remain cheap, including after the binding was removed.
+        assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|i| matches!(i,
+            MountItem::AccessibilityLabel { id, label } if *id == line && label.is_none()
+        )));
+        assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+        assert!(c.commit().is_none(), "unchanged values send no mount items");
+    }
+
     #[test]
     fn a_prop_from_js_reaches_only_what_reads_it() {
         let mut c = core();

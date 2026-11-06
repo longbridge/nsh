@@ -3884,9 +3884,20 @@ impl<M: TextEngine> Core<M> {
         let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
-            Some(p) => (
-                p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
-            ),
+            Some(mut p) => {
+                // Bindings may have changed the node since this element
+                // was applied. Diff against those latest values, even
+                // when the new element has no bindings.
+                if let Some(applied) = inst.bound.remove(&p.id) {
+                    p.attrs = applied.attrs;
+                    p.style = applied.style;
+                    p.classes = applied.classes;
+                    p.text = applied.text;
+                }
+                (
+                    p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
+                )
+            }
             None => {
                 let id = self.components.alloc();
                 let _ = self.apply_op(Op::Create { id, tag: el.tag });
