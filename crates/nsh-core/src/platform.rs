@@ -204,6 +204,11 @@ pub struct Environment {
     /// its ends (`bottom` is 0); all 0 while the system shows its title
     /// bar.
     pub title_bar: Edges<Points>,
+    /// The app's window: its bounds on the screen, its mode and display
+    /// (desktops; `None` elsewhere and where the surface has no window).
+    /// The engine holds back a move or resize until the window stops for
+    /// a moment, so platforms report every change.
+    pub window_state: Option<crate::desktop::WindowState>,
     /// Height of the software keyboard over the surface; 0 when hidden.
     pub keyboard_height: Points,
     /// Duration of the keyboard's show / hide animation in milliseconds.
@@ -264,6 +269,10 @@ pub struct Environment {
     /// [`crate::notifications`]); without it, the permission is
     /// `unavailable` and nothing shows.
     pub notifications: bool,
+    /// The platform plays sound ([`crate::Command::Audio`],
+    /// [`crate::audio`]); without it, sounds and players fail at once
+    /// (`unavailable`) unless the core has a [`crate::audio::AudioBackend`].
+    pub audio: bool,
     /// The size of one Cell of a grid surface (a terminal, whose content is
     /// whole character Cells), in points; `None` on every other surface.
     /// With it the core lays out with its terminal algorithm, ratatui's
@@ -298,6 +307,7 @@ impl Default for Environment {
             window: Size::default(),
             safe_area: Edges::default(),
             title_bar: Edges::default(),
+            window_state: None,
             keyboard_height: Points(0.0),
             keyboard_duration: 250.0,
             color_scheme: ColorScheme::Light,
@@ -318,6 +328,7 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             notifications: false,
+            audio: false,
             cell: None,
             web_input: false,
         }

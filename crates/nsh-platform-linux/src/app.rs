@@ -155,6 +155,11 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// The URL schemes that open the app (nsh.json `schemes`), for
+    /// [`run_app`]: it registers them with the desktop, runs one instance
+    /// and hands each URL to the app (`UrlScheme.on("open", ...)`). An app
+    /// embedding a view hands URLs in with [`AppView::open_url`].
+    pub schemes: Vec<String>,
 }
 
 impl Default for AppOptions {
@@ -174,6 +179,7 @@ impl Default for AppOptions {
             storage: None,
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            schemes: Vec::new(),
         }
     }
 }
@@ -255,6 +261,12 @@ impl AppView {
         view
     }
 
+    /// Hands the app a URL the system opened it with (`UrlScheme.on("open",
+    /// ...)` hears it; the app's listener may come later).
+    pub fn open_url(&self, url: &str) {
+        self.surface.open_url(url);
+    }
+
     /// The widget to put in a window.
     pub fn widget(&self) -> gtk::Widget {
         self.outer.clone().upcast()
@@ -319,6 +331,7 @@ impl AppView {
             host: options.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -405,9 +418,13 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         file_requests: true,
         notifications: true,
+        audio: true,
         ..Environment::default()
     }
 }
+
+/// The window [`run_app`] shows and its view, once shown.
+type Shown = (gtk::ApplicationWindow, Rc<AppView>);
 
 thread_local! {
     /// The standalone app's application ([`run_app`]): what [`quit`] ends.
@@ -447,14 +464,43 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
     // app id is the application id).
     glib::set_prgname(Some(&options.app_id));
+    // An app that opens URLs runs once: a second launch hands its URL to
+    // the first (GApplication's `open`) and ends.
+    let links = !options.schemes.is_empty();
     let app = gtk::Application::builder()
         .application_id(&options.app_id)
-        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        .flags(if links {
+            gtk::gio::ApplicationFlags::HANDLES_OPEN
+        } else {
+            gtk::gio::ApplicationFlags::NON_UNIQUE
+        })
         .build();
     STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
+    let args: Vec<String> = if links {
+        crate::links::register(&options.app_id, &options.title, &options.schemes);
+        crate::links::launch_args(&options.schemes)
+    } else {
+        Vec::new()
+    };
+    let shown: Rc<RefCell<Option<Shown>>> = Rc::default();
+    let shown_open = shown.clone();
+    app.connect_open(move |app, files, _| {
+        if shown_open.borrow().is_none() {
+            app.activate();
+        }
+        if let Some((window, view)) = &*shown_open.borrow() {
+            for file in files {
+                view.open_url(&file.uri());
+            }
+            window.present();
+        }
+    });
     let source = RefCell::new(Some(source));
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
+            if let Some((window, _)) = &*shown.borrow() {
+                window.present();
+            }
             return;
         };
         let window = gtk::ApplicationWindow::builder()
@@ -472,12 +518,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             AppSource::DevServer(url) => crate::dev::start(&view, url),
         }
         install_shortcuts(app, &window);
+        *shown.borrow_mut() = Some((window.clone(), view.clone()));
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
         window.present();
     });
-    // GTK must not parse the host's own arguments.
-    app.run_with_args::<&str>(&[])
+    // GTK must not parse the host's own arguments: only the URL the app
+    // was opened with goes to it (`open`).
+    app.run_with_args(&args)
 }
 
 /// Draws with GSK's GL renderer instead of its Vulkan one (GTK's default

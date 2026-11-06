@@ -12,6 +12,7 @@ mod byte_size;
 pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
+pub mod audio;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;
@@ -61,6 +62,7 @@ pub mod text_edit;
 pub mod time;
 mod transform;
 pub mod transition;
+pub mod url_scheme;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.

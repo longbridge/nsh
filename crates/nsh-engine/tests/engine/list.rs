@@ -133,6 +133,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     };
     (config, dir)
 }

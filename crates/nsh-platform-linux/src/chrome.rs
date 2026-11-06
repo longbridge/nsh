@@ -192,6 +192,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
         // The docks show apps, not windows.

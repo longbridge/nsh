@@ -112,6 +112,11 @@ pub(crate) enum Action {
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
+    /// The next link the system hands the app ([`crate::url_scheme`])
+    /// resolves the slot, those that came before first.
+    NextUrlSchemeOpen(AnswerSlot<String>),
+    /// A sound's or a player's request ([`crate::audio`]).
+    Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.
@@ -170,6 +175,21 @@ pub(crate) enum SpeechAction {
     /// Ends session `id` at once, without an error.
     Abort(u32),
     /// Whether speech can be recognized; the answer resolves the slot.
+    Available(AnswerSlot<bool>),
+}
+
+/// What a sound or a player asks of the core ([`Action::Audio`]).
+pub(crate) enum AudioAction {
+    /// Opens sound or player `id` (its first command, a
+    /// [`crate::audio::AudioCommand::Load`] or
+    /// [`crate::audio::AudioCommand::Open`]), reporting to `sink`.
+    Open {
+        command: crate::audio::AudioCommand,
+        sink: crate::audio::AudioSink,
+    },
+    /// A command of an open sound or player; an unload or close ends it.
+    Command(crate::audio::AudioCommand),
+    /// Whether sound plays here; the answer resolves the slot.
     Available(AnswerSlot<bool>),
 }
 
@@ -362,6 +382,8 @@ pub(crate) struct Executor {
     /// What waits for the app to answer the events emitted before it
     /// ([`super::after_answer`]).
     answers: RefCell<Answers>,
+    /// The engine's sounds ([`super::audio`]).
+    pub(crate) sounds: RefCell<super::audio::Sounds>,
 }
 
 /// The closures of [`super::after_answer`], by how far their events went.

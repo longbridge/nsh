@@ -69,7 +69,7 @@ In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows 
 
 ### Props
 
-In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scrollable`, `user_agent`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
+In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scrollable`, `user_agent`, `incognito`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -81,6 +81,7 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
 | `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `userAgent` | `string` | | The browser's user agent string. |
+| `incognito` | `boolean` | `false` | The pages' website data lives only as long as the web view, as each platform keeps it ([below](#website-data)). Read when the web view is made. |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS: swipe back and forward through the page history. |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS: swipe with two fingers on the trackpad to go back and forward; Windows: swipe on a touchscreen; Linux: swipe on the touchpad. |
 
@@ -363,6 +364,32 @@ import { signal, WebView } from "nsh";
 const input = signal(false);
 WebView.inputAvailable().then((available) => input.set(available));
 ```
+
+### Website data
+
+A web view keeps the website data of its pages (cookies, local storage, IndexedDB, the cache) with the app's, so a
+sign-in in one web view is there in the next and after the app restarts. A web view that shows pages the app does not
+trust (HTML someone else made, a one-time sign-in) takes `incognito`: its pages get a store of their own, kept in
+memory and gone with the web view.
+
+```rust tabs
+web_view("https://example.com/preview").incognito(true).flex_1()
+```
+
+```tsx tabs
+<WebView src="https://example.com/preview" incognito style={{ flex: 1 }} />
+```
+
+`incognito` is read when the web view is made, so it takes a value in Rust; a later change in TSX keeps the store the
+web view has and logs a warning. To switch, show a new web view. Each platform keeps the store this way:
+
+| Platform | An incognito web view's store |
+|---|---|
+| iOS, macOS | A non-persistent `WKWebsiteDataStore` of its own. |
+| Linux | An ephemeral WebKit network session of its own. |
+| Windows | An InPrivate WebView2 controller. The incognito web views open at the same time share one store in memory, cleared when the last of them closes. |
+| Android | Cookies and web storage are the app's, shared by every web view and kept after it closes. An incognito web view loads without the HTTP cache and saves no form data. |
+| Web | The browser's storage for the page's origin, as for any `iframe`. |
 
 ### Which sites a web view may show
 

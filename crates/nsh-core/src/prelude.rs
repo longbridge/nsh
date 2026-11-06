@@ -167,6 +167,7 @@ pub use crate::element::{
     System,
     Task,
     Text,
+    TextSelectionEvent,
     TextShadow,
     Timing,
     Tokens,
@@ -226,6 +227,10 @@ pub use crate::element::{
     web_view_html,
     white,
 };
+/// Sound ([`crate::audio`]).
+pub use crate::element::{
+    AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+};
 pub use crate::element::{
     Delay, Each, If, IntoElements, IntoReactive, KeyOptions, Memo, Owner, Prop, Reactive,
     ReadSignal, Resource, ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Spawned,
@@ -235,7 +240,7 @@ pub use crate::element::{
     component_ref, computed, dark, dismiss_keyboard, dynamic, each, effect, element_ref,
     engine_context, fetch, font_scale, global, idiom, image_size, is_catalyst, is_desktop,
     key_label, keyboard_duration, keyboard_height, keystroke_label, lifecycle, locale,
-    measure_text, motion, move_to_trash, next_frame, next_notification_press,
+    measure_text, motion, move_to_trash, next_frame, next_notification_press, next_url_scheme_open,
     notification_permission, on_back_press, on_key, on_key_with, open_path, open_url, os,
     os_version, pick_files, pick_images, pick_paths, pick_save_path, pick_screen_color,
     pixel_ratio, prefetch_image, provide_context, recognize_speech, reduce_motion,

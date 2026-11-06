@@ -36,6 +36,7 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+mod audio;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -43,6 +44,8 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+
+pub use audio::AudioCall;
 mod stub;
 
 use std::{
@@ -283,6 +286,9 @@ pub struct Headless {
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
+    /// The speaker the app plays to; `None` when the config gave its own
+    /// (`EngineConfig::audio`).
+    audio: Option<audio::FakeAudio>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -314,6 +320,10 @@ impl Headless {
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
         }
+        let audio = config.audio.is_none().then(audio::FakeAudio::default);
+        if let Some(audio) = &audio {
+            config.audio = Some(Arc::new(audio.clone()));
+        }
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -341,6 +351,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             speech,
+            audio,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -492,6 +503,29 @@ impl Headless {
         self.step(format!("host.send({name})"));
         self.host.send(name, data)?;
         self.done()
+    }
+
+    /// The step `openWithUrl(<url>)`: the system hands the app `url`, a
+    /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
+    /// gets it when the app claims its scheme); then waits until the app
+    /// is quiet.
+    pub fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("openWithUrl({url})"));
+        self.send_url_scheme(url);
+        self.done()
+    }
+
+    /// Reports `url` as a link the system handed the app, without a step:
+    /// the one that launches it.
+    pub fn send_url_scheme(&self, url: &str) {
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![(
+                nsh_core::url_scheme::URL,
+                PayloadValue::Str(url.to_owned()),
+            )]),
+        );
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
@@ -670,6 +704,27 @@ impl Headless {
         error: Option<nsh_core::speech::SpeechError>,
     ) -> Result<(), String> {
         self.fake_speech()?.end(error)?;
+        self.done()
+    }
+
+    /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
+    /// in order. Headless apps play sound: sounds decode as WAV, players
+    /// play a minute of their source at once and end when the test says
+    /// ([`Headless::end_audio`]).
+    pub fn audio_calls(&self) -> Vec<AudioCall> {
+        self.audio
+            .as_ref()
+            .map(audio::FakeAudio::calls)
+            .unwrap_or_default()
+    }
+
+    /// The players playing reach their end (`end`; those that loop start
+    /// again), then waits until the app is quiet. Fails when none plays.
+    pub fn end_audio(&mut self) -> Result<(), String> {
+        self.audio
+            .clone()
+            .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
+            .end()?;
         self.done()
     }
 

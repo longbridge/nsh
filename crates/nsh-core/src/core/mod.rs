@@ -1242,6 +1242,8 @@ pub struct Core<M: TextEngine> {
     /// Recognizes the app's speech in place of the platform
     /// ([`Core::set_speech`]).
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
+    /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
+    audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1303,6 +1305,7 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             speech: None,
+            audio: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1526,6 +1529,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's (`None`: the platform's, the default).
     pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
         self.speech = backend;
+    }
+
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
+    /// embedding app's own audio stack or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
+        self.audio = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -4717,6 +4727,20 @@ impl<M: TextEngine> Core<M> {
                     self.set_disabled(key, d);
                 }
                 let node = &mut self.nodes[key as usize];
+                // The platforms make a web view's website data store with
+                // the web view, from its first props.
+                if let (NativeProp::Incognito(on), Some(NativeProps::WebView(p))) =
+                    (&prop, node.control.as_deref())
+                    && node.created
+                {
+                    if *on != p.incognito {
+                        log::warn!(
+                            target: "js",
+                            "a web view's `incognito` is read when it is made; render a new element to change it"
+                        );
+                    }
+                    return Ok(());
+                }
                 if let Some(control) = node.control.as_mut() {
                     apply_native(control, prop);
                     flags |= dirty::NATIVE;
@@ -8530,6 +8554,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::Scrollable(v)) => p.scrollable = v,
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
+        (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),

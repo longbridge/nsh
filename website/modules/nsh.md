@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -1844,6 +1844,52 @@ only the running app: one left on screen after the app exits does nothing.
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
 `"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
 
+## UrlScheme
+
+`UrlScheme` reports the links that open the app: URLs of the schemes the app claims in `nsh.json`, such as
+`myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app claims its
+schemes once, and `nsh package` declares them to the system:
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
+listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
+when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
+`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`).
+
+A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
+link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
+lets through links of the app's own schemes, at most 16 KB long, and never navigates on its own: what a link opens is
+the app's.
+
+A scheme is a letter followed by letters, digits, `+`, `-` or `.`, compared in lower case. The schemes of the web,
+files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ...) are refused when the app is built.
+
+| Platform | How the app claims its schemes |
+| --- | --- |
+| macOS | `CFBundleURLTypes` in the app's `Info.plist`; the system opens the app, or hands the link to the one that runs |
+| iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
+| Android | An `ACTION_VIEW` intent filter in the manifest `nsh package` writes; the activity runs as `singleTask`, so a link reaches the running app |
+| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
+| Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
+
+`nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
+`app.openWithUrl(url)` opens one while it runs, both headless.
+
+An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
+
 ## Speech
 
 The speech API turns what the user says into text (dictation): the app starts a session, the platform listens to the
@@ -1986,6 +2032,152 @@ app started. See [Testing](../docs/testing-and-trace.md).
 > When your app declares `capabilities` in `nsh.json`, speech must be granted with `"speech": true`. Without it
 > `Speech.start` throws an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"speech"` and `resource` `""`.
 > In Rust, the session ends with `not-allowed` and the refusal is logged. See
+> [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+
+## Sound
+
+Two primitives make sound, one for each kind of audio. A `Sound` is a short clip (a tap, a notice, an alert) decoded
+once into memory and played any number of times, overlapping, starting within a frame of the call: load it ahead,
+play it in the handler. An `AudioPlayer` streams long audio (a voice message, music, a recording) from its source as
+it plays, with a player's state: position, duration, pause, seek, rate and loop. macOS and iOS play with AVFoundation
+(`AVAudioEngine` for sounds, `AVPlayer` for players; on iOS the audio session is `ambient`, mixing with other apps'
+audio and following the silent switch), Windows with XAudio2 and Media Foundation, Android with `SoundPool` and
+`MediaPlayer`, Linux with GStreamer for sounds and GTK's media streams for players (which keep a player's rate at 1), and the web with the Web Audio API and an
+audio element (sound starts after the user's first gesture on the page). Check `Sound.available()` where the platform may have no sound; there `load`
+and `play()` fail with `"unavailable"`. Rust code calls `load_sound` and `audio_player` of `nsh_core::prelude`; TSX
+imports `Sound` and `AudioPlayer` from `nsh`.
+
+```rust tabs
+use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
+```
+
+```tsx tabs
+import { AudioPlayer, Sound } from "nsh";
+```
+
+```ts
+declare class Sound {
+  static available(): Promise<boolean>;
+  static load(src: string): Promise<Sound>;
+  play(options?: { volume?: number; rate?: number }): void;
+  stop(): void;
+  readonly duration: number;
+  dispose(): void;
+}
+
+declare class AudioPlayer {
+  constructor(src: string, options?: { volume?: number; rate?: number; loop?: boolean });
+  static available(): Promise<boolean>;
+  on(event: "load", listener: (load: { duration: number }) => void): () => void;
+  on(event: "progress", listener: (progress: { currentTime: number; duration: number }) => void): () => void;
+  on(event: "buffer", listener: (buffer: { buffering: boolean }) => void): () => void;
+  on(event: "end", listener: () => void): () => void;
+  on(event: "error", listener: (error: { code: AudioErrorCode; message: string }) => void): () => void;
+  play(): Promise<void>;
+  preload(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  volume: number;
+  rate: number;
+  loop: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly state: "idle" | "loading" | "playing" | "paused" | "ended";
+  dispose(): void;
+}
+
+type AudioErrorCode =
+  | "not-allowed" | "network" | "decode" | "not-supported"
+  | "quota-exceeded" | "unavailable" | "failed";
+```
+
+| TSX | Rust |
+|---|---|
+| `await Sound.available()` | `audio_available().await -> bool` |
+| `await Sound.load(src)` | `load_sound(src).await -> Result<Sound, AudioFailure>` |
+| `sound.play({ volume, rate })` | `sound.play(volume, rate)` |
+| `new AudioPlayer(src, options)` | `audio_player(src, settings) -> AudioPlayer` |
+| `player.on("progress", ...)` | `player.next().await -> Option<AudioEvent>` |
+| `player.play()` / `pause()` / `seek(s)` | `player.play()` / `pause()` / `seek(duration)` (dropping it closes it) |
+
+### Sound.load
+
+Loads a sound from a bundled asset's path (`"sounds/click.wav"`), a `file:` URL, a `data:` URI or an `http(s)` URL
+the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
+components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
+component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
+of decoded audio at once; past them `load` rejects with `code` `"ERR_NSH_QUOTA_EXCEEDED"`. Longer audio is an
+`AudioPlayer`'s.
+
+### Sound.play
+
+Starts a play over the ones playing (up to 32 at once; past them the oldest stops) at `volume` (0 to 1) and `rate`
+(0.5 to 2; the pitch goes with it). It returns nothing and never fails for a device that is muted or has no output:
+that is silence. A value out of range throws a `RangeError`. `stop()` stops every play of the sound.
+
+```tsx
+import { Sound, View } from "nsh";
+
+const tap = await Sound.load("sounds/tap.wav");
+
+function Key(props: { label: string }) {
+  return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
+}
+```
+
+### AudioPlayer
+
+A player loads nothing until `play()` or `preload()`. Its `state` and `currentTime` follow the platform's reports:
+`load` comes once it knows its duration (`Infinity` for a live stream), `progress` about four times a second while it
+plays and after a seek, `buffer` when it waits for data, `end` when it played to its end (a player that loops starts
+again instead). `play()` resolves once it plays and rejects as `error` reports a failure. A player stops with
+`dispose()`, or when what made it goes: keep it as long as it plays.
+
+```tsx
+import { AudioPlayer, signal } from "nsh";
+
+const position = signal(0);
+const voice = new AudioPlayer("https://example.com/messages/42.m4a");
+voice.on("progress", ({ currentTime }) => position.set(currentTime));
+voice.on("end", () => position.set(0));
+await voice.play();
+```
+
+```rust
+use nsh_core::{audio::{AudioEvent, PlayerSettings}, prelude::*};
+
+async fn play_message(url: &str) {
+    let mut player = audio_player(url, PlayerSettings::default());
+    player.play();
+    while let Some(event) = player.next().await {
+        if event == AudioEvent::Ended {
+            break;
+        }
+    }
+}
+```
+
+### Formats
+
+Sounds and players play what the platform decodes. WAV and AAC (`.m4a`) play everywhere and suit sounds; AAC and MP3
+suit players.
+
+### Embedding apps
+
+An app that embeds NSH and plays sound its own way gives the engine an `AudioBackend` (`nsh_core::audio`,
+`EngineConfig::audio`): it receives every `AudioCommand` with the `AudioSink` of the sound or player it is about,
+which it reports to from any thread. The platform plays nothing then.
+
+### Tests
+
+`nsh test` plays to a fake speaker in headless runs: sounds decode as WAV (their length from the header), players play
+a minute of their source at once, `app.endAudio()` brings the playing players to their end, and `app.audio()` lists
+what the app asked (`load`, `play`, `open`, `resume`, `seek`, ...). See [Testing](../docs/testing-and-trace.md).
+
+> [!NOTE]
+> When your app declares `capabilities` in `nsh.json`, sound must be granted with `"audio": true`. Without it
+> `Sound.load` rejects and `new AudioPlayer` throws an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
+> `"audio"` and `resource` the source. In Rust, the load or player fails with `not-allowed`. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ## Storage

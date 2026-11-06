@@ -15,6 +15,8 @@ pub struct Environment {
     pub safe_area: EdgeInsets,
     /// Space reserved for system controls in a custom desktop title bar.
     pub title_bar: crate::geometry::Edges<crate::geometry::Points>,
+    /// The app's window: its bounds, mode and display (desktops).
+    pub window_state: Option<crate::desktop::WindowState>,
     /// The software keyboard's height, 0 when hidden.
     pub keyboard_height: Points,
     /// How long the keyboard's show / hide animation takes, in milliseconds.
@@ -64,6 +66,9 @@ pub struct Environment {
     /// The platform shows notifications
     /// ([`crate::platform::Environment::notifications`]).
     pub notifications: bool,
+    /// The platform plays sound
+    /// ([`crate::platform::Environment::audio`]).
+    pub audio: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -78,6 +83,7 @@ impl Default for Environment {
             window: crate::geometry::size_pt(0.0, 0.0),
             safe_area: EdgeInsets::default(),
             title_bar: crate::geometry::Edges::default(),
+            window_state: None,
             keyboard_height: Points(0.0),
             keyboard_duration: 0.0,
             dark: false,
@@ -98,6 +104,7 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             notifications: false,
+            audio: false,
             cell: None,
             web_input: false,
         }

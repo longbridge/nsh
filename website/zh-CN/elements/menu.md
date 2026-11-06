@@ -228,6 +228,23 @@ function ViewMenu() {
 
 没有 `open` 时，菜单自己保存状态（`Menu` 的初始值为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`、`"select"`、`"pressOutside"`、`"backdropPress"`、`"cancel"`、`"contextMenu"` 或 `"longPress"`。
 
+`Submenu` 自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
+
+```tsx
+const recent = signal<string[] | null>(null);
+
+<Submenu
+  trigger={<Text>Open Recent</Text>}
+  onOpenChange={({ open }) => {
+    if (open && recent() === null) loadRecent().then((names) => recent.set(names));
+  }}
+>
+  <Each of={recent() ?? []}>
+    {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
+  </Each>
+</Submenu>
+```
+
 <a id="props"></a>
 
 ## 属性
@@ -297,6 +314,7 @@ function ViewMenu() {
 | `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 桌面：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
 | `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择；可勾选的条目请求它的另一个值。 |
+| `onOpenChange`（`Submenu`） | `.on_open_change(\|e\| ..)` | 它按用户的操作打开或关闭了，附带原因。 |
 
 <a id="accessibility"></a>
 

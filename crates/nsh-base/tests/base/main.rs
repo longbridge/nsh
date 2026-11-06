@@ -36,6 +36,7 @@ mod scrollbar;
 mod select;
 mod sheet;
 mod slider;
+mod submenu;
 mod switch;
 mod tabs;
 mod terminal;

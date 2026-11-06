@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
-import { HoverCard, type OpenChangeReason } from "nsh/base";
-import { desktop, focusRing, Inspector, Log, PopIn, type PopupSide, Segmented, Stage, tint, ui, wide } from "./palette";
+import { Button, HoverCard, type OpenChangeReason } from "nsh/base";
+import { buttonLabel, buttonLook, type ButtonKind, desktop, focusRing, Inspector, Log, PopIn, type PopupSide, Segmented, Stage, tint, ui, wide } from "./palette";
 
 type Placement = PopupSide;
 
@@ -16,6 +16,8 @@ function App() {
   const placement = signal<Placement>("bottom");
   const events = signal<string[]>([]);
   const following = signal(false);
+  // The card's action: the accent fill to follow, a quiet raised button once following.
+  const followKind = (): ButtonKind => (following() ? "secondary" : "accent");
   const price = signal(227.52);
   let timer: ReturnType<typeof setInterval> | undefined;
   const log = (name: string) => ({ open, reason }: { open: boolean; reason: OpenChangeReason }) =>
@@ -44,12 +46,9 @@ function App() {
           </View>
         </View>
         <Text style={{ fontSize: 13, lineHeight: 18, color: ui().text }}>Writes the first programs for the Analytical Engine.</Text>
-        <View
-          onPress={() => following.set(!following())}
-          style={{ height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center", ...(following() ? ui().raised : ui().accentFill), transitionProperty: "background-color", transitionDuration: 150 }}
-        >
-          <Text style={{ fontSize: 13, fontWeight: "500", color: following() ? ui().text : ui().onAccent }}>{following() ? "Following" : "Follow"}</Text>
-        </View>
+        <Button onPress={() => following.set(!following())} {...buttonLook(followKind)}>
+          <Text style={buttonLabel(followKind)}>{following() ? "Following" : "Follow"}</Text>
+        </Button>
       </PopIn>
     </HoverCard>
   );

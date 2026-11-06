@@ -1027,6 +1027,23 @@ impl Host {
         });
     }
 
+    /// Publishes the displays to JS (`nsh/desktop`'s `displays()`). Call
+    /// before evaluating the bundle where there are displays, then on every
+    /// change; without a call they are none.
+    pub fn set_displays(&self, displays: &[nsh_core::desktop::Display]) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_displays(raw, displays) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1261,6 +1278,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         // And speech sessions' events (`Speech`'s listeners get them).
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
+        // And sounds' and players' events (their objects' listeners).
+        EventPayload::Audio { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;

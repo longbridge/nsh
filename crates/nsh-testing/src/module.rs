@@ -256,7 +256,7 @@ impl Testing {
     /// platform cannot honor rejects (`ERR_NSH_TEST_UNSUPPORTED`, naming
     /// it): `width` and `height` on iOS and Android, a `platform` the
     /// target is not (a phone's on a desktop, a desktop's on a phone, the
-    /// other phone), `host.handlers`.
+    /// other phone), `host.handlers`, `url`.
     pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, JsError> {
         let session = Session::current().map_err(JsError::Error)?;
         let options = options.unwrap_or_default();
@@ -284,6 +284,7 @@ impl Testing {
                 .map(|c| c.time.map_or_else(std::time::SystemTime::now, |t| t.0)),
             host,
             host_handlers,
+            url_scheme: options.url_scheme,
         };
         let opening = blocking(move || session.open(&entry, launch));
         let (app, storage, requests) = serve(server.as_ref(), opening)
@@ -425,6 +426,11 @@ pub struct OpenOptions {
     /// launch parameters it reads as `host.params` and the handlers of its
     /// `host.call` and `host.post`.
     pub host: Option<HostOptions>,
+    /// The link that launched the app (none): its `UrlScheme.on("open")`
+    /// listener gets it when the app claims its scheme (`nsh.json`
+    /// `schemes`), as from the system. Headless runs only: with
+    /// `--target` it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub url_scheme: Option<String>,
 }
 
 /// The embedding app a test plays (`open`'s `host`; `nsh/host`).
@@ -791,6 +797,42 @@ impl From<&nsh_core::speech::SpeechRequest> for SpeechRequest {
         SpeechRequest {
             lang: request.lang.clone(),
             interim: request.interim,
+        }
+    }
+}
+
+/// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
+/// reads it.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct AudioCall {
+    /// `"load"`, `"play"`, `"stop"`, `"unload"` for sounds; `"open"`,
+    /// `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"` for
+    /// players.
+    pub command: String,
+    /// The sound's or player's source.
+    pub src: String,
+    /// `play`'s, `open`'s and `set`'s volume.
+    pub volume: Option<f64>,
+    /// `play`'s, `open`'s and `set`'s rate.
+    pub rate: Option<f64>,
+    /// `seek`'s position, in seconds.
+    pub position: Option<f64>,
+}
+
+/// `value` as the shortest decimal that reads back as it (`0.8`, not
+/// `0.800000011920929`): what the app wrote.
+fn shortest(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+impl From<&crate::headless::AudioCall> for AudioCall {
+    fn from(call: &crate::headless::AudioCall) -> Self {
+        AudioCall {
+            command: call.command.into(),
+            src: call.src.clone(),
+            volume: call.volume.map(shortest),
+            rate: call.rate.map(shortest),
+            position: call.position.map(|p| p.as_secs_f64()),
         }
     }
 }
@@ -1177,6 +1219,8 @@ pub(crate) struct Launch {
     pub(crate) host: HostChannel,
     /// Whether `open`'s `host` has handlers (a headless run's only).
     pub(crate) host_handlers: bool,
+    /// The link that launched the app (a headless run's only).
+    pub(crate) url_scheme: Option<String>,
 }
 
 /// The network an app opens with, made where it starts (it is `Send`).
@@ -1927,6 +1971,22 @@ impl App {
         step(&this, move |app| app.end_speech(error)).await
     }
 
+    /// What the app asked of the speaker (`Sound`, `AudioPlayer`), in
+    /// order. Headless apps play sound: sounds decode as WAV (their length
+    /// from the header; anything else fails with `decode`), players play a
+    /// minute of their source at once and end when `endAudio` says.
+    /// Headless runs only.
+    pub fn audio(&self) -> Result<Vec<AudioCall>, JsError> {
+        self.with(|app| Ok(app.audio_calls()?.iter().map(AudioCall::from).collect()))
+    }
+
+    /// The players playing reach their end: `end` (those that loop start
+    /// again). Then waits until the app is quiet. Rejects when none plays.
+    /// Headless runs only.
+    pub async fn end_audio(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.end_audio()).await
+    }
+
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, JsError> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
@@ -2031,6 +2091,15 @@ impl App {
         scheme: ColorScheme,
     ) -> Result<(), JsError> {
         step(&this, move |app| app.set_color_scheme(scheme.into())).await
+    }
+
+    /// The system hands the app `url`, a link that opens it, as when the
+    /// user opens one while the app runs: its `UrlScheme.on("open")`
+    /// listener gets it when the app claims its scheme (`nsh.json`
+    /// `schemes`; others are dropped, as on a device). Then waits
+    /// until the app is quiet. Headless only.
+    pub async fn open_with_url(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.open_with_url(&url)).await
     }
 
     /// Moves the app to `state`, as the system does when the user leaves it
