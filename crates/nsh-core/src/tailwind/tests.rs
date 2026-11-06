@@ -769,11 +769,7 @@ fn transforms() {
 #[test]
 fn corner_shapes() {
     assert!(styled("rounded-xl corner-squircle").view.continuous_corners);
-    assert!(
-        !styled("corner-squircle corner-round")
-            .view
-            .continuous_corners
-    );
+    assert!(!styled("corner-squircle corner-round").view.continuous_corners);
 }
 
 #[test]
