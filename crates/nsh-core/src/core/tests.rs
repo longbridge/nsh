@@ -25092,18 +25092,23 @@ mod built_in_scrollbars {
         prelude::*,
     };
 
-    /// A bar: a view with a thumb.
+    /// A bar: a view with a thumb, counting its cleanups.
     #[derive(Default)]
     struct Bar;
 
     #[derive(Clone, PartialEq, Props)]
     struct BarProps {}
 
+    thread_local! {
+        static BARS_CLEANED: Cell<u32> = const { Cell::new(0) };
+    }
+
     impl Component for Bar {
         type Props = BarProps;
         type Event = NoEvent;
 
         fn view(_: BarProps, _: Scope<NoEvent>) -> impl IntoElement {
+            cleanup(|| BARS_CLEANED.with(|c| c.set(c.get() + 1)));
             view().child(view().w(px(4.0)).h(px(20.0)))
         }
     }
@@ -25520,6 +25525,32 @@ mod built_in_scrollbars {
         );
         assert_eq!(indicator(&batch), Some(true));
         assert!(c.decorated.is_empty());
+        assert_eq!(BARS_CLEANED.with(Cell::get), 1, "the bar's cleanup ran");
+    }
+
+    #[test]
+    fn a_scrollbar_turned_off_releases_its_bar_in_the_runtime() {
+        let (mut c, batch) = scroll_view(true, Some(ScrollbarSetting::Shown));
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scrollbar(ScrollbarSetting::Hidden),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar)),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(BARS_CLEANED.with(Cell::get), 1, "the bar's cleanup ran");
     }
 
     #[test]
