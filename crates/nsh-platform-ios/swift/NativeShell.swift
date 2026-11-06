@@ -577,6 +577,18 @@ extension NshAppView {
         }
     }
 
+    /// Hands `url`, one the embedding app was opened with (its scene's
+    /// `openURLContexts`, for example), to the running app: its
+    /// `UrlScheme.on("open")` listeners get it (`nsh`). While no app runs, the
+    /// next one loaded gets it.
+    public func openURL(_ url: URL) {
+        do {
+            try check(url.absoluteString.withCString { nsh_app_open_url(app, $0) })
+        } catch {
+            print("[nsh] open URL \(url): \(error)")
+        }
+    }
+
     /// Handles the app's calls (`await host.call(name, data)`) and posts
     /// (`host.post(name, data)`) of `name` on the main thread, replacing the
     /// handler it had: `handler` gets the data (JSON as Foundation objects,

@@ -234,6 +234,108 @@ fn positions_are_offsets_in_the_text_given() {
 }
 
 #[test]
+fn bare_urls_end_at_cjk_text() {
+    let url = |url: &str| link(url, vec![t(url)]);
+    assert_eq!(
+        blocks("https://example.com。下一句"),
+        vec![p(vec![url("https://example.com"), t("。下一句")])]
+    );
+    assert_eq!(
+        blocks("详见 https://a.dev/docs，然后看www.b.dev"),
+        vec![p(vec![
+            t("详见 "),
+            url("https://a.dev/docs"),
+            t("，然后看www.b.dev"),
+        ])]
+    );
+    assert_eq!(
+        blocks("www.a.dev很好"),
+        vec![p(vec![
+            link("http://www.a.dev", vec![t("www.a.dev")]),
+            t("很好")
+        ])]
+    );
+    // Curly quotes, trailing punctuation, a second URL after CJK text.
+    assert_eq!(
+        blocks("见“https://a.dev/x”。或 https://b.dev.。"),
+        vec![p(vec![
+            t("见“"),
+            url("https://a.dev/x"),
+            t("”。或 "),
+            url("https://b.dev"),
+            t(".。"),
+        ])]
+    );
+    assert_eq!(
+        blocks("https://a.dev中https://b.dev"),
+        vec![p(vec![url("https://a.dev"), t("中"), url("https://b.dev")])]
+    );
+    // Emphasis closing after the URL.
+    assert_eq!(
+        blocks("**来源：https://x.dev**。后面"),
+        vec![p(vec![
+            strong(vec![t("来源："), url("https://x.dev")]),
+            t("。后面"),
+        ])]
+    );
+    // A path with CJK characters ends there; angle brackets and links keep
+    // the whole URL.
+    assert_eq!(
+        blocks("https://zh.wikipedia.org/wiki/中文"),
+        vec![p(vec![url("https://zh.wikipedia.org/wiki/"), t("中文")])]
+    );
+    assert_eq!(
+        blocks("<https://zh.wikipedia.org/wiki/中文> [维基](https://zh.wikipedia.org/wiki/中文)"),
+        vec![p(vec![
+            url("https://zh.wikipedia.org/wiki/中文"),
+            t(" "),
+            link("https://zh.wikipedia.org/wiki/中文", vec![t("维基")]),
+        ])]
+    );
+    // Code keeps its text; positions are offsets in the text given.
+    assert_eq!(
+        blocks("`https://a.dev中`"),
+        vec![p(vec![code("https://a.dev中")])]
+    );
+    assert_eq!(
+        node_sources("https://example.com。下一句"),
+        vec![
+            "Root: https://example.com。下一句",
+            "Paragraph: https://example.com。下一句",
+            "Link: https://example.com",
+            "Text: https://example.com",
+            "Text: 。下一句",
+        ]
+    );
+}
+
+#[test]
+fn bare_urls_beside_latin_text_are_githubs() {
+    let url = |url: &str| link(url, vec![t(url)]);
+    assert_eq!(
+        blocks(
+            "See https://example.com/a?b#c. Or www.example.com/path, (https://x.dev/a_(b)) café"
+        ),
+        vec![p(vec![
+            t("See "),
+            url("https://example.com/a?b#c"),
+            t(". Or "),
+            link(
+                "http://www.example.com/path",
+                vec![t("www.example.com/path")]
+            ),
+            t(", ("),
+            url("https://x.dev/a_(b)"),
+            t(") café"),
+        ])]
+    );
+    assert_eq!(
+        blocks("https://a.dev/é/ü"),
+        vec![p(vec![url("https://a.dev/é/ü")])]
+    );
+}
+
+#[test]
 fn emphasis_beside_latin_text_is_commonmarks() {
     // CommonMark's examples, unchanged.
     assert_eq!(blocks("a**\"foo\"**"), vec![p(vec![t("a**\"foo\"**")])]);
@@ -729,6 +831,49 @@ fn html_in_markdown() {
                 t("</div>")
             ]),
         ]
+    );
+}
+
+#[test]
+fn tags_of_no_element_are_text() {
+    // Not HTML's elements: the tags show as written.
+    assert_eq!(
+        blocks("美股 <US tech> 板块与 <公司名> 都涨了"),
+        vec![p(vec![t("美股 <US tech> 板块与 <公司名> 都涨了")])]
+    );
+    assert_eq!(
+        blocks("a <Foo bar>b</Foo> c"),
+        vec![p(vec![t("a <Foo bar>b</Foo> c")])]
+    );
+    // Alone on its line: the tag is text, the lines after it Markdown.
+    assert_eq!(
+        blocks("<US tech>\n**涨了** 2%\n\nNext"),
+        vec![
+            p(vec![t("<US tech> "), strong(vec![t("涨了")]), t(" 2%")]),
+            p(vec![t("Next")]),
+        ]
+    );
+    // HTML's elements, any case, and comments read as before.
+    assert_eq!(
+        blocks("x <B>y</B> <!-- hidden --> z"),
+        blocks("x <b>y</b> <!-- hidden --> z")
+    );
+    assert_eq!(
+        blocks("x <b>y</b>"),
+        vec![p(vec![t("x "), strong(vec![t("y")])])]
+    );
+    // A `tag` extension's element is read as the extension.
+    let doc = Parser::new()
+        .extension(MarkdownExtension::tag("ticker", "Ticker"))
+        .markdown("Buy <Ticker sym=\"AAPL\">Apple</Ticker> now");
+    let [Block::Paragraph { content }] = doc.blocks.as_slice() else {
+        panic!("{doc:?}");
+    };
+    assert!(
+        content
+            .iter()
+            .any(|i| matches!(i, Inline::Custom(node) if node.name == "ticker")),
+        "{content:?}"
     );
 }
 

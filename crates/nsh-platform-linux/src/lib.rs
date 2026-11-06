@@ -35,6 +35,7 @@ mod image;
 mod input;
 mod key_focus;
 mod keymap;
+mod links;
 mod menu_style;
 mod mount;
 mod native;
@@ -65,5 +66,6 @@ pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, run_app, set_components, set_ui_sets},
     image::AssetBase,
+    links::set_exec_args,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };

@@ -624,8 +624,10 @@ expect Plain: a b
 expect Parsed: 1 paragraph
 expect Extended: text,custom
 expect CJK emphasis: strong,text
+expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
+expect Unknown tag: <US tech> up
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document

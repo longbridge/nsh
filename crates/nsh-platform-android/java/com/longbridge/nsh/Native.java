@@ -82,6 +82,7 @@ final class Native {
     static final int SPEECH = 70;
     static final int DOWNLOAD = 71;
     static final int NOTIFICATION = 72;
+    static final int URL_SCHEME = 73;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

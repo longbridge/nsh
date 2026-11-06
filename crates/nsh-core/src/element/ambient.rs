@@ -733,6 +733,16 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
+/// URL of a scheme the app claims (`nsh.json` `schemes`), those
+/// that came before anything listened first, the one that launched the app
+/// included ([`crate::url_scheme`]). To await in a task.
+pub fn next_url_scheme_open() -> Answer<String> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextUrlSchemeOpen(slot));
+    answer
+}
+
 /// Whether a web view's ref gives its page trusted input here (TS:
 /// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
 /// the platform delivers it (macOS) and the app's capabilities grant

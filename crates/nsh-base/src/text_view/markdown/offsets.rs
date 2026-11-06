@@ -1,12 +1,19 @@
 //! What the reader inserts into a Markdown part before parsing it (`cjk.rs`'s
-//! marks, the escapes of prose `$`), and the parsed tree brought back to the
-//! text given: its values without the marks, its positions offsets in that
-//! text. So nothing inserted shows to plugins, which slice the source by
-//! positions.
+//! marks, `autolink.rs`'s ends of URLs, the escapes of prose `$`), and the
+//! parsed tree brought back to the text given: its values without the
+//! characters inserted, its positions offsets in that text. So nothing
+//! inserted shows to plugins, which slice the source by positions.
 
-use markdown::{mdast::Node, unist::Point};
+use markdown::{
+    mdast::{AttributeContent, AttributeValue, Node},
+    unist::Point,
+};
 
-use super::cjk;
+use super::{autolink, cjk};
+
+/// The characters inserted that values may hold (escapes are read by the
+/// parser).
+const INSERTED: [char; 2] = [cjk::MARK, autolink::END];
 
 /// Insertions into a text, in order: where each starts in the text as
 /// parsed (with every insertion) and how many bytes it is.
@@ -70,8 +77,9 @@ impl Map<'_> {
 }
 
 /// The tree parsed from `parsed` (the text given with `inserted`) brought
-/// back to the text given: positions mapped, `marked` values unmarked.
-pub(super) fn restore(root: &mut Node, parsed: &str, inserted: &Inserted, marked: bool) {
+/// back to the text given: positions mapped, and with `strip` the
+/// characters inserted taken out of the values.
+pub(super) fn restore(root: &mut Node, parsed: &str, inserted: &Inserted, strip: bool) {
     let map = inserted.map();
     // Insertions never hold a line break: a column moves by what was
     // inserted between its line's start and it.
@@ -95,8 +103,8 @@ pub(super) fn restore(root: &mut Node, parsed: &str, inserted: &Inserted, marked
     // A stack, not recursion: the tree may be as deep as the input nests.
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
-        if marked {
-            cjk::unmark_node(node);
+        if strip {
+            strip_node(node);
         }
         if let Some(position) = node.position_mut() {
             point(&mut position.start);
@@ -104,6 +112,92 @@ pub(super) fn restore(root: &mut Node, parsed: &str, inserted: &Inserted, marked
         }
         if let Some(children) = node.children_mut() {
             stack.extend(children.iter_mut());
+        }
+    }
+}
+
+fn strip(text: &mut String) {
+    if text.contains(INSERTED) {
+        text.retain(|c| !INSERTED.contains(&c));
+    }
+}
+
+fn strip_option(text: &mut Option<String>) {
+    if let Some(text) = text {
+        strip(text);
+    }
+}
+
+/// Node `node` without the characters inserted, in its text, URL, title,
+/// label and attributes (not its children's). One the text given holds is
+/// removed too: both are characters text does not use.
+fn strip_node(node: &mut Node) {
+    match node {
+        Node::Text(n) => strip(&mut n.value),
+        Node::InlineCode(n) => strip(&mut n.value),
+        Node::InlineMath(n) => strip(&mut n.value),
+        Node::Html(n) => strip(&mut n.value),
+        Node::Yaml(n) => strip(&mut n.value),
+        Node::Toml(n) => strip(&mut n.value),
+        Node::MdxjsEsm(n) => strip(&mut n.value),
+        Node::MdxTextExpression(n) => strip(&mut n.value),
+        Node::MdxFlowExpression(n) => strip(&mut n.value),
+        Node::Code(n) => {
+            strip(&mut n.value);
+            strip_option(&mut n.lang);
+            strip_option(&mut n.meta);
+        }
+        Node::Math(n) => {
+            strip(&mut n.value);
+            strip_option(&mut n.meta);
+        }
+        Node::Link(n) => {
+            strip(&mut n.url);
+            strip_option(&mut n.title);
+        }
+        Node::Image(n) => {
+            strip(&mut n.url);
+            strip(&mut n.alt);
+            strip_option(&mut n.title);
+        }
+        Node::Definition(n) => {
+            strip(&mut n.url);
+            strip_option(&mut n.title);
+            strip(&mut n.identifier);
+            strip_option(&mut n.label);
+        }
+        Node::LinkReference(n) => {
+            strip(&mut n.identifier);
+            strip_option(&mut n.label);
+        }
+        Node::ImageReference(n) => {
+            strip(&mut n.alt);
+            strip(&mut n.identifier);
+            strip_option(&mut n.label);
+        }
+        Node::FootnoteDefinition(n) => {
+            strip(&mut n.identifier);
+            strip_option(&mut n.label);
+        }
+        Node::FootnoteReference(n) => {
+            strip(&mut n.identifier);
+            strip_option(&mut n.label);
+        }
+        Node::MdxJsxFlowElement(n) => strip_attributes(&mut n.attributes),
+        Node::MdxJsxTextElement(n) => strip_attributes(&mut n.attributes),
+        _ => {}
+    }
+}
+
+fn strip_attributes(attributes: &mut [AttributeContent]) {
+    for attribute in attributes {
+        match attribute {
+            AttributeContent::Property(property) => match &mut property.value {
+                Some(AttributeValue::Literal(value)) => strip(value),
+                Some(AttributeValue::Expression(expression)) => strip(&mut expression.value),
+                None => {}
+            },
+            AttributeContent::Expression(expression) => strip(&mut expression.value),
         }
     }
 }
