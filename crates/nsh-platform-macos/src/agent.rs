@@ -30,6 +30,10 @@ use crate::{surface::Surface, synth};
 const ACTIVATION: Duration = Duration::from_secs(1);
 /// A display frame, where the window's screen tells none.
 const FRAME: Duration = Duration::from_millis(16);
+/// How long a screenshot waits for the window server to show the last
+/// commit (three frames at 60 Hz): a picture taken at once was of the
+/// frame before it.
+const PRESENT: Duration = Duration::from_millis(50);
 /// How far one gesture event scrolls at most, in points.
 const GESTURE_STEP: f64 = 20.0;
 /// How far a press may land from the last one, in points, and still count
@@ -414,6 +418,10 @@ impl Native for MacNative {
     }
 
     fn screenshot(&self) -> Result<Vec<u8>, String> {
+        // The window server shows a commit a frame or two after it is
+        // made: let it show the last one before taking its picture.
+        self.on_main(|_, _| objc2_quartz_core::CATransaction::flush());
+        std::thread::sleep(PRESENT);
         self.on_main(|_, window| synth::shot(window))
             .unwrap_or_else(|| Err("the window is gone".into()))
     }

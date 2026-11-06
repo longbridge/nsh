@@ -265,24 +265,37 @@ echo 'await app.screenshot("/tmp/a.png"); await app.press("label:Navigation"); a
   | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # steps from stdin
 ```
 
-A screenshot renders the window's content in process (`cacheDisplayInRect:`), so it needs no Screen Recording
-permission and works while the screen is locked. `cacheDisplayInRect:` draws sublayers in their order and ignores
-`zPosition`, so the screenshot first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
+A screenshot is the window as the window server composited it (`synth.rs` `composited`:
+`CGWindowListCreateImageFromArray` of the window, its sheets and its child windows, clipped to the content view, at
+the backing scale), so it shows what the screen shows: backdrop blur and glass, 3D transforms, Core Image filters,
+`maskedCorners`, every box shadow, sheets, `AVPlayerLayer` and web views. An app may take pictures of its own windows
+without the Screen Recording permission (checked on macOS 27 with the permission denied), and the picture is of the
+window's own surface, so other windows over it do not matter. The function is deprecated and missing from the SDK's
+headers since macOS 15 but still exported, so it is looked up at run time. Before the picture, the agent flushes Core
+Animation and waits 50 ms (`agent.rs` `PRESENT`): taken at once, the picture was of the frame before the last commit.
+In-process rendering cannot do this: `CARenderer` renders a layer tree only in a context of its own, and given the
+window's tree (or a keyed-archive copy of it) it rendered and left the window's content blank on screen.
+
+Where the window server gives no picture (the function is missing, the window is not visible, or the picture is all
+black or clear, as a locked screen may make it), the screenshot falls back to drawing the window's content in process
+(`drawn`: `cacheDisplayInRect:`), logged at debug. `cacheDisplayInRect:` draws sublayers in their order and ignores
+`zPosition`, so the fallback first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
 the window does not change): without that, a decoration added before a layer it sits above (a border's stroke before
 a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts
 masks at their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective,
 `rotateX`, `rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show:
 WebKit draws them for `cacheDisplayInRect:`, as of macOS 27). `decor.rs` avoids the first three (shape layers for
-differing corners, masked holders for box shadows), so screenshots match the window closely, except that spread
-rings of box shadows are missing from them, and so are outer box shadows under an opaque background (unmasked
-`shadowPath` casters, `visual.rs`).
+differing corners, masked holders for box shadows), so the fallback matches the window closely, except that spread
+rings of box shadows are missing from it, and so are outer box shadows under an opaque background (unmasked
+`shadowPath` casters, `visual.rs`). The composited picture also differs from the fallback in two ways a test may
+see: the window's rounded bottom corners are clear, and a sheet dims the window under it, as on screen.
 
 ## Not implemented, or different
 
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
 - **`mixBlendMode`**, `brightness()` above 1. **`backdropFilter: blur()`** is an `NSVisualEffectView` (within-window
   blending, the popover material) below the view's background: AppKit picks the blur radius and adds the material's
-  light tint; in-process screenshots cannot show it. `glassEffect` puts an `NSGlassEffectView` there instead on macOS 26
+  light tint; the test agent's screenshots show it, its in-process fallback cannot. `glassEffect` puts an `NSGlassEffectView` there instead on macOS 26
   and later (looked up at run time, `setStyle:` regular / clear, `setCornerRadius:` the shared radius); before, the
   blur stands in, and glass alone draws nothing. Not yet seen on macOS 26: written and checked on macOS 15, where the
   class is missing.
