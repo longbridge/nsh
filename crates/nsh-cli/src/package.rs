@@ -111,10 +111,10 @@ pub(crate) struct AppConfig {
     pub(crate) web: WebConfig,
     /// Where the app finds its updates (`update.rs`).
     pub(crate) updater: Option<crate::updater::UpdaterConfig>,
-    /// `{ "schemes": [...] }`: the URL schemes the app claims, whose links
-    /// open it ([`AppConfig::deep_link_schemes`]).
+    /// `"schemes": [...]`: the custom URL schemes the app claims, whose URLs
+    /// open it ([`AppConfig::url_schemes`]).
     #[serde(default)]
-    pub(crate) deep_links: Option<serde_json::Value>,
+    pub(crate) schemes: Option<serde_json::Value>,
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
@@ -151,12 +151,12 @@ impl AppConfig {
         }
     }
 
-    /// The URL schemes the app claims (`"deepLinks": { "schemes": [...] }`),
-    /// checked, in lower case.
-    pub(crate) fn deep_link_schemes(&self) -> anyhow::Result<Vec<String>> {
-        match &self.deep_links {
+    /// The URL schemes the app claims (`"schemes": [...]`), checked, in
+    /// lower case.
+    pub(crate) fn url_schemes(&self) -> anyhow::Result<Vec<String>> {
+        match &self.schemes {
             None => Ok(Vec::new()),
-            Some(value) => nsh_core::deep_link::schemes_from_json(value)
+            Some(value) => nsh_core::url_scheme::schemes_from_json(value)
                 .map_err(|e| anyhow::anyhow!("nsh.json: {e}")),
         }
     }
@@ -187,11 +187,11 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
 ];
 
 /// The `app.json` of a package: `info` (the app's id, ...) with the
-/// schemes it claims, which its runner hands the core so the deep links of
-/// others are dropped (`nsh_engine::Bundle::deep_link_schemes`).
+/// schemes it claims, which its runner hands the core so the URLs of
+/// others are dropped (`nsh_engine::Bundle::url_schemes`).
 pub(crate) fn app_json(mut info: serde_json::Value, schemes: &[String]) -> String {
     if !schemes.is_empty() {
-        info["deepLinks"] = serde_json::json!({ "schemes": schemes });
+        info["schemes"] = serde_json::json!(schemes);
     }
     info.to_string()
 }
@@ -359,10 +359,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
-    let schemes = config.deep_link_schemes()?;
+    let schemes = config.url_schemes()?;
     if options.target == PackageTarget::Web && !schemes.is_empty() {
         ui::warn(
-            "nsh.json deepLinks: a web page opens from its address, so the schemes are left out",
+            "nsh.json schemes: a web page opens from its address, so the schemes are left out",
         );
     }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
@@ -803,7 +803,7 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
-    let schemes = config.deep_link_schemes()?;
+    let schemes = config.url_schemes()?;
     fs::write(nsh.join("app.json"), app_json(info, &schemes))?;
     let icon = match &config.icon {
         Some(icon) => {
@@ -1252,9 +1252,8 @@ mod tests {
     #[test]
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
-            serde_json::from_str(r#"{ "deepLinks": { "schemes": ["MyApp", "myapp-dev"] } }"#)
-                .unwrap();
-        let schemes = config.deep_link_schemes().unwrap();
+            serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
+        let schemes = config.url_schemes().unwrap();
         assert_eq!(schemes, ["myapp", "myapp-dev"]);
         // The system opens the app for their links...
         let mut info = info_plist("A", "com.a", "a", &config, "iphoneos");
@@ -1275,7 +1274,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "id": "com.a", "deepLinks": { "schemes": ["myapp", "myapp-dev"] } })
+            serde_json::json!({ "id": "com.a", "schemes": ["myapp", "myapp-dev"] })
         );
         // An app that claims none declares none.
         let mut info = macos_info_plist("A", "com.a", "a", &AppConfig::default(), false);
@@ -1286,10 +1285,9 @@ mod tests {
             r#"{"id":"com.a"}"#
         );
         // Schemes of the system and other apps are refused.
-        let config: AppConfig =
-            serde_json::from_str(r#"{ "deepLinks": { "schemes": ["https"] } }"#).unwrap();
-        let error = config.deep_link_schemes().unwrap_err().to_string();
-        assert!(error.starts_with("nsh.json: deepLinks.schemes:"), "{error}");
+        let config: AppConfig = serde_json::from_str(r#"{ "schemes": ["https"] }"#).unwrap();
+        let error = config.url_schemes().unwrap_err().to_string();
+        assert!(error.starts_with("nsh.json: schemes:"), "{error}");
     }
 
     #[test]

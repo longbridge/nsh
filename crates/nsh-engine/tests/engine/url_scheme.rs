@@ -1,4 +1,4 @@
-//! `DeepLinks` of `nsh` from JS: the links the platform reports reach the
+//! `UrlScheme` of `nsh` from JS: the links the platform reports reach the
 //! `open` listener, those that came before it first, and only those of the
 //! schemes the app claims.
 
@@ -14,11 +14,11 @@ use crate::ChannelSink;
 /// Listens only after a while, so the links reported at the start wait for
 /// it, as the one that launches an app does; says `done` later still.
 const APP: &str = r#"
-import { mount, DeepLinks, signal, Text } from "nsh";
+import { mount, UrlScheme, signal, Text } from "nsh";
 function App() {
   const said = signal("");
   setTimeout(() => {
-    DeepLinks.on("open", ({ url }) => said.set(`${said()} ${url}`));
+    UrlScheme.on("open", ({ url }) => said.set(`${said()} ${url}`));
   }, 200);
   setTimeout(() => said.set(`${said()} done`), 1000);
   return <Text>{`links:${said()}`}</Text>;
@@ -27,7 +27,7 @@ mount(App);
 "#;
 
 fn bundle() -> Bundle {
-    let dir = crate::temporary_root().join(format!("nsh-deep-links-{}", std::process::id()));
+    let dir = crate::temporary_root().join(format!("nsh-url-scheme-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
     std::fs::write(&entry, APP).unwrap();
@@ -52,9 +52,9 @@ fn bundle() -> Bundle {
 fn open(control: &EngineControl, url: &str) {
     control.dispatch_event(
         ROOT_ID,
-        EventKind::DeepLink,
+        EventKind::UrlScheme,
         EventPayload::Map(vec![(
-            nsh_core::deep_link::URL,
+            nsh_core::url_scheme::URL,
             PayloadValue::Str(url.into()),
         )]),
     );
@@ -66,7 +66,7 @@ fn run(schemes: &[&str], launch: &[String], later: &str) -> String {
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(600.0)),
         ui_sets: vec![nsh_base::registry()],
-        ..EngineConfig::new(bundle().with_deep_link_schemes(schemes.iter().copied()))
+        ..EngineConfig::new(bundle().with_url_schemes(schemes.iter().copied()))
     };
     let (tx, rx) = crossbeam_channel::unbounded();
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();

@@ -110,9 +110,9 @@ pub struct Bundle {
     /// What the app declares it may reach (`nsh.json` `capabilities`);
     /// `None` without a declaration.
     pub capabilities: Option<nsh_core::access::Capabilities>,
-    /// The URL schemes the app claims (`nsh.json` `deepLinks.schemes`,
+    /// The URL schemes the app claims (`nsh.json` `schemes`,
     /// checked, in lower case).
-    pub deep_link_schemes: Vec<String>,
+    pub url_schemes: Vec<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -157,17 +157,17 @@ pub fn capabilities(
         .transpose()
 }
 
-/// The schemes of the `"deepLinks"` of the `nsh.json` next to the entry,
-/// checked ([`nsh_core::deep_link::schemes_from_json`]).
-pub fn deep_link_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
+/// The URL schemes the app claims: the `"schemes"` of the `nsh.json` next
+/// to the entry, checked ([`nsh_core::url_scheme::schemes_from_json`]).
+pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
     let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
         return Ok(Vec::new());
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
-    match config.get("deepLinks") {
+    match config.get("schemes") {
         None => Ok(Vec::new()),
-        Some(value) => nsh_core::deep_link::schemes_from_json(value)
+        Some(value) => nsh_core::url_scheme::schemes_from_json(value)
             .map_err(|e| BundleError::other(format!("nsh.json: {e}"))),
     }
 }
@@ -389,7 +389,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let cwd_root = cwd.clone();
     let tailwind = tailwind_setup(&cwd)?;
     let capabilities = capabilities(&cwd)?;
-    let deep_link_schemes = deep_link_schemes(&cwd)?;
+    let url_schemes = url_schemes(&cwd)?;
     let resolve = ResolveSetup::read(&cwd)?;
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
@@ -505,7 +505,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         entry_native_use,
         chunk_native_use,
         capabilities,
-        deep_link_schemes,
+        url_schemes,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }
@@ -618,8 +618,8 @@ pub struct HotBundle {
     pub watch_files: Vec<PathBuf>,
     /// As in [`Bundle::capabilities`].
     pub capabilities: Option<nsh_core::access::Capabilities>,
-    /// As in [`Bundle::deep_link_schemes`].
-    pub deep_link_schemes: Vec<String>,
+    /// As in [`Bundle::url_schemes`].
+    pub url_schemes: Vec<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -784,7 +784,7 @@ pub async fn bundle_hot_async(
     let assets = Arc::new(Mutex::new(Vec::new()));
     let tailwind = tailwind_setup(&cwd)?;
     let capabilities = capabilities(&cwd)?;
-    let deep_link_schemes = deep_link_schemes(&cwd)?;
+    let url_schemes = url_schemes(&cwd)?;
     let resolve = ResolveSetup::read(&cwd)?;
     let mut bundler_options = BundlerOptions {
         input: Some(vec![InputItem {
@@ -872,7 +872,7 @@ pub async fn bundle_hot_async(
         assets,
         watch_files: watch_files(&bundler, &cwd),
         capabilities,
-        deep_link_schemes,
+        url_schemes,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }

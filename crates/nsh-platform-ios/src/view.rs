@@ -90,9 +90,9 @@ impl AppView {
     }
 
     /// Hands `url`, a link the system opened the standalone app with, to
-    /// the running app (`DeepLinks`).
-    pub(crate) fn deep_link(&self, url: String) {
-        self.inner.deep_link(url);
+    /// the running app (`UrlScheme`).
+    pub(crate) fn scheme_url(&self, url: String) {
+        self.inner.scheme_url(url);
     }
 
     /// Sets where `asset:/…` files (images, fonts) are read from. A change
@@ -295,11 +295,11 @@ impl Inner {
     }
 
     /// Hands `url`, a link the system opened the app with, to the running
-    /// app ([`Surface::deep_link`]).
-    pub(crate) fn deep_link(&self, url: String) {
+    /// app ([`Surface::scheme_url`]).
+    pub(crate) fn scheme_url(&self, url: String) {
         match &self.state.borrow().surface {
-            Some(surface) => surface.deep_link(url),
-            None => log::warn!("deep link dropped: no app runs"),
+            Some(surface) => surface.scheme_url(url),
+            None => log::warn!("scheme URL dropped: no app runs"),
         }
     }
 

@@ -19,7 +19,6 @@ mod compiled;
 mod component_bench;
 mod components;
 mod counter;
-mod deep_links;
 mod errors;
 mod external_wake;
 mod fetch;
@@ -66,6 +65,7 @@ mod storage;
 mod system;
 mod test_ui;
 mod theme;
+mod url_scheme;
 mod websocket;
 
 /// Hands the engine's batches to the test.

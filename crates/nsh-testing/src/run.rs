@@ -577,8 +577,8 @@ impl Session {
         app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
         // The link that launched it, there before the app listens.
-        if let Some(url) = &launch.deep_link {
-            app.send_deep_link(url);
+        if let Some(url) = &launch.scheme_url {
+            app.send_scheme_url(url);
         }
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
@@ -769,9 +769,9 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
         );
     }
-    if launch.deep_link.is_some() {
+    if launch.scheme_url.is_some() {
         return unsupported(
-            "deepLink",
+            "schemeUrl",
             "the system hands links to packaged apps: run the test without --target",
         );
     }
@@ -1148,7 +1148,7 @@ mod tests {
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
-            deep_link: None,
+            scheme_url: None,
         }
     }
 
@@ -1178,10 +1178,10 @@ mod tests {
 
         // A launching link: only headless runs hand one over.
         let mut linked = launch();
-        linked.deep_link = Some("myapp://item/42".into());
+        linked.scheme_url = Some("myapp://item/42".into());
         let error = check(&linked, &macos).unwrap_err();
         assert!(
-            error.contains("`deepLink` is unsupported on --target macos"),
+            error.contains("`schemeUrl` is unsupported on --target macos"),
             "{error}"
         );
         assert_eq!(code_of(&error), Some(UNSUPPORTED));

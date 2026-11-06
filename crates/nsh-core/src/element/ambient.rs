@@ -724,13 +724,12 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
-/// The next link that opens the app (TS: `DeepLinks.on("open", ...)`): a
-/// URL of a scheme the app claims (`nsh.json` `deepLinks.schemes`), those
-/// that came before anything listened first, the one that launched the app
-/// included ([`crate::deep_link`]). To await in a task.
-pub fn next_deep_link() -> Answer<String> {
+/// The next URL of a scheme the app claims (`nsh.json` `schemes`) that
+/// opens it (TS: `UrlScheme.on("open", ...)`), those that came before
+/// anything listened first, the one that launched the app included ([`crate::url_scheme`]). To await in a task.
+pub fn next_scheme_url() -> Answer<String> {
     let (answer, slot) = Answer::new();
-    act(Action::NextDeepLink(slot));
+    act(Action::NextSchemeUrl(slot));
     answer
 }
 

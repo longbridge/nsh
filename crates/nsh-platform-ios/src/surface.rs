@@ -138,8 +138,8 @@ pub(crate) struct RootViewIvars {
     host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
-    /// Deep links that came before the engine started ([`Surface::deep_link`]).
-    deep_links: RefCell<Vec<String>>,
+    /// Scheme URLs that came before the engine started ([`Surface::scheme_url`]).
+    scheme_urls: RefCell<Vec<String>>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -310,7 +310,7 @@ impl RootView {
             host: Cell::default(),
             host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
-            deep_links: RefCell::new(Vec::new()),
+            scheme_urls: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -768,9 +768,9 @@ impl RootView {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);
-        let links = std::mem::take(&mut *self.ivars().deep_links.borrow_mut());
+        let links = std::mem::take(&mut *self.ivars().scheme_urls.borrow_mut());
         for url in links {
-            send_deep_link(&engine.control(), url);
+            send_scheme_url(&engine.control(), url);
         }
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
@@ -985,12 +985,12 @@ impl Surface {
     }
 
     /// Hands `url`, a link the system opened the app with, to the app's
-    /// engine, whose core keeps it until the app listens (`DeepLinks`);
+    /// engine, whose core keeps it until the app listens (`UrlScheme`);
     /// kept until the engine starts.
-    pub(crate) fn deep_link(&self, url: String) {
+    pub(crate) fn scheme_url(&self, url: String) {
         match &*self.view.ivars().running.borrow() {
-            Some(running) => send_deep_link(&running.engine.control(), url),
-            None => self.view.ivars().deep_links.borrow_mut().push(url),
+            Some(running) => send_scheme_url(&running.engine.control(), url),
+            None => self.view.ivars().scheme_urls.borrow_mut().push(url),
         }
     }
 
@@ -1011,12 +1011,12 @@ impl Surface {
 }
 
 /// Reports `url` as a link the system opened the app with.
-fn send_deep_link(control: &nsh_engine::EngineControl, url: String) {
+fn send_scheme_url(control: &nsh_engine::EngineControl, url: String) {
     control.dispatch_event(
         nsh_core::ROOT_ID,
-        nsh_core::EventKind::DeepLink,
+        nsh_core::EventKind::UrlScheme,
         nsh_core::EventPayload::Map(vec![(
-            nsh_core::deep_link::URL,
+            nsh_core::url_scheme::URL,
             nsh_core::PayloadValue::Str(url),
         )]),
     );

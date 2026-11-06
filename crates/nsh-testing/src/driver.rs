@@ -70,10 +70,10 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
-    /// The system hands the app a link that opens it (`openDeepLink`).
-    fn open_deep_link(&mut self, url: &str) -> Result<(), String> {
+    /// The system hands the app a link that opens it (`openSchemeUrl`).
+    fn open_scheme_url(&mut self, url: &str) -> Result<(), String> {
         let _ = url;
-        Err(headless_only("openDeepLink"))
+        Err(headless_only("openSchemeUrl"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -224,8 +224,8 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
-    fn open_deep_link(&mut self, url: &str) -> Result<(), String> {
-        Headless::open_deep_link(self, url)
+    fn open_scheme_url(&mut self, url: &str) -> Result<(), String> {
+        Headless::open_scheme_url(self, url)
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
         Headless::run_for(self, time)

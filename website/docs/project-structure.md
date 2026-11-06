@@ -133,13 +133,13 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `web` | object | `package` | What a web package adds to its page. `web.host`: a JS module relative to `nsh.json` exporting `createHost(player)`, which answers the app's [`host`](../modules/nsh.md#host) calls; `web.connect`: the hosts that module's own requests reach, as patterns of `capabilities.network.hosts`, which the page's Content-Security-Policy allows ([Web](./web.md#the-hosts-functions)). |
-| `deepLinks` | object | every build, `package` | The URL schemes whose links open the app: `{ "schemes": ["myapp"] }`. Packages declare them to the system, and the app hears the links with `DeepLinks.on("open")` ([DeepLinks](../modules/nsh.md#deeplinks)). |
+| `schemes` | string[] | every build, `package` | The custom URL schemes whose URLs open the app: `["myapp"]`. Packages declare them to the system, and the app hears the links with `UrlScheme.on("open")` ([UrlScheme](../modules/nsh.md#urlscheme)). |
 | `updater` | object | `package` | Where the packaged app gets its updates: `{ "github": "owner/repo" }` or `{ "url": "https://…/latest.json", "publicKey": "…" }`, `publicKey` optional with `github` ([App Updates](./app-updates.md), [nsh/updater](../modules/nsh-updater.md#nshjson)). |
 | `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate, the first one of a list (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `deepLinks` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `schemes` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
 ```text
 error building App.tsx failed

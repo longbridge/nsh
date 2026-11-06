@@ -1844,29 +1844,30 @@ only the running app: one left on screen after the app exits does nothing.
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
 `"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
 
-## DeepLinks
+## UrlScheme
 
-`DeepLinks` reports the links that open the app: URLs of the schemes the app claims in `nsh.json`, such as
-`myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app claims its
-schemes once, and `nsh package` declares them to the system:
+`UrlScheme` reports the URLs of the app's own custom schemes that open it: the schemes the app claims in `nsh.json`,
+such as `myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app
+claims its schemes once, and `nsh package` declares them to the system:
 
 ```json
-{ "deepLinks": { "schemes": ["myapp"] } }
+{ "schemes": ["myapp"] }
 ```
 
 ```tsx
-import { DeepLinks } from "nsh";
+import { UrlScheme } from "nsh";
 
-DeepLinks.on("open", ({ url }) => {
+UrlScheme.on("open", ({ url }) => {
   const link = new URL(url);
   if (link.host === "orders") openOrder(link.pathname.slice(1));
 });
 ```
 
-`open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
+`open` reports every such URL the system hands the app, at launch and while it runs. A link that comes while nothing
 listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
-when the app starts or once the screen that handles links is ready. Rust code awaits `next_deep_link()` of
-`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::deep_link_schemes`).
+when the app starts or once the screen that handles links is ready. Rust code awaits `next_scheme_url()` of
+`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`). Web links that
+open the app (universal links, App Links) are a separate API, planned for later.
 
 A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
 link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
@@ -1881,8 +1882,8 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 | macOS | `CFBundleURLTypes` in the app's `Info.plist`; the system opens the app, or hands the link to the one that runs |
 | iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
 
-`nsh test` hands a test's app links: `App.open(entry, { deepLink })` launches the app with one, and
-`app.openDeepLink(url)` opens one while it runs, both headless.
+`nsh test` hands a test's app links: `App.open(entry, { schemeUrl })` launches the app with one, and
+`app.openSchemeUrl(url)` opens one while it runs, both headless.
 
 ## Speech
 

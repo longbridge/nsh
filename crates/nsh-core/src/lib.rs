@@ -18,7 +18,6 @@ pub mod color;
 mod core;
 mod css;
 mod css_named;
-pub mod deep_link;
 pub mod desktop;
 mod effects;
 pub mod element;
@@ -62,6 +61,7 @@ pub mod text_edit;
 pub mod time;
 mod transform;
 pub mod transition;
+pub mod url_scheme;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.

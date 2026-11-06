@@ -90,14 +90,14 @@ expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
 expect Shown: false
 covers [nsh] Notifications
-# mod-deep-links
-tap id:case-mod-deep-links
+# mod-url-scheme
+tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
 expect Links: none
 expect Listener: listening
 tap id:stop-links
 expect Listener: stopped
-covers [nsh] DeepLinks
+covers [nsh] UrlScheme
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup

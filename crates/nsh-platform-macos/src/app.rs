@@ -488,14 +488,14 @@ struct Running {
 
 thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
-    /// Deep links that came before the app's engine started.
-    static DEEP_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Scheme URLs that came before the app's engine started.
+    static SCHEME_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Hands `url`, a link the system opened the app with, to the running
 /// app's engine, whose core keeps it until the app listens; keeps it until
 /// the engine starts.
-fn deep_link(url: String) {
+fn scheme_url(url: String) {
     let mut url = Some(url);
     RUNNING.with(|running| {
         if let Some(running) = running.borrow().as_ref() {
@@ -503,9 +503,9 @@ fn deep_link(url: String) {
                 if let Some(url) = url.take() {
                     control.dispatch_event(
                         nsh_core::ROOT_ID,
-                        nsh_core::EventKind::DeepLink,
+                        nsh_core::EventKind::UrlScheme,
                         nsh_core::EventPayload::Map(vec![(
-                            nsh_core::deep_link::URL,
+                            nsh_core::url_scheme::URL,
                             nsh_core::PayloadValue::Str(url),
                         )]),
                     );
@@ -514,7 +514,7 @@ fn deep_link(url: String) {
         }
     });
     if let Some(url) = url {
-        DEEP_LINKS.with(|links| links.borrow_mut().push(url));
+        SCHEME_URLS.with(|links| links.borrow_mut().push(url));
     }
 }
 
@@ -559,7 +559,7 @@ define_class!(
         fn open_urls(&self, _app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {
                 if let Some(url) = url.absoluteString() {
-                    deep_link(url.to_string());
+                    scheme_url(url.to_string());
                 }
             }
         }
@@ -796,8 +796,8 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
-    for url in DEEP_LINKS.with(|links| std::mem::take(&mut *links.borrow_mut())) {
-        deep_link(url);
+    for url in SCHEME_URLS.with(|links| std::mem::take(&mut *links.borrow_mut())) {
+        scheme_url(url);
     }
     app.run();
     stop_running();

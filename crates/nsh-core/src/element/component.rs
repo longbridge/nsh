@@ -538,7 +538,7 @@ pub struct Root {
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
-    deep_link_schemes: Vec<String>,
+    url_schemes: Vec<String>,
     status_bar: Option<crate::StatusBarSetting>,
 }
 
@@ -551,7 +551,7 @@ impl Root {
             fonts: Vec::new(),
             appearance: None,
             app_id: None,
-            deep_link_schemes: Vec::new(),
+            url_schemes: Vec::new(),
             status_bar: None,
         }
     }
@@ -568,20 +568,17 @@ impl Root {
         self.app_id.as_deref()
     }
 
-    /// The URL schemes the app claims (`nsh.json` `deepLinks.schemes`,
-    /// which nsh's generated code sets): the deep links the core lets
-    /// through ([`crate::deep_link`], [`crate::element::next_deep_link`]).
-    pub fn deep_link_schemes(
-        mut self,
-        schemes: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        self.deep_link_schemes = schemes.into_iter().map(Into::into).collect();
+    /// The URL schemes the app claims (`nsh.json` `schemes`,
+    /// which nsh's generated code sets): the URLs the core lets
+    /// through ([`crate::url_scheme`], [`crate::element::next_scheme_url`]).
+    pub fn url_schemes(mut self, schemes: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.url_schemes = schemes.into_iter().map(Into::into).collect();
         self
     }
 
-    /// The schemes the app claims ([`Root::deep_link_schemes`]).
-    pub fn deep_link_schemes_ref(&self) -> &[String] {
-        &self.deep_link_schemes
+    /// The schemes the app claims ([`Root::url_schemes`]).
+    pub fn url_schemes_ref(&self) -> &[String] {
+        &self.url_schemes
     }
 
     /// Renders with design tokens `tokens` (`nsh-base`'s theme's; by

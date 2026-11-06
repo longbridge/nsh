@@ -1,5 +1,5 @@
 {
   "name": "API Modules",
   "id": "com.example.api-modules",
-  "deepLinks": { "schemes": ["compat"] }
+  "schemes": ["compat"]
 }

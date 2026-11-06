@@ -1,7 +1,7 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
-//! `Speech`, `DeepLinks` and `nsh/storage`,
+//! `Speech`, `UrlScheme` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -16,7 +16,6 @@ use crate::element::Registry;
 mod accessibility;
 mod android;
 mod clipboard;
-mod deep_links;
 mod desktop;
 mod device;
 mod fs;
@@ -30,6 +29,7 @@ mod process;
 mod speech;
 mod storage;
 mod updater;
+mod url_scheme;
 mod websocket;
 mod webview;
 
@@ -59,7 +59,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<picker::Picker>()
             .module::<speech::Speech>()
             .module::<notifications::Notifications>()
-            .module::<deep_links::DeepLinks>()
+            .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()
             .module::<storage::Storage>()
             .module::<host::Host>()

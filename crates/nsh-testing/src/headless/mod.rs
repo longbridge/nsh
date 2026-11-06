@@ -494,24 +494,24 @@ impl Headless {
         self.done()
     }
 
-    /// The step `openDeepLink(<url>)`: the system hands the app `url`, a
-    /// link that opens it, as a platform reports it (`DeepLinks.on("open")`
+    /// The step `openSchemeUrl(<url>)`: the system hands the app `url`, a
+    /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
     /// gets it when the app claims its scheme); then waits until the app
     /// is quiet.
-    pub fn open_deep_link(&mut self, url: &str) -> Result<(), String> {
-        self.step(format!("openDeepLink({url})"));
-        self.send_deep_link(url);
+    pub fn open_scheme_url(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("openSchemeUrl({url})"));
+        self.send_scheme_url(url);
         self.done()
     }
 
     /// Reports `url` as a link the system handed the app, without a step:
     /// the one that launches it.
-    pub fn send_deep_link(&self, url: &str) {
+    pub fn send_scheme_url(&self, url: &str) {
         self.engine.control().dispatch_event(
             ROOT_ID,
-            EventKind::DeepLink,
+            EventKind::UrlScheme,
             EventPayload::Map(vec![(
-                nsh_core::deep_link::URL,
+                nsh_core::url_scheme::URL,
                 PayloadValue::Str(url.to_owned()),
             )]),
         );

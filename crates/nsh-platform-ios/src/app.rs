@@ -148,14 +148,14 @@ define_class!(
             // The link that launched the app, if one did.
             // SAFETY: a documented property, a set of `UIOpenURLContext`.
             let contexts: Retained<NSSet<AnyObject>> = unsafe { msg_send![options, URLContexts] };
-            deep_links(&contexts);
+            scheme_urls(&contexts);
         }
 
         // Links of the schemes the app claims (`CFBundleURLTypes`) while it
         // runs.
         #[unsafe(method(scene:openURLContexts:))]
         fn open_url_contexts(&self, _scene: &UIScene, contexts: &NSSet<AnyObject>) {
-            deep_links(contexts);
+            scheme_urls(contexts);
         }
     }
 
@@ -194,7 +194,7 @@ impl RootController {
 }
 
 /// Hands the URLs of `contexts` (`UIOpenURLContext`s) to the app.
-fn deep_links(contexts: &NSSet<AnyObject>) {
+fn scheme_urls(contexts: &NSSet<AnyObject>) {
     for context in contexts.iter() {
         // SAFETY: `UIOpenURLContext`'s documented `URL` property.
         let url: Retained<NSURL> = unsafe { msg_send![&*context, URL] };
@@ -202,8 +202,8 @@ fn deep_links(contexts: &NSSet<AnyObject>) {
             continue;
         };
         APP.with(|app| match &*app.borrow() {
-            Some(app) => app.view.deep_link(url.to_string()),
-            None => log::warn!("deep link dropped: no app runs"),
+            Some(app) => app.view.scheme_url(url.to_string()),
+            None => log::warn!("scheme URL dropped: no app runs"),
         });
     }
 }

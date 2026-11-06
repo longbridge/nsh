@@ -1,13 +1,13 @@
 // A case of the API's test suite (docs/dev/compatibility.md):
-// `DeepLinks` with the schemes the domain's nsh.json claims: `on("open")`
+// `UrlScheme` with the schemes the domain's nsh.json claims: `on("open")`
 // returns a function that stops listening, and nothing arrives while no
 // link opens the app. Its script checks both.
-import { DeepLinks, Text, View, signal } from "nsh";
+import { UrlScheme, Text, View, signal } from "nsh";
 
 function App() {
   const links = signal("none");
   const stops = signal("listening");
-  const stop = DeepLinks.on("open", ({ url }) => links.set(url));
+  const stop = UrlScheme.on("open", ({ url }) => links.set(url));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Links: ${links()}`}</Text>
