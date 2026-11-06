@@ -1984,6 +1984,66 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
+/// With tree order tracked (a platform's focus traversal), a list's
+/// recycled cells come in the order they are on screen, not in the order
+/// they were made, and their moves send the order again.
+#[test]
+fn tracked_tree_order_puts_a_lists_cells_in_screen_order() {
+    let mut c = core();
+    c.set_tree_order_tracking(true);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(1000),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let mut order = Vec::new();
+    let mut take = |batch: Option<MountBatch>| {
+        for item in batch.into_iter().flat_map(|b| b.items) {
+            if let MountItem::TreeOrder(nodes) = item {
+                order = nodes;
+            }
+        }
+    };
+    take(c.commit());
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    take(c.commit());
+    for y in [600.0, 300.0, 1500.0, 900.0, 2400.0, 1700.0] {
+        c.set_scroll_offset(2, point(px(0.0), px(y)), u32::MAX);
+        take(c.commit());
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        take(c.commit());
+    }
+    let shown: Vec<u32> = order
+        .iter()
+        .copied()
+        .filter(|id| cells.contains(id))
+        .collect();
+    assert_eq!(shown.len(), cells.len());
+    let y = |id: &u32| c.nodes[c.key(*id).unwrap() as usize].frame.origin.y.0;
+    assert!(shown.windows(2).all(|w| y(&w[0]) <= y(&w[1])), "{shown:?}");
+    // The cells were recycled out of the order they were made in.
+    assert_ne!(shown, cells);
+}
+
 #[test]
 fn list_keeps_visible_content_anchored() {
     let mut c = core();
