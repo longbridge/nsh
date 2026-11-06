@@ -33,6 +33,7 @@
 mod ambient;
 pub(crate) mod animated;
 mod asset;
+mod audio;
 mod back;
 pub(crate) mod builder;
 pub(crate) mod call;
@@ -110,6 +111,9 @@ pub use self::{
         sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    audio::{
+        AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+    },
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
         ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, InputPartStyle,
@@ -137,8 +141,9 @@ pub use self::{
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        CaretEvent, Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent,
-        OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDropEvent, GestureEvent, HintReason, ImageProgress,
+        NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection, TextSelectionEvent,
+        VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -187,7 +192,10 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer, SpeechAction},
+    task::{
+        Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
+        NotificationAction, SpeechAction,
+    },
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{
@@ -200,11 +208,11 @@ pub use crate::{
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
     EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, KeyboardAppearance,
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
-    LayoutCurve, LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation,
-    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
-    PastedFile, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
-    TouchEvent, TransformKind, TransformOrigin, Viewability,
+    LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, Measurement,
+    ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior,
+    PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType,
+    ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

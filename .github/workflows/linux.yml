@@ -17,6 +17,7 @@ on:
       - "crates/nsh-linux-host/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -40,6 +41,7 @@ on:
       - "crates/nsh-linux-host/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -79,9 +81,11 @@ jobs:
 
       # QuickJS is C (bindgen needs libclang); the backend links GTK 4 and
       # Pango, and WebKitGTK 6.0 for web views (the hosts' default); Xvfb
-      # is the display the examples' tests open their windows on.
-      - name: Install clang, GTK 4 and WebKitGTK
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb
+      # is the display the examples' tests open their windows on. GStreamer
+      # decodes and mixes sounds; its base and good plug-ins are what the
+      # sound tests decode (WAV) and mix with.
+      - name: Install clang, GTK 4, WebKitGTK and GStreamer
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -105,6 +109,21 @@ jobs:
       # web views as placeholders.
       - name: Clippy (without WebKitGTK)
         run: cargo clippy --all-targets -p nsh-platform-linux -- -D warnings
+
+      # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
+      # imara-diff; no `zlib` or `crypto` module.
+      - name: Check without optional features
+        run: cargo clippy -p nsh-linux-app --no-default-features --features js -- -D warnings
+
+      # Each optional feature alone, so that none leans on another.
+      - name: Check each optional feature alone
+        run: |
+          for feature in shader editor rich-editor plot highlight math zlib crypto; do
+            cargo clippy -p nsh-linux-app --no-default-features --features "$feature" -- -D warnings
+          done
+
+      - name: Test without optional features
+        run: xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features js --lib without_the_feature
 
       # The backend's tests that make GTK widgets (`gtk_test`) run where a
       # display opens: the second run has a virtual one, with a session bus

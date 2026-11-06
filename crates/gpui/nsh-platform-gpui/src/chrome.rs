@@ -46,7 +46,7 @@
 //! shortcuts after `nsh/keymap`'s bindings ([`shortcut`]), so a binding
 //! wins over a menu item of the same keystroke, then Ctrl+W / Cmd+W, which
 //! closes the window unless the app takes it. Quitting and closing (keys,
-//! roles, `Window.close()`, the close button) go to the embedding app's
+//! roles, `Application.quit()`, `Window.close()`, the close button) go to the embedding app's
 //! handler instead when it set one ([`crate::AppView::on_close_request`]).
 
 mod menus;
@@ -213,6 +213,8 @@ pub(crate) struct Chrome {
     asked_size: Cell<Option<AskedSize>>,
     /// The menu open (drawn), if any.
     open: RefCell<Option<menus::Open>>,
+    /// The icons of its rows.
+    icons: RefCell<menus::Icons>,
     /// The menu bar's items, in window coordinates (from the last frame).
     bar_items: RefCell<Vec<Bounds<Pixels>>>,
     /// When the menu bar shows (`Window.setMenuBar`).
@@ -367,7 +369,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.
@@ -380,7 +386,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
+        DesktopCommand::Quit => push(surface, Op::Quit),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
@@ -402,6 +412,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
+        // The host app owns the tray and global shortcuts.
+        DesktopCommand::SetTray(_)
+        | DesktopCommand::RegisterGlobalShortcut { .. }
+        | DesktopCommand::UnregisterGlobalShortcut(_) => {}
     }
 }
 
@@ -925,7 +939,12 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                         title_double_click(window);
                     }
                     MouseButton::Left => surface.chrome.drag.set(Some((x, y))),
-                    MouseButton::Right if PLATFORM == Platform::Linux => {
+                    // (a view of the app's own with a context menu there
+                    // hears the click instead)
+                    MouseButton::Right
+                        if PLATFORM == Platform::Linux
+                            && !crate::input::hears_context_menu(&surface.root, x - ox, y - oy) =>
+                    {
                         window.show_window_menu(e.position);
                     }
                     _ => return,
@@ -1270,12 +1289,14 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             checked: None,
             role: Some(role),
             when: nsh_core::keymap::When::Always,
+            icon: None,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {
         label: label.to_owned(),
         enabled: true,
         items,
+        icon: None,
     };
     vec![
         submenu(
@@ -1349,11 +1370,14 @@ fn gpui_keystroke(s: &Shortcut) -> String {
     out
 }
 
+/// `items` as GPUI's native menus (macOS): GPUI's `MenuItem` has no image,
+/// so these show no icons, unlike the rows [`menus`] draws.
 fn native_items(
     surface: u64,
     items: &[MenuItem],
     entries: &mut Vec<(u32, Option<MenuRole>)>,
     bindings: &mut Vec<gpui::KeyBinding>,
+    cx: &App,
 ) -> Vec<gpui::MenuItem> {
     items
         .iter()
@@ -1366,11 +1390,23 @@ fn native_items(
                 };
                 entries.push((a.id, a.role));
                 if let Some(s) = a.shortcut.or_else(|| a.role.and_then(|r| r.shortcut(true))) {
-                    bindings.push(gpui::KeyBinding::new(
-                        &gpui_keystroke(&s),
-                        action.clone(),
-                        Some(MENU_SHORTCUT_CONTEXT),
-                    ));
+                    // `KeyBinding::new` takes static keystrokes; `load` parses
+                    // this one with the same mapping on macOS, where the menu
+                    // bar is native.
+                    let context = gpui::KeyBindingContextPredicate::parse(MENU_SHORTCUT_CONTEXT)
+                        .unwrap()
+                        .into();
+                    bindings.push(
+                        gpui::KeyBinding::load(
+                            &gpui_keystroke(&s),
+                            Box::new(action.clone()),
+                            Some(context),
+                            false,
+                            None,
+                            cx,
+                        )
+                        .unwrap(),
+                    );
                 }
                 gpui::MenuItem::action(menus::label(a), action)
                     .checked(a.checked == Some(true))
@@ -1380,9 +1416,10 @@ fn native_items(
                 label,
                 enabled,
                 items,
+                ..
             } => gpui::MenuItem::submenu(gpui::Menu {
                 name: label.clone().into(),
-                items: native_items(surface, items, entries, bindings),
+                items: native_items(surface, items, entries, bindings, cx),
                 disabled: !enabled,
             }),
         })
@@ -1422,9 +1459,10 @@ fn set_native_menus(surface: &Surface, cx: &mut App) {
                 label,
                 enabled,
                 items,
+                ..
             } => Some(gpui::Menu {
                 name: label.clone().into(),
-                items: native_items(surface.key(), items, &mut entries, &mut bindings),
+                items: native_items(surface.key(), items, &mut entries, &mut bindings, cx),
                 disabled: !enabled,
             }),
             _ => None,

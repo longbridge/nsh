@@ -388,7 +388,9 @@ impl Mounter {
             // The animator's (`Surface::apply`).
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
-            | MountItem::ComponentPropSlots { .. } => {}
+            | MountItem::ComponentPropSlots { .. }
+            | MountItem::TreeOrder(_)
+            | MountItem::ProjectStates { .. } => {}
         }
     }
 
@@ -454,6 +456,7 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::Load(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

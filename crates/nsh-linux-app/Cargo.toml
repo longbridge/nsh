@@ -12,10 +12,21 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "webview"]
+default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto", "webview"]
 # JS apps (the bundle in the package). Without it the runner runs a Rust
 # app only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-linux/js"]
+# Shaders, on naga and wgpu. Without them, the runner links neither.
+shader = ["nsh-platform-linux/shader"]
+# The large parts of `nsh/base` and the standard JS modules
+# (`docs/dev/features.md`).
+editor = ["nsh-platform-linux/editor"]
+rich-editor = ["nsh-platform-linux/rich-editor"]
+plot = ["nsh-platform-linux/plot"]
+highlight = ["nsh-platform-linux/highlight"]
+math = ["nsh-platform-linux/math"]
+zlib = ["nsh-platform-linux/zlib"]
+crypto = ["nsh-platform-linux/crypto"]
 # Web views (WebKitGTK 6.0): `libwebkitgtk-6.0-dev` to build, and packaged
 # apps then need `libwebkitgtk-6.0-4` to start; off, a web view shows a
 # placeholder and the runner needs only GTK 4.

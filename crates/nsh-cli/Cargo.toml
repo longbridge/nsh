@@ -23,7 +23,7 @@ nsh-core = { workspace = true, features = ["declarations"] }
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor"] }
 nsh-package.workspace = true
 nsh-testing = { workspace = true, features = ["agent", "bundle"] }
 crossbeam-channel.workspace = true
@@ -33,6 +33,8 @@ notify.workspace = true
 log.workspace = true
 libc.workspace = true
 ureq.workspace = true
+ring.workspace = true
+nsh-updater.workspace = true
 serde.workspace = true
 tungstenite.workspace = true
 serde_json.workspace = true

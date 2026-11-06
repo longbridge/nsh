@@ -393,6 +393,10 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         if node.projected != states {
             node.projected = states;
+            if self.mount_projected && node.created {
+                let id = node.id;
+                self.mount.push(MountItem::ProjectStates { id, states });
+            }
             self.states_changed(key);
         }
     }

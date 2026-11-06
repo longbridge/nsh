@@ -36,6 +36,7 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+mod audio;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -43,6 +44,8 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+
+pub use audio::AudioCall;
 mod stub;
 
 use std::{
@@ -189,7 +192,7 @@ pub enum DialogAnswer {
 /// Answers a pick: the files the user picks for the request (none: the
 /// picker cancelled).
 type PickHandler =
-    Box<dyn FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile> + Send>;
+    Box<dyn FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile> + Send>;
 
 /// Who answers the picks a step asks for.
 enum Picks {
@@ -283,6 +286,9 @@ pub struct Headless {
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
+    /// The speaker the app plays to; `None` when the config gave its own
+    /// (`EngineConfig::audio`).
+    audio: Option<audio::FakeAudio>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -314,6 +320,10 @@ impl Headless {
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
         }
+        let audio = config.audio.is_none().then(audio::FakeAudio::default);
+        if let Some(audio) = &audio {
+            config.audio = Some(Arc::new(audio.clone()));
+        }
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -341,6 +351,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             speech,
+            audio,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -494,6 +505,29 @@ impl Headless {
         self.done()
     }
 
+    /// The step `openWithUrl(<url>)`: the system hands the app `url`, a
+    /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
+    /// gets it when the app claims its scheme); then waits until the app
+    /// is quiet.
+    pub fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("openWithUrl({url})"));
+        self.send_url_scheme(url);
+        self.done()
+    }
+
+    /// Reports `url` as a link the system handed the app, without a step:
+    /// the one that launches it.
+    pub fn send_url_scheme(&self, url: &str) {
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![(
+                nsh_core::url_scheme::URL,
+                PayloadValue::Str(url.to_owned()),
+            )]),
+        );
+    }
+
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
     /// rotation, a resized window), as a platform reports it.
     pub fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String> {
@@ -567,11 +601,11 @@ impl Headless {
         self.done()
     }
 
-    /// Answers the picks steps ask for (`Picker.pickImages`) with
+    /// Answers the picks steps ask for (`Picker.pickImages`, `Picker.pickFiles`) with
     /// `handler`, the files the user picks, instead of cancelling them.
     pub fn on_pick(
         &mut self,
-        handler: impl FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile>
+        handler: impl FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile>
         + Send
         + 'static,
     ) {
@@ -613,12 +647,12 @@ impl Headless {
     }
 
     /// The oldest pick asked and not answered yet.
-    pub fn pending_pick(&self) -> Option<nsh_core::picker::PickRequest> {
+    pub fn pending_pick(&self) -> Option<nsh_core::picker::Pick> {
         self.screen.pending_pick().map(|(_, request)| request)
     }
 
     /// The picks the app asked for so far, in order.
-    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+    pub fn picks(&self) -> Vec<nsh_core::picker::Pick> {
         self.screen.picks()
     }
 
@@ -670,6 +704,27 @@ impl Headless {
         error: Option<nsh_core::speech::SpeechError>,
     ) -> Result<(), String> {
         self.fake_speech()?.end(error)?;
+        self.done()
+    }
+
+    /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
+    /// in order. Headless apps play sound: sounds decode as WAV, players
+    /// play a minute of their source at once and end when the test says
+    /// ([`Headless::end_audio`]).
+    pub fn audio_calls(&self) -> Vec<AudioCall> {
+        self.audio
+            .as_ref()
+            .map(audio::FakeAudio::calls)
+            .unwrap_or_default()
+    }
+
+    /// The players playing reach their end (`end`; those that loop start
+    /// again), then waits until the app is quiet. Fails when none plays.
+    pub fn end_audio(&mut self) -> Result<(), String> {
+        self.audio
+            .clone()
+            .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
+            .end()?;
         self.done()
     }
 
@@ -1337,7 +1392,9 @@ impl Headless {
     /// whose test id, label or text it is), sending the view's
     /// `onPressDown`, `onPressUp` and `onPress`, inside a finger going down
     /// and lifting on it as platforms report it to the views around it
-    /// that listen to touches (an overlay's `onPressOutside` hears it).
+    /// that listen to touches (an overlay's `onPressOutside` hears it). A
+    /// text field that listens to presses takes the focus first, as a tap
+    /// in it does.
     pub fn press(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("press({selector})"));
@@ -1356,6 +1413,13 @@ impl Headless {
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), at);
+        }
+        // A text field that listens to presses (a combobox's) takes the
+        // focus as a tap's does, then hears the press.
+        if self.screen.input(id).is_some_and(|i| i.config.editable)
+            && self.screen.focused() != Some(id)
+        {
+            self.move_focus(Some(id));
         }
         let inside = self.screen.press_point(&parsed, id);
         let payload = self.press_payload(id, inside);
@@ -1413,9 +1477,16 @@ impl Headless {
     /// press), as the platforms count them. `None` when the view has no
     /// bounds.
     fn press_payload(&mut self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
-        // A pointer's press takes the keyboard focus off the view Tab
-        // gave it to.
-        if self.screen.key_focus().is_some_and(|id| id != view) {
+        // In a terminal a press gives the stop it is on (or in) the
+        // focus, as terminal apps do, and Tab goes on from there.
+        let stop = (self.environment.idiom == nsh_core::platform::Idiom::Terminal)
+            .then(|| self.screen.stop_around(view))
+            .flatten();
+        if let Some(stop) = stop {
+            self.move_focus(Some(stop));
+        } else if self.screen.key_focus().is_some_and(|id| id != view) {
+            // A pointer's press takes the keyboard focus off the view Tab
+            // gave it to.
             self.move_focus(None);
         }
         let Some(bounds) = self.screen.bounds_in_root(view) else {

@@ -322,9 +322,14 @@ fn is_gate(name: &str) -> bool {
 /// What the app imports by name from each native module: the browser host
 /// declares these names at start (`nativeExports`), so a chunk importing a
 /// name a side module registers later still links. More than the app
-/// gets is harmless: a name nothing registers stays `undefined`.
+/// gets is harmless: a name nothing registers stays `undefined`. The
+/// host makes these modules with only these names, so an app that loads a
+/// module by a computed specifier (`import(name)`) declares none.
 fn native_exports(uses: Option<&nsh_bundler::NativeUse>) -> serde_json::Value {
     let mut out = serde_json::Map::new();
+    if uses.is_some_and(|u| u.computed_import) {
+        return out.into();
+    }
     for (module, imported) in uses.map(|u| &u.imports).into_iter().flatten() {
         if let nsh_bundler::Imported::Names(names) = imported
             && !names.is_empty()
@@ -391,8 +396,7 @@ impl GatePlan {
 
     /// Every gate some chunk loads later, each once, sorted.
     fn lazy(&self) -> Vec<&str> {
-        let mut set: BTreeSet<&str> =
-            self.chunks.values().flatten().map(String::as_str).collect();
+        let mut set: BTreeSet<&str> = self.chunks.values().flatten().map(String::as_str).collect();
         // `TextView`'s formulas: asked for by the first one, wherever the
         // view is.
         if set.contains(TEXT_VIEW_GATE) || self.main.iter().any(|g| g == TEXT_VIEW_GATE) {
@@ -1309,6 +1313,17 @@ mod tests {
     }
 
     #[test]
+    fn native_exports_are_the_names_imported_unless_a_specifier_is_computed() {
+        let mut app = uses(&[("nsh", Some(&["View"])), ("nsh/base", None)]);
+        assert_eq!(
+            native_exports(Some(&app)),
+            serde_json::json!({ "nsh": ["View"] })
+        );
+        app.computed_import = true;
+        assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
+    }
+
+    #[test]
     fn an_app_set_gate_is_named_by_its_specifier() {
         assert_eq!(ui_set_gate("app/charts"), "nsh_ui_set_app_charts");
         assert_eq!(ui_set_gate("@acme/ui-kit"), "nsh_ui_set__acme_ui_kit");
@@ -1882,4 +1897,3 @@ mod tests {
         assert_eq!(json["icons"][0]["sizes"], "192x192");
     }
 }
-

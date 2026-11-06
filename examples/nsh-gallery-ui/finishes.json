@@ -1,7 +1,7 @@
 {
   "dark": {
     "card": {
-      "backgroundImage": "linear-gradient(180deg, #25262a 0%, #25262a 100%)",
+      "backgroundImage": "linear-gradient(180deg, #1f2228 0%, #1f2228 100%)",
       "boxShadow": "0 1px 0 rgba(0,0,0,0.35)"
     },
     "inset": {
@@ -54,6 +54,12 @@
       "backgroundImage": "linear-gradient(180deg, #9a9da3 0%, #83868c 100%)",
       "boxShadow": "0 1px 0 rgba(0,0,0,0.45)",
       "borderColor": "#8a8d93"
+    },
+    "knobOn": {
+      "backgroundColor": "#ffffff",
+      "backgroundImage": "linear-gradient(180deg, #ffffff 0%, #f7f9f2 100%)",
+      "boxShadow": "0 1px 0 rgba(60,90,0,0.18)",
+      "borderColor": "#8db536"
     },
     "pill": {
       "backgroundColor": "#38393d",
@@ -131,6 +137,12 @@
       "backgroundImage": "linear-gradient(180deg, #ffffff 0%, #f4f4f1 100%)",
       "boxShadow": "0 1px 0 rgba(20,20,10,0.08)",
       "borderColor": "#c4c4bc"
+    },
+    "knobOn": {
+      "backgroundColor": "#ffffff",
+      "backgroundImage": "linear-gradient(180deg, #ffffff 0%, #f7f9f2 100%)",
+      "boxShadow": "0 1px 0 rgba(60,90,0,0.18)",
+      "borderColor": "#8fb536"
     },
     "pill": {
       "backgroundColor": "#f5f5f1",

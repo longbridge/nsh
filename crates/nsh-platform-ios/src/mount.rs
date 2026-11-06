@@ -567,6 +567,8 @@ pub(crate) struct Mounter {
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
+    /// The engine's sounds and players ([`crate::audio`]).
+    audio: crate::audio::Speaker,
     /// What the app may reach (web view navigations check it).
     access: std::sync::Arc<nsh_engine::Access>,
     control: EngineControl,
@@ -696,6 +698,7 @@ impl Mounter {
                 },
                 access.clone(),
             ),
+            audio: Default::default(),
             control,
             access,
             shared,
@@ -1074,7 +1077,7 @@ impl Mounter {
                 self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
-                    self.areas.remove(i).1.detach();
+                    self.areas.remove(i).1.delete();
                 }
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
                     // A modal deleted while presented (the app closed it and
@@ -1617,6 +1620,7 @@ impl Mounter {
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
             MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
+            MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
         }
         false
     }
@@ -1641,7 +1645,8 @@ impl Mounter {
                 | Command::GoForward
                 | Command::StopLoading
                 | Command::InjectJavaScript(_)
-                | Command::PostMessage(_)),
+                | Command::PostMessage(_)
+                | Command::Load(_)),
                 Native::Web(web),
             ) => web.command(&c),
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),
@@ -1708,8 +1713,28 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (Command::Notification(command), _) if id == nsh_core::ROOT_ID => {
+                crate::notifications::command(&self.control, &command);
+            }
+            (
+                Command::PickFiles {
+                    id: request,
+                    request: asked,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => {
+                crate::picker::pick_files(request, asked, native.view(), &self.control);
+            }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
+            }
+            (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
+                use nsh_core::image::loader::AssetBase as Base;
+                let base = self.images.asset_base().map(|base| match base {
+                    crate::image::AssetBase::Http(url) => Base::Http(url.clone()),
+                    crate::image::AssetBase::Directory(dir) => Base::Directory(dir.clone()),
+                });
+                crate::audio::command(&self.audio, &self.control, &command, base.as_ref());
             }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
@@ -2515,11 +2540,12 @@ impl Mounter {
             return;
         };
         let (position, page_position) = self.pointer_positions(&view, in_window);
-        let event = nsh_core::ContextMenuEvent {
+        let event = nsh_core::ContextMenuEvent::new(
             position,
             page_position,
-            modifiers: key_modifiers(modifiers),
-        };
+            key_modifiers(modifiers),
+            Some(nsh_core::PointerType::Mouse),
+        );
         self.control
             .dispatch_event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     }
@@ -2927,6 +2953,9 @@ impl Mounter {
             .slot(id)
             .is_some_and(|s| s.events.contains(EventKind::Touch));
         self.set_view_events(id, events);
+        if let Some((_, area)) = self.areas.iter().find(|(a, _)| *a == id) {
+            area.set_listens(events.contains(EventKind::SelectionChange));
+        }
         let listens = self
             .slot(id)
             .is_some_and(|s| s.events.contains(EventKind::Touch));
@@ -3695,10 +3724,19 @@ impl Mounter {
         }
         // After the props: the texts below read whether they are in an area.
         match (area, was_area) {
-            (Some(view), false) => self.areas.push((
-                id,
-                crate::selectable_view::AreaResponder::attach(&view, mtm, self.control.clone()),
-            )),
+            (Some(view), false) => {
+                let listens = self
+                    .slot(id)
+                    .is_some_and(|s| s.events.contains(EventKind::SelectionChange));
+                let area = crate::selectable_view::AreaResponder::attach(
+                    &view,
+                    mtm,
+                    self.control.clone(),
+                    id,
+                    listens,
+                );
+                self.areas.push((id, area));
+            }
             (None, true) => {
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
                     self.areas.remove(i).1.detach();

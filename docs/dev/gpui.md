@@ -139,6 +139,16 @@ import -window root -display :170 whole.png        # the display, if the window'
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
+  A window that is not presented (minimized, hidden, a suspended Wayland toplevel) or a surface whose view is not
+  rendered gets no frames, yet what changes the app's state when an animation ends still happens on time: a
+  transition detaching its view, a screen or modal settling with `onShow` / `onDismiss`, an animation's `finished`, a
+  scroll's end. Each frame client tells its next such deadline (`Next::At`, from the core's `Animator::deadline`,
+  `Live::deadline`, `Transitions::deadline` and `scroll::deadline`), and the surface keeps the earliest with one
+  `rt::after_ms` timer 50 ms past it (`Surface::keep_deadline`): if no tick ran since it came due, the timer runs the
+  same tick outside the paint (nothing in it needs the window; what it changes is drawn when the window shows again)
+  and schedules the next. A batch applied while frame clients run is due at once, as it may have moved what they
+  reported. While frames come they always tick first and the timer only schedules on; what only draws (an endless
+  loop, a fade, a shader, a JS frame request) gives no deadline, so a hidden window with a spinner does no work.
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
@@ -157,7 +167,7 @@ import -window root -display :170 whole.png        # the display, if the window'
   window itself (its bounds, a GPUI Kit `Root` around the view) calls `AppView::own_window` in the window's build
   closure, best with the window opened with `titlebar_options`: the app's title, title bar, application menu and window
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
-  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Window.close()`, the close
+  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `Window.close()`, the close
   button) to the host, which quits or closes when it is ready (after saving, say). `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
@@ -189,7 +199,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
 | Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions; the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
 | Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0. The app's state (`lifecycle()`) from the window's activation and visibility (`observe_window_activation`, `observe_window_visibility`): `background` while the surface's window is not presented (`WindowVisibility::Hidden`), `active` while one of the windows showing a surface is the active one, `inactive` otherwise |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Window.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Window.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access. A menu item's `icon` (`menus.rs`: not the bar's titles) draws in those rows, in a column of its own that moves a level's labels; it loads when its level first shows and comes in with a redraw, an SVG painted in the row's text color and a bitmap as it is. GPUI's native menu bar on macOS shows none, as `gpui::MenuItem` has no image |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
 | File drops | `file_drop.rs` | GPUI makes a drag from another application an internal drag of `ExternalPaths` that only its own elements hear, and the surface's hitbox blocks the mouse for those behind it: while a drag is active the `AppView` lays a layer over the surface whose drag moves and drop pick the destination (the closest `onFileDrop` listener under the pointer, within its modal: `input::file_drop_target`) and deliver absolute paths as `file:` URLs; moving between destinations leaves one and enters the next, and leaving the window, dropping, removal or disablement clear it. The first report after a drag enters is the platform's next move (the layer comes with the drag's frame) |
 | Networking | `nsh_engine::net` | ureq, the stack Windows and Linux use |
@@ -204,13 +214,15 @@ drawn and how many of them GPUI counted active (unfocused windows run at 30 fps 
 mean/p50/p95/max), the paint's milliseconds rasterizing canvases and its paths per frame (each batch of paths is a
 viewport-sized MSAA pass for GPUI), the animation frames requested and the notifies sent (what made GPUI draw). GPUI's
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
-real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
+real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks (its
+animations' ends are kept by a timer instead, above).
 
 ## Idle windows
 
 A window with nothing animating draws no frames and NSH's threads sleep: the engine thread waits on its channel, the
 main thread on GPUI's event loop, and nothing NSH schedules runs again on its own (the caret's timer stops when its
-window is inactive or hidden, and on Linux after its blinks, above). Measured on Linux (voluntary context switches
+window is inactive or hidden, and on Linux after its blinks; a hidden window's animations wake it only at their ends,
+above). Measured on Linux (voluntary context switches
 per thread, `/proc/<pid>/task/*/status`, an app showing static text, `nsh-gpui-host --bundle`, software Vulkan):
 
 - Wayland: about 4 a second, all of them the two idle threads of the `blocking` crate's pool (a dependency of
@@ -271,7 +283,7 @@ and Windows.
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
-- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.9 uses it): the adapters pass on only `Click`, `Focus`,
+- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.13 uses it): the adapters pass on only `Click`, `Focus`,
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).

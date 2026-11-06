@@ -13,8 +13,9 @@ colored with the theme's tokens; the app restyles each part over it.
 | `document.rs` | The document model (`Document`, `Block`, `Inline`, `CodeBlock`, `Table`, `Image`, `CustomNode`, ...): serde data, JSON in JS, its TypeScript declarations (`TextViewDocument`, `TextViewBlock`, ...) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `TextViewClasses`, `TextViewStyles` (each a `PartStyle`, a `Style` declared `StyleProp<TextStyle>`, since most parts are texts) and `TextViewPart`; `TextViewParts` (context): typed `StyleRefinement` functions by part for Rust views |
 | `extension.rs` | `MarkdownOptions`, `MarkdownExtension` (declared syntax), `MarkdownPlugin` / `MarkdownPlugins` (Rust), `Parser` |
-| `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair |
-| `html/` | HTML into the model (html5ever, as a reader mode reads a page) |
+| `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair; `cjk.rs`: emphasis beside CJK text read as the CJK-friendly amendment to CommonMark reads it (`**涨幅：**5%` is bold), which markdown-rs does not; `autolink.rs`: bare URLs end where CJK text or a curly quote starts (`https://example.com。下一句` links only the URL); `offsets.rs`: what is inserted before parsing taken out of the tree again, so positions (and a plugin's `ParseContext::source`) are the text given; `latex.rs`: TeX's `\(…\)` and `\[…\]` read as formulas, escaped brackets that hold a reference number or CJK words (`\[1\]\[3\]`) kept as text |
+| `html/` | HTML into the model (html5ever, as a reader mode reads a page); `ELEMENTS`: HTML's element names, outside which a tag in Markdown is text (`<US tech>`) |
+| `tex_text.rs` | A formula's TeX as plain text, which a terminal shows when the app has no `renderMath` |
 | `common.rs` | What both parsers share: `pattern` extensions on inline content, headings' anchors |
 | `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the KaTeX fonts (`fonts/katex.pack.zst`; embedded, or fetched on the web: "Formulas on the web"); feature `math`, which the platforms turn on |
 | `formula.rs` | What the view calls: `math.rs` directly on native, and on the web once its side module and fonts arrived |
@@ -70,6 +71,9 @@ colored with the theme's tokens; the app restyles each part over it.
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
   (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::element::open_url`,
   under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
+  Each link (and footnote reference) is a pressable span, so it is a stop of the keyboard focus where the platform
+  walks links (`elements.md` "Keyboard focus": `TextLink::focus_stop`): Tab reaches it, Return presses it, and the
+  press goes through `onLinkPress` and `links` as a pointer's does.
 
 ## Parts and their default styles
 
@@ -212,6 +216,19 @@ metadata, scripts, styles, form controls, embedded media; elements `hidden`, `ar
 `display: none`, such as KaTeX's HTML beside its MathML), and reads GitHub's own markup back (alerts, task list
 checkboxes, `<math>` with a TeX annotation, `language-*` classes of code). Depth is bounded (256) and `colspan` too
 (64): the input is untrusted.
+
+## In a terminal
+
+On the terminal backend (`is_terminal()`) the document takes the forms of a terminal reader, in `text_view/view.rs`
+next to the screen forms; the full list is `TextView`'s row in `docs/dev/components.md` "In a terminal". In short:
+blocks are one blank row apart and nothing trails the last (`shown_before` skips the blocks that show nothing: a
+rule, a paragraph of images without alt text); headings drop their `#` marks and take their level's color in bold,
+with a `─` rule under h1 only (`terminal_heading`); a quote is `▎` in the accent before muted text; code blocks and
+formulas are bands as wide as their longest line plus a Cell each side (`terminal_band`), a code block under its
+language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its
+tint where the terminal draws no bands; tables fit the view by narrowing their widest column, never below
+`MIN_COLUMN` Cells (`fit_columns`, recomputed from the table's laid-out width), their cells wrapping; tasks show
+`☐` / `☑`. The tests are `nsh-base`'s `tests/base/terminal.rs`.
 
 ## Accessibility
 

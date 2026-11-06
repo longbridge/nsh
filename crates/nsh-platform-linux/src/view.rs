@@ -391,6 +391,8 @@ mod imp {
             if opacity < 1.0 {
                 snapshot.push_opacity(opacity as f64);
             }
+            // Masked after the filters, as CSS does.
+            let masked = crate::decor::push_mask(snapshot, &state);
             let filters = crate::decor::push_filters(snapshot, &state);
             let (phase, changed) = self.damage.get();
             let phase = phase ^ changed;
@@ -399,10 +401,10 @@ mod imp {
             }
             state.draw_overhang(snapshot, phase);
             let soft = crate::decor::soft_shadows(obj.upcast_ref(), &state);
-            crate::decor::draw_background(snapshot, &state, soft);
+            crate::decor::draw_background(snapshot, &state, soft, obj.upcast_ref());
             let clip = state.clips();
             if clip {
-                snapshot.push_rounded_clip(&state.rounded_bounds());
+                crate::decor::push_clip(snapshot, &state);
             }
             // The view's own content stays inside it, as a UIKit view's
             // drawing stays in its backing store: a cell the core has not
@@ -447,6 +449,9 @@ mod imp {
             for _ in 0..filters {
                 snapshot.pop();
             }
+            if masked {
+                snapshot.pop();
+            }
             if opacity < 1.0 {
                 snapshot.pop();
             }
@@ -462,6 +467,14 @@ mod imp {
     }
 
     impl WidgetImpl for NshView {
+        fn focus(&self, direction: gtk::DirectionType) -> bool {
+            let view = self.obj();
+            crate::key_focus::offer(&view);
+            let moved = self.parent_focus(direction);
+            crate::key_focus::offered(&view);
+            moved
+        }
+
         fn measure(&self, _orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             // The core sizes every view; GTK's own sizing never applies.
             (0, 0, -1, -1)
@@ -565,7 +578,8 @@ impl NshView {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         let view: NshView = glib::Object::new();
         *view.imp().state.borrow_mut() = ViewState::new(id, kind);
-        // Views never take keyboard focus themselves; hosted fields do.
+        // Only while Tab or `focus()` picks them (`key_focus`); hosted fields
+        // take it as usual.
         view.set_focusable(false);
         view
     }

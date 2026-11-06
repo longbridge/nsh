@@ -188,6 +188,7 @@ impl HostValue for AccessibilityState {
             busy: flag("busy"),
             expanded: input.field("expanded").and_then(|v| v.as_bool()),
             pressed: tristate("pressed"),
+            has_popup: flag("hasPopup"),
             // `false` and unknown words are no current item, as ARIA has it.
             current: match current.as_ref().and_then(|c| c.as_bool()) {
                 Some(true) => Some(AccessibilityCurrent::True),
@@ -213,7 +214,9 @@ impl HostValue for AccessibilityState {
              /** A toggle button that is on or off (ARIA's `aria-pressed`). */\n  \
              pressed?: boolean | \"mixed\";\n  \
              /** The current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step. */\n  \
-             current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n}"
+             current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n  \
+             /** Opens a popup, a menu or a list (ARIA's `aria-haspopup`); `expanded` says whether it is open. */\n  \
+             hasPopup?: boolean;\n}"
                 .into()
         })
     }

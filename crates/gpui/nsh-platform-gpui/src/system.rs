@@ -81,7 +81,7 @@ use crate::{
     geom::rect,
     input::{Cursor, KeyEvent, PointerKind},
     render::{DrawCx, border_quad, corners},
-    surface::Surface,
+    surface::{Next, Surface},
     view::{Hosted, ItemPointer},
 };
 
@@ -1032,6 +1032,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             });
         }
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
@@ -1099,6 +1100,43 @@ fn pick_images(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::PickRe
                 .collect();
             std::thread::spawn(move || {
                 let files = nsh_core::picker::read_files(&paths, &request);
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id, files },
+                );
+            });
+        })
+        .detach();
+    });
+}
+
+/// `Picker.pickFiles`: GPUI's open dialog. It filters nothing, so the files
+/// whose extension the request does not take are left out; they are read on
+/// a thread of their own.
+fn pick_files(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::FilePickRequest) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    crate::rt::on_app(move |cx| {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: request.multiple(),
+            prompt: None,
+        });
+        cx.spawn(async move |_| {
+            let paths: Vec<_> = paths
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| nsh_core::file_dialog::passes(&request.filters, p))
+                .collect();
+            std::thread::spawn(move || {
+                let files = nsh_core::picker::read_picked_files(&paths, &request);
                 control.dispatch_event(
                     ROOT_ID,
                     EventKind::Pick,
@@ -1426,11 +1464,11 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     let mut start = None;
     surface.on_frame(move |surface, now| {
         let Some(kind) = find(serial) else {
-            return false;
+            return Next::Done;
         };
         // A newer fade took over (a dialog answered while fading in).
         if !remove && matches!(&kind, OverlayKind::Dialog(d) if d.closing.get()) {
-            return false;
+            return Next::Done;
         }
         let t0 = *start.get_or_insert(now);
         let t = ((now - t0) / secs).clamp(0.0, 1.0) as f32;
@@ -1438,12 +1476,18 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
         kind.opacity().set(from + (to - from) * eased);
         surface.root.changed();
         if t < 1.0 {
-            return true;
+            // Fading in only draws; fading out ends with the overlay gone
+            // (a millisecond past it, whatever the rounding).
+            return if remove {
+                Next::At(t0 + secs + 0.001)
+            } else {
+                Next::Frame
+            };
         }
         if remove {
             drop_overlay(surface, serial);
         }
-        false
+        Next::Done
     });
 }
 

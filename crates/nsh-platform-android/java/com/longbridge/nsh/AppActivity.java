@@ -18,6 +18,9 @@ public final class AppActivity extends Activity {
         // An app on its own, not a module embedded in another app: no limits.
         view.useStandaloneLimits();
         setContentView(view);
+        view.handleNotificationIntent(getIntent());
+        // A recreated activity's intent was handed in already.
+        if (state == null) view.handleUrlSchemeIntent(getIntent());
         if (rustApp()) view.runRustApp("nsh");
         else view.loadAssetBundle("nsh");
     }
@@ -37,6 +40,16 @@ public final class AppActivity extends Activity {
     public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
         DevActivity.systemBars(this);
+    }
+
+    /** A notification pressed, or a URL opened, while this activity is in its task. */
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        if (view != null) {
+            view.handleNotificationIntent(intent);
+            view.handleUrlSchemeIntent(intent);
+        }
     }
 
     /** Android 12 and older: the app gets the back button first. */

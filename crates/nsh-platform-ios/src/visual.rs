@@ -11,15 +11,21 @@
 //! background (sublayers always draw over a layer's contents) without
 //! covering it, and work with transparent backgrounds.
 
+use std::cell::Cell;
+
 use nsh_core::{
     BackdropMaterial, BorderStyle, BoxShadow, Color, CornerRadii, Filter, GlassEffect, Gradient,
     GradientKind, GradientSize, ViewStyle,
     geometry::{Points, px},
 };
-use objc2::{MainThreadMarker, MainThreadOnly, msg_send, rc::Retained, runtime::AnyClass};
+use objc2::{
+    DefinedClass as _, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyClass, AnyObject},
+};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGMutablePath;
-use objc2_foundation::{NSArray, NSNumber};
+use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
 use objc2_quartz_core::{
     CAGradientLayer, CALayer, CAShapeLayer, kCAFillRuleEvenOdd, kCAGradientLayerAxial,
     kCAGradientLayerConic, kCAGradientLayerRadial, kCALineCapButt, kCALineCapRound,
@@ -66,6 +72,8 @@ struct BackdropSpec {
     material: BackdropMaterial,
     dark: bool,
     glass: GlassEffect,
+    /// The view is masked: a [`PlainBlur`].
+    plain: bool,
 }
 
 struct Backdrop {
@@ -121,6 +129,101 @@ fn glass_effect(style: GlassEffect) -> Option<Retained<UIVisualEffect>> {
     // SAFETY: UIGlassEffect's documented factory, on the class just found,
     // which answers a UIVisualEffect. The caller holds a MainThreadMarker.
     unsafe { Some(msg_send![class, effectWithStyle: raw]) }
+}
+
+define_class!(
+    /// A masked `backdropFilter`: what a progressive blur stacks. UIKit's
+    /// materials tint, and layers of them held at a fraction add those tints
+    /// up; this view's backdrop layer blurs by the view's radius and draws
+    /// nothing else, as CSS.
+    ///
+    /// UIKit gives no way to say that, so it edits the layers the material
+    /// is made of, each time UIKit may have made them again, through public
+    /// `CALayer` API (`filters`, key-value coding). Where they are not what
+    /// this expects the view stays the plain material.
+    #[unsafe(super(UIVisualEffectView, UIView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Cell<f32>]
+    #[name = "NshPlainBlur"]
+    struct PlainBlur;
+
+    impl PlainBlur {
+        #[unsafe(method(layoutSubviews))]
+        fn layout_subviews(&self) {
+            // SAFETY: UIView's `layoutSubviews`, on the main thread.
+            let _: () = unsafe { msg_send![super(self), layoutSubviews] };
+            self.strip();
+        }
+
+        #[unsafe(method(didMoveToWindow))]
+        fn did_move_to_window(&self) {
+            // SAFETY: UIView's `didMoveToWindow`, on the main thread.
+            let _: () = unsafe { msg_send![super(self), didMoveToWindow] };
+            self.strip();
+        }
+    }
+);
+
+impl PlainBlur {
+    fn new(radius: f32, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(Cell::new(radius));
+        let none: Option<&UIVisualEffect> = None;
+        // SAFETY: UIVisualEffectView's `initWithEffect:`, on an allocated view.
+        unsafe { msg_send![super(this), initWithEffect: none] }
+    }
+
+    fn strip(&self) {
+        strip_material(&self.layer(), self.ivars().get());
+    }
+}
+
+/// Leaves of a material's layers nothing but the blur of `radius`: the
+/// backdrop layer's Gaussian blur alone, its fill and tints hidden.
+fn strip_material(layer: &CALayer, radius: f32) {
+    // SAFETY: reading the sublayers on the main thread, which is all this does.
+    let Some(subs) = (unsafe { layer.sublayers() }) else {
+        return;
+    };
+    for sub in subs.iter() {
+        let backdrop = sub
+            .class()
+            .name()
+            .to_str()
+            .is_ok_and(|n| n.contains("Backdrop"));
+        if backdrop {
+            let gaussian = ns_string!("gaussianBlur");
+            // A backdrop layer's `filters` are `CAFilter`s, which have a name.
+            let kept: Vec<Retained<AnyObject>> = sub
+                .filters()
+                .map(|f| f.to_vec())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| {
+                    // SAFETY: `CAFilter`'s `name`, an `NSString`.
+                    let name: Option<Retained<NSString>> = unsafe { msg_send![&**f, name] };
+                    name.is_some_and(|n| &*n == gaussian)
+                })
+                .collect();
+            if kept.is_empty() {
+                continue;
+            }
+            // SAFETY: those filters, back on their layer, then their radius
+            // by the key path Core Animation documents for named filters.
+            unsafe {
+                sub.setFilters(Some(&NSArray::from_retained_slice(&kept)));
+                let value = NSNumber::new_f32(radius);
+                let _: () = msg_send![
+                    &*sub,
+                    setValue: &*value,
+                    forKeyPath: ns_string!("filters.gaussianBlur.inputRadius")
+                ];
+            }
+        } else if unsafe { sub.sublayers() }.is_some_and(|l| l.count() > 0) {
+            strip_material(&sub, radius);
+        } else {
+            sub.setHidden(true);
+        }
+    }
 }
 
 /// Holds `target`'s blur at `spec.radius`'s fraction of its material's
@@ -272,6 +375,7 @@ impl Visual {
             material: style.backdrop_material,
             dark,
             glass: style.glass_effect,
+            plain: effects.is_some_and(|e| !e.mask_images.is_empty()),
         };
         self.set_backdrop(view, spec, local, radii, mtm);
         // Last: the mask covers everything above, the backdrop's view included.
@@ -549,12 +653,22 @@ impl Visual {
             if effect.is_none() && spec.radius <= 0.0 {
                 return;
             }
-            let effect_view =
-                UIVisualEffectView::initWithEffect(UIVisualEffectView::alloc(mtm), None);
+            let plain = effect.is_none() && spec.plain;
+            let effect_view = if plain {
+                Retained::into_super(PlainBlur::new(spec.radius, mtm))
+            } else {
+                UIVisualEffectView::initWithEffect(UIVisualEffectView::alloc(mtm), None)
+            };
             effect_view.setUserInteractionEnabled(false);
             let animator = match effect {
                 Some(glass) => {
                     effect_view.setEffect(Some(&glass));
+                    None
+                }
+                None if plain => {
+                    let blur =
+                        UIBlurEffect::effectWithStyle(blur_style(spec.material, spec.dark), mtm);
+                    effect_view.setEffect(Some(&blur));
                     None
                 }
                 None => Some(blur_animator(effect_view.clone(), spec, mtm)),

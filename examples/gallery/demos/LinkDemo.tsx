@@ -171,7 +171,17 @@ export function LinkDemo() {
       <Card
         title="Footer"
         subtitle="Quiet links; a closed page stays disabled"
-        right={<Toggle value={hiring()} onChange={(v) => hiring.set(v)} label="Hiring" />}
+        right={
+          // The terminal's switch is a glyph: its label beside it says what it turns on.
+          platform.idiom === "terminal" ? (
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Text style={{ fontSize: 12, color: colors.muted }}>Hiring</Text>
+              <Toggle value={hiring()} onChange={(v) => hiring.set(v)} label="Hiring" />
+            </View>
+          ) : (
+            <Toggle value={hiring()} onChange={(v) => hiring.set(v)} label="Hiring" />
+          )
+        }
       >
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 20 }}>
           <Each of={columns}>

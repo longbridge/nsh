@@ -570,10 +570,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::OpenUrl { id, url } => open_url(surface, *id, url),
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::Audio(command) => surface.control(|c| {
+            let base = surface.asset_base.borrow().clone();
+            crate::audio::command(&surface.audio, c, command, base.as_ref())
+        }),
+        Command::Notification(command) => surface.control(|c| {
+            let root = surface.root.upcast_ref::<gtk::Widget>();
+            crate::notifications::command(c, root, command);
+        }),
         Command::Back => crate::navigation::default_back(surface),
         Command::Tokens(tokens) => set_menu_tokens(tokens),
         Command::ExitApp => {

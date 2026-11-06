@@ -4,12 +4,14 @@ import { colorScheme, fontScale, windowSize } from "nsh";
 import { AlertDialog, type AlertDialogAction, Dialog, type StatusBarForeground } from "nsh/base";
 import { keyboardFrame, safeArea } from "nsh";
 import { Menu, Window } from "nsh/desktop";
-import { keymap } from "nsh";
-import { Icon, type IconName } from "../icons";
+import { keymap, platform } from "nsh";
+import { Icon, type IconName, lucideSvg } from "../icons";
 import { toast } from "../toast";
 import { Appear, Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, IconTile, isDark, Inset, Legend, Meter, mono, Press, Row, Segmented, Stat, tints, Toggle, type Tone, toneColor } from "../ui";
 
 /** The window drawn to scale, with the safe area insets shaded. */
+const terminal = platform.idiom === "terminal";
+
 function SafeAreaDiagram() {
   const width = 76;
   const scale = () => width / Math.max(1, windowSize().width);
@@ -58,19 +60,28 @@ function Environment() {
             <Stat label="Font scale" value={`${fontScale().toFixed(2)}×`} width="50%" />
           </View>
         </View>
-        <SafeAreaDiagram />
+        {/* A drawing the terminal's Cells would not hold; its figures are below. */}
+        <If when={!terminal}>
+          <SafeAreaDiagram />
+        </If>
       </View>
       <View style={{ height: 1, backgroundColor: colors.line }} />
       <View style={{ gap: 4 }}>
-        <Caption label="Safe area insets" note="pt" />
+        {/* The terminal's figures carry their unit, as the keyboard's does. */}
+        <Caption label="Safe area insets" note={terminal ? undefined : "pt"} />
         <View style={{ flexDirection: "row" }}>
-          <Each of={insets()}>{(inset) => <Stat label={inset().label} value={String(Math.round(inset().value))} width="25%" />}</Each>
+          <Each of={insets()}>
+            {(inset) => <Stat label={inset().label} value={`${Math.round(inset().value)}${terminal ? " pt" : ""}`} width="25%" />}
+          </Each>
         </View>
       </View>
       <View style={{ height: 1, backgroundColor: colors.line }} />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-        <Legend color={colors.info} label="Safe area" />
-        <Legend color={colors.warn} label="Keyboard" />
+        {/* The legend is the drawing's, which the terminal leaves out. */}
+        <If when={!terminal}>
+          <Legend color={colors.info} label="Safe area" />
+          <Legend color={colors.warn} label="Keyboard" />
+        </If>
         <View style={{ flex: 1 }} />
         <Badge label={colorScheme() === "dark" ? "Dark scheme" : "Light scheme"} tone={colorScheme() === "dark" ? "info" : "warn"} outline />
       </View>
@@ -341,7 +352,8 @@ function Shortcuts() {
           )}
         </Each>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {/* A terminal's badge is its text: a wider gap keeps it apart from the count. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 24 : 8 }}>
         <Badge label={on() ? "Light on" : "Light off"} tone={on() ? "up" : "neutral"} />
         <View style={{ flex: 1 }}>
           <Caption label={`Counted ${count()}`} note={last() || "–"} />
@@ -356,9 +368,13 @@ function ContextMenu() {
   const chosen = signal("");
   const menu = () =>
     Menu.popup([
-      { label: "Copy", onSelect: () => chosen.set("Copy") },
-      { label: "Paste", disabled: true },
-      { label: "Share", submenu: [{ label: "Mail", onSelect: () => chosen.set("Share > Mail") }] },
+      { label: "Copy", icon: lucideSvg("copy"), onSelect: () => chosen.set("Copy") },
+      { label: "Paste", icon: lucideSvg("clipboard-paste"), disabled: true },
+      {
+        label: "Share",
+        icon: lucideSvg("share-2"),
+        submenu: [{ label: "Mail", icon: lucideSvg("mail"), onSelect: () => chosen.set("Share > Mail") }],
+      },
     ]);
   return (
     <Card icon="bell" title="Context menu" subtitle="nsh/desktop · right click">
@@ -393,6 +409,42 @@ function WindowFrame() {
       <Text style={{ fontSize: 12, color: colors.faint }}>
         "Width, then height" makes 900 × 640 in one go. A maximized or full-screen window keeps its size.
       </Text>
+    </Card>
+  );
+}
+
+/** Shared by the main window and the second one: one JS runtime renders
+ * both, so a signal is all they need. */
+const sharedCount = signal(0);
+
+function SecondWindow() {
+  return (
+    <View style={{ flex: 1, padding: 20, gap: 12, backgroundColor: colors.background }}>
+      <Text style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>Second window</Text>
+      <Text testID="second-count" style={{ fontSize: 14, color: colors.muted }}>{`Shared count: ${sharedCount()}`}</Text>
+      <Button label="Add one" icon="plus" onPress={() => sharedCount.set(sharedCount() + 1)} />
+      <Button label="Close" onPress={() => Window.open(SecondWindow, { id: "second" }).close()} />
+    </View>
+  );
+}
+
+function Windows() {
+  const supported = platform.os === "linux" || platform.os === "windows";
+  return (
+    <Card icon="system" title="Windows" subtitle="nsh/desktop · Window.open">
+      <Text testID="main-count" style={{ fontSize: 14, color: colors.muted }}>
+        {supported ? `Shared count: ${sharedCount()}` : "Window.open is on Linux and Windows for now"}
+      </Text>
+      {supported && (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            label="Open second window"
+            icon="plus"
+            onPress={() => Window.open(SecondWindow, { id: "second", title: "Second window", size: { width: 360, height: 240 } }).focus()}
+          />
+          <Button label="Add one" onPress={() => sharedCount.set(sharedCount() + 1)} />
+        </View>
+      )}
     </Card>
   );
 }
@@ -462,6 +514,6 @@ function Network() {
 }
 
 export function System() {
-  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, WindowFrame, Network];
+  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, WindowFrame, Windows, Network];
   return <DemoPage cards={sections} />;
 }

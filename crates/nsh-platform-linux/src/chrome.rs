@@ -38,7 +38,7 @@ use std::{
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
-    EventKind, EventPayload, PayloadValue, ROOT_ID,
+    EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
     desktop::{DesktopCommand, Key, MenuItem, MenuRole, Shortcut, TitleBarStyle},
     geometry::{Edges, Points},
 };
@@ -192,16 +192,37 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(window) = window(surface) {
                 window.present();
             }
         }
         DesktopCommand::Close => close(surface),
+        DesktopCommand::Quit => {
+            crate::app::quit();
+        }
+        DesktopCommand::Hide => {
+            if let Some(window) = window(surface) {
+                window.set_visible(false);
+            }
+        }
+        // Addressed to a dialog root ([`crate::window`]).
+        DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, *shortcut)
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 
@@ -474,7 +495,7 @@ fn unsupported(role: Option<MenuRole>) -> bool {
 }
 
 /// The shortcut as a GTK accelerator (`<Control><Shift>n`).
-fn accelerator(shortcut: &Shortcut) -> Option<String> {
+pub(crate) fn accelerator(shortcut: &Shortcut) -> Option<String> {
     let mut out = String::new();
     for (on, name) in [
         (shortcut.ctrl, "<Control>"),
@@ -547,6 +568,20 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
+    /// Sets `item`'s `icon` attribute. GTK shows none today: `GtkModelButton`
+    /// shows its image only without text or in an iconic section
+    /// (`update_visibility`: `has_icon && (iconic || !has_text)`). The
+    /// attribute keeps the model complete for a change there, or for the
+    /// custom rows that would show it.
+    fn set_icon(&self, item: &gio::MenuItem, icon: Option<&ImageSource>) {
+        let surface = self.surface.upgrade();
+        if let (Some(surface), Some(icon)) = (surface, icon)
+            && let Some(icon) = crate::image::menu_icon(&surface, icon)
+        {
+            item.set_icon(&icon);
+        }
+    }
+
     fn menu(&mut self, items: &[MenuItem]) -> gio::Menu {
         let menu = gio::Menu::new();
         let mut section = gio::Menu::new();
@@ -562,9 +597,11 @@ impl Builder<'_> {
                     label,
                     enabled,
                     items,
+                    icon,
                 } => {
                     let sub = self.menu(items);
                     let item = gio::MenuItem::new_submenu(Some(&label.replace('_', "__")), &sub);
+                    self.set_icon(&item, icon.as_ref());
                     if !enabled {
                         // A submenu opens while its `submenu-action` is
                         // enabled.
@@ -603,6 +640,7 @@ impl Builder<'_> {
                     };
                     let detailed = format!("{}.{name}", self.prefix);
                     let item = gio::MenuItem::new(Some(&label.replace('_', "__")), Some(&detailed));
+                    self.set_icon(&item, a.icon.as_ref());
                     if let Some(accel) = a.shortcut.as_ref().and_then(accelerator) {
                         item.set_attribute_value("accel", Some(&accel.to_variant()));
                         // The editing roles' keys stay the text field's.
@@ -808,8 +846,10 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
 
 /// An item was chosen: the platform carries out its role, the app hears
 /// about the rest.
-fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
+pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     match role {
+        Some(MenuRole::Quit) if crate::app::quit() => {}
+        // A view embedded in another app closes its window, as before.
         Some(MenuRole::Quit | MenuRole::Close) => close(surface),
         Some(MenuRole::Minimize) => {
             if let Some(window) = window(surface) {

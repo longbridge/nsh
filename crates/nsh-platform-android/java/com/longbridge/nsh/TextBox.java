@@ -67,6 +67,8 @@ final class TextBox extends android.view.ViewGroup implements Node {
     private boolean selectable;
     /** `selectable={false}`: out of selectable views too. */
     boolean excluded;
+    /** It continues the text before it (`ViewProps.continues_text`: a wrapped line's later part). */
+    boolean continuesText;
     /** The selectable view whose gesture this touch is ({@link SelectableView}), if any. */
     private SelectableView areaGesture;
     /** What a selectable view has selected here (UTF-16 offsets), or -1. */

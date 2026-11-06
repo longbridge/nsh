@@ -80,13 +80,6 @@ Default bundles and packages are `.nsh/out/`; `--out` still overrides that locat
 `target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not add Cargo configuration to relocate it.
 Existing directories are never deleted automatically. Follow the CoC project constraint in `AGENTS.md`.
 
-## LayerFS trial
-
-The opt-in [LayerFS trial](layerfs.md) exercises Git, Cargo, build-output snapshots and branch isolation on Linux.
-`./scripts/layerfs prepare`, `smoke` and `status` prepare and inspect it; macOS preparation runs in a local Linux
-Docker container. Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache
-and has a manual GitHub Actions workflow. It is separate from the platform checks.
-
 ## Output
 
 
@@ -118,18 +111,28 @@ step, the details only when something fails. Every command prints through it:
 before every `cargo run`): `✓` lines for its builds, cargo's and the tools' output only when they fail, `-v` /
 `NSH_VERBOSE` to see it all (`cargo xtask clippy-android` streams clippy's output: it is what the task is for).
 
+For `nsh run --target tui` (and `nsh dev --target tui`), app preparation and host builds show progress
+on stderr, with Cargo's current crate when a host is built (a checkout or a Rust app); `-v` streams tool output. Immediately before launching the host,
+the CLI routes diagnostics to the app's `.nsh/tui.log` until the host stops, including hot rebuilds.
+Spinners and colors are disabled there; verbose subprocess output is captured into the same file.
+A Rust restart restores terminal output for preparation before the next host launches. The terminal host inherits stdin/stdout and appends stderr and its logger
+to that file. `C-h e` opens its log/error panel; closing it gives every row back to the app.
+
 ## Dev server (nsh dev / nsh run)
 
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, or `--port`) to all
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
+- Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
+  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
   exit through its normal cleanup path; the replacement waits up to ten seconds for the lock before
   starting. A second simultaneous takeover fails. Locks release on process exit, and stale stop files
   are cleared by the next owner. All cooperating commands use the same cache directory. A listener
-  outside this mechanism (including an older CLI) produces a bind error naming the port; `--port 0`
+  outside this mechanism (including an older CLI) given by `--port` produces a bind error naming the port; `--port 0`
   asks the OS for a free port. The control files stay local to the machine.
 - Imported source directories and theme files outside the entry directory are watched too, using the last
   successful bundle's dependencies. The gallery and website demos share `examples/nsh-gallery-ui`; saving one of
@@ -157,6 +160,13 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   process group of its own (`CREATE_NEW_PROCESS_GROUP`), out of the console's Ctrl-C, so a stop is not taken for the
   host failing, and in a job object that kills it when the job closes (`run::KillOnClose`): Windows ends a child with
   its parent only in a job, so the host goes with `nsh` however it ends (a closed console, a killed process).
+- `nsh run --target tui` runs `nsh-tui-host` in the current terminal while the CLI serves and watches in process.
+  It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
+  panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
+  `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
+  raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
   `android::Reverse`) and removes that rule, and only that one (`adb reverse --remove tcp:<port>`), however the run
   ends: normally, by an error, by Ctrl-C or SIGTERM, or for a restart of an app with a Rust crate (`rust_app::Restart`;
@@ -318,7 +328,8 @@ report it:
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
-  presses (a press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
+  presses (a press of the pointer takes it off), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
@@ -370,7 +381,7 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else
   `default_answer` (the cancel button, else dismissed when cancelable, else the step fails); `nsh/test`'s `App` answers
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
-- picks (`Command::PickImages`) are answered with `onPick` (`EventPayload::Picked`): by the test's files
+- picks (`Command::PickImages`, `Command::PickFiles`) are answered with `onPick` (`EventPayload::Picked`): by the test's files
   (`Headless::on_pick`, `app.onPick`; given as they are, nothing scaled), else cancelled (no files); `nsh/test`'s `App`
   answers them after each step and its dialogs (`answer_picks_myself`), and `app.picks()` lists what was asked; a real
   platform shows its own picker, which the driver does not answer;
@@ -507,7 +518,7 @@ test's side prints them under the step `Remote` took last (named as `Headless` n
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
-`windows`, `gpui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
+`windows`, `gpui`, `tui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
 monitor's readings once a second, shown with `-v` (`docs/dev/linux.md` "Performance", `docs/dev/windows.md`
 "Performance"). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
@@ -519,7 +530,21 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. Synthesized input is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
+it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+`Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
+it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
+without becoming key and the agent does not wait for activation (`MacNative::activate`). A window that is not the
+key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
+for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
+Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
+key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
+the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+An item is not checked for being enabled (AppKit validates against the key window's responders:
+with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
+checks of this are `crates/nsh-platform-macos/tests/host`
+(`nsh test crates/nsh-platform-macos/tests/host --target macos`, also with `--foreground`).
+Synthesized input is
 window-relative on macOS (posted `NSEvent`s carry the window's number and a window point; wheels a location that
 makes their window point the agent's), so the tests run the same on any display. A host whose hello says `tests` takes steps:
 `DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the
@@ -558,8 +583,8 @@ then waits until neither a batch came nor a native animation that ends by itself
 the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s; 2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
-on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
-test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
+on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
+on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
@@ -610,6 +635,21 @@ web the realm's global `WebSocket` is the browser's, so `testing.js` puts one in
 (operation 1010, `System::check_connection`) and, refused, fires `error` and `close` (1006) as nsh-js' does.
 `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
 (`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
+
+Terminal (`nsh-platform-tui`, feature `dev`): the CLI accepts `--target tui` and starts `nsh-tui-host --headless`
+with null stdin. The host selects ratatui's in-memory `TestBackend` before terminal setup and runs the ordinary
+surface loop. `--window-size` carries `open`'s point viewport, rounded up to whole Cells; `nsh.json`'s
+`tui.pointsPerCell` sets the scale. The dev session attaches the test Model before loading the bundle, and the
+private `TuiNative` sends requests to the view's inbox. Render applies batches and draws before servicing requests;
+synthetic pointer, key, wheel and paste events go through `AppView::handle`. `app.screenshot("cells.json")` returns
+and saves UTF-8 JSON with `format: "nsh-tui-cells"`, `version: 1`, Cell `width`/`height` and `rows[y][x]` holding
+`symbol`, `fg`, `bg`, `underline`, and ordered `modifiers`. See [the terminal backend](tui.md#platform-tests-and-cell-screenshots)
+for the encoding and the current interaction boundaries. The same tests run with redirected standard streams:
+
+```sh
+./target/debug/nsh test examples/counter --target tui
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+```
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
 and key events, `NSView` frames converted to the content's top-left points, `NSAlert`
@@ -667,8 +707,7 @@ mouse presses, wheel events of 20 px a frame apart, key events with macOS's edit
 them), `history.back()` for back, `Emulation.*` for the viewport and the color scheme and `Page.captureScreenshot`.
 Headless Chromium finds no input device and reports `pointer: none` / `hover: none`, which `nsh.js`'s `measureIdiom`
 reads as a touch screen; `cdp.rs` launches it with `--blink-settings` giving it a fine, hovering pointer (as
-Playwright does), so the page measures as a browser with a mouse: the desktop idiom at least 600 wide, a phone below
-(`open`'s `width`). A desktop's `platform` (`macos`, `windows`, `linux`) skips the measuring: `run.rs`'s
+Playwright does), so the page measures as a browser with a mouse: the desktop idiom at any width (`open`'s `width`). A desktop's `platform` (`macos`, `windows`, `linux`) skips the measuring: `run.rs`'s
 `launch_idiom` puts `TestIdiom::Desktop` in the setup (`TestEnvironment::idiom`), and the page starts the apps it runs
 in the desktop idiom at any width (`nsh.js`'s `testSetup`, before the `idiom` option's fallback to `measureIdiom`), as
 every other target runs them as desktops; `platform.os` stays `web`. Without a `platform`, or with `web`, the page
@@ -872,9 +911,17 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
+(`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
+to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
+host on every `nsh run`. The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
+
+The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
+is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
+are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 
 ## Releases
 

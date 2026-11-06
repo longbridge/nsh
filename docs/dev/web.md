@@ -390,19 +390,28 @@ browserslist queries). `nsh.js` gives every import it does not know a stub that 
 ## The environment
 
 `nsh.js` reports what the page knows with `nsh_environment(json)` before the app starts and whenever it changes (only
-when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `rtl` (`<html dir>`, else the locale's script),
-`reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read
-through a hidden probe element, clipped to the container) and `keyboard` (the container's part below
-`visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the window keep their own
-calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `languagechange`, `visualViewport`,
-`resize` and a mutation observer on `<html dir lang>`.
+when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `lifecycle` (`background` while
+`document.visibilityState` is `hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`,
+else the locale's script), `reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea`
+(`env(safe-area-inset-*)` read through a hidden probe element, clipped to the container) and `keyboard` (the
+container's part below `visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the
+window keep their own calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners,
+`languagechange`, `visibilitychange`, `focus`, `blur`, `visualViewport`, `resize` and a mutation observer on
+`<html dir lang>`.
 
-The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
-container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
+The app's side, `browser/environment.js`, gets the engine's environment (`Host::set_environment`,
+`src/browser/engine.rs`) and keeps one signal per part, written only when the part changed, as nsh-js's `env.rs`
+does. Its accessors are grouped as `env.rs` declares them: the exports of `nsh/device` and `nsh/accessibility`, which
+`nsh` serves and `runtime.js` also serves as namespaces of those names (`modules`), the same values in both.
+`environment.test.mjs` checks them against `env.rs`: `nsh` has every one, each namespace exactly those its module
+declares, so a part added to `env.rs` fails there rather than in apps.
+
+The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer at
+any width, as a narrow window on a native desktop (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
 `phone`; the player's `idiom` option overrides it, and so does a test's setup (`TestEnvironment::idiom`: `open`'s
 desktop `platform` starts the app in the desktop idiom at any width). `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
+(desktop OS, the web in the desktop idiom, or the terminal idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
 `platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
 gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
@@ -423,7 +432,7 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
 the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
-after each batch and each `requestAnimationFrame` tick.
+after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
 transitions (`["sht"]`, `["shi"]`, `["shn"]`) take pictures of the DOM with a 2D canvas (`paintTree`), and pages and
@@ -437,6 +446,20 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
+- **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
+  what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
+  engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
+  ends by itself to end (`Animator::deadline`'s, in ms on `nsh_frame`'s clock) and keeps one timer at that time plus
+  `LATE_MS` (50 ms); if no animation frame ran since it came due, the timer runs `nsh_frame` at the current time,
+  which ends what ended (its `finished` reaches the app) and gives the next deadline. While frames come it does
+  nothing; nothing waits for what only draws (an endless loop, a JS frame request). The page's own motions that end
+  in an event have a timer beside their frames too: a page's slide or fade (`moveScreens`, whose Web Animation
+  finishes only as the page renders: the spec's "update animations and send events" is a step of updating the
+  rendering) and a page's or a dialog's shader (`shaderNav`) end at their duration plus `LATE_MS`, a dialog comes in
+  without its two frames after `ENTER_LATE_MS` (`present`; its `onShow` and `onDismiss` are timers already), and a
+  wheel's glide whose frames stopped ends where it was going (`scrollSmoothly`, then `onScrollEnd`). Browsers
+  throttle a hidden page's timers (to about once a second, and less after minutes), which these ends can come as
+  late as. Touch momentum, zoom and pull animations, which only input starts, go on when frames come back.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
   border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
   color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,
@@ -665,8 +688,9 @@ browsers' touches into what phones report:
   another is part of the outer one (`areaOf`). `textAt` takes the area's texts and `areaGap` its other places outside
   views that take presses, so `mousedown` is not prevented there and a drag may start between texts, as between a
   web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins
-  the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline and
-  leaves out attachments (U+FFFC), as `SelectionModel::text` does.
+  the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline, joins
+  a text whose props have `continuesText` (`ViewProps::continues_text`: a wrapped line's later part) to the one
+  before it with nothing, and leaves out attachments (U+FFFC), as `SelectionModel::text` does.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.

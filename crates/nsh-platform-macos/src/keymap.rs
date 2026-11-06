@@ -20,7 +20,7 @@ use std::{cell::RefCell, ptr::NonNull, rc::Rc, sync::Arc};
 use block2::RcBlock;
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
-    keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
+    keymap::{Key, Keymap, Keystroke, Modifiers},
     platform::Os,
 };
 use objc2::{rc::Retained, runtime::AnyObject};
@@ -88,15 +88,17 @@ fn install(key: u64) -> Option<Retained<AnyObject>> {
 
 /// What the monitor does with key-down `event`, for a key given to a
 /// window that is not the key window (`nsh test`'s, whose events the
-/// monitor never sees): whether it fired a binding (then it is reported to
-/// JS, and the window must not get it).
+/// monitor never sees): whether a binding consumed it (then the window
+/// must not get it; a binding passing it through is reported and the
+/// window gets it).
 #[cfg(feature = "dev")]
 pub(crate) fn fires(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     pressed(surface, event)
 }
 
-/// Whether key-down `event` fired one of the surface's bindings (then it
-/// is reported to JS and consumed).
+/// Whether key-down `event` is consumed by one of the surface's bindings.
+/// A binding it fires is reported to JS, one passing the key through
+/// ([`nsh_core::keymap::KeyMatch::Notify`]) without consuming it.
 fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
@@ -121,7 +123,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     }
     let found = table.find(keystroke, editing, event.isARepeat());
-    if let KeyMatch::Fire(id) = found {
+    if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
             EventKind::KeyCommand,
@@ -200,12 +202,22 @@ fn character(event: &NSEvent, shift: bool) -> Option<char> {
     }
 }
 
+/// The virtual key codes of F1 to F20.
+const FUNCTION_KEYS: [u16; 20] = [
+    122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
+];
+
 /// F1 to F20, by virtual key code.
 fn function_key(code: u16) -> Option<u8> {
-    const KEYS: [u16; 20] = [
-        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
-    ];
-    KEYS.iter().position(|&k| k == code).map(|i| i as u8 + 1)
+    FUNCTION_KEYS
+        .iter()
+        .position(|&k| k == code)
+        .map(|i| i as u8 + 1)
+}
+
+/// The virtual key code of F`n` (macOS's keyboards end at F20).
+pub(crate) fn function_key_code(n: u8) -> Option<u16> {
+    FUNCTION_KEYS.get(usize::from(n).checked_sub(1)?).copied()
 }
 
 #[cfg(test)]
@@ -216,5 +228,9 @@ mod tests {
         assert_eq!(super::function_key(96), Some(5));
         assert_eq!(super::function_key(90), Some(20));
         assert_eq!(super::function_key(0), None);
+        assert_eq!(super::function_key_code(1), Some(122));
+        assert_eq!(super::function_key_code(20), Some(90));
+        assert_eq!(super::function_key_code(0), None);
+        assert_eq!(super::function_key_code(21), None);
     }
 }

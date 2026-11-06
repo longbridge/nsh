@@ -91,6 +91,7 @@ fn start_root(root: Root) -> (Engine, Receiver<MountBatch>) {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

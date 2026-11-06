@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -203,21 +202,7 @@ public class NshView extends FrameLayout {
         // The keyboard's curve and duration, as it starts to move: what makes
         // room for it moves with it (`LayoutCurve::Keyboard`).
         if (Build.VERSION.SDK_INT >= 30) {
-            setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
-                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
-                @Override
-                public void onPrepare(WindowInsetsAnimation animation) {
-                    // Before the end state's insets are applied.
-                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
-                    keyboardDuration = animation.getDurationMillis();
-                    mounter.keyboardMotion(animation.getInterpolator(), keyboardDuration);
-                }
-
-                @Override
-                public WindowInsets onProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> running) {
-                    return insets;
-                }
-            });
+            KeyboardAnimation.install(this, mounter);
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
@@ -531,6 +516,41 @@ public class NshView extends FrameLayout {
         Native.setOpenUrlHandler(handle, handler != null);
     }
 
+    /**
+     * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
+     * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
+     * the app's launcher activity.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleNotificationIntent(android.content.Intent intent) {
+        Notifications.handleIntent(intent);
+    }
+
+    /**
+     * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
+     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     *
+     * @param url the URL
+     */
+    public void openUrl(String url) {
+        if (url == null || handle == 0) return;
+        mounter.eventMap(1, Native.URL_SCHEME, new String[] {"url"}, new Object[] {url});
+    }
+
+    /**
+     * Hands the app the URL {@code intent} carries, if it is an {@code ACTION_VIEW} intent with one ({@link #openUrl}).
+     * The activity showing this view calls it from {@code onCreate} (with the launch intent, when it is not being
+     * recreated) and {@code onNewIntent}.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleUrlSchemeIntent(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data != null) openUrl(data.toString());
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {
@@ -589,6 +609,7 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        mounter.cancelAnimations();
         endShaders();
     }
 
@@ -601,6 +622,7 @@ public class NshView extends FrameLayout {
     void appStopped() {
         main.post(() -> {
             mounter.destroyComponents();
+            mounter.cancelAnimations();
             endShaders();
         });
     }
@@ -650,7 +672,7 @@ public class NshView extends FrameLayout {
      */
     private int lifecycle;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
-    private long keyboardDuration = 250;
+    long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
     private java.util.Locale hostLocale;
     private float hostFontScale;

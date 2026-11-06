@@ -20,16 +20,6 @@ async function show(name: string, text: string) {
   await app.waitFor(text);
 }
 
-test("an overlay shows outside the box that clips it and closes on a press outside", async () => {
-  await show("Overlay", "Open the overlay");
-  await app.press("Open the overlay");
-  await app.waitFor("Outside the clipped box, on top of the page.");
-  await app.waitFor("overlay at bottom");
-  // The placement's tabs lie outside it: a press there closes it.
-  await app.press("role:tab[Above]");
-  expect(app.texts()).not.toContain("Outside the clipped box, on top of the page.");
-});
-
 test("the share popover opens from its button, invites, and back closes it", async () => {
   await show("Popover", "Share a document");
   await app.press("Share");

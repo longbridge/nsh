@@ -22,8 +22,9 @@ mod local_storage;
 pub mod net;
 pub mod perf;
 mod script;
-#[cfg(feature = "shader")]
+#[cfg_attr(not(feature = "shader"), path = "shader_off.rs")]
 pub mod shader;
+mod shader_frame;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js-core")]
@@ -133,6 +134,15 @@ impl App {
             App::Js(bundle) => bundle.app_id.as_deref(),
         }
     }
+
+    /// The URL schemes the app claims (`nsh.json` `schemes`):
+    /// the links the core lets through (`nsh_core::url_scheme`).
+    pub fn url_schemes(&self) -> &[String] {
+        match self {
+            App::Rust(root) => root.url_schemes_ref(),
+            App::Js(bundle) => &bundle.url_schemes,
+        }
+    }
 }
 
 impl From<Root> for App {
@@ -161,6 +171,11 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
+    /// The URL schemes the app claims (`nsh.json` `schemes`, a
+    /// packaged app's `app.json`): the links its engine lets through.
+    /// Read from the app's own resources, never from its code; none for a
+    /// signed package, whose embedding app owns the schemes.
+    pub url_schemes: Vec<String>,
     /// Trusted filesystem anchors selected by the native host, never decoded
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
@@ -290,6 +305,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
+            url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
         }
@@ -304,6 +320,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
+            url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
         }
@@ -324,6 +341,16 @@ impl Bundle {
     /// gives it.
     pub fn with_app_id(mut self, id: Option<&str>) -> Self {
         self.app_id = id.map(str::to_owned);
+        self
+    }
+
+    /// The URL schemes the app claims ([`Bundle::url_schemes`]), as
+    /// `nsh.json` gives them.
+    pub fn with_url_schemes(
+        mut self,
+        schemes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.url_schemes = schemes.into_iter().map(Into::into).collect();
         self
     }
 
@@ -352,8 +379,9 @@ impl Bundle {
     }
 
     /// Reads a JS source bundle written by `nsh build` (`bundle.js`), plus
-    /// `bundle.js.map`, the app's `capabilities.json` and its id
-    /// (`app.json` `"id"`) next to it if present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
+    /// `bundle.js.map`, the app's `capabilities.json`, its id and the
+    /// schemes it claims (`app.json` `"id"` and `"schemes"`) next to it
+    /// if present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
     /// only [`Bundle::read_trusted`] (the app's own resources) or a verified
     /// package may load bytecode.
     pub fn read(path: &std::path::Path) -> io::Result<Bundle> {
@@ -387,7 +415,14 @@ impl Bundle {
         if let Ok(json) = std::fs::read_to_string(path.with_file_name("capabilities.json")) {
             bundle.policy.declared = Some(parse_capabilities(&json).map_err(io::Error::other)?);
         }
-        bundle.app_id = read_app_id(&path.with_file_name("app.json"));
+        let info = read_app_json(&path.with_file_name("app.json"));
+        bundle.app_id = info
+            .as_ref()
+            .and_then(|info| info.get("id")?.as_str().map(str::to_owned));
+        if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
+            bundle.url_schemes = nsh_core::url_scheme::schemes_from_json(url_schemes)
+                .map_err(|e| io::Error::other(format!("app.json: {e}")))?;
+        }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
             .map(std::path::Path::to_path_buf);
@@ -435,11 +470,10 @@ impl Bundle {
     }
 }
 
-/// The `"id"` of an `app.json` (`nsh build`'s, a packaged app's).
-fn read_app_id(path: &std::path::Path) -> Option<String> {
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    json.get("id")?.as_str().map(str::to_owned)
+/// An `app.json` (`nsh build`'s, a packaged app's): the app's id, the
+/// schemes it claims.
+fn read_app_json(path: &std::path::Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 /// A verified package, unpacked ([`load_package`], [`verify_package`]).
@@ -555,6 +589,19 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
+    /// Include logical tree order when the mounted structure changes. Native
+    /// `Insert` items alone describe stacking order, which can differ by `zIndex`.
+    fn needs_tree_order(&self) -> bool {
+        false
+    }
+
+    /// Include the states views show as parts of a control
+    /// ([`nsh_core::MountItem::ProjectStates`]): for a platform that marks
+    /// a list's highlighted option itself, as a terminal does.
+    fn needs_projected_states(&self) -> bool {
+        false
+    }
+
     /// An error of the app, as text (the message and the stack): the
     /// bundle failed to load, an exception escaped a JS callback, the VM
     /// was stopped. Errors are always logged; development hosts also show
@@ -621,6 +668,71 @@ pub trait FetchTask: Send {
     fn pause(&mut self, paused: bool);
     /// Aborts the request.
     fn cancel(self: Box<Self>);
+}
+
+/// `nsh/updater` on the engine's network and assets: the platform's HTTP stack
+/// (so its TLS and proxies), and the file `nsh package` left among the assets.
+struct UpdaterOverNetwork {
+    network: Arc<dyn Network>,
+    assets: Arc<dyn Assets>,
+}
+
+impl UpdaterOverNetwork {
+    /// `None` without both (nothing to update from).
+    #[cfg_attr(
+        not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
+        allow(dead_code)
+    )]
+    fn host(
+        network: Option<Arc<dyn Network>>,
+        assets: Option<Arc<dyn Assets>>,
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        Some(Arc::new(UpdaterOverNetwork {
+            network: network?,
+            assets: assets?,
+        }))
+    }
+}
+
+impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
+    fn config(&self) -> Option<Vec<u8>> {
+        // Only a package has it; a dev server answers nothing for it.
+        self.assets.read("asset:/nsh-updater.json").ok()
+    }
+
+    fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let events: FetchEvents = Box::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let task = self.network.fetch(HttpRequest::new("GET", url), events);
+        let mut total = None;
+        let result = loop {
+            match rx.recv() {
+                Ok(FetchEvent::Head(head)) => {
+                    if !(200..300).contains(&head.status) {
+                        break Err(format!("HTTP {}", head.status));
+                    }
+                    total = head
+                        .headers
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.parse().ok());
+                }
+                Ok(FetchEvent::Data(chunk)) => {
+                    if let Err(e) = sink(&chunk, total) {
+                        break Err(e);
+                    }
+                }
+                Ok(FetchEvent::End) => return Ok(()),
+                Ok(FetchEvent::Failed(e)) => break Err(e),
+                Ok(FetchEvent::BodyWanted) => {}
+                Err(_) => break Err("the network stack went away".to_owned()),
+            }
+        };
+        task.cancel();
+        result
+    }
 }
 
 /// The platform's HTTP stack, used by JS `fetch`.
@@ -732,7 +844,7 @@ pub struct EngineConfig {
     /// posts. A view keeps one for every app it runs; the default is a
     /// channel of the engine's own, with none of them.
     pub host: HostChannel,
-    /// Answers the app's picks (`Picker.pickImages`) in place of the
+    /// Answers the app's picks (`Picker.pickImages`, `Picker.pickFiles`) in place of the
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
     pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,
@@ -741,6 +853,11 @@ pub struct EngineConfig {
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
     /// has one (`Environment::speech`).
     pub speech: Option<Arc<dyn nsh_core::speech::SpeechBackend>>,
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) instead of the
+    /// platform: the embedding app's own audio stack, or a test's fake
+    /// (`nsh_testing`'s). `None` (the default): the platform's, where it
+    /// has one (`Environment::audio`).
+    pub audio: Option<Arc<dyn nsh_core::audio::AudioBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -835,6 +952,7 @@ impl EngineConfig {
             host: HostChannel::default(),
             picker: None,
             speech: None,
+            audio: None,
         }
     }
 }
@@ -891,6 +1009,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("host", &self.host)
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
+            .field("audio", &self.audio.is_some())
             .finish()
     }
 }
@@ -917,6 +1036,8 @@ enum Message {
     /// A component's task was woken: it runs in the loop.
     Wake,
     Environment(Environment),
+    /// The displays (desktops).
+    Displays(Arc<[nsh_core::desktop::Display]>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
@@ -1057,6 +1178,13 @@ impl EngineControl {
     /// appearance...).
     pub fn set_environment(&self, environment: Environment) {
         let _ = self.tx.send(Message::Environment(environment));
+    }
+
+    /// Reports the displays (desktops: on start, in
+    /// [`Engine::start_with`]'s setup, so the app reads them as it first
+    /// renders, then whenever they change).
+    pub fn set_displays(&self, displays: Vec<nsh_core::desktop::Display>) {
+        let _ = self.tx.send(Message::Displays(displays.into()));
     }
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
@@ -1250,6 +1378,10 @@ fn raise_thread_priority() {
         libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
     }
 }
+
+/// A resize this soon after the last is one of a burst, a window being
+/// dragged; this long after the last the burst is over ([`Core::set_resizing`]).
+const RESIZE_BURST_GAP: Duration = Duration::from_millis(120);
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run<M: TextEngine + 'static, S: MountSink>(
@@ -1478,6 +1610,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        core.set_tree_order_tracking(sink.needs_tree_order());
+        core.set_projected_state_mounting(sink.needs_projected_states());
         // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
         // sets the host serves.
         let sets: Vec<_> = nsh_core::runtime::registries()
@@ -1512,6 +1646,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
+        core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_audio(config.audio.clone());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
@@ -1577,10 +1713,16 @@ impl<M: TextEngine + 'static> Driver<M> {
         // The embedding app's tokens sent before the start
         // (`Engine::start_with`) are there as the bundle evaluates, so its
         // first render reads them; the rest comes after it, in order.
+        // So are the displays, which the app reads as it first renders.
         let mut early = Vec::new();
+        let mut displays: Arc<[nsh_core::desktop::Display]> = Arc::from(Vec::new());
         while let Ok(message) = rx.try_recv() {
             match message {
                 Message::Tokens(tokens) => core.set_host_tokens(tokens.map(|t| *t)),
+                Message::Displays(list) => {
+                    core.set_displays(list.clone());
+                    displays = list;
+                }
                 message => early.push(message),
             }
         }
@@ -1603,6 +1745,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             mouse_moved: None,
             sets_seen: FxHashMap::default(),
             resized: None,
+            resize_burst_ends: None,
+            window_state: WindowStateReport {
+                shown: config.environment.window_state,
+                ..WindowStateReport::default()
+            },
             events_handled: 0,
             events_reported: 0,
             pinned: config.pinned,
@@ -1649,6 +1796,10 @@ impl<M: TextEngine + 'static> Driver<M> {
                         websocket: config.websocket.clone(),
                         refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
+                        updater: UpdaterOverNetwork::host(
+                            config.network.clone(),
+                            config.assets.clone(),
+                        ),
                         data_dir: config
                             .data_dir
                             .as_ref()
@@ -1671,6 +1822,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     &config.ui_sets,
                     posts,
                     &environment,
+                    &displays,
                     driver.state.js_tokens.clone(),
                     driver.state.core.theme_tokens(),
                     text_engine,
@@ -1723,6 +1875,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
+        // A resize that came while the app started is in the first frame:
+        // reported as a turn reports it, or a platform waiting for the
+        // layout at that size waits until something else wakes the engine.
+        if let Some(size) = state.resized.take() {
+            sink.resized(size);
+        }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
@@ -1758,6 +1916,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.resize_burst_ends,
+            self.state.window_state.settles,
         ]
         .into_iter()
         .flatten()
@@ -1916,6 +2076,23 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        if state
+            .resize_burst_ends
+            .is_some_and(|ends| ends <= nsh_core::time::now())
+        {
+            state.resize_burst_ends = None;
+            state.core.set_resizing(false);
+        }
+        if state
+            .window_state
+            .settles
+            .is_some_and(|due| due <= nsh_core::time::now())
+            && let Some(env) = state.window_state.reported
+        {
+            state.window_state.settles = None;
+            state.window_state.shown = env.window_state;
+            apply_environment(script, state, env);
+        }
         let turn_start = state.trace.then(Instant::now);
         state.dispatch_touch_move(script);
         if state
@@ -2056,6 +2233,12 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// A resize before this time continues a burst of them
+    /// ([`RESIZE_BURST_GAP`]).
+    resize_burst_ends: Option<Instant>,
+    /// The window's bounds as the app reads them, held back while the
+    /// window moves.
+    window_state: WindowStateReport,
     /// Events received ([`EngineControl::dispatch_event`]), and the count
     /// last reported ([`MountSink::handled`]).
     events_handled: u64,
@@ -2823,6 +3006,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         window,
         safe_area: insets(env),
         title_bar: env.title_bar,
+        window_state: env.window_state,
         keyboard_height: env.keyboard_height,
         keyboard_duration: env.keyboard_duration,
         dark: env.color_scheme == ColorScheme::Dark,
@@ -2836,11 +3020,15 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         idiom: env.idiom,
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
+        ctrl_for_command: env.ctrl_for_command,
         host: env.host,
         lifecycle: env.lifecycle,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
         speech: env.speech,
+        notifications: env.notifications,
+        audio: env.audio,
+        cell: env.cell,
         web_input: env.web_input,
     }
 }
@@ -2857,6 +3045,80 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
             nsh_core::tailwind::Platform::Ios
         },
         reduce_motion: env.reduce_motion,
+    }
+}
+
+/// How long the window stays where it is before a move or a resize
+/// reaches the app ([`WindowStateReport`]).
+const WINDOW_SETTLE: Duration = Duration::from_millis(150);
+
+/// The window's bounds the app reads: a move or a resize reaches it once
+/// the window has stayed for [`WINDOW_SETTLE`] (one report at the end of a
+/// drag, not one per point), a change of mode, display or being minimized
+/// or hidden at once (with the bounds of then).
+#[derive(Default)]
+struct WindowStateReport {
+    /// What the app reads.
+    shown: Option<nsh_core::desktop::WindowState>,
+    /// The platform's latest environment while a move settles.
+    reported: Option<Environment>,
+    /// When it has settled.
+    settles: Option<Instant>,
+}
+
+impl WindowStateReport {
+    /// The environment the app gets of `env`, the platform's at `now`: its
+    /// window state held back while it moves.
+    fn report(&mut self, mut env: Environment, now: Instant) -> Environment {
+        let next = env.window_state;
+        let moving = match (&self.shown, &next) {
+            (Some(shown), Some(next)) => shown != next && moved_only(shown, next),
+            _ => false,
+        };
+        if moving {
+            // The window moved again (not some other part of the
+            // environment): it settles from now.
+            let moved = self.reported.map(|r| r.window_state) != Some(next);
+            if moved || self.settles.is_none() {
+                self.settles = Some(now + WINDOW_SETTLE);
+            }
+            self.reported = Some(env);
+            env.window_state = self.shown;
+        } else {
+            self.reported = None;
+            self.settles = None;
+            self.shown = next;
+        }
+        env
+    }
+}
+
+/// Whether `next` differs from `shown` by where the window is or its size
+/// alone (a move or a resize, which settles before it is reported), not by
+/// its mode, display or being minimized or hidden.
+fn moved_only(
+    shown: &nsh_core::desktop::WindowState,
+    next: &nsh_core::desktop::WindowState,
+) -> bool {
+    std::mem::discriminant(&shown.window_bounds) == std::mem::discriminant(&next.window_bounds)
+        && shown.minimized == next.minimized
+        && shown.hidden == next.hidden
+        && shown.display.map(|d| d.id) == next.display.map(|d| d.id)
+}
+
+/// Gives the core and JS the environment `env`.
+fn apply_environment<M: TextEngine>(
+    script: Option<&Script>,
+    state: &mut State<M>,
+    env: Environment,
+) {
+    state.core.set_font_scale(env.font_scale);
+    state.core.set_class_environment(class_environment(&env));
+    state.core.set_safe_area(insets(&env));
+    let window = env.window;
+    state.core.set_environment(ui_environment(&env, window));
+    if let Some(script) = script {
+        script.set_environment(&env);
     }
 }
 
@@ -2954,19 +3216,28 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Resize(size) => {
+            // The next within a burst's gap: a window being dragged. A manual
+            // clock wakes nothing to end one, and a test wants its layout whole.
+            if !nsh_core::time::manual() {
+                let now = nsh_core::time::now();
+                if state.resize_burst_ends.is_some_and(|ends| now < ends) {
+                    state.core.set_resizing(true);
+                }
+                state.resize_burst_ends = Some(now + RESIZE_BURST_GAP);
+            }
             state.core.set_viewport(size);
             state.resized = Some(size);
         }
         Message::Wake => {}
         Message::Environment(mut env) => {
             state.pinned.apply(&mut env);
-            state.core.set_font_scale(env.font_scale);
-            state.core.set_class_environment(class_environment(&env));
-            state.core.set_safe_area(insets(&env));
-            let window = env.window;
-            state.core.set_environment(ui_environment(&env, window));
+            let env = state.window_state.report(env, nsh_core::time::now());
+            apply_environment(script, state, env);
+        }
+        Message::Displays(displays) => {
+            state.core.set_displays(displays.clone());
             if let Some(script) = script {
-                script.set_environment(&env);
+                script.set_displays(&displays);
             }
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
@@ -3123,6 +3394,32 @@ fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn moves_settle_and_changes_of_mode_do_not() {
+        use nsh_core::{
+            desktop::{Display, DisplayId, WindowBounds, WindowState},
+            geometry::{Bounds, point, px, size},
+        };
+        let rect = |x: f32| Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
+        let a = WindowState::new(rect(0.0), WindowBounds::Windowed(rect(0.0)));
+        let mut moved = a;
+        moved.bounds = rect(10.0);
+        moved.window_bounds = WindowBounds::Windowed(rect(10.0));
+        assert!(super::moved_only(&a, &moved));
+        let mut maximized = a;
+        maximized.window_bounds = WindowBounds::Maximized(rect(0.0));
+        assert!(!super::moved_only(&a, &maximized));
+        let mut minimized = a;
+        minimized.minimized = true;
+        assert!(!super::moved_only(&a, &minimized));
+        let mut hidden = a;
+        hidden.hidden = true;
+        assert!(!super::moved_only(&a, &hidden));
+        let mut elsewhere = a;
+        elsewhere.display = Some(Display::new(DisplayId(2), rect(0.0), rect(0.0), false));
+        assert!(!super::moved_only(&a, &elsewhere));
+    }
+
     #[test]
     fn pinned_values_hold_whatever_the_platform_reports() {
         let pins = super::EnvironmentPins {

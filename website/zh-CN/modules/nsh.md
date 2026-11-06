@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -955,7 +955,7 @@ const platform: Platform;
 interface Platform {
   readonly os: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly version: string;
-  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   readonly desktop: boolean;
   readonly catalyst: boolean;
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
@@ -968,8 +968,8 @@ interface Platform {
 |---|---|---|
 | `os` | `os() -> Os`（`os().name()` 即 TS 的字符串） | 操作系统。iOS、iOS 模拟器和 Mac Catalyst 都报告 `"ios"`，浏览器报告 `"web"`。 |
 | `version` | `os_version() -> (u16, u16)` | iOS 和桌面系统：系统版本（`"17.5"`）；Android：API 级别（`"35"`）；Web：`"0.0"`。Rust 给出主版本和次版本号，在 Android 上是 API 级别和 0。 |
-| `idiom` | `idiom() -> Idiom` | 设备类型：`desktop` 为 `true` 时恰好是 `"desktop"`；其他情况下是 `"phone"`、`"pad"`（iPad、Android 平板、以 iPad 形态运行的 Mac Catalyst）、`"mac"`（以 UIKit 的 Mac 形态运行的 Mac Catalyst，属于移动端形态）或 `"tv"`（Apple TV、Android TV）。 |
-| `desktop` | `is_desktop() -> bool` | 适用桌面行为：macOS、Windows、Linux，以及有鼠标且窗口较宽的浏览器。`desktop={{…}}` 属性、`select({ desktop })` 和 `idiom` 的 `"desktop"` 都以它为准。Mac Catalyst 运行 iOS 后端，属于移动端：那里适用 `ios={{…}}` 属性。[`nsh/desktop`](./nsh-desktop.md#isavailable) 的 `isAvailable` 是更窄的判断，表示它的窗口和菜单 API 可用，即 macOS、Windows 和 Linux。 |
+| `idiom` | `idiom() -> Idiom` | 设备类型：在终端里（`--target tui`）是 `"terminal"`：画在字符格子上，适用桌面行为（`desktop` 为 `true`；`os` 仍是本机的操作系统）；其他情况下 `desktop` 为 `true` 时恰好是 `"desktop"`，否则是 `"phone"`、`"pad"`（iPad、Android 平板、以 iPad 形态运行的 Mac Catalyst）、`"mac"`（以 UIKit 的 Mac 形态运行的 Mac Catalyst，属于移动端形态）或 `"tv"`（Apple TV、Android TV）。 |
+| `desktop` | `is_desktop() -> bool` | 适用桌面行为：macOS、Windows、Linux、有鼠标且窗口较宽的浏览器，以及终端。`desktop={{…}}` 属性、`select({ desktop })` 和 `idiom` 的 `"desktop"`（终端除外）都以它为准。Mac Catalyst 运行 iOS 后端，属于移动端：那里适用 `ios={{…}}` 属性。[`nsh/desktop`](./nsh-desktop.md#isavailable) 的 `isAvailable` 是更窄的判断，表示它的窗口和菜单 API 可用，即 macOS、Windows 和 Linux。 |
 | `catalyst` | `is_catalyst() -> bool` | 应用运行在 Mac Catalyst 下，无论是 Mac 形态还是 iPad 形态（`os` 为 `"ios"`）。 |
 | `select(spec)` | `match os() { … }` | 当前平台对应的值（见下文）。 |
 
@@ -992,7 +992,7 @@ interface PlatformSelectSpec<T> {
   linux?: T;
   web?: T;
   mobile?: T;   // platform.desktop 为 false：iOS（包括 Mac Catalyst）、Android，以及手机和平板上的浏览器
-  desktop?: T;  // platform.desktop 为 true：macOS、Windows、Linux，以及桌面浏览器
+  desktop?: T;  // platform.desktop 为 true：macOS、Windows、Linux、桌面浏览器，以及终端
   native?: T;   // 除 Web 外的所有平台
   default?: T;
 }
@@ -1574,7 +1574,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // 允许选择多个（false：一个）
+  limit?: number; // multiple 时最多选几个（最多 100）
+  filters?: { name: string; extensions: string[] }[]; // 提供的文件类型（不给：任意文件）
+}
+
+interface PickedFile {
+  file: File; // 名称、类型、字节大小和内容，都保持原样
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // 允许选多张（false：一张）
@@ -1593,6 +1604,7 @@ interface PickedImage {
 | TS | Rust |
 |---|---|
 | `await Picker.pickImages(options)` | `pick_images(request).await -> Vec<PickedFile>` |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `multiple`、`limit` | `PickRequest::new(multiple, limit)`（`limit` 为 0 表示最多 100） |
 | `maxDimension` | `request.max_dimension = Some(DevicePixels(2048))` |
 | `quality` | `request.quality = Some(Percentage(0.8))` |
@@ -1701,12 +1713,47 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+显示系统的文件选择器，可选任意类型的文件，resolve 为用户选中的文件；用户取消时 resolve 为 `[]`。拒绝的情况与
+`pickImages` 相同：超出范围的选项（`limit: 0`、没有扩展名的过滤器）以 `RangeError` reject，没有 `picker` 能力时以
+`ERR_ACCESS_DENIED` reject。Rust：`pick_files(request)`。
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "文档", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| 平台 | 选择器 | 过滤器 |
+|---|---|---|
+| macOS | `NSOpenPanel` 表单 | 所有扩展名合为一组 |
+| Windows | `IFileOpenDialog` | 每个过滤器一个选项，显示其名称 |
+| Linux | `GtkFileDialog`（有 portal 时用 portal 的） | 每个过滤器一个选项，显示其名称 |
+| iOS | `UIDocumentPickerViewController`，以副本形式 | 所有扩展名合为一组 |
+| Android | `ACTION_OPEN_DOCUMENT` | 按媒体类型；有 Android 不认识的扩展名时提供任意文件 |
+| Web | `<input type=file>` | 所有扩展名合为一组 |
+| GPUI | GPUI 的打开对话框，可选任意文件 | 不符合的文件在选择后被剔除 |
+
+所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，因此超过 512 MiB 的文件不会出现在
+结果中，并记录到日志。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
+
 ### 嵌入 NSH 的应用
 
 嵌入 NSH、并且有自己选择器（比如带有应用自己的相册）的应用可以自己回答选取：在 Rust 中，把 `PickerBackend`
 （`nsh_core::picker`）交给引擎（`EngineConfig::picker`，GPUI 和 GPUI Kit 应用用 `AppView::set_picker`），它会收到每次选取的
 `PickRequest` 并返回文件，系统的选择器不会出现。它返回的文件和平台给的一样会被补全：截到请求的数量上限，大小、类型和
-扩展名从字节中读出。
+扩展名从字节中读出。`pick_files` 以同样的方式回答 `pickFiles`；没有实现它的 backend 会取消这些选取，系统的选择器同样不会出现。
 
 ### 测试
 
@@ -1714,9 +1761,91 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 和 `pickFiles` 什么也不显示，
 > 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
-> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 中，`pick_images` 和 `pick_files` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+
+## Notifications
+
+`Notifications` 显示系统通知并设置应用图标的角标（macOS 上是 Dock 图标）。在用户做了需要通知的操作时再请求权限，然后显示：
+
+```tsx
+import { Notifications } from "nsh";
+
+Notifications.on("press", ({ id }) => openChat(id));
+
+async function notifyMe() {
+  if ((await Notifications.requestPermission()) !== "granted") return;
+  await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you coming?" });
+  Notifications.setBadge(1);
+}
+```
+
+Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`set_badge` 和 `next_notification_press`。
+
+| 平台 | 通知 | 角标 |
+| --- | --- | --- |
+| macOS | 通知中心，需要已签名的应用包；`nsh run` 的非应用包宿主上，以及未设置 `AppOptions::notifications` 的嵌入应用中为 `unavailable` | Dock，无需权限 |
+| iOS | 通知中心 | 主屏幕，需要权限 |
+| Android | 系统通知，Android 13 需要 `POST_NOTIFICATIONS`（`nsh package` 会为获得 `notifications` 能力的应用声明） | 没有可设置的数字：启动器会标记有通知显示的应用，数字随之后显示的通知一起传递 |
+| Windows | Toast 通知，除非用户在设置里关闭了应用的通知（即 `denied`）。Windows 没有授权弹窗，`requestPermission` 不会询问用户。未设置 `AppOptions::notifications` 的嵌入应用为 `unavailable` | 任务栏按钮上的数字，最多显示 `99+`；任务栏使用小按钮时不显示 |
+| Linux | 桌面的通知守护进程（`org.freedesktop.Notifications`）：运行时为 `granted`，不弹提示，否则为 `unavailable` | Unity launcher API，支持它的 Dock 才显示（Plasma、Ubuntu Dock、Dash to Dock），其他环境不显示 |
+| Web | `Notification`，需要浏览器允许页面直接显示（Android 上不行） | Badging API，仅限已安装的应用 |
+| 终端、GPUI | `unavailable` | 无 |
+
+### Notifications.show
+
+`show` 的结果表示系统是否接收了这条通知；没有权限时为 `false`。应用在前台时通知照常显示。用相同的 `id` 再次显示会替换旧通知，`Notifications.close(id)` 用于移除。
+
+### Notifications.on
+
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
+
+### Notifications.permission
+
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
+
+## UrlScheme
+
+`UrlScheme` 报告打开应用的链接：应用在 `nsh.json` 中认领的 scheme 的 URL，例如网页上「在应用中打开」按钮发出的
+`myapp://orders/42`，或完成登录后浏览器跳回应用的链接。应用只需认领一次，`nsh package` 会把这些 scheme 声明给系统：
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` 报告系统交给应用的每一个链接，启动时和运行中都会。没有监听者时到达的链接（包括启动应用的那个）会留给下一个监听者
+（最多 16 个，超出时丢弃最早的），所以在应用启动时，或处理链接的界面准备好后再监听都可以。Rust 代码 await
+`nsh_core::prelude` 的 `next_url_scheme_open()`；Rust 应用生成的代码会把 scheme 交给它的根组件（`Root::url_schemes`）。
+
+链接是来自应用外部的输入：任何网页或应用都能用任意路径和参数打开 `myapp://`。在执行链接要求的操作之前，像对待其他输入一样先校验
+（id 确实存在、操作经用户确认）。NSH 只放行应用自己的 scheme、长度不超过 16 KB 的链接，并且从不自行导航：链接打开什么由应用决定。
+
+scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小写比较。Web、文件和系统应用的 scheme（`http`、`https`、`file`、
+`mailto`、`tel`、`sms` 等）在构建应用时会被拒绝。
+
+| 平台 | 应用如何认领 scheme |
+| --- | --- |
+| macOS | 应用 `Info.plist` 中的 `CFBundleURLTypes`；系统会打开应用，或把链接交给正在运行的那个 |
+| iOS、Mac Catalyst | 应用 `Info.plist` 中的 `CFBundleURLTypes`；包括启动应用的链接和运行中到达的链接 |
+| Android | `nsh package` 写入清单的 `ACTION_VIEW` intent filter；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
+| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件并设为默认处理程序；`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
+
+`nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
+在运行中打开一个链接，两者都在无头模式下运行。
+
+嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
+`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
 
 ## Speech
 
@@ -1856,6 +1985,124 @@ async fn dictate() -> String {
 > 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"speech": true` 授予语音。没有授予时 `Speech.start` 抛出一个
 > `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`，`resource` 为 `""`。在 Rust 中，会话以
 > `not-allowed` 结束，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+
+## Sound
+
+两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 的音效用 GStreamer、播放器用 GTK 的媒体流（播放器的速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
+
+```rust tabs
+use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
+```
+
+```tsx tabs
+import { AudioPlayer, Sound } from "nsh";
+```
+
+```ts
+declare class Sound {
+  static available(): Promise<boolean>;
+  static load(src: string): Promise<Sound>;
+  play(options?: { volume?: number; rate?: number }): void;
+  stop(): void;
+  readonly duration: number;
+  dispose(): void;
+}
+
+declare class AudioPlayer {
+  constructor(src: string, options?: { volume?: number; rate?: number; loop?: boolean });
+  static available(): Promise<boolean>;
+  on(event: "load", listener: (load: { duration: number }) => void): () => void;
+  on(event: "progress", listener: (progress: { currentTime: number; duration: number }) => void): () => void;
+  on(event: "buffer", listener: (buffer: { buffering: boolean }) => void): () => void;
+  on(event: "end", listener: () => void): () => void;
+  on(event: "error", listener: (error: { code: AudioErrorCode; message: string }) => void): () => void;
+  play(): Promise<void>;
+  preload(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  volume: number;
+  rate: number;
+  loop: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly state: "idle" | "loading" | "playing" | "paused" | "ended";
+  dispose(): void;
+}
+
+type AudioErrorCode =
+  | "not-allowed" | "network" | "decode" | "not-supported"
+  | "quota-exceeded" | "unavailable" | "failed";
+```
+
+| TSX | Rust |
+|---|---|
+| `await Sound.available()` | `audio_available().await -> bool` |
+| `await Sound.load(src)` | `load_sound(src).await -> Result<Sound, AudioFailure>` |
+| `sound.play({ volume, rate })` | `sound.play(volume, rate)` |
+| `new AudioPlayer(src, options)` | `audio_player(src, settings) -> AudioPlayer` |
+| `player.on("progress", ...)` | `player.next().await -> Option<AudioEvent>` |
+| `player.play()` / `pause()` / `seek(s)` | `player.play()` / `pause()` / `seek(duration)`（drop 即关闭） |
+
+### Sound.load
+
+从打包资源的路径（`"sounds/click.wav"`）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+
+### Sound.play
+
+在正在播放的声音之上再起一路播放（同时最多 32 路，超出时最早的一路停止），音量 `volume`（0 到 1）、速率 `rate`（0.5 到 2，音高随之变化）。它没有返回值，设备静音或没有输出时也不会失败——那就是静音。超出范围的值抛出 `RangeError`。`stop()` 停止这个音效的所有播放。
+
+```tsx
+import { Sound, View } from "nsh";
+
+const tap = await Sound.load("sounds/tap.wav");
+
+function Key(props: { label: string }) {
+  return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
+}
+```
+
+### AudioPlayer
+
+播放器在 `play()` 或 `preload()` 之前什么都不加载。它的 `state` 和 `currentTime` 跟随平台的报告：知道时长后来一次 `load`（直播流为 `Infinity`），播放期间以及跳转之后约每秒四次 `progress`，等待数据时 `buffer`，播到结尾时 `end`（循环的播放器则从头再播）。`play()` 在开始播放后 resolve，出错时按 `error` 报告的原因 reject。播放器在 `dispose()` 时停止，或在创建它的一方离开时停止：播放期间请一直持有它。
+
+```tsx
+import { AudioPlayer, signal } from "nsh";
+
+const position = signal(0);
+const voice = new AudioPlayer("https://example.com/messages/42.m4a");
+voice.on("progress", ({ currentTime }) => position.set(currentTime));
+voice.on("end", () => position.set(0));
+await voice.play();
+```
+
+```rust
+use nsh_core::{audio::{AudioEvent, PlayerSettings}, prelude::*};
+
+async fn play_message(url: &str) {
+    let mut player = audio_player(url, PlayerSettings::default());
+    player.play();
+    while let Some(event) = player.next().await {
+        if event == AudioEvent::Ended {
+            break;
+        }
+    }
+}
+```
+
+### 格式
+
+音效和播放器播放平台能解码的格式。WAV 和 AAC（`.m4a`）在所有平台都能播放，适合音效；AAC 和 MP3 适合播放器。
+
+### 嵌入 NSH 的应用
+
+以自己的方式播放声音的宿主应用，给引擎一个 `AudioBackend`（`nsh_core::audio`，`EngineConfig::audio`）：它收到每条 `AudioCommand` 以及对应音效或播放器的 `AudioSink`，可以从任意线程向其报告。此时平台不播放任何声音。
+
+### 测试
+
+`nsh test` 在 headless 运行中把声音交给一个假扬声器：音效按 WAV 解码（时长取自文件头），播放器立即播放其源的一分钟，`app.endAudio()` 让正在播放的播放器播到结尾，`app.audio()` 列出应用发出的请求（`load`、`play`、`open`、`resume`、`seek` 等）。参见[测试](../docs/testing-and-trace.md)。
+
+> [!NOTE]
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，出声需要授权 `"audio": true`。未授权时 `Sound.load` 会 reject、`new AudioPlayer` 会抛出 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`、`permission` 为 `"audio"`、`resource` 为音源。Rust 中加载或播放器以 `not-allowed` 失败。参见[沙箱与 capability](../docs/sandbox-and-capabilities.md)。
 
 ## Storage
 
@@ -2194,13 +2441,14 @@ const keymap: {
 interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
+  passThrough?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat })` | `on_key_with(keystroke, KeyOptions { when, repeat }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2352,7 +2600,7 @@ keymap.bind("mod+e", archive, { when: "notEditing" });
 
 ### 运行哪个绑定
 
-触发了绑定的按键会被消耗：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后运行，Rust 在引擎线程上，TSX 在 JS 线程上。
+触发了绑定的按键会被消耗（设置了 `passThrough` 的绑定会让按键传下去，见下文）：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后运行，Rust 在引擎线程上，TSX 在 JS 线程上。
 
 按住一个键只触发一次绑定，直到松开为止；设置 `repeat: true` 后，每次自动重复都会再次触发（例如在列表中逐项移动）：
 
@@ -2362,6 +2610,16 @@ on_key_with("alt+down", KeyOptions { repeat: true, ..KeyOptions::default() }, mo
 
 ```tsx tabs
 keymap.bind("alt+down", nextItem, { repeat: true });
+```
+
+设置 `passThrough: true` 后，绑定照常运行，按键也照常传下去，就像没有绑定一样：Tab 仍会移动焦点，文本输入框仍会输入字符。弹出层要在 Tab 离开时关闭，就这样绑定 Tab，焦点随后移到下一个控件：
+
+```rust tabs
+on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, move |_| close());
+```
+
+```tsx tabs
+keymap.bind("tab", close, { passThrough: true });
 ```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
