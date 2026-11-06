@@ -499,7 +499,10 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
     const slogan = title.querySelector<HTMLElement>('.hero__slogan')!;
     const text = slogan.querySelector('span')!;
     const fit = () => {
+      // Measured free: a width left from a narrower window would hold the
+      // platforms to it as their type grows with the window, and wrap them.
       slogan.style.fontSize = '';
+      title.style.width = '';
       const width = h1.getBoundingClientRect().width;
       const natural = text.getBoundingClientRect().width;
       if (!width || !natural) return;
@@ -508,7 +511,8 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
       title.style.width = `${width}px`;
     };
     document.fonts.ready.then(fit);
-    new ResizeObserver(fit).observe(h1);
+    // The hero, not the title: the title's own width is the one fit sets.
+    new ResizeObserver(fit).observe(title.parentElement!);
   }
 
   // The live frames load when they come near the screen, in the page's theme,
