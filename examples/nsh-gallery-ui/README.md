@@ -9,6 +9,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `finishes.json` | Surface gradients, shadows and glass finishes used by NSH and HTML |
 | `theme.ts` | Reactive palette roles, finish accessors, radii, focus/hover feedback and motion |
 | `index.tsx` | Shared buttons, cards, insets, badges, rows, switches, sheets and presentation helpers |
+| `look/button.ts` | What a button looks like, spread on `nsh/base`'s `Button` (or a pressable `View`): `buttonLook` (kinds, sizes, the selected, hover, pressed, focus and disabled states, the press's native sink, a hit slop to 44 points on touch screens), `buttonLabel`, `buttonGlyph`, `buttonSizes`, and the icon-only and round buttons' `iconButtonLook` / `roundButtonLook`; the gallery's `Button`, `RoundButton` and icon buttons and the demos' `button()` use it |
 | `popup.tsx` | The popup families' one surface and their enter motion (`PopIn`, `createPresence` for tooltips), and `MenuMark` / `menuIndicator`: a checkable menu item's check or dot and the indicator part it follows |
 | `segmented.tsx` | The segmented control shared by the gallery and demo inspectors |
 | `icons.tsx` | The common line icon set, `IconLabel` (an icon-only control's icon, its short label as text in the terminal), and `CheckMark`: the check of checkboxes, selects and menus as an SVG image |
@@ -18,7 +19,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `tree.tsx` | A `Tree`'s rows: `treeItemClass` (hover, selected, focus and disabled feedback) and `TreeRow` (the chevron and folder that open with the row, the label indented by depth) |
 | `avatar.ts` | Avatars' identity colors (an OkLCH hue per name, as gpui-component's), offline SVG portraits and an image that never loads |
 | `slider.ts` | The slider's rail, gradient fill, pill thumb, value column and state feedback |
-| `palette.ts`, `demo.ts` | The documentation demos' palette adapter, button/field state helpers, and stage, inspector, panel and log components |
+| `palette.ts`, `demo.ts` | The documentation demos' palette adapter, `button()` / `buttonText()` (`buttonLook` with the demos' options), the field state helper, and stage, inspector, panel and log components |
 | `css.js` | CSS variables for the website, generated from the same theme and finish data |
 
 The gallery imports through `examples/gallery/ui.tsx`; that file keeps its navigation, sidebar state, branded
@@ -26,6 +27,8 @@ header and lazy demo loading. Website demos import through `website/demos/palett
 application state outside this layer while existing demo imports keep working.
 The website's Vite plugin consumes `css.js`; its page CSS aliases these variables rather than keeping another
 palette and another copy of the shared surface finishes.
+
+Shared looks live in `look/`, one plain `.ts` module per control family that imports only `../theme` and `nsh` / `nsh/*`, so the playground can include it. A look returns the props to spread on the `nsh/base` component (`style`, `hoverStyle`, `activeStyle`, `focusStyle`, `disabledStyle`, `hitSlop`), its colors getters that follow the theme; a state's border or fill goes after the finish it changes. Colors come from the theme's tokens and finishes: `website/tests/gallery-ui-colors.test.ts` rejects color literals in the looks and the demo adapters.
 
 Add or change a shared visual rule here. Keep layout, interaction and accessibility in `nsh/base`; colors, padding,
 borders, surfaces and state feedback belong here. Preserve a component's iconography when changing spacing or

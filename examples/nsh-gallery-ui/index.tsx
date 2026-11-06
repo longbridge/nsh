@@ -1,5 +1,5 @@
 import type { JSX, ViewStyle } from "nsh";
-import { effect, signal, Text, token, View } from "nsh";
+import { effect, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { type AnimatedValue, createAnimatedValue } from "nsh";
 import { platform } from "nsh";
@@ -8,9 +8,11 @@ import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/b
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
-import { alpha, colors, finish, focusRing, ghostFill, hovered, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints, toneColor, toneTint, type Tone, wholeRows } from "./theme";
+import { alpha, colors, finish, focusRing, isDark, mono, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
+import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type ButtonSize, roundButtonGlyph, roundButtonLook } from "./look/button";
 
 export * from "./theme";
+export * from "./look/button";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -421,50 +423,52 @@ export function Spinner(props: { size: number; tint: string }) {
   );
 }
 
-/** A button's heights and label sizes, by size: compact with a pointer, roomier on a touch screen. */
-const buttonSizes = pointer
-  ? { small: { height: 24, font: 12, icon: 12, pad: 8 }, regular: { height: 28, font: 13, icon: 14, pad: 12 }, large: { height: 34, font: 14, icon: 15, pad: 16 } }
-  : { small: { height: 36, font: 14, icon: 14, pad: 12 }, regular: { height: 40, font: 15, icon: 16, pad: 16 }, large: { height: 48, font: 17, icon: 18, pad: 20 } };
-
 /**
- * A button: 28 pt tall on a desktop, 40 on a touch screen (`small` 24 / 36,
- * `large` 34 / 48); one row, its label and no glyph in the terminal, which
- * brackets it. `primary` and `accent` are the citrus fill (the main
- * action), `secondary` a raised neutral, `ghost` bare until the pointer is
- * over it (in the terminal, `ghostFill`'s faint band), `danger` a
- * destructive action: the danger tone's tint, edge and text on the raised
- * finish's drop, as quiet as `secondary`. A `color`
- * fills it with that color instead. Under the pointer a raised button
- * lightens, pressed it sinks (an inner shade, and 3% smaller). `busy`
- * puts a spinner in the icon's place and takes no presses; a new icon or
- * the spinner grows in. Its width follows the label at once: a layout
- * animation would move every frame of the update, app-wide (a list
- * refreshing beside it too), so the motion stays on the glyph's own
- * opacity and scale.
+ * A button (`buttonLook`'s, on `nsh/base`'s `Button`): 28 pt tall on a
+ * desktop, 40 on a touch screen (`small` 24 / 36, `large` 34 / 48); one
+ * row, its label and no glyph in the terminal, which brackets it.
+ * `primary` and `accent` are the citrus fill (the main action),
+ * `secondary` a raised neutral, `ghost` bare until the pointer is over it
+ * (in the terminal, `ghostFill`'s faint band), `danger` a destructive
+ * action: the danger tone's tint, edge and text on the raised finish's
+ * drop, as quiet as `secondary`. Under the pointer a raised button
+ * lightens; pressed it sinks (an inner shade, and 3% smaller, natively:
+ * `activeStyle`). `busy` puts a spinner in the icon's place and takes no
+ * presses; a new icon or the spinner grows in. Its width follows the label
+ * at once: a layout animation would move every frame of the update,
+ * app-wide (a list refreshing beside it too), so the motion stays on the
+ * glyph's own opacity and scale.
  */
 export function Button(props: {
   label: string;
   /** What screen readers say, when the label is shorter (default `label`). */
   accessibilityLabel?: string;
   variant?: ButtonVariant;
-  color?: string;
   icon?: IconName;
   disabled?: boolean;
   /** Work started by it is going on: a spinner, no presses (not dimmed). */
   busy?: boolean;
   /** Grows to share a row with its siblings. */
   flex?: number;
-  size?: "small" | "regular" | "large";
+  size?: ButtonSize;
   /** Shown as chosen: what it opens is open (a menu's or a popover's
    * trigger), or it is on. A ghost button keeps the hover's `accent` fill, a
    * raised one its pressed look, a filled one its pressed shade. */
   selected?: boolean;
   onPress: () => void;
 }) {
-  const dims = () => buttonSizes[props.size ?? "regular"];
   // `nsh/base`'s Button gives the behavior (presses, disabled, the button
-  // role); the look below is the gallery's own.
-  const scale = createAnimatedValue(1);
+  // role); the look is `buttonLook`'s.
+  const options: ButtonLookOptions = {
+    size: () => props.size,
+    selected: () => props.selected,
+    disabled: () => props.disabled,
+    busy: () => props.busy,
+    style: () => (props.flex === undefined ? undefined : { flex: props.flex }),
+  };
+  const variant = () => props.variant ?? "primary";
+  const look = buttonLook(variant, options);
+  const glyphLook = buttonGlyph(variant, options);
   // The leading glyph (the icon, or the spinner while busy) grows in each
   // time it changes; at once with reduced motion.
   const glyph = createAnimatedValue(1);
@@ -477,73 +481,30 @@ export function Button(props: {
     glyph.set(0);
     glyph.spring(1, motion.control);
   });
-  const variant = () => props.variant ?? "primary";
-  const filled = () => !props.color && (variant() === "primary" || variant() === "accent");
-  const height = () => dims().height;
-  const danger = () => !props.color && variant() === "danger";
-  const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : danger() ? colors.danger : colors.text);
-  const look = (): ViewStyle =>
-    props.color
-      ? { backgroundColor: props.color, borderColor: "transparent", opacity: props.selected ? 0.88 : 1 }
-      : danger()
-        ? {
-            backgroundColor: props.selected ? alpha(colors.danger, 0.2) : tints.danger,
-            backgroundImage: "none",
-            borderColor: alpha(colors.danger, 0.32),
-            boxShadow: finish.raised.boxShadow,
-          }
-      : variant() === "ghost"
-        ? { backgroundColor: props.selected ? token("accent") : ghostFill(), borderColor: "transparent" }
-        : filled()
-          ? { ...finish.accent, opacity: props.selected ? 0.88 : 1 }
-          : props.selected
-            ? finish.pressed
-            : finish.raised;
   return (
     <BaseButton
       // Busy, it keeps its focus and its look and takes no second press.
       onPress={() => !props.busy && props.onPress()}
-      onPressDown={() => !props.busy && scale.spring(0.97, motion.press)}
-      onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       selected={props.selected}
-      hoverStyle={props.disabled || props.selected || props.busy ? undefined : props.color || filled() ? { opacity: 0.94 } : danger() ? { backgroundColor: alpha(colors.danger, 0.16) } : variant() === "ghost" ? hovered() : finish.hover}
-      activeStyle={props.disabled || props.busy ? undefined : props.color || filled() ? { opacity: 0.88 } : danger() ? { backgroundColor: alpha(colors.danger, 0.22), boxShadow: "none" } : finish.pressed}
-      focusStyle={focusRing()}
-      style={{
-        flex: props.flex,
-        height: terminal ? TERMINAL_ROW : height(),
-        paddingHorizontal: terminal ? TERMINAL_COLUMN : dims().pad,
-        borderRadius: radius.control,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: pointer ? 6 : 8,
-        opacity: props.disabled ? 0.4 : 1,
-        ...look(),
-        transform: [{ scale }],
-        transitionProperty: "background-color, border-color, box-shadow, opacity",
-        transitionDuration: 120,
-      }}
+      {...look}
     >
       <If when={(props.busy || props.icon) && !terminal}>
         <View style={{ opacity: glyph, transform: [{ scale: glyph.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }] }}>
-          <If when={props.busy} else={<Icon name={props.icon!} size={dims().icon} tint={fg()} />}>
-            <Spinner size={dims().icon} tint={fg()} />
+          <If when={props.busy} else={<Icon name={props.icon!} {...glyphLook} />}>
+            <Spinner {...glyphLook} />
           </If>
         </View>
       </If>
-      <Text style={{ fontSize: dims().font, fontWeight: "500", color: fg() }}>{props.label}</Text>
+      <Text style={buttonLabel(variant, options)}>{props.label}</Text>
     </BaseButton>
   );
 }
 
 /**
- * A round icon button; in the terminal a text button reading `title` (a
- * word or two), else `label`.
+ * A round icon button (`roundButtonLook`'s); in the terminal a text button
+ * reading `title` (a word or two), else `label`.
  */
 export function RoundButton(props: {
   icon: IconName;
@@ -566,29 +527,16 @@ export function RoundButton(props: {
       />
     );
   }
-  const size = props.size ?? (pointer ? 28 : 40);
-  const primary = () => (props.variant ?? "primary") === "primary";
+  const variant = props.variant ?? "primary";
   return (
-    <Press
+    <BaseButton
       onPress={props.onPress}
       disabled={props.disabled}
-      scale={0.92}
       accessibilityLabel={props.label}
-      hoverStyle={primary() ? { opacity: 0.94 } : finish.hover}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        ...(primary() ? finish.accent : finish.raised),
-        transitionProperty: "background-color, border-color, box-shadow, opacity",
-        transitionDuration: 120,
-      }}
+      {...roundButtonLook(variant, { size: props.size, disabled: () => props.disabled })}
     >
-      <Icon name={props.icon} size={size * 0.42} tint={primary() ? colors.onLight : colors.text} />
-    </Press>
+      <Icon name={props.icon} {...roundButtonGlyph(variant, props.size)} />
+    </BaseButton>
   );
 }
 

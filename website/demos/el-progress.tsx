@@ -51,7 +51,7 @@ function Action(props: { label: string; disabled?: boolean; onPress: () => void 
     <Button
       onPress={props.onPress}
       disabled={props.disabled}
-      {...button("secondary", { style: desktop ? {} : { flex: 1 } })}
+      {...button("secondary", { disabled: () => !!props.disabled, style: desktop ? {} : { flex: 1 } })}
     >
       <Text style={buttonText()}>{props.label}</Text>
     </Button>
