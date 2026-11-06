@@ -137,6 +137,24 @@ pub struct TestEnvironment {
     /// The locale, a BCP 47 tag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
+    /// The time zone, an IANA name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
+    /// The preferred languages, BCP 47 tags, most preferred first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<String>>,
+    /// The hour cycle, as `Intl` names it (`h23`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hour_cycle: Option<String>,
+    /// The first day of the week: 1 for Monday to 7 for Sunday.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_day_of_week: Option<u8>,
+    /// The measurement system: `metric`, `us` or `uk`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_system: Option<String>,
+    /// The temperature unit: `celsius` or `fahrenheit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature_unit: Option<String>,
     /// Whether the user asked for less motion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reduced_motion: Option<bool>,

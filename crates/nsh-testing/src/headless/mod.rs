@@ -1400,6 +1400,21 @@ impl Headless {
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        // A real finger lands where the view is drawn: a view drawn over it
+        // there takes the press, so the step fails as the user would.
+        if let Some(target) = self.screen.bounds_in_root(id) {
+            let point = self
+                .screen
+                .press_point(&parsed, id)
+                .map_or(target.center(), |p| target.origin + p);
+            if let Some(cover) = self.screen.covering(id, point) {
+                return Err(format!(
+                    "{}; {}",
+                    failure::covered(selector, &self.screen.selector_of(cover)),
+                    self.on_screen()
+                ));
+            }
+        }
         let at = self
             .screen
             .canvas_node(&parsed)
@@ -2699,6 +2714,85 @@ mod tests {
         app.press("id:chart").unwrap();
         app.wait_for("Opens 1 presses 1 steps 1 focused false")
             .unwrap();
+    }
+
+    /// A list of 200 rows of its own, each a button showing its row.
+    #[component]
+    fn LongList() -> impl IntoElement {
+        virtual_list(200, |at| {
+            view()
+                .h(px(40.0))
+                .on_press(|| {})
+                .child(text(move || format!("Row {}", at.index())))
+        })
+        .test_id("list")
+        .estimated_item_size(px(40.0))
+        .flex_1()
+    }
+
+    /// Scrolled back and forth, a list's cells are recycled out of the order
+    /// they were made in: what reads the screen, Tab and `nth=` still find
+    /// its rows in the order they show.
+    #[test]
+    fn a_lists_recycled_rows_are_found_in_screen_order() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<LongList>())).unwrap();
+        app.first_render().unwrap();
+        for distance in [
+            300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
+        ] {
+            app.scroll("id:list", px(distance)).unwrap();
+        }
+        let rows: Vec<u32> = app
+            .screen()
+            .texts()
+            .iter()
+            .filter_map(|t| t.strip_prefix("Row ")?.parse().ok())
+            .collect();
+        assert!(rows.len() > 10, "{rows:?}");
+        assert!(rows.windows(2).all(|w| w[1] == w[0] + 1), "{rows:?}");
+        // Tab's stops are the rows' buttons, in the same order.
+        assert_eq!(app.screen().tab_stops().len(), rows.len());
+    }
+
+    /// A page: a header and a list of 200 rows in the page's viewport.
+    #[component]
+    fn LongPage() -> impl IntoElement {
+        scroll()
+            .test_id("page")
+            .flex_1()
+            .child(text("Header").h(px(120.0)))
+            .child(
+                virtual_list(200, |at| {
+                    view()
+                        .h(px(40.0))
+                        .on_press(|| {})
+                        .child(text(move || format!("Row {}", at.index())))
+                })
+                .viewport(nsh_core::ListViewport::Parent)
+                .estimated_item_size(px(40.0)),
+            )
+    }
+
+    /// The same for a list in its parent's viewport: a plain view in the
+    /// page, its cells read in screen order all the same.
+    #[test]
+    fn a_page_lists_recycled_rows_are_found_in_screen_order() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<LongPage>())).unwrap();
+        app.first_render().unwrap();
+        for distance in [
+            300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
+        ] {
+            app.scroll("id:page", px(distance)).unwrap();
+        }
+        let rows: Vec<u32> = app
+            .screen()
+            .texts()
+            .iter()
+            .filter_map(|t| t.strip_prefix("Row ")?.parse().ok())
+            .collect();
+        assert!(rows.len() > 10, "{rows:?}");
+        assert!(rows.windows(2).all(|w| w[1] == w[0] + 1), "{rows:?}");
+        assert_eq!(app.screen().tab_stops().len(), rows.len());
     }
 
     #[cfg(feature = "js")]

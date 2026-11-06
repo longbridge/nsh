@@ -4,7 +4,7 @@
 // sized to it and two columns from the next.
 import { Text, View } from "nsh";
 import { Button as BaseButton, Toggle as BaseToggle, ToggleGroup as BaseToggleGroup } from "nsh/base";
-import { colors, finish, focusRing, ghostFill, terminal, TERMINAL_GAP } from "../ui";
+import { colors, focusRing, ghostFill, terminal, TERMINAL_GAP, toggleGlyph, toggleLabel, toggleLook } from "../ui";
 import { LucideIcon, type LucideIconName } from "../icons";
 
 export { LucideIcon, type LucideIconName } from "../icons";
@@ -39,6 +39,8 @@ export function ToggleGroup<T extends string>(props: {
       <Each of={props.items}>
         {(item) => {
           const pressed = () => props.value.includes(item().value);
+          // The toggles' shared look: bare while off, `finish.on` while pressed.
+          const look = { disabled: () => item().disabled };
           return (
             <View tooltip={item().label}>
               <BaseToggle
@@ -46,20 +48,10 @@ export function ToggleGroup<T extends string>(props: {
                 disabled={item().disabled}
                 accessibilityLabel={item().label}
                 onChange={({ pressed: next }) => props.onToggle(item().value, next)}
-                hoverStyle={item().disabled || pressed() ? undefined : { backgroundColor: colors.raised }}
-                focusStyle={focusRing(1)}
-                style={{
-                  width: terminal ? undefined : 30,
-                  height: terminal ? undefined : 28,
-                  borderRadius: 7,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: item().disabled ? 0.35 : 1,
-                  ...(pressed() ? { ...finish.pill, borderWidth: 1 } : { borderWidth: 1, borderColor: "transparent" }),
-                }}
+                {...toggleLook(look)}
               >
-                <If when={terminal} else={<LucideIcon name={item().icon} size={16} tint={pressed() ? colors.text : colors.muted} />}>
-                  <Text style={{ color: pressed() ? colors.text : colors.muted }}>{item().short ?? item().label}</Text>
+                <If when={terminal} else={<LucideIcon name={item().icon} {...toggleGlyph(pressed, look)} />}>
+                  <Text style={toggleLabel(pressed, look)}>{item().short ?? item().label}</Text>
                 </If>
               </BaseToggle>
             </View>

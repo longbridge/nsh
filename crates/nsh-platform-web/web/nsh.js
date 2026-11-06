@@ -90,6 +90,9 @@ const SLIDE_MS = 300;
 const FADE_MS = 200;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
+// Browsers that order Tab and screen readers by `reading-order`
+// (`orderReading`); the others keep the DOM's order.
+const READING_ORDER = typeof CSS !== "undefined" && !!CSS.supports?.("reading-flow", "source-order");
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
 /** How long after something animated comes due a timer makes it happen
@@ -375,6 +378,26 @@ function localOffset(ms) {
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+}
+
+/**
+ * What the browser knows of the regional preferences of `locale`
+ * (`localeSettings()`'s `hourCycle` and the like): its hour cycle and first day of the week,
+ * and the locale with its likely region (`de` is `de-Latn-DE`), which has
+ * the others. Browsers tell no user settings of them.
+ */
+function regional(locale) {
+  const known = { locale };
+  try {
+    const l = new Intl.Locale(locale);
+    known.locale = l.maximize().toString();
+    // `weekInfo` before browsers made it `getWeekInfo()`.
+    known.firstDay = (l.getWeekInfo?.() ?? l.weekInfo)?.firstDay;
+    known.hourCycle = new Intl.DateTimeFormat(locale, { hour: "numeric" }).resolvedOptions().hourCycle;
+  } catch {
+    // A tag the browser does not take: the region's.
+  }
+  return known;
 }
 
 /**
@@ -856,6 +879,9 @@ class Player {
     this.appearing = [];
     this.disappearing = [];
     this.changedStacks = new Set();
+    // Scroll views (or their content layers) whose content the batch
+    // placed or added to (`orderReading`).
+    this.readingHosts = new Set();
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
@@ -1751,7 +1777,8 @@ class Player {
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
     // `lifecycle()`: hidden (another tab, a minimized window) or without
-    // the focus.
+    // the focus. The time zone (`localeSettings()`) is read again then too: browsers tell no
+    // change of the system's zone, which the user makes away from the page.
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
     addEventListener("blur", changed);
@@ -1799,6 +1826,10 @@ class Player {
     return {
       idiom: this.idiom,
       locale,
+      // The browser's preferred languages (`localeSettings()`), the locale's
+      // first; `languagechange` tells their changes.
+      languages: [...new Set([locale, ...languages.filter(Boolean)])],
+      regional: regional(locale),
       rtl: dir === "rtl" || dir === "ltr" ? dir === "rtl" : rightToLeft(locale),
       reduceMotion: this.reducedMotion.matches,
       fontScale: Math.round(fontSize / 16 * 100) / 100,
@@ -1810,6 +1841,7 @@ class Player {
       lifecycle: document.visibilityState === "hidden"
         ? "background"
         : document.hasFocus() ? "active" : "inactive",
+      timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
@@ -1886,6 +1918,16 @@ class Player {
     box.replaceChildren(copy, message);
   }
 
+  /** Loads `img` from `src`, the address of `uri`: an app's asset from
+   * another origin (a packaged site's `--asset-url`) as a CORS image, so a
+   * canvas and a transition's snapshot may still draw it. */
+  setImageSource(img, uri, src) {
+    const asset = uri?.startsWith("asset:/") && new URL(src, location.href).origin !== location.origin;
+    if (asset) img.crossOrigin = "anonymous";
+    else img.removeAttribute("crossorigin");
+    img.src = src;
+  }
+
   asset(uri) {
     if (!uri) return uri;
     if (uri.startsWith("asset:/")) {
@@ -1906,6 +1948,43 @@ class Player {
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
+    if (this.readingHosts?.size) this.orderReading();
+  }
+
+  /** `el` was placed or added in `parent`: when that is a scroll view's
+   * content, its reading order is set again after the batch. */
+  readingChanged(parent) {
+    if (!READING_ORDER || !parent) return;
+    // A sticky cell is in a track among the other cells.
+    const host = parent._list ? parent.parentNode : parent;
+    if (host && (host._kind === "scroll" || host._screenOrder || host.classList.contains("nsh-layer"))) (this.readingHosts ??= new Set()).add(host);
+  }
+
+  /** Tab and screen readers go through a scroll view's content in the
+   * order it is on screen, along the scroll axis, then across it, as on
+   * the other platforms. A list's recycled cells stay where they were
+   * made in the DOM, which is also the order they paint in, so the DOM is
+   * not in their rows' order: `reading-order` gives the rows' order
+   * without moving them (a move would blur a focused field, restart
+   * animations and reload frames inside them). */
+  orderReading() {
+    for (const host of this.readingHosts) {
+      const scroll = host._kind === "scroll" || host._screenOrder ? host : host.parentNode;
+      const horizontal = scroll?._screenOrder ? scroll._screenOrder === "horizontal" : !!scroll?._horizontal;
+      const kids = [];
+      for (const child of host.children) {
+        const f = (child._list ? child.firstElementChild : child)?._frame;
+        if (f && (child._id !== undefined || child._list)) kids.push(horizontal ? [f[0], f[1], child] : [f[1], f[0], child]);
+      }
+      kids.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      if (host.style.readingFlow !== "source-order") host.style.readingFlow = "source-order";
+      kids.forEach(([, , child], i) => {
+        if (child._readingOrder === i) return;
+        child._readingOrder = i;
+        child.style.readingOrder = String(i);
+      });
+    }
+    this.readingHosts.clear();
   }
 
   /** The batch is applied: views it removed leave the page, unless they
@@ -2010,6 +2089,7 @@ class Player {
     child._leftWith = null;
     const host = parent._layer ?? parent;
     host.insertBefore(child, before && before.parentNode === host ? before : null);
+    this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
@@ -2093,8 +2173,13 @@ class Player {
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
     const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
+    // A stack laid out at no size (`display: none`: a tab not selected) or
+    // at one again changes whether it shows (`stackShown`).
+    const emptied = el._kind === "stack" && el._frame && !(el._frame[2] > 0 && el._frame[3] > 0) !== !(w > 0 && h > 0);
     el._frame = [x, y, w, h];
+    if (emptied) this.syncHistorySoon();
     this.placeFrame(el);
+    this.readingChanged(el.parentNode);
     if (resized && el._corners) this.placeCorners(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
       const box = (f) => ({ left: `${f[0]}px`, top: `${f[1]}px`, width: `${f[2]}px`, height: `${f[3]}px` });
@@ -2391,6 +2476,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._props = props;
+    // A list in its parent's viewport: its cells are read in screen order.
+    if (el._screenOrder !== props.screenOrder) {
+      el._screenOrder = props.screenOrder;
+      this.readingChanged(el);
+    }
     if (props.testID) el.dataset.testid = props.testID;
     else delete el.dataset.testid;
     const pe = props.pointerEvents;
@@ -2657,7 +2747,7 @@ class Player {
     if (el._ph) {
       el._ph.className = el._imgClass + (el._ph.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
       if (ph) {
-        if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
+        if (el._ph.getAttribute("src") !== ph) this.setImageSource(el._ph, placeholder, ph);
       } else {
         el._ph.remove();
         el._ph = null;
@@ -2677,7 +2767,7 @@ class Player {
     // Shown when it loaded: faded in over the placeholder, or at once.
     img.style.transition = "";
     img.style.opacity = fade > 0 ? "0" : "";
-    img.src = src;
+    this.setImageSource(img, uri, src);
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
@@ -3846,6 +3936,7 @@ class Player {
         host.insertBefore(track, cell.parentNode === host ? cell : null);
         track.append(cell);
         cell._track = track;
+        this.readingChanged(host);
         tracks.set(cellId, cell);
       }
       cell._range = range;
@@ -3864,6 +3955,7 @@ class Player {
     if (cell.parentNode === track) track.replaceWith(cell);
     else track.remove();
     this.placeFrame(cell);
+    this.readingChanged(cell.parentNode);
   }
 
   /** Where the views around `track` (up to its scroll view) put it in the
@@ -3916,11 +4008,10 @@ class Player {
   // the desktop backends.
 
   /** Whether `el` has a bar: a scroll view along one axis with its
-   * indicator, and horizontal ones always (a mouse without a horizontal
-   * wheel has no other way to move them, as mouse drags do not scroll),
-   * unless a built-in bar of the app's takes their place. */
+   * indicator, on either axis, unless a built-in bar of the app's takes
+   * its place. */
   barShown(el) {
-    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || (el._horizontal && !el._replaced));
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator && !el._replaced);
   }
 
   /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
@@ -4471,7 +4562,7 @@ class Player {
         entry.ready = true;
         for (const w of entry.waiting) this.drawSoon(w);
       };
-      img.src = src;
+      this.setImageSource(img, uri, src);
       this.images.set(src, entry);
     }
     if (!entry.ready) entry.waiting.add(el);
@@ -4913,13 +5004,27 @@ class Player {
     return modals[modals.length - 1] ?? null;
   }
 
+  /** Whether stack `el` shows: in the tree, visible, and laid out with a
+   * size, as the views around it. `display: none` (a tab not selected) is
+   * laid out by the core at zero size, which the browser's
+   * `checkVisibility` does not see. */
+  stackShown(el) {
+    if (!el.isConnected || !(el.checkVisibility?.({ visibilityProperty: true }) ?? true)) return false;
+    // It and the views around it: a page of a stack laid out at no size is
+    // laid out at its stack's.
+    for (let view = el; view && view !== this.root; view = view.parentElement) {
+      const frame = view._frame;
+      if (frame && !(frame[2] > 0 && frame[3] > 0)) return false;
+    }
+    return true;
+  }
+
   /** The innermost shown stack (inside `within`, else anywhere) that goes
    * back: it has a screen under the top one, or a top one that asks. */
   backStack(within) {
-    const shown = (el) => el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true);
     const candidates = [];
     for (const el of this.views.values()) {
-      if (el._kind !== "stack" || !shown(el) || (within && !within.contains(el))) continue;
+      if (el._kind !== "stack" || !this.stackShown(el) || (within && !within.contains(el))) continue;
       const screens = this.screensOf(el);
       if (screens.length > 1 || screens[screens.length - 1]?._screen?.preventBack) candidates.push(el);
     }
@@ -4988,7 +5093,7 @@ class Player {
   backDepth() {
     let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
     for (const el of this.views.values()) {
-      if (el._kind === "stack" && el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true)) {
+      if (el._kind === "stack" && this.stackShown(el)) {
         depth += Math.max(0, this.screensOf(el).length - 1);
       }
     }
@@ -5597,7 +5702,7 @@ class Player {
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
-      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3]); break;
+      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
@@ -6023,11 +6128,11 @@ class Player {
 
   // `Notifications.show`: replaces the one of the same id (`tag`). Android's
   // browsers have the class but throw: only a service worker shows there.
-  showNotification(request, id, title, body) {
+  showNotification(request, id, title, body, silent) {
     let shown = false;
     if (window.Notification.permission === "granted") {
       try {
-        const notification = new window.Notification(title, { body, tag: id });
+        const notification = new window.Notification(title, { body, tag: id, silent });
         notification.onclick = () => {
           window.focus();
           notification.close();
@@ -6279,7 +6384,7 @@ class Player {
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
     img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ error: `failed to load ${uri}` });
-    img.src = this.asset(uri);
+    this.setImageSource(img, uri, this.asset(uri));
   }
 
   // Network -------------------------------------------------------------

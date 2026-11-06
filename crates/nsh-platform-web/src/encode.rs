@@ -830,6 +830,12 @@ fn props_json(p: &ViewProps) -> String {
     if p.continues_text {
         s.push_str(",\"continuesText\":true");
     }
+    // A list in its parent's viewport: its cells are read in screen order.
+    match p.screen_order {
+        Some(nsh_core::geometry::Axis::Vertical) => s.push_str(",\"screenOrder\":\"vertical\""),
+        Some(nsh_core::geometry::Axis::Horizontal) => s.push_str(",\"screenOrder\":\"horizontal\""),
+        None => {}
+    }
     s.push('}');
     s
 }
@@ -1485,6 +1491,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str(&notification.id)
                     .str(&notification.title)
                     .str(&notification.body)
+                    .bool(notification.silent)
                     .end(),
                 N::Close(name) => out
                     .item("cmd")

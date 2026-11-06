@@ -325,8 +325,13 @@ fn toast_xml(notification: &Notification) -> String {
     if !notification.body.is_empty() {
         lines += &format!("<text>{}</text>", escape(&notification.body));
     }
+    let audio = if notification.silent {
+        "<audio silent=\"true\"/>"
+    } else {
+        ""
+    };
     format!(
-        "<toast launch=\"{}\"><visual><binding template=\"ToastGeneric\">{lines}</binding></visual></toast>",
+        "<toast launch=\"{}\"><visual><binding template=\"ToastGeneric\">{lines}</binding></visual>{audio}</toast>",
         hex(&notification.id)
     )
 }
@@ -665,11 +670,26 @@ mod tests {
     }
 
     #[test]
+    fn a_silent_toast_plays_no_sound() {
+        let xml = toast_xml(&Notification::new("a", "T", "").silent(true));
+        assert!(
+            xml.ends_with("</visual><audio silent=\"true\"/></toast>"),
+            "{xml}"
+        );
+        assert!(!toast_xml(&Notification::new("a", "T", "")).contains("<audio"));
+    }
+
+    #[test]
     fn the_toast_loads_in_the_system_parser() {
-        let xml = toast_xml(&Notification::new("chat:\"42\"\n", "<T> & \u{1}", "B\n"));
-        let document = XmlDocument::new().unwrap();
-        document.LoadXml(&HSTRING::from(xml)).unwrap();
-        ToastNotification::CreateToastNotification(&document).unwrap();
+        for silent in [false, true] {
+            let notification =
+                Notification::new("chat:\"42\"\n", "<T> & \u{1}", "B\n").silent(silent);
+            let document = XmlDocument::new().unwrap();
+            document
+                .LoadXml(&HSTRING::from(toast_xml(&notification)))
+                .unwrap();
+            ToastNotification::CreateToastNotification(&document).unwrap();
+        }
     }
 
     #[test]
