@@ -44,7 +44,7 @@ function App() {
 
   const action = (label: string, onPress: () => void, primary?: boolean) => (
     <View onPress={onPress} role="button" accessibilityLabel={label} {...button(primary ? "accent" : "secondary", { size: "sm" })}>
-      <Text style={buttonText(primary ? "accent" : "secondary")}>{label}</Text>
+      <Text style={buttonText(primary ? "accent" : "secondary", { size: "sm" })}>{label}</Text>
     </View>
   );
 
@@ -74,7 +74,7 @@ function App() {
                   role="button"
                   {...button("secondary", { size: "sm" })}
                 >
-                  <Text style={buttonText()}>Reset</Text>
+                  <Text style={buttonText("secondary", { size: "sm" })}>Reset</Text>
                 </View>
               </View>
             </Panel>

@@ -28,7 +28,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Lifecycle, Locale, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Os},
     time::Instant,
 };
 
@@ -75,6 +75,7 @@ struct EnvSignals {
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
 }
@@ -103,6 +104,7 @@ impl EnvSignals {
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
             }
@@ -203,7 +205,7 @@ fn env<T: Clone + 'static>(part: impl FnOnce(&EnvSignals) -> Memo<T>) -> T {
         .get()
 }
 
-fn executor() -> Rc<Executor> {
+pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
@@ -290,6 +292,23 @@ pub fn round_to_nearest_pixel(points: Points) -> Points {
 /// The user's locale (TS: what `Intl` formats for by default).
 pub fn locale() -> Locale {
     env(|e| e.locale)
+}
+
+/// The user's locale settings (TS: `localeSettings()`): the preferred
+/// languages, most preferred first (the app shows its text in the first it
+/// has, the others are its fallbacks; an embedding app's own language comes
+/// first), the device's time zone as the system names it
+/// (`Europe/Berlin`), and the regional preferences: 12- or 24-hour time,
+/// the first day of the week, the measurement system and the temperature
+/// unit, each the system's setting, else the region's. Reading it
+/// subscribes, so what shows them follows the user's settings and travels;
+/// a `computed` of one of them changes only with it. `nsh_base`'s
+/// `TimeField` and `DatePicker` take their `HourCycle::H12` where
+/// [`HourCycle::twelve_hour`](crate::platform::HourCycle::twelve_hour),
+/// else `H23`; its `Calendar` and `DatePicker` count their
+/// `first_day_of_week` from 0 for Sunday: pass `number() % 7`.
+pub fn locale_settings() -> LocaleSettings {
+    env(|e| e.locale_settings)
 }
 
 /// Whether the app is in use: in the foreground, visible without the

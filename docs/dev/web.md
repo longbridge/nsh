@@ -138,7 +138,12 @@ build to the same file) and takes `nsh.js` from the crate.
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
-  (`document.baseURI`, `nsh_set_base_url`). The app ships as minified ES modules
+  (`document.baseURI`, `nsh_set_base_url`); the page's script resolves its `app` URLs against it as it starts (and
+  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root
+  in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
+  added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
+  (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
+  (the dev server serves its files at the root). The app ships as minified ES modules
   (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening
@@ -390,13 +395,15 @@ browserslist queries). `nsh.js` gives every import it does not know a stub that 
 ## The environment
 
 `nsh.js` reports what the page knows with `nsh_environment(json)` before the app starts and whenever it changes (only
-when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `lifecycle` (`background` while
-`document.visibilityState` is `hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`,
-else the locale's script), `reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea`
-(`env(safe-area-inset-*)` read through a hidden probe element, clipped to the container) and `keyboard` (the
-container's part below `visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the
-window keep their own calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners,
-`languagechange`, `visibilitychange`, `focus`, `blur`, `visualViewport`, `resize` and a mutation observer on
+when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `languages` (`navigator.languages`, the locale
+first), `regional` (the locale's hour cycle and first day of the week from `Intl`, the rest the region's), `timeZone`
+(`Intl.DateTimeFormat().resolvedOptions().timeZone`), `lifecycle` (`background` while `document.visibilityState` is
+`hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`, else the locale's script),
+`reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read through a
+hidden probe element, clipped to the container) and `keyboard` (the container's part below `visualViewport`). The Rust
+side keeps it (`PAGE`) for the next start; the appearance and the window keep their own calls (`nsh_set_dark`,
+`nsh_resize`). Changes come from media query listeners, `languagechange`, `visibilitychange`, `focus` and `blur` (the
+time zone is read again then: browsers report no change of it), `visualViewport`, `resize` and a mutation observer on
 `<html dir lang>`.
 
 The app's side, `browser/environment.js`, gets the engine's environment (`Host::set_environment`,
@@ -617,7 +624,10 @@ browsers' touches into what phones report:
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a
-  stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), and
+  stop is blurred), so Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
+  `screenOrder`): where the browser takes
+  `reading-flow` (Chromium), it is read in the order it is on screen (`orderReading`: `reading-order` on its children,
+  the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`:focus-visible`), and
   they are all that shows it: as the desktop backends, the runtime draws no ring of its own; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
   text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest

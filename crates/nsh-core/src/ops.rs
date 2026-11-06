@@ -254,6 +254,7 @@ events! {
     Download = "onDownload": "A web view's download started, finished or failed (payload: `state`, `id`, `url`, `filename`, `path`; `bytes` once finished, `message` when it failed).",
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
+    Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
 
 }
 
@@ -859,6 +860,14 @@ pub enum EventPayload {
         id: u32,
         /// What it reported.
         event: crate::speech::SpeechEvent,
+    },
+    /// What a sound or a player reported ([`EventKind::Audio`],
+    /// [`crate::audio`]).
+    Audio {
+        /// The sound or player ([`crate::audio::AudioCommand::id`]).
+        id: u32,
+        /// What it reported.
+        event: crate::audio::AudioEvent,
     },
     /// The answer to a [`Command::FileRequest`] ([`EventKind::FileRequest`],
     /// [`crate::file_dialog`]).
@@ -2010,6 +2019,12 @@ pub enum Command {
     /// [`EventKind::Speech`] ([`EventPayload::Speech`]). Sent only on
     /// platforms whose [`crate::platform::Environment::speech`] is set.
     Speech(crate::speech::SpeechCommand),
+    /// Load, play and free sounds, open and drive players (on the root;
+    /// `Sound` and `AudioPlayer` of `nsh`, [`crate::audio`]) and report
+    /// what happens as [`EventKind::Audio`] ([`EventPayload::Audio`]). Sent
+    /// only on platforms whose [`crate::platform::Environment::audio`] is
+    /// set.
+    Audio(crate::audio::AudioCommand),
     /// Show a notification, ask for the permission, set the app's badge
     /// (on the root; `Notifications` of `nsh`, [`crate::notifications`]).
     Notification(crate::notifications::NotificationCommand),
@@ -2286,8 +2301,7 @@ pub enum Prop {
     Scroll(ScrollProp),
     /// `scrollbar`: the scroll indicator shows (default true), or the
     /// app's built-in bar of a theme (an object, `nsh/base`'s
-    /// `ScrollbarTheme`). On the desktop a horizontal view keeps it: it is
-    /// the mouse's scroll bar. A multiline input's is its text's.
+    /// `ScrollbarTheme`). A multiline input's is its text's.
     #[prop(js = "scrollbar", with = crate::js::host_values::scrollbar, reset = Prop::Scrollbar(ScrollbarSetting::Shown), ts = "boolean | import(\"nsh/base\").ScrollbarTheme", on = SCROLL | LIST | INPUT)]
     Scrollbar(ScrollbarSetting),
     /// `refreshing`: the pull-to-refresh spinner shows.

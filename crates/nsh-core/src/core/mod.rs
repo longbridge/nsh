@@ -798,6 +798,13 @@ impl Node {
         if self.spare {
             props.accessibility.hidden = true;
         }
+        if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
+            props.screen_order = Some(if list.horizontal {
+                crate::geometry::Axis::Horizontal
+            } else {
+                crate::geometry::Axis::Vertical
+            });
+        }
         props
     }
 
@@ -1246,6 +1253,8 @@ pub struct Core<M: TextEngine> {
     /// Recognizes the app's speech in place of the platform
     /// ([`Core::set_speech`]).
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
+    /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
+    audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1307,6 +1316,7 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             speech: None,
+            audio: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1532,6 +1542,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's (`None`: the platform's, the default).
     pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
         self.speech = backend;
+    }
+
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
+    /// embedding app's own audio stack or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
+        self.audio = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -4066,6 +4083,8 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.sync_spacer(key, true);
                         self.outer_moved = true;
+                        // Its children are read along the new axis.
+                        flags |= dirty::VIEW_PROPS;
                     }
                 }
             }
@@ -5572,7 +5591,7 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare {
+        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {

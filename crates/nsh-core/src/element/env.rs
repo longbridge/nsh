@@ -3,7 +3,7 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{Idiom, Lifecycle, Locale, Os},
+    platform::{Idiom, Lifecycle, Locale, LocaleSettings, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
@@ -41,6 +41,9 @@ pub struct Environment {
     pub idiom: Idiom,
     /// The user's locale, for formatting numbers and dates.
     pub locale: Locale,
+    /// The user's locale settings: the preferred languages, the time zone
+    /// and the regional preferences.
+    pub locale_settings: LocaleSettings,
     /// In a browser, it runs on an Apple platform: shortcuts follow Apple's
     /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
     /// theirs.
@@ -66,6 +69,9 @@ pub struct Environment {
     /// The platform shows notifications
     /// ([`crate::platform::Environment::notifications`]).
     pub notifications: bool,
+    /// The platform plays sound
+    /// ([`crate::platform::Environment::audio`]).
+    pub audio: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -93,6 +99,7 @@ impl Default for Environment {
             os_version: (0, 0),
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
+            locale_settings: LocaleSettings::default(),
             apple_keyboard: false,
             ctrl_for_command: false,
             host: false,
@@ -101,6 +108,7 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             notifications: false,
+            audio: false,
             cell: None,
             web_input: false,
         }

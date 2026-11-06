@@ -21685,6 +21685,58 @@ fn scroll_content(batch: &MountBatch, id: NodeId) -> Option<f32> {
     })
 }
 
+/// A list in its parent's viewport is a plain view: its props tell the
+/// platforms to read its recycled cells in screen order, along its axis.
+/// A list of its own is a scroll view, read so already.
+#[test]
+fn a_list_in_its_parents_viewport_is_read_in_screen_order() {
+    let screen_order = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id: i, props } if *i == id => Some(props.screen_order),
+            _ => None,
+        })
+    };
+    let mut c = core();
+    page(&mut c, 100.0, &[100]);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 20,
+                tag: Tag::List,
+            },
+            Op::SetProp {
+                id: 20,
+                prop: Prop::Count(10),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 20,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        screen_order(&batch, 4),
+        Some(Some(crate::geometry::Axis::Vertical))
+    );
+    assert_eq!(screen_order(&batch, 20).flatten(), None);
+    // A horizontal one is read along its axis.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Horizontal(true),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        screen_order(&batch, 4),
+        Some(Some(crate::geometry::Axis::Horizontal))
+    );
+}
+
 #[test]
 fn a_list_below_a_header_renders_the_rows_in_the_pages_viewport() {
     let mut c = core();
@@ -22317,6 +22369,28 @@ fn render_lists_binds(
     }
 }
 
+/// Stacks the children of view `parent` as `batch` inserts and removes
+/// them (`stacked`, bottom to top).
+fn stack_children(stacked: &mut Vec<NodeId>, parent: NodeId, batch: Option<&MountBatch>) {
+    for item in batch.iter().flat_map(|b| &b.items) {
+        match *item {
+            MountItem::Insert {
+                parent: p,
+                child,
+                before,
+            } if p == parent => {
+                stacked.retain(|&v| v != child);
+                let at = before
+                    .and_then(|b| stacked.iter().position(|&v| v == b))
+                    .unwrap_or(stacked.len());
+                stacked.insert(at, child);
+            }
+            MountItem::Remove { id } => stacked.retain(|&v| v != id),
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     let mut c = core();
@@ -22330,10 +22404,13 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         })
         .unwrap();
     }
-    c.commit();
+    // The second list's views, bottom to top, as the batches stack them.
+    let mut stacked = Vec::new();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     // The page's scroll view pins them, in its offsets: the first list's
     // row 0 from 100 until row 10 pushes it out, row 10 from 600 until its
     // bottom meets the list's end (1100).
@@ -22351,9 +22428,10 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     // The second list's rows are not bound yet (it starts at 1100, past
     // the window); scrolled there, its row 0 joins, from 1100.
     c.set_scroll_offset(2, point(px(0.0), px(1200.0)), 0);
-    c.commit();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     let pinned = sticky_of(&batch, 2).expect("the page's sticky cells");
     assert!(
         pinned.contains(&(cells[&5][bound_slot(&c, 5, 0) as usize], 1100.0, 1550.0)),
@@ -22363,11 +22441,14 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         pinned.contains(&(cells[&4][bound_slot(&c, 4, 10) as usize], 600.0, 1050.0)),
         "{pinned:?}"
     );
-    // A sticky cell goes on top of its list's other cells.
-    assert!(batch.items.iter().any(|i| matches!(
-        i,
-        MountItem::Insert { parent: 5, child, before: None } if *child == cells[&5][bound_slot(&c, 5, 0) as usize]
-    )));
+    // A sticky cell goes on top of its list's other cells: only sticky
+    // cells are above it.
+    let sticky = [0, 10].map(|i| cells[&5][bound_slot(&c, 5, i) as usize]);
+    let at = stacked.iter().position(|&v| v == sticky[0]).unwrap();
+    assert!(
+        stacked[at + 1..].iter().all(|v| sticky.contains(v)),
+        "{stacked:?}"
+    );
     // The first list leaves the page: its cells leave the page's set, and
     // the second list's move up with it (it now starts at 100).
     c.apply(Op::Remove {
@@ -29717,6 +29798,369 @@ fn a_bad_page_shader_keeps_its_error() {
         "its error kept"
     );
     assert_eq!(c.shaders.len(), 1);
+}
+
+mod audio {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use super::*;
+    use crate::{
+        audio::{AudioBackend, AudioCommand, AudioEvent, AudioSink, MAX_DECODED_BYTES},
+        prelude::*,
+    };
+
+    /// What the fake decodes a sound as.
+    struct Decodes {
+        duration: Duration,
+        bytes: u64,
+        truncated: bool,
+    }
+
+    /// Plays in place of the platform: records what it is asked.
+    struct FakeAudio {
+        log: Mutex<Vec<String>>,
+        decodes: Mutex<Decodes>,
+    }
+
+    impl FakeAudio {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                log: Mutex::default(),
+                decodes: Mutex::new(Decodes {
+                    duration: Duration::from_millis(400),
+                    bytes: 70_000,
+                    truncated: false,
+                }),
+            })
+        }
+
+        fn log(&self) -> Vec<String> {
+            self.log.lock().unwrap().clone()
+        }
+    }
+
+    impl AudioBackend for FakeAudio {
+        fn command(&self, command: AudioCommand, events: &AudioSink) {
+            let line = match &command {
+                AudioCommand::Load { max_duration, .. } => {
+                    assert_eq!(*max_duration, crate::audio::MAX_SOUND_DURATION);
+                    let d = self.decodes.lock().unwrap();
+                    events.send(AudioEvent::Loaded {
+                        duration: d.duration,
+                        bytes: d.bytes,
+                        truncated: d.truncated,
+                    });
+                    "load".to_owned()
+                }
+                AudioCommand::LoadUrl { url, .. } => format!("load {url}"),
+                AudioCommand::Play { volume, rate, .. } => format!("play {volume} {rate}"),
+                AudioCommand::Stop { .. } => "stop".into(),
+                AudioCommand::Unload { .. } => "unload".into(),
+                AudioCommand::Open { src, settings, .. } => {
+                    format!("open {src} {}", settings.looped)
+                }
+                AudioCommand::Resume { .. } => {
+                    events.send(AudioEvent::Load {
+                        duration: Some(Duration::from_secs(10)),
+                    });
+                    events.send(AudioEvent::Playing);
+                    "resume".into()
+                }
+                AudioCommand::Pause { .. } => {
+                    events.send(AudioEvent::Paused);
+                    "pause".into()
+                }
+                AudioCommand::Seek { position, .. } => {
+                    events.send(AudioEvent::Progress {
+                        position: *position,
+                        duration: None,
+                    });
+                    format!("seek {}", position.as_secs_f32())
+                }
+                AudioCommand::Set { settings, .. } => format!("set {}", settings.volume),
+                AudioCommand::Preload { .. } => "preload".into(),
+                AudioCommand::Close { .. } => "close".into(),
+            };
+            self.log.lock().unwrap().push(line);
+        }
+    }
+
+    fn click_uri() -> String {
+        crate::platform::clipboard::data_uri("audio/wav", b"RIFF a click")
+    }
+
+    fn failed(result: Result<Sound, AudioFailure>) -> String {
+        match result {
+            Ok(sound) => format!("loaded {}", sound.duration().as_millis()),
+            Err(failure) => failure.error.as_str().to_owned(),
+        }
+    }
+
+    /// Loads [`click_uri`] twice and plays both, then lets them go.
+    #[component]
+    fn Clicks() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            let a = load_sound(&click_uri()).await.unwrap();
+            a.play(0.5, 1.0);
+            let b = load_sound(&click_uri()).await.unwrap();
+            b.play(1.0, 2.0);
+            // Clamped, never refused: a Rust caller's values.
+            b.play(3.0, 0.1);
+            drop(a);
+            b.stop();
+            drop(b);
+            shown.set(format!("done {}", 1));
+        });
+        text(move || shown.get())
+    }
+
+    /// Loads [`click_uri`] once and shows how it went.
+    #[component]
+    fn Click() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            shown.set(failed(load_sound(&click_uri()).await));
+        });
+        text(move || shown.get())
+    }
+
+    /// Plays a remote player, seeks it, and closes it.
+    #[component]
+    fn Voice() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            let mut player = audio_player(
+                "https://example.com/voice.m4a",
+                crate::audio::PlayerSettings::default(),
+            );
+            player.play();
+            let mut seen = Vec::new();
+            while let Some(event) = player.next().await {
+                let playing = event == AudioEvent::Playing;
+                seen.push(format!("{event:?}"));
+                if playing {
+                    break;
+                }
+            }
+            player.seek(Duration::from_secs(3));
+            seen.push(format!("{:?}", player.next().await));
+            drop(player);
+            shown.set(seen.join("|"));
+        });
+        text(move || shown.get())
+    }
+
+    fn shown_after<C: crate::element::Component>(c: &mut Core<FakeEngine>) -> String
+    where
+        C::Props: Default,
+    {
+        c.mount_root(&crate::element::Root::new::<C>(C::Props::default));
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < end {
+            c.run_component_tasks();
+            if let Some(batch) = c.commit() {
+                let texts: Vec<String> = batch
+                    .items
+                    .iter()
+                    .filter_map(|i| match i {
+                        MountItem::Text { text, .. } if !text.text.is_empty() => {
+                            Some(text.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(last) = texts.last() {
+                    return last.clone();
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("nothing shown");
+    }
+
+    /// Commits until no command is left, for the ones sent last.
+    fn settle(c: &mut Core<FakeEngine>) {
+        for _ in 0..5 {
+            c.run_component_tasks();
+            let _ = c.commit();
+        }
+    }
+
+    #[test]
+    fn a_source_loads_once_and_plays_overlapping() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(shown_after::<Clicks>(&mut c), "done 1");
+        settle(&mut c);
+        assert_eq!(
+            audio.log(),
+            [
+                "load",
+                "play 0.5 1",
+                "play 1 2",
+                "play 1 0.5",
+                "stop",
+                "unload"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_sound_longer_than_the_limit_is_refused() {
+        let audio = FakeAudio::new();
+        audio.decodes.lock().unwrap().truncated = true;
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(shown_after::<Click>(&mut c), "quota-exceeded");
+        settle(&mut c);
+        assert_eq!(audio.log(), ["load", "unload"]);
+    }
+
+    #[test]
+    fn decoded_audio_has_a_budget() {
+        let audio = FakeAudio::new();
+        audio.decodes.lock().unwrap().bytes = MAX_DECODED_BYTES + 1;
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(shown_after::<Click>(&mut c), "quota-exceeded");
+        settle(&mut c);
+        assert_eq!(audio.log(), ["load", "unload"]);
+    }
+
+    #[test]
+    fn sound_needs_the_capability() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        assert_eq!(shown_after::<Click>(&mut c), "not-allowed");
+        assert_eq!(audio.log(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn nothing_plays_where_the_platform_has_no_sound() {
+        let mut c = core();
+        assert_eq!(shown_after::<Click>(&mut c), "unavailable");
+    }
+
+    #[test]
+    fn the_platform_decodes_and_reports_on_the_root() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            audio: true,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<Click>(|| ()));
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        let id = loop {
+            assert!(std::time::Instant::now() < end, "no load");
+            c.run_component_tasks();
+            let load = c.commit().and_then(|b| {
+                b.items.into_iter().find_map(|i| match i {
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command:
+                            Command::Audio(AudioCommand::Load {
+                                id, bytes, hint, ..
+                            }),
+                    } => {
+                        assert_eq!(&*bytes, b"RIFF a click");
+                        assert!(hint.starts_with("data:audio/wav"));
+                        Some(id)
+                    }
+                    _ => None,
+                })
+            });
+            if let Some(id) = load {
+                break id;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        // Another object's event is dropped.
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Audio,
+            &EventPayload::Audio {
+                id: id + 1000,
+                event: AudioEvent::Ended,
+            }
+        ));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Audio,
+            &EventPayload::Audio {
+                id,
+                event: AudioEvent::Loaded {
+                    duration: Duration::from_millis(250),
+                    bytes: 44_100,
+                    truncated: false,
+                },
+            }
+        ));
+        let mut shown = None;
+        for _ in 0..50 {
+            c.run_component_tasks();
+            if let Some(batch) = c.commit() {
+                shown = batch.items.iter().find_map(|i| match i {
+                    MountItem::Text { text, .. } if !text.text.is_empty() => {
+                        Some(text.text.clone())
+                    }
+                    _ => None,
+                });
+                if shown.is_some() {
+                    break;
+                }
+            }
+        }
+        assert_eq!(shown.as_deref(), Some("loaded 250"));
+    }
+
+    #[test]
+    fn a_player_streams_and_closes() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(
+            shown_after::<Voice>(&mut c),
+            "Load { duration: Some(10s) }|Playing|Some(Progress { position: 3s, duration: None })"
+        );
+        settle(&mut c);
+        assert_eq!(
+            audio.log(),
+            [
+                "open https://example.com/voice.m4a false",
+                "resume",
+                "seek 3",
+                "close"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_player_of_a_source_not_granted_fails_at_once() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({ "audio": true }))
+                .unwrap(),
+            granted: None,
+        }));
+        assert_eq!(
+            shown_after::<Voice>(&mut c),
+            // Nothing after the failure: the core closed it.
+            "Failed { error: NotAllowed, message: \"the source is not granted\" }|None"
+        );
+        assert_eq!(audio.log(), Vec::<String>::new());
+    }
 }
 
 /// Words of eight points a character that wrap at spaces, each line taking

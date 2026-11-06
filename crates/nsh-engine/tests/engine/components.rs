@@ -107,6 +107,7 @@ fn app_config(
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 

@@ -24,7 +24,10 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
   default, so packaged apps need WebKitGTK 6.0 where they run (`libwebkitgtk-6.0-4` on Debian and Ubuntu; GNOME
   desktops have it). `cargo xtask dist` on a machine without its development files builds a runtime whose web views
   are placeholders, and whose apps need only GTK.
-- **GStreamer** plugins for the video formats your app plays (GTK plays video through GStreamer).
+- **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with: to build the runtime its
+  development packages, `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian and Ubuntu, `gstreamer
+  gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora. Where apps run, GStreamer and
+  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays.
 
 ## Running an app
 
