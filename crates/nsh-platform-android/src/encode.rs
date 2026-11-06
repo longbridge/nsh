@@ -718,7 +718,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // `Audio.java`: the sub-opcode, then the command's
                     // fields (see `audio_command`).
                     Command::Audio(command) => {
-                        e.int(45);
+                        e.int(47);
                         audio_command(&mut e, command);
                     }
                     Command::Notification(command) => {
@@ -781,7 +781,7 @@ const DIALOG_TOKENS: [&str; 5] = [
     "destructive",
 ];
 
-/// An audio command after its opcode (45), as `Audio.command` reads it:
+/// An audio command after its opcode (47), as `Audio.command` reads it:
 /// 0 load (id, bytes, hint, max duration in ms), 1 load from a URL (id),
 /// 2 play (id, volume, rate), 3 stop (id), 4 unload (id), 5 open (id, src,
 /// volume, rate, loop), 6 preload (id), 7 resume (id), 8 pause (id), 9 seek
