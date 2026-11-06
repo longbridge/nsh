@@ -36,7 +36,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::Context as _;
+use anyhow::{Context as _, bail};
 
 use crate::{android, term};
 
@@ -154,10 +154,17 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // them, as with the Android runtimes without an SDK. The compiler is
     // the one the build will use, which docs/dev/web.md lets a macOS
     // developer set to an LLVM toolchain outside PATH.
+    // An explicitly configured compiler is a promise that the web runtimes
+    // are wanted: on a release runner a broken one must fail the build
+    // rather than quietly ship an archive with no `runtime/web`.
+    let configured = ["CC_wasm32_unknown_unknown", "CC"]
+        .iter()
+        .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
     let compiler = wasm_cc(|key| env::var_os(key));
-    let web = wasm_compiles(&compiler, |command| {
+    let compiles = wasm_compiles(&compiler, |command| {
         command.status().is_ok_and(|status| status.success())
     });
+    let web = web_runtimes_plan(configured, compiles, &compiler)?;
     if web {
         web_runtimes(&root, &out, &release)?;
     } else {
@@ -217,13 +224,32 @@ pub(crate) fn dist() -> anyhow::Result<()> {
 /// then `CC`, then the `clang` the build defaults to (`docs/dev/web.md`).
 fn wasm_cc(get: impl Fn(&str) -> Option<OsString>) -> OsString {
     for key in ["CC_wasm32_unknown_unknown", "CC"] {
-        if let Some(value) = get(key) {
-            if !value.is_empty() {
-                return value;
-            }
+        if let Some(value) = get(key)
+            && !value.is_empty()
+        {
+            return value;
         }
     }
     OsString::from("clang")
+}
+
+/// Whether to build the web runtimes. A developer who explicitly configured
+/// a wasm32 compiler expects them: a broken toolchain must fail the release
+/// rather than quietly ship an archive with no `runtime/web`. With nothing
+/// configured, a machine without a wasm32 clang still gets a usable (web-less)
+/// distribution, as before.
+fn web_runtimes_plan(configured: bool, compiles: bool, compiler: &OsStr) -> anyhow::Result<bool> {
+    if compiles {
+        return Ok(true);
+    }
+    if configured {
+        bail!(
+            "the configured wasm32 C compiler ({}) cannot compile for wasm32: \
+             refusing to build a distribution without web runtimes",
+            compiler.to_string_lossy()
+        );
+    }
+    Ok(false)
 }
 
 /// Whether `compiler` can actually produce a wasm32 object. `clang
@@ -500,7 +526,7 @@ mod tests {
         io::Read as _,
     };
 
-    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles};
+    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan};
 
     #[test]
     fn an_aar_carries_the_rules_that_keep_the_runtime() {
@@ -559,5 +585,20 @@ mod tests {
         assert!(!wasm_compiles(missing.as_os_str(), |command| {
             command.status().is_ok_and(|status| status.success())
         }));
+    }
+
+    #[test]
+    fn an_explicit_compiler_failure_fails_the_distribution() {
+        let cc = OsStr::new("/opt/llvm/bin/clang");
+        assert!(web_runtimes_plan(false, true, cc).unwrap());
+        assert!(web_runtimes_plan(true, true, cc).unwrap());
+        // Nothing configured: a machine with no wasm32 clang still gets a
+        // distribution, just without the web runtimes.
+        assert!(!web_runtimes_plan(false, false, cc).unwrap());
+        // release.yml always sets CC_wasm32_unknown_unknown: a broken
+        // toolchain there must not quietly ship an archive with no
+        // runtime/web.
+        let error = web_runtimes_plan(true, false, cc).unwrap_err().to_string();
+        assert!(error.contains("/opt/llvm/bin/clang"), "{error}");
     }
 }
