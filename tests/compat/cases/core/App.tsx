@@ -19,6 +19,7 @@ import CoreResource from "./core-resource";
 import CoreShader from "./core-shader";
 import CoreShaderEffects from "./core-shader-effects";
 import ModuleUrl from "./module-url";
+import WebLoad from "./web-load";
 import Steps from "./steps";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -39,6 +40,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-shader-effects": CoreShaderEffects,
   "module-url": ModuleUrl,
   "steps": Steps,
+  "web-load": WebLoad,
 };
 const shown = signal("");
 
