@@ -1467,6 +1467,23 @@ pub trait Interactive: Element {
         )
     }
 
+    /// The selection across the texts of a selectable view
+    /// ([`Self::selectable`]) changed: the selected text, as a copy gives
+    /// it, empty once nothing is selected, and where it starts in the
+    /// view's whole text (TSX `onSelectionChange` of a `<View selectable>`,
+    /// `{ text, start }`). Only the outermost selectable view of an area
+    /// reports it; an [`Input`](super::Input)'s own selection is its
+    /// `on_selection_change`.
+    fn on_text_selection_change<M>(
+        self,
+        listener: impl IntoListener<super::TextSelectionEvent, M>,
+    ) -> Self {
+        self.on(
+            EventKind::SelectionChange,
+            events::typed(listener.into_listener(), events::selected_text),
+        )
+    }
+
     /// It took the keyboard focus: an input, or a view that takes presses
     /// reached by Tab (or `focus()`) on the platforms that move the focus
     /// between pressables.

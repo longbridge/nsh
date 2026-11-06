@@ -100,7 +100,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `empty` | `.empty(el)` | `ListSlot` | | `each` 为空时代替条目显示。 |
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | 条目之间的分隔（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前先滚动到该条目。 |
-| `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。在 Rust 中是各行的标识，前面的行增删时，行保留自己的单元格和尺寸。 |
+| `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。在 Rust 中是各行的标识，前面的行增删时，行保留自己的单元格和尺寸。在 TSX 中，key 相同的行就算 `each` 换成了新对象也视为同一行，因此重建行数据（例如在 `computed` 里）不会丢掉行高和阅读位置；不设置时按对象是否相同比较。 |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | 快到末端了：加载更多。 |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | 距末端多近（以视口为单位）时触发 `onLoadMore`。 |
 | `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | 用户或滚动命令移动列表后快到开头了：加载第一项之前的内容。 |

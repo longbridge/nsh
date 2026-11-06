@@ -25,6 +25,14 @@
   are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- Links: `nsh.json` `"schemes": [...]` names the URL schemes a packaged app claims (checked by
+  `nsh_core::url_scheme::schemes_from_json` in the bundler, the CLI and a Rust app's generated root). `nsh package`
+  declares them to the system (`CFBundleURLTypes` on macOS and iOS) and writes them to `app.json`, which the runner
+  reads with the app's id (`nsh_engine::Bundle::url_schemes`; a Rust app's `Root::url_schemes`), never
+  from the app's code. The platform reports every URL the system opens the app with as the root's `UrlScheme` event; the
+  core drops the links of other schemes and keeps the rest until the app listens (`UrlScheme.on("open")`,
+  `next_url_scheme_open()`). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
+  A signed package embedded in another app claims no schemes: the embedding app owns them.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
   with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
@@ -350,3 +358,22 @@ NSH draws (`src/layers.rs`).
   handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
   `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
   `NshView.ErrorListener`) are unchanged.
+
+## TestFlight uploads
+
+`nsh publish ios <IPA>` (`publish_ios.rs`) uploads a device IPA made by `nsh package` directly
+to App Store Connect's build uploads API. It reads the IPA's Info.plist, verifies the remote app's
+bundle ID, creates a build upload and file reservation, streams the prescribed ranges, and commits
+the SHA-256 checksum. Apple then processes the build; beta distribution and review remain in
+App Store Connect. The existing `.nshpkg` signing form of `publish` is preserved (`./ios` disambiguates
+an entry directory named `ios`).
+
+Credentials use flags or `NSH_APP_STORE_{APP_ID,ISSUER_ID,KEY_ID,PRIVATE_KEY}` environment variables,
+never project configuration. Each control request gets a two-minute ES256 JWT; delivery requests
+use only Apple's supplied headers. HTTP redirects are disabled, transfer errors omit signed URLs,
+and upload ranges must cover the file exactly. The CLI uses the existing ring dependency tree for
+P-256 signing, and existing ureq, base64, sha2, zip and plist crates.
+
+Unit tests verify JWT signatures and claims, request bodies, IPA metadata and range validation.
+A real upload requires a macOS machine, an App Store-signed IPA and an owner's App Store Connect
+team API key; local tests do not prove Apple's signing validation or TestFlight processing.

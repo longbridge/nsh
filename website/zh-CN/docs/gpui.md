@@ -144,7 +144,8 @@ view.load(App::Js(Bundle::source(code)));
 - **Web 视图**是位于 NSH 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）；在 Xwayland
   下页面一直是黑的（日志中有 "Failed to create GBM buffer"）时，请用 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 运行应用。macOS 和
   Windows 上裁剪祖先不会裁剪它们，加载失败也不会报告 `onError`。不支持 `baseUrl`、`scrollable` 和
-  `allowsBackForwardNavigationGestures`。
+  `allowsBackForwardNavigationGestures`。`incognito` 网页视图保存页面数据的方式与该系统自己的后端相同
+  （见[网站数据](./web-view-and-video.md#网站数据)）。
 - **无障碍**通过 AccessKit 实现：读屏软件在所有平台上都能激活、聚焦、设置值并把元素滚动到可见；自定义操作和上下文菜单操作
   尚未传递。
 

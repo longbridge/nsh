@@ -180,6 +180,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
+| `url` | none | The link that launched the app: `UrlScheme.on("open")` gets it when the app claims its scheme (`nsh.json` `schemes`), as from the system ([UrlScheme](../modules/nsh.md#urlscheme)). Headless runs only. |
 
 ### Playing the host app
 
@@ -410,6 +411,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.host.send(name, data?)` | Sends an event of the host app's to the app (`host.on`), then waits until it is quiet. See [Playing the host app](#playing-the-host-app). |
 | `app.host.calls()`, `app.host.posts()` | The app's calls and posts that `open`'s `host.handlers` got, in order: `name`, `data`. |
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
+| `await app.openWithUrl(url)` | The system hands the app a link that opens it, as when the user opens one while it runs (`UrlScheme.on("open")`; a link of a scheme the app does not claim is dropped, as on a device), then waits until it is quiet. Headless runs only. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
@@ -439,7 +441,7 @@ a test matches the code:
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
-| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`. The message names it. |
+| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `url`. The message names it. |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -575,7 +577,7 @@ as it was; a text input's own copy and paste use the system's. `host.params` rea
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
 headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
 `height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
-the other phone's on iOS or Android) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
+the other phone's on iOS or Android), `host.handlers` and `url` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
 is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does

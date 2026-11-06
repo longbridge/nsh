@@ -38,6 +38,8 @@ public final class DevActivity extends Activity {
         view.useStandaloneLimits();
         setContentView(view);
         view.handleNotificationIntent(getIntent());
+        // A recreated activity's intent was handed in already.
+        if (state == null) view.handleUrlSchemeIntent(getIntent());
         String pkg = getIntent().getStringExtra("package");
         if (pkg != null) {
             trust = new NshTrust(new java.io.File(getCacheDir(), "nsh-trust"));
@@ -62,11 +64,14 @@ public final class DevActivity extends Activity {
         file.delete();
     }
 
-    /** A notification pressed while this activity is in its task. */
+    /** A notification pressed, or a URL opened, while this activity is in its task. */
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
-        if (view != null) view.handleNotificationIntent(intent);
+        if (view != null) {
+            view.handleNotificationIntent(intent);
+            view.handleUrlSchemeIntent(intent);
+        }
     }
 
     /** Android 12 and older: the app gets the back button first. */
