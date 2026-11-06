@@ -163,7 +163,10 @@ consult after the capability check (`System::check_connection`), failing with th
 `ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
 adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
 `websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake
-uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere). On native hosts a task spawned per connection drives the socket (answering pings, keeping what arrives until it
+uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere).
+Extra headers may include the app's `Cookie` and `Authorization`; `Proxy-Authorization` and handshake-control
+headers (`Host`, `Connection`, `Upgrade`, `Sec-WebSocket-*`) are refused. A browser transport refuses all custom
+headers. On native hosts a task spawned per connection drives the socket (answering pings, keeping what arrives until it
 is read). Unread messages are back pressure: while 8 messages or 8 MiB wait, the native task does not poll the
 socket (TCP's flow control holds the peer back, and pings wait for reading to resume) and a host transport is
 paused (`WebSocketTask::pause`; the browser's page holds its socket's events, `web/nsh.js`), so a connection keeps
