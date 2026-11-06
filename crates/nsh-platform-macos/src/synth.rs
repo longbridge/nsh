@@ -21,6 +21,36 @@ pub(crate) fn to_window(window: &NSWindow, x: f64, y: f64) -> NSPoint {
     NSPoint::new(x as CGFloat, height - y as CGFloat)
 }
 
+/// How many of the agent's latest mouse events [`from_agent`] knows.
+const AGENT_EVENTS: usize = 64;
+
+thread_local! {
+    /// The type and timestamp of the agent's latest mouse events: a test's
+    /// window takes only these, so the user's own mouse, moving over it or
+    /// resting elsewhere, never changes what a test hovers
+    /// (`View::pointer`). AppKit hands the view a copy of a posted event and
+    /// keeps 16 bits of its event number, which real events reach; the
+    /// timestamp survives the copy to the nanosecond (rounded), and no
+    /// real event shares it.
+    static AGENT: std::cell::RefCell<std::collections::VecDeque<(NSEventType, i64)>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// Whether `event` is one of the agent's mouse events.
+pub(crate) fn from_agent(event: &NSEvent) -> bool {
+    let (kind, at) = (event.r#type(), nanoseconds(event));
+    AGENT.with_borrow(|events| {
+        events
+            .iter()
+            .any(|&(k, t)| k == kind && (t - at).abs() <= 1)
+    })
+}
+
+/// `event`'s timestamp in whole nanoseconds.
+fn nanoseconds(event: &NSEvent) -> i64 {
+    (event.timestamp() * 1e9).round() as i64
+}
+
 pub(crate) fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks: isize) {
     mouse_with(window, kind, x, y, clicks, NSEventModifierFlags::empty());
 }
@@ -45,6 +75,14 @@ pub(crate) fn mouse_event(
         clicks,
         if clicks > 0 { 1.0 } else { 0.0 },
     )
+    .inspect(|event| {
+        AGENT.with_borrow_mut(|events| {
+            if events.len() == AGENT_EVENTS {
+                events.pop_front();
+            }
+            events.push_back((event.r#type(), nanoseconds(event)));
+        });
+    })
 }
 
 pub(crate) fn mouse_with(

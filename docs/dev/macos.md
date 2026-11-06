@@ -287,7 +287,10 @@ session that is not the console's, with `CGSessionCopyCurrentDictionary` (`syste
 `lifecycle()` does not turn `background` because the lock covers its windows. A left button press into a web view
 while the app is not active (`--background`, the default, or a locked screen) goes to the `WKWebView` directly,
 with its drags and release (`agent::mouse`): AppKit gives an inactive window's first click only to a view that
-accepts the first mouse, which WebKit's does not for a click. Lock the screen with `pmset displaysleepnow` (with a
+accepts the first mouse, which WebKit's does not for a click. The agent's mouse is the test window's only one: the
+root takes no pointer events but the agent's (`synth::from_agent`, by type and timestamp, which survive the copy
+AppKit makes of a posted event), so the user's mouse, and the enters and exits AppKit derives from where it really
+is, never change what a test hovers, locked or not, and the user may go on using it while tests run. Lock the screen with `pmset displaysleepnow` (with a
 password required right after sleep) to run tests that way.
 
 ## Not implemented, or different

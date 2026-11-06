@@ -990,6 +990,22 @@ impl ViewObj {
     }
 
     fn pointer(&self, event: &NSEvent) {
+        // Under `nsh test --target macos` the agent's mouse is the only
+        // one: the user's (and the enters and exits AppKit derives from
+        // where it really is) would change what a test hovers with where it
+        // happens to rest, and a locked screen sends none.
+        #[cfg(feature = "dev")]
+        {
+            let surface = self
+                .surface()
+                .or_else(|| self.ivars().window.borrow().upgrade());
+            if surface.is_some_and(|s| s.testing())
+                && scripted_type().is_none()
+                && !crate::synth::from_agent(event)
+            {
+                return;
+            }
+        }
         if let Some(surface) = self.input_surface() {
             // Drags may scroll or pan (a frame for the performance
             // monitor); the rest changes the screen through the engine.
