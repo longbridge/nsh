@@ -156,6 +156,9 @@ pub(crate) fn watch(surface: &Rc<Surface>) {
 
 /// The window changed: the environment gets its state.
 pub(crate) fn changed(surface: &Surface) {
+    // Full screen, another screen or a resize: AppKit laid out the title
+    // bar again, and its area may have changed.
+    crate::chrome::update_area(surface);
     let state = read(surface);
     let mut env = surface.environment.get();
     if env.window_state != state {

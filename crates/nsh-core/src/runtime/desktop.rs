@@ -43,10 +43,9 @@ impl Window {
     /// `desktop={{ windowDrag: true }}`; the system's window controls stay,
     /// in the area `titleBar()` reports. `height` is the app's bar's height
     /// in points: the controls are centered in it (Windows' caption buttons
-    /// fill it); the platform's own without it. On macOS, it selects compact
-    /// chrome up to 44 points and regular chrome above; use `titleBar().height`
-    /// to lay out the bar at AppKit's actual height. An embedding host's
-    /// existing toolbar keeps its own style and height.
+    /// fill it); the platform's own without it. An embedding host's
+    /// existing toolbar on macOS keeps its own height, which
+    /// `titleBar().height` reports.
     pub(crate) fn set_title_bar(options: TitleBarOptions, cx: &mut ModuleCx) {
         let height = crate::desktop::title_bar_height(options.height.map(Points));
         desktop(

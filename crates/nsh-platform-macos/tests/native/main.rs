@@ -1,5 +1,7 @@
 //! Native checks need AppKit on the process main thread and a desktop session.
 #[cfg(target_os = "macos")]
+mod title_bar;
+#[cfg(target_os = "macos")]
 mod window_press;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
@@ -7,5 +9,8 @@ fn main() {
         return;
     }
     #[cfg(target_os = "macos")]
-    window_press::run();
+    {
+        window_press::run();
+        title_bar::run();
+    }
 }
