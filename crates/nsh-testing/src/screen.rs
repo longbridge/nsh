@@ -224,6 +224,9 @@ struct View {
     attributed: Option<Arc<nsh_core::AttributedText>>,
     /// Which touches it and its subtree receive (`pointerEvents`).
     pointer_events: PointerEvents,
+    /// Its children are read in screen order along this axis (a list in
+    /// its parent's viewport, `ViewProps::screen_order`).
+    screen_order: Option<nsh_core::geometry::Axis>,
     /// A node of a canvas's drawing, not a view of its own.
     canvas_node: bool,
 }
@@ -394,6 +397,7 @@ impl Screen {
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
                 view.pointer_events = props.pointer_events;
+                view.screen_order = props.screen_order;
             }
             MountItem::Keymap(keymap) => self.keymap = Some(keymap.clone()),
             MountItem::TrackStates { id, states } => {
@@ -840,11 +844,35 @@ impl Screen {
             } else if view.clips && id != ROOT {
                 inner = inner.within(bounds);
             }
-            let children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+            let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
                 self.screens(id).last().copied().into_iter().collect()
             } else {
                 self.children.get(&id).cloned().unwrap_or_default()
             };
+            // A scroll view's content, and a list's cells in its parent's
+            // viewport, in the order they are on screen, as macOS, iOS and
+            // Android order Tab and screen readers: a list's recycled cells
+            // are in the order they were made.
+            let horizontal = view.scroll.as_ref().map(|s| s.horizontal).or(view
+                .screen_order
+                .map(|a| a == nsh_core::geometry::Axis::Horizontal));
+            if let Some(horizontal) = horizontal
+                && children.len() > 1
+            {
+                let start = |child: &NodeId| {
+                    let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
+                    let (main, cross) = if horizontal {
+                        (frame.origin.x, frame.origin.y)
+                    } else {
+                        (frame.origin.y, frame.origin.x)
+                    };
+                    (main.0, cross.0)
+                };
+                children.sort_by(|a, b| {
+                    let (a, b) = (start(a), start(b));
+                    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+                });
+            }
             stack.extend(
                 children
                     .into_iter()
@@ -1085,7 +1113,8 @@ impl Screen {
         self.nodes.get(&id)?.kind
     }
 
-    /// The texts on screen, in tree order.
+    /// The texts on screen, in tree order (a scroll view's content in
+    /// screen order).
     pub fn texts(&self) -> Vec<&str> {
         self.shown()
             .into_iter()
@@ -1850,7 +1879,8 @@ impl Screen {
         self.key_focus = id;
     }
 
-    /// Tab's stops, in tree order, as macOS and the web have them: the
+    /// Tab's stops, in tree order (a scroll view's content in screen
+    /// order), as macOS and the web have them: the
     /// inputs that edit and the views [`nsh_core::ViewProps::focus_stop`]
     /// takes (those that take presses unless `focusable={false}`, and
     /// `focusable={true}` ones whether or not they do), shown and enabled.

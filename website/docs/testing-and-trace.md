@@ -358,7 +358,8 @@ prefixes arrive.
 (JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
 inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0
 (`text:Delete >> nth=1`). A selector finds the views a user would look at first: in the top modal, then on screen,
-and of a navigation stack only the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
+and of a navigation stack only the top screen; the content of a scroll view or a list comes in the order it is on
+screen, top to bottom (left to right in a horizontal one), as Tab and screen readers go through it. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
 the views that clip them (`overflow: hidden`), or anywhere in the content of a scroll view the user can scroll, which
 scrolling brings in (`opacity` and transforms aside, as in Playwright). A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
 one: a selector matching several fails the step, and the error says how to narrow it.

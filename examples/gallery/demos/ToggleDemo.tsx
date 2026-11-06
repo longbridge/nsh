@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, type ToggleSize, Toggle as Switch, toolbarRule, toolbarTrack } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
@@ -8,19 +8,13 @@ import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 // makes a toolbar of them, one Tab stop whose arrow keys move the focus.
 // Which toggles are pressed is the app's: any number (bold, italic), or
 // exactly one (an alignment, a view). The look and the motion are the
-// gallery's: a raised pill while pressed that fades in, a press that sinks,
-// a star that pops; none of it with reduced motion.
+// gallery's: the toggles' shared look (`toggleLook`: an on fill that fades
+// in, a press that sinks), a thumb that springs between two views, a star
+// that pops; none of the motion with reduced motion.
 
 const pointer = platform.desktop;
 
-type Size = "small" | "regular" | "large";
-
-/** A toggle's side and its icon's, by size: compact with a pointer, roomier on a touch screen. */
-const SIZES: Record<Size, { side: number; icon: number; text: number; pad: number }> = pointer
-  ? { small: { side: 24, icon: 14, text: 12, pad: 8 }, regular: { side: 28, icon: 16, text: 13, pad: 10 }, large: { side: 34, icon: 18, text: 14, pad: 12 } }
-  : { small: { side: 32, icon: 16, text: 13, pad: 10 }, regular: { side: 38, icon: 18, text: 15, pad: 12 }, large: { side: 44, icon: 20, text: 16, pad: 14 } };
-
-/** The fades and the sink every toggle shares; nothing moves with reduced motion. */
+/** The fades and the sink of the view switcher's segments; nothing moves with reduced motion. */
 const transition = (): ViewStyle => ({
   transitionProperty: "background-color, border-color, box-shadow, transform, opacity",
   transitionDuration: reduceMotion() ? 0 : 140,
@@ -35,23 +29,28 @@ const transition = (): ViewStyle => ({
 type Content = { icon?: LucideIconName; glyph?: (tint: string, size: number) => JSX.Element; text?: string; short?: string };
 
 /**
- * A toolbar toggle in the gallery's look: bare (`ghost`) or on a field's
- * edge (`outline`) while off, the raised pill while pressed; the pointer's
- * hover and the focus ring as every control's. Its label is what screen
- * readers say and, with a pointer, its tooltip.
+ * A toolbar toggle in the shared look (`toggleLook`): bare (`ghost`) or on
+ * a field's edge (`outline`) while off, `finish.on` while pressed; the
+ * pointer's hover and the focus ring as every control's. Its label is what
+ * screen readers say and, with a pointer, its tooltip.
  */
 function Tool(props: Content & {
   label: string;
   pressed: boolean;
   onChange: (pressed: boolean) => void;
   disabled?: boolean;
-  size?: Size;
+  size?: ToggleSize;
   variant?: "ghost" | "outline";
 }) {
-  const s = () => SIZES[props.size ?? "regular"];
-  const tint = () => (props.pressed ? colors.text : colors.muted);
-  const outline = () => props.variant === "outline";
   const text = () => props.text ?? (terminal ? (props.short ?? props.label) : undefined);
+  const look: ToggleLookOptions = {
+    size: () => props.size,
+    variant: props.variant,
+    text: !!props.text,
+    disabled: () => props.disabled,
+  };
+  const pressed = () => props.pressed;
+  const glyph = toggleGlyph(pressed, look);
   return (
     <View tooltip={props.text ? undefined : props.label}>
       <Toggle
@@ -59,35 +58,14 @@ function Tool(props: Content & {
         disabled={props.disabled}
         accessibilityLabel={props.label}
         onChange={({ pressed }) => props.onChange(pressed)}
-        style={{
-          // The terminal sizes it to its label, which it never breaks: a
-          // track too narrow for its tools wraps them instead.
-          minWidth: terminal ? undefined : s().side,
-          height: terminal ? undefined : s().side,
-          flexShrink: terminal ? 0 : undefined,
-          paddingHorizontal: props.text ? s().pad : 0,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          borderRadius: s().side / 4 + 1,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          ...(outline() ? { borderColor: colors.fieldBorder, backgroundColor: colors.field } : { borderColor: "transparent" }),
-          ...transition(),
-        }}
-        pressedStyle={{ ...finish.pill }}
-        hoverStyle={props.pressed || props.disabled ? undefined : hovered()}
-        activeStyle={{ transform: [{ scale: 0.92 }] }}
-        focusStyle={focusRing(1)}
-        disabledStyle={{ opacity: 0.4 }}
+        {...toggleLook(look)}
       >
         <If when={!terminal && props.icon}>
-          <LucideIcon name={props.icon!} size={s().icon} tint={tint()} />
+          <LucideIcon name={props.icon!} {...glyph} />
         </If>
-        <If when={!terminal && props.glyph}>{props.glyph!(tint(), s().icon)}</If>
+        <If when={!terminal && props.glyph}>{props.glyph!(glyph.tint, glyph.size)}</If>
         <If when={text()}>
-          <Text style={{ fontSize: s().text, fontWeight: "500", color: tint() }}>{text()}</Text>
+          <Text style={toggleLabel(pressed, look)}>{text()}</Text>
         </If>
       </Toggle>
     </View>
@@ -176,13 +154,14 @@ const ALIGNS: { value: Align; label: string; short?: string }[] = [
   { value: "justify", label: "Justify" },
 ];
 
-const FILES = [
-  { name: "Roadmap", kind: "Board", size: "24 cards", tone: () => chart.s1 },
-  { name: "Q3 report", kind: "PDF", size: "2.4 MB", tone: () => chart.s2 },
-  { name: "Launch", kind: "Deck", size: "18 slides", tone: () => chart.s3 },
-  { name: "Brand kit", kind: "Folder", size: "36 files", tone: () => chart.s4 },
-  { name: "Interviews", kind: "Notes", size: "9 pages", tone: () => chart.s5 },
-  { name: "Budget", kind: "Sheet", size: "4 tabs", tone: () => chart.s1 },
+/** The files the view switcher shows, each with the icon of its kind. */
+const FILES: { name: string; kind: string; size: string; icon: LucideIconName }[] = [
+  { name: "Roadmap", kind: "Board", size: "24 cards", icon: "blocks" },
+  { name: "Q3 report", kind: "PDF", size: "2.4 MB", icon: "file-text" },
+  { name: "Launch", kind: "Deck", size: "18 slides", icon: "images" },
+  { name: "Brand kit", kind: "Folder", size: "36 files", icon: "folder-input" },
+  { name: "Interviews", kind: "Notes", size: "9 pages", icon: "scroll-text" },
+  { name: "Budget", kind: "Sheet", size: "4 tabs", icon: "table" },
 ];
 
 /**
@@ -194,19 +173,7 @@ export function ToggleDemo() {
   const last = signal("—");
 
   /** The toolbar a toolbar row sits in: an inset track around its toggles. */
-  const track = (): ViewStyle => ({
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: terminal ? TERMINAL_GAP : 2,
-    flexWrap: terminal ? "wrap" : undefined,
-    padding: 3,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.inset,
-  });
+  const track = (): ViewStyle => ({ ...toolbarTrack(), alignSelf: "flex-start" });
 
   function Formatting() {
     const marks = signal<string[]>(["bold"]);
@@ -231,7 +198,7 @@ export function ToggleDemo() {
               />
             )}
           </Each>
-          <View style={{ width: 1, height: 18, marginHorizontal: 4, backgroundColor: colors.border }} />
+          <View style={toolbarRule()} />
           <Each of={ALIGNS}>
             {(a) => (
               <Tool
@@ -307,18 +274,9 @@ export function ToggleDemo() {
             : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
         }
       >
-        <View
-          style={{
-            display: terminal ? "none" : "flex",
-            width: grid() ? 22 : 20,
-            height: grid() ? 22 : 20,
-            borderRadius: 6,
-            backgroundColor: alpha(f().tone(), 0.22),
-            borderWidth: 1,
-            borderColor: alpha(f().tone(), 0.5),
-            ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}),
-          }}
-        />
+        <View style={{ display: terminal ? "none" : "flex", ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}) }}>
+          <LucideIcon name={f().icon} size={grid() ? 18 : 16} tint={colors.muted} />
+        </View>
         <Text style={{ flex: grid() ? undefined : 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text, numberOfLines: 1 }}>{f().name}</Text>
         <Text style={{ fontSize: pointer ? 11 : 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grid() ? f().kind : `${f().kind} · ${f().size}`}</Text>
       </View>
@@ -463,8 +421,8 @@ export function ToggleDemo() {
       on.set(next ? [...on(), key] : on().filter((k) => k !== key));
       last.set(`${label}: ${next ? "on" : "off"}`);
     };
-    const sizes: Size[] = ["small", "regular", "large"];
-    const caption = (s: Size) => s[0].toUpperCase() + s.slice(1);
+    const sizes: ToggleSize[] = ["small", "regular", "large"];
+    const caption = (s: ToggleSize) => s[0].toUpperCase() + s.slice(1);
     return (
       <Card title="Sizes and looks" subtitle="Bare until pressed, or on a field's edge">
         <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
