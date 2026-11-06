@@ -913,7 +913,8 @@ what changed.
 - The component's own rows (`virtual_list(count, |at| row)`, layout from `ListLayout`, `.keys(ids)` for splices):
   the core creates the list and binds its cells itself, within the commit that needs them (`Core::commit` binds and
   lays out again; JS is not involved). Each cell's content (`Inner::VirtualRow`) is made once, under an owner of its
-  own, and shows the row its `Position` says: a memo of the list's count and keys moves the cells' index signals
+  own made under the owner `virtual_list` was called in (the view's, or a `when` / `dynamic` / `each` run's), so the
+  rows see that run's context and are disposed with it (also when the list is passed as another component's `Items`; a list a later run keeps moves to that run, and the earlier run's end leaves it alone); it shows the row its `Position` says: a memo of the list's count and keys moves the cells' index signals
   (`move_rows`) before the bindings that read them run, so a splice runs only the bindings of the rows that moved
   and never shows a row with another row's data. With keys, rows removed or inserted before others leave their
   cells and sizes alone. A cell past the end (the list shrank) disposes its content until the list binds it again.
