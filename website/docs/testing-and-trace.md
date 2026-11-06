@@ -170,6 +170,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `clipboard` | empty | The text on the clipboard at the start. |
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
+| `localeSettings` | the locale's, in UTC | The user's locale settings (`localeSettings()`), the ones it names over the locale's: `languages` (BCP 47 tags, most preferred first; `[locale]`), `timeZone` (an IANA name; `"UTC"`), `hourCycle` (`"h12"`, `"h23"`, `"h11"` or `"h24"`), `firstDayOfWeek` (1 for Monday to 7 for Sunday), `measurementSystem` (`"metric"`, `"us"` or `"uk"`) and `temperatureUnit` (`"celsius"` or `"fahrenheit"`), the last four the locale's region's. A time zone names the zone: local times, `Date`'s and `Intl`'s, stay the machine's, and so does the zone `Intl` names. |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
@@ -412,6 +413,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
+| `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
@@ -566,7 +568,7 @@ the platform shows moves it a frame (1/60 s), so the app's time passes while it 
 `delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. Sockets and WebSockets connect on the host's network with `"live"`, and are refused as headless otherwise. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
-`reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
+the locale settings `localeSettings` names, `reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
 and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
 as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
