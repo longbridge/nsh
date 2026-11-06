@@ -1123,6 +1123,16 @@ mod tests {
         assert_eq!(ids(&element_children(&list, false)), [8, 10, 4, 6]);
         // Elsewhere the tree's order stays.
         assert_eq!(ids(&element_children(&root, true)), [2]);
+        // A list in its parent's viewport is a plain view, looked through:
+        // its cells are read in screen order too.
+        list.unparent();
+        let page = view(12, ViewKind::View, Accessibility::default());
+        page.state_mut().props.screen_order = Some(nsh_core::geometry::Axis::Vertical);
+        page.insert_before(&root, None);
+        for cell in list.child_views() {
+            cell.insert_before(&page, None);
+        }
+        assert_eq!(ids(&element_children(&root, true)), [8, 10, 4, 6]);
     }
 
     #[test]

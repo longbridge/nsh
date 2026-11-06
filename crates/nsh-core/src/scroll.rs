@@ -36,7 +36,7 @@ use std::f32::consts::PI;
 use crate::{
     Bounds, Command, EventKind, EventPayload, NodeId, Point, Points, ScrollBehavior, Size,
     StickyCell,
-    geometry::{Percentage, Radians, point},
+    geometry::{Axis, Percentage, Radians, point},
 };
 
 /// Below this release speed (points per ms) a drag does not glide.
@@ -370,6 +370,31 @@ pub fn spokes(progress: Percentage, spin: Radians) -> impl Iterator<Item = (Radi
     })
 }
 
+// The reading order.
+
+/// Orders a view's children as they are on screen, the order Tab and
+/// screen readers go through a scroll view's content (and a list's cells,
+/// [`crate::ViewProps::screen_order`]) in: along `axis`, then across it. A
+/// list recycles its cells, so in the view tree they stay in the order
+/// they were made, not their rows'. `origin` is a child's frame origin;
+/// the sort is stable.
+pub fn reading_order<T>(axis: Axis, children: &mut [T], origin: impl Fn(&T) -> Point<Points>) {
+    if children.len() < 2 {
+        return;
+    }
+    let key = |child: &T| {
+        let at = origin(child);
+        match axis {
+            Axis::Horizontal => (at.x.0, at.y.0),
+            Axis::Vertical => (at.y.0, at.x.0),
+        }
+    };
+    children.sort_by(|a, b| {
+        let (a, b) = (key(a), key(b));
+        a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+    });
+}
+
 // The state.
 
 impl ScrollState {
@@ -392,29 +417,6 @@ impl ScrollState {
     pub fn origin(&self) -> Point<Points> {
         let inset = self.behavior.content_inset;
         point(self.x - inset.left, self.y - inset.top)
-    }
-
-    /// Orders the scroll view's children as they are on screen, the order
-    /// Tab and screen readers go through its content in: along its axis,
-    /// then across it. A list recycles its cells, so in the view tree they
-    /// stay in the order they were made, not their rows'. `origin` is a
-    /// child's frame origin; the sort is stable.
-    pub fn reading_order<T>(&self, children: &mut [T], origin: impl Fn(&T) -> Point<Points>) {
-        if children.len() < 2 {
-            return;
-        }
-        let key = |child: &T| {
-            let at = origin(child);
-            if self.horizontal {
-                (at.x.0, at.y.0)
-            } else {
-                (at.y.0, at.x.0)
-            }
-        };
-        children.sort_by(|a, b| {
-            let (a, b) = (key(a), key(b));
-            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
-        });
     }
 
     /// The offset along the main axis.
@@ -1603,8 +1605,9 @@ mod tests {
         // away and their cells bound to rows 4 and 5.
         let cells = [(0, 160.0), (1, 200.0), (2, 80.0), (3, 120.0)];
         let mut vertical = cells;
-        scroll_state((100.0, 1000.0), false)
-            .reading_order(&mut vertical, |c| point(Points(0.0), Points(c.1)));
+        reading_order(Axis::Vertical, &mut vertical, |c| {
+            point(Points(0.0), Points(c.1))
+        });
         assert_eq!(vertical.map(|c| c.0), [2, 3, 0, 1]);
         // Two columns read row by row; a horizontal list column by column.
         let grid = [
@@ -1615,10 +1618,10 @@ mod tests {
         ];
         let at = |c: &(i32, (f32, f32))| point(Points(c.1.0), Points(c.1.1));
         let mut rows = grid;
-        scroll_state((100.0, 1000.0), false).reading_order(&mut rows, at);
+        reading_order(Axis::Vertical, &mut rows, at);
         assert_eq!(rows.map(|c| c.0), [2, 0, 1, 3]);
         let mut columns = grid;
-        scroll_state((1000.0, 100.0), true).reading_order(&mut columns, at);
+        reading_order(Axis::Horizontal, &mut columns, at);
         assert_eq!(columns.map(|c| c.0), [2, 1, 0, 3]);
     }
 

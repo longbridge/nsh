@@ -406,14 +406,19 @@ impl NshView {
     }
 
     /// Calls `f` with its children in the order Tab and screen readers go
-    /// through them: a scroll view's as they are on screen (a list's
+    /// through them: a scroll view's, and a list's in its parent's viewport
+    /// (`ViewProps::screen_order`), as they are on screen (a list's
     /// recycled cells are not in their rows' order in the tree:
-    /// [`ScrollState::reading_order`]), any other view's bottom to top.
+    /// [`nsh_core::scroll::reading_order`]), any other view's bottom to top.
     pub(crate) fn with_children_in_reading_order<R>(&self, f: impl FnOnce(&[NshView]) -> R) -> R {
         let sorted = self.try_state().and_then(|s| {
-            let scroll = s.scroll.as_ref()?;
+            let axis = match &s.scroll {
+                Some(scroll) if scroll.horizontal => nsh_core::geometry::Axis::Horizontal,
+                Some(_) => nsh_core::geometry::Axis::Vertical,
+                None => s.props.screen_order?,
+            };
             let mut kids = self.child_views();
-            scroll.reading_order(&mut kids, |v| {
+            nsh_core::scroll::reading_order(axis, &mut kids, |v| {
                 v.try_state()
                     .map_or_else(Default::default, |s| s.frame.origin)
             });

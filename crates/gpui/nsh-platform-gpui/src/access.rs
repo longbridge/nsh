@@ -1469,6 +1469,16 @@ mod tests {
             node(&b, 2).children(),
             [8, 10, 4, 6].map(|id| node_id(7, id))
         );
+        // A list in its parent's viewport is a plain view, looked through:
+        // its cells are read in screen order too.
+        list.unparent();
+        let page = view(12, ViewKind::View, Accessibility::default());
+        page.state_mut().props.screen_order = Some(nsh_core::geometry::Axis::Vertical);
+        page.insert_before(&root, None);
+        for cell in list.child_views() {
+            cell.insert_before(&page, None);
+        }
+        assert_eq!(built(&root).top, [8, 10, 4, 6].map(|id| node_id(7, id)));
     }
 
     #[test]
