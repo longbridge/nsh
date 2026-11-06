@@ -336,8 +336,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
-        // Not on this backend yet.
-        DesktopCommand::SetBounds(_) => {}
+        DesktopCommand::SetBounds(bounds) => crate::window_state::set_bounds(surface, *bounds),
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
         DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
@@ -398,8 +397,7 @@ fn set_frame(surface: &Surface, hwnd: HWND, frame: &WindowFrame) {
         return;
     }
     let scale = surface.scale();
-    let x = frame.x.map_or(rect.left, |v| (v.0 * scale).round() as i32);
-    let y = frame.y.map_or(rect.top, |v| (v.0 * scale).round() as i32);
+    let (x, y) = crate::window_state::frame_origin(surface, rect, frame.x, frame.y);
     let width = frame
         .width
         .map_or(rect.right - rect.left, |v| (v.0 * scale).round() as i32);

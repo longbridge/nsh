@@ -570,6 +570,17 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Windows, Win32
 
+- **A screen origin is not a window-local length.** On mixed-DPI desktops, dividing an absolute screen origin by
+  the window's DPI loses the monitor's offset. `window_state/screens.rs` maps each monitor's local pixels to DIPs
+  relative to its laid-out desktop origin. Reporting and restoring share the mapping; tests cover the 100% primary /
+  200% right-display case, fractional DPI ratios, negative monitor positions and taskbar offsets.
+
+- **Full-screen restoration must preserve the original window style** as well as its placement. Adding
+  `WS_OVERLAPPEDWINDOW` unconditionally on exit gives a transparent, borderless window a system frame
+  (`window_state::tests::full_screen_state_restores_a_borderless_windows_style`).
+  Keep the live `WS_MINIMIZE` / `WS_MAXIMIZE` bits until `SetWindowPlacement` restores the show state; copying the
+  saved bits first can strand a window at its minimized rectangle (`current_frame_follows_native_moves_and_window_states`).
+
 - **Git checks files out with CRLF** (`core.autocrlf=true`, Git for Windows' default), and `.rustfmt.toml`'s
   `newline_style = "unix"` then makes `cargo +nightly fmt --all` rewrite every line of every file it touches. The
   repository's `.gitattributes` forces LF; a checkout made before it needs `git add --renormalize .` (or a fresh

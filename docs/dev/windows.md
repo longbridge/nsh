@@ -48,6 +48,21 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 
 ## Architecture
 
+The main window implements the shared `windowState()` / `displays()` / `Window.setBounds` API from
+`desktop::WindowState` and `WindowBounds` (`window_state.rs`). Native move, size, visibility and mode messages
+refresh the environment; the engine settles moves and resizes. Display geometry is available before the first
+component renders and refreshes with display, work-area and DPI changes. The backend hashes the monitor's device
+interface name for its stable display id, with the Win32 display name as a fallback.
+
+`window_state/screens.rs` lays out touching monitors from the primary display in DIPs. Each transform scales the
+monitor-local offset and size, keeping its desktop origin separate from its DPI. Both state reporting and saved
+bounds restoration use that layout, so a fresh window's DPI does not affect where saved bounds land. Partial
+`setFrame` calls use the same screen-position transform and keep their existing current-window sizing units.
+The core fits saved bounds onto current displays; Windows applies the resulting placement and mode in one UI
+transaction. A DPI notification updates rendering and chrome while the explicit restore rectangle supplies the
+position and size. Full screen keeps its ordinary placement and restores only the decoration bits it changed.
+Embedded child surfaces expose the displays and leave window placement to their host.
+
 - **One retained view per node, one window per surface.** Each node is an `NshView` (`view.rs`): an `Rc` node with
   its `ViewState` (frame, style, animated values, content), its children in drawing order and a weak parent. A
   surface's window draws its tree with Direct2D into a flip-model swap chain (`render.rs`); NSH content needs

@@ -279,7 +279,8 @@ effect(() => {
 });
 ```
 
-macOS 报告窗口状态和显示器。在 iOS、Android 和 Web 上，`windowState()` 为 `null`，`displays()` 为空，`setBounds` 什么也不做。
+macOS 和 Windows 报告窗口状态和显示器。Windows 按目标显示器的缩放比例还原保存的外框，即使新窗口从不同 DPI 的
+显示器启动，也能还原到保存的位置和尺寸。全屏期间保留普通外框，退出时恢复原来的窗口装饰。在 iOS、Android 和 Web 上，`windowState()` 为 `null`，`displays()` 为空，`setBounds` 什么也不做。
 
 ## Menu
 

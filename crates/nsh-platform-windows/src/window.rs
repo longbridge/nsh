@@ -102,6 +102,8 @@ struct WindowData {
     sys_char: Cell<bool>,
     /// Where the window was before it went full screen.
     windowed: Cell<Option<WINDOWPLACEMENT>>,
+    /// The original style, restored together with `windowed` after full screen.
+    windowed_style: Cell<isize>,
     /// The embedding app's root window an embedded surface's window
     /// observes ([`observe_root`]); none for a top-level one.
     root: Cell<Option<HWND>>,
@@ -195,6 +197,7 @@ pub(crate) fn create(
         surrogate: Cell::new(0),
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
+        windowed_style: Cell::new(0),
         root: Cell::new(None),
         window: None,
     });
@@ -285,6 +288,7 @@ pub(crate) fn create_app_window(
         surrogate: Cell::new(0),
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
+        windowed_style: Cell::new(0),
         root: Cell::new(None),
         window: Some(id),
     });
@@ -357,15 +361,19 @@ pub(crate) fn is_full_screen(hwnd: HWND) -> bool {
 /// Takes a top-level window to full screen on its monitor (no frame, over
 /// the taskbar), or back to where it was.
 pub(crate) fn toggle_full_screen(hwnd: HWND) {
-    toggle_full_screen_inner(hwnd);
+    if let Some(surface) = surface_of(hwnd) {
+        crate::window_state::report(&surface);
+    }
+    toggle_full_screen_inner(hwnd, None);
     // Neither the menu bar nor a hidden title bar's area show in full
     // screen.
     if let Some(surface) = surface_of(hwnd) {
         crate::chrome::full_screen_changed(&surface);
+        crate::window_state::report(&surface);
     }
 }
 
-fn toggle_full_screen_inner(hwnd: HWND) {
+fn toggle_full_screen_inner(hwnd: HWND, target: Option<(WINDOWPLACEMENT, RECT)>) {
     let Some(data) = data(hwnd) else { return };
     if !data.top_level {
         return;
@@ -390,9 +398,11 @@ fn toggle_full_screen_inner(hwnd: HWND) {
                 {
                     return;
                 }
+                let (placement, rect) = target.unwrap_or((placement, info.rcMonitor));
                 data.windowed.set(Some(placement));
+                data.windowed_style.set(style);
                 SetWindowLongPtrW(hwnd, GWL_STYLE, style & !frame);
-                let r = info.rcMonitor;
+                let r = rect;
                 let _ = SetWindowPos(
                     hwnd,
                     Some(HWND_TOP),
@@ -404,7 +414,14 @@ fn toggle_full_screen_inner(hwnd: HWND) {
                 );
             }
             Some(placement) => {
-                SetWindowLongPtrW(hwnd, GWL_STYLE, style | frame);
+                // Restore only decoration bits changed on entry. Keep live
+                // visibility, disabled and show-state bits until placement
+                // restores the mode; clearing WS_MINIMIZE early strands it.
+                SetWindowLongPtrW(
+                    hwnd,
+                    GWL_STYLE,
+                    (style & !frame) | (data.windowed_style.get() & frame),
+                );
                 let _ = SetWindowPlacement(hwnd, &placement);
                 let _ = SetWindowPos(
                     hwnd,
@@ -420,12 +437,39 @@ fn toggle_full_screen_inner(hwnd: HWND) {
     }
 }
 
+/// Sets the ordinary placement a full-screen window restores to.
+pub(crate) fn set_restore_placement(hwnd: HWND, placement: WINDOWPLACEMENT) {
+    if let Some(data) = data(hwnd) {
+        data.windowed.set(Some(placement));
+    }
+}
+
+/// Enters full screen without displaying an intermediate windowed frame.
+pub(crate) fn full_screen_at(hwnd: HWND, placement: WINDOWPLACEMENT, monitor: RECT) {
+    toggle_full_screen_inner(hwnd, Some((placement, monitor)));
+    if let Some(surface) = surface_of(hwnd) {
+        crate::chrome::full_screen_changed(&surface);
+    }
+}
+
 /// Shows a top-level window.
 pub(crate) fn show(hwnd: HWND) {
+    if let Some(data) = data(hwnd)
+        && let Some(mut placement) = data.windowed.take()
+    {
+        if placement.showCmd == SW_HIDE.0 as u32 {
+            placement.showCmd = SW_SHOWNORMAL.0 as u32;
+        }
+        data.windowed.set(Some(placement));
+    }
     // SAFETY: plain calls on a live window.
     unsafe {
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        let command = surface_of(hwnd).map_or(SW_SHOW, |s| crate::window_state::show_command(&s));
+        let _ = ShowWindow(hwnd, command);
         let _ = UpdateWindow(hwnd);
+    }
+    if let Some(surface) = surface_of(hwnd) {
+        crate::window_state::report(&surface);
     }
 }
 
@@ -516,6 +560,7 @@ fn sync_size(surface: &Rc<Surface>, hwnd: HWND) {
         (rect.bottom - rect.top).max(0) as u32,
     );
     surface.resized(pixels, dpi(hwnd) as f32 / 96.0);
+    crate::window_state::report(surface);
 }
 
 /// Wakes the surface of window `hwnd` (any thread).
@@ -838,21 +883,24 @@ fn handle(
             surface.paint();
         }
         WM_DPICHANGED => {
-            // SAFETY: `lparam` is the suggested window rectangle.
-            let r = unsafe { &*(lparam.0 as *const RECT) };
-            // SAFETY: plain call on this window.
-            let _ = unsafe {
-                SetWindowPos(
-                    hwnd,
-                    None,
-                    r.left,
-                    r.top,
-                    r.right - r.left,
-                    r.bottom - r.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-            };
+            if !surface.window_state.applying.get() && !is_full_screen(hwnd) {
+                // SAFETY: `lparam` is the suggested window rectangle.
+                let r = unsafe { &*(lparam.0 as *const RECT) };
+                // SAFETY: plain call on this window.
+                let _ = unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        None,
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    )
+                };
+            }
             sync_size(surface, hwnd);
+            crate::window_state::refresh(surface);
             crate::chrome::dpi_changed(surface);
             crate::tray::refresh(hwnd);
         }
@@ -1072,14 +1120,22 @@ fn handle(
         | WM_DWMCOLORIZATIONCOLORCHANGED
         | WM_TIMECHANGE => {
             crate::system::settings_changed(surface);
+            crate::window_state::refresh(surface);
         }
         WM_ACTIVATEAPP => crate::system::app_activated(surface, wparam.0 != 0),
         // Shown, hidden, minimized or restored (before default handling
         // sends `WM_SIZE`).
-        WM_WINDOWPOSCHANGED if data.top_level => crate::system::lifecycle_changed(surface),
+        WM_WINDOWPOSCHANGED if data.top_level => {
+            crate::window_state::changed(surface);
+            crate::system::lifecycle_changed(surface);
+        }
+        WM_DISPLAYCHANGE => crate::window_state::refresh(surface),
         // An embedded surface's: its root window's ([`observe_root`]).
         WM_NSH_ROOT => crate::system::lifecycle_changed(surface),
         WM_DESTROY => {
+            let mut env = surface.environment.get();
+            env.window_state = None;
+            surface.set_environment(env);
             crate::tray::destroyed(hwnd);
             crate::global_shortcut::destroyed(hwnd);
             surface.stop();

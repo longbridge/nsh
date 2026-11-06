@@ -290,7 +290,9 @@ effect(() => {
 });
 ```
 
-macOS reports the window's state and the displays. On iOS, Android and the web, `windowState()` is `null`, `displays()` is empty and `setBounds` does nothing.
+macOS and Windows report the window's state and the displays. On Windows, saved bounds restore using the target
+display's scale, including when the new window starts on a display with a different DPI. Full screen retains the
+ordinary bounds and restores the window's original decorations on exit. On iOS, Android and the web, `windowState()` is `null`, `displays()` is empty and `setBounds` does nothing.
 
 ## Menu
 

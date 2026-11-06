@@ -5,7 +5,7 @@
 // callable and do nothing, so an app that calls them runs on. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import { Application, Menu, Window, displays, isAvailable, titleBar, windowState } from "nsh/desktop";
+import { Application, Menu, Window, displays, isAvailable, titleBar, windowState, type WindowBounds } from "nsh/desktop";
 
 function App() {
   const calls = signal("not called");
@@ -27,10 +27,13 @@ function App() {
           Window.setLevel("floating");
           Window.setLevel("normal");
           Window.orderFront();
-          Window.setBounds({
-            mode: "maximized",
-            bounds: { origin: { x: -3000, y: 10 }, size: { width: 800, height: 600 } },
-          });
+          for (const mode of ["windowed", "maximized", "fullscreen"] as const) {
+            const saved: WindowBounds = {
+              mode,
+              bounds: { origin: { x: -3000, y: 10 }, size: { width: 800, height: 600 } },
+            };
+            Window.setBounds(JSON.parse(JSON.stringify(saved)));
+          }
           calls.set(`window done, close ${typeof Window.close}, minimize ${typeof Window.minimize}, setBounds ${typeof Window.setBounds}`);
         }}
       >

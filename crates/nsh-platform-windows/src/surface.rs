@@ -183,6 +183,7 @@ pub(crate) struct Surface {
     dirty: RefCell<Vec<NshView>>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
+    pub(crate) window_state: crate::window_state::Watch,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
     /// scheme is the system's resolved with it ([`crate::system`]).
     pub(crate) appearance: Cell<nsh_core::platform::Appearance>,
@@ -289,6 +290,7 @@ impl Surface {
             whole_change: Cell::new(0),
             dirty: RefCell::default(),
             environment: Cell::new(environment),
+            window_state: Default::default(),
             appearance: Cell::default(),
             host_environment: Cell::default(),
             host_tokens: RefCell::new(None),
@@ -435,8 +437,12 @@ impl Surface {
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
         // The embedding app's theme overrides are in the first frame.
+        crate::window_state::refresh(self);
+        config.environment = self.environment.get();
+        let displays = crate::window_state::displays(self);
         let tokens = self.host_tokens.borrow().clone();
         let setup = |control: &EngineControl| {
+            control.set_displays(displays);
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
@@ -665,6 +671,9 @@ impl Surface {
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
         self.invalid.set(false);
+        if self.window_state.applying.get() {
+            return;
+        }
         // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
         if crate::render::frame(self) {
