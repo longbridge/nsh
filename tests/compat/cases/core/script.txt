@@ -133,6 +133,20 @@ covers [nsh] WebView
 covers [nsh] nativeComponent
 covers [nsh] nativeModule
 covers [nsh] PanResponder
+# core-frame-rate
+tap id:case-core-frame-rate
+expect Frame rates started: yes
+# Each animation asks for a rate and still ends where it would.
+animated id:fade opacity 1
+animated id:slide transform.0 0
+# The decay stops at its bound.
+animated id:glide transform.0 20
+animated id:pulse opacity 1
+animated id:tint opacity 1
+style id:spinner animationName spin
+style id:spinner animationFrameRate 30
+nostyle id:uncapped animationFrameRate
+covers [styles] animationFrameRate
 # core-list
 tap id:case-core-list
 expect Fruits
@@ -413,3 +427,8 @@ tap id:risky
 expect Caught pressed
 expect Break
 covers [nsh] ErrorBoundary
+# web-load
+tap id:case-web-load
+tap id:load
+expect Loaded, invalid header: TypeError
+covers [nsh] WebView

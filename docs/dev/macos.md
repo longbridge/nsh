@@ -110,7 +110,11 @@ belong to the app, which owns retention and its storage budget.
   with attachments are made at once on the engine.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
   link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
-  screen's `maximumFramesPerSecond` (set again when the link resumes). The link does not fire while the window is
+  screen's `maximumFramesPerSecond`, or less while everything that wants frames asked for a lower rate (`frameRate`,
+  `animationFrameRate`: `animation.md` "Frame rate"): `Surface::frame_rate` folds the graph's rate with the frame
+  callbacks that report one (`Surface::cap_frame`, a view's keyframes alone); anything else (a JS frame request, a
+  batch waiting, a transition, a scroll glide) wants the screen's highest. The range (`frame_rate_range`) is set when
+  the link starts or resumes and again whenever the folded rate changes. The link does not fire while the window is
   occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
   only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
   waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
@@ -308,7 +312,8 @@ Explicit application Quit and `quit_app()` always take the stop-and-return
 path, including while the window is hidden. `quit_app()` dispatches to the main
 thread and only affects the standalone runner; an embedded host retains its own
 application lifecycle. The Rust core's `close_window()` remains a window-close
-request, so hosts using retention must use `quit_app()` for Exit/relaunch.
+request; an Exit or relaunch uses `quit_app()` from the host, or the app's
+`quit()` (TS: `Application.quit()`), which takes the same path.
 
 Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while

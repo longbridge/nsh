@@ -145,6 +145,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The app this view runs owns the process's notifications (`nsh`'s
+    /// `Notifications`). On Linux the desktop portal knows the app by
+    /// [`app_id`](Self::app_id) either way, so notifications show without it
+    /// too; [`run_app`] sets it, as on macOS and Windows.
+    pub notifications: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -167,6 +172,7 @@ impl Default for AppOptions {
             data_dir: None,
             cache: Default::default(),
             storage: None,
+            notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
     }
@@ -403,8 +409,39 @@ fn initial_environment() -> Environment {
     }
 }
 
+thread_local! {
+    /// The standalone app's application ([`run_app`]): what [`quit`] ends.
+    static STANDALONE: RefCell<Option<glib::WeakRef<gtk::Application>>> =
+        const { RefCell::new(None) };
+}
+
+/// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
+/// its windows close as the user closing them would, then its run ends,
+/// also while something else holds the application (a tray icon). A view
+/// embedded in another app leaves the app's lifecycle to that app: false
+/// there, with nothing done.
+pub(crate) fn quit() -> bool {
+    let app = STANDALONE.with(|s| s.borrow().as_ref().and_then(|app| app.upgrade()));
+    let Some(app) = app else {
+        return false;
+    };
+    // Not while a surface applies its batch: closing its window stops it.
+    glib::idle_add_local_once(move || quit_application(&app));
+    true
+}
+
+/// Closes `app`'s windows (closing the main one stops its engine), then
+/// ends its run.
+fn quit_application(app: &gtk::Application) {
+    for window in app.windows() {
+        window.close();
+    }
+    app.quit();
+}
+
 /// Runs `source` in a window until it is closed.
-pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
+pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
+    options.notifications = true;
     prefer_gl_on_nvidia();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
@@ -414,6 +451,7 @@ pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
         .application_id(&options.app_id)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
     let source = RefCell::new(Some(source));
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
@@ -466,11 +504,8 @@ fn install_shortcuts(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     let quit = gtk::gio::SimpleAction::new("quit", None);
     let weak = app.downgrade();
     quit.connect_activate(move |_, _| {
-        // Closing the windows stops their apps; the last one ends the run.
         if let Some(app) = weak.upgrade() {
-            for window in app.windows() {
-                window.close();
-            }
+            quit_application(&app);
         }
     });
     app.add_action(&quit);

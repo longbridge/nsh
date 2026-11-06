@@ -804,10 +804,11 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                 })
                 // Observed, never claimed: the trigger's presses and the
                 // scroll views around it go on.
+                // A held finger opens it on any touch screen, a desktop's
+                // too (a touch laptop, a browser with a mouse and a touch
+                // screen); opening again when the platform also raises a
+                // context menu for the hold changes nothing.
                 .on_touch(move |e: &TouchEvent| {
-                    if is_desktop() {
-                        return;
-                    }
                     let at = e.points.first().map(|p| p.page);
                     match e.phase {
                         TouchPhase::Start if e.points.len() == 1 => {

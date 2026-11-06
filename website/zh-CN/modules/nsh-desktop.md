@@ -6,20 +6,21 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、`quit`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
     desktop::{MenuRole, TitleBarStyle},
     element::desktop::{
-        MenuItem, close_window, popup_menu, set_application_menu, set_title, set_title_bar, title_bar,
+        MenuItem, close_window, popup_menu, quit, set_application_menu, set_title, set_title_bar,
+        title_bar,
     },
     prelude::*,
 };
 ```
 
 ```tsx tabs
-import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { Application, isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 ```
 
 ## isAvailable
@@ -104,6 +105,20 @@ chat.focus();
 
 返回的窗口有 `id`、`focus()`（显示窗口，`hide()` 之后也可以，并把它提到最前）、`hide()` 和 `close()`（其内容随之卸载）。
 用户关闭它时，效果和 `close()` 相同；关闭主窗口也会关闭它。`Window.open` 在 Linux 和 Windows 上运行；在其他平台上会抛出异常。
+
+## Application
+
+```ts
+const Application: {
+  quit(): void;
+};
+```
+
+| 成员 | Rust | 说明 |
+|---|---|---|
+| `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
+
+`Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
 ## 自定义标题栏
 

@@ -600,6 +600,7 @@ const NSH_CRATES: &[&str] = &[
     "nsh-testing",
     "nsh-bundler",
     "nsh-dev",
+    "nsh-platform-apple",
     "nsh-platform-ios",
     "nsh-platform-android",
     "nsh-platform-linux",

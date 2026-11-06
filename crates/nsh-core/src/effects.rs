@@ -894,6 +894,10 @@ pub struct KeyframeAnimation {
     pub easing: [f32; 4],
     /// `None` repeats forever.
     pub iterations: Option<u32>,
+    /// The highest frame rate it needs, in Hz (`animationFrameRate`);
+    /// `None`: the screen's highest. Platforms that can lower their frame
+    /// rate honor it.
+    pub frame_rate: Option<f32>,
 }
 
 impl KeyframeAnimation {
@@ -906,6 +910,7 @@ impl KeyframeAnimation {
             delay: 0.0,
             easing: [0.0, 0.0, 1.0, 1.0],
             iterations: None,
+            frame_rate: None,
         }
     }
 
@@ -930,6 +935,13 @@ impl KeyframeAnimation {
     /// `count` iterations, then it stops.
     pub const fn iterations(mut self, count: u32) -> Self {
         self.iterations = Some(count);
+        self
+    }
+
+    /// Needs at most `hz` frames per second (a slow spinner: 30), so the
+    /// screen may refresh less often while it is all that moves.
+    pub const fn frame_rate(mut self, hz: f32) -> Self {
+        self.frame_rate = Some(hz);
         self
     }
 }

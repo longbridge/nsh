@@ -1,5 +1,5 @@
 import { cleanup, signal } from "nsh";
-import { GlobalShortcut, isAvailable, Tray } from "nsh/desktop";
+import { GlobalShortcut, isAvailable, Tray, Window } from "nsh/desktop";
 import star from "../star.svg";
 import { Badge, Button, Caption, Card, DemoPage, Row } from "../ui";
 
@@ -21,7 +21,7 @@ export function TrayDemo() {
       tooltip: "NSH Gallery",
       onClick: () => last.set("Clicked the icon"),
       menu: [
-        { label: "Open Gallery", onSelect: () => last.set("Chose Open Gallery") },
+        { label: "Open Gallery", onSelect: () => (Window.orderFront(), last.set("Chose Open Gallery")) },
         { label: "Mute", checked: muted(), onSelect: () => (muted.set(!muted()), showTray(), last.set(`Muted: ${muted()}`)) },
         { type: "separator" },
         { label: "More", submenu: [{ label: "About", onSelect: () => last.set("Chose About") }] },
@@ -51,7 +51,7 @@ export function TrayDemo() {
       cards={[
         () => (
           <Card title="Tray icon" subtitle={isAvailable ? "Click it, or open its menu" : "Desktops only"}>
-            <Row>
+            <Row first>
               <Button label={shown() ? "Update" : "Show icon"} onPress={showTray} />
               <Button label="Remove" variant="ghost" onPress={hideTray} />
             </Row>
@@ -60,7 +60,7 @@ export function TrayDemo() {
         ),
         () => (
           <Card title="Global shortcut" subtitle="Ctrl+Alt+K, from any app">
-            <Row>
+            <Row first>
               <Button label="Register" onPress={register} />
               <Button label="Unregister" variant="ghost" onPress={unregister} />
               <Badge label={registered()} />

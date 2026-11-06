@@ -122,6 +122,14 @@
 - **Web**: animated values run in Rust as elsewhere; layout animations, transitions, keyframes and screen transitions
   are Web Animations and CSS made to match the Linux backend (`web.md` "Animation"); a text's color is a CSS
   transition of its element's `color`, which its runs inherit.
+- **Frame rate**: an animation may say the highest rate it needs, in Hz: `frameRate` in the options of `timing`,
+  `spring`, `decay`, `Animated.*`, keyframes and motions (`Driver`'s `frame_rate`, `KeyframeTiming::frame_rate`, Rust's
+  `Timing::frame_rate` / `Spring::frame_rate`), and `animationFrameRate` beside a keyframe `animation`'s other keys
+  (`KeyframeAnimation::frame_rate`). Unset, it needs the screen's highest. `Graph::frame_rate` folds what runs (the
+  highest rate; `None` as soon as one runs uncapped; a composite asks for the highest of its steps while it runs),
+  `transition::Live::frame_rate` a view's keyframes while they run alone. Platforms that can lower their frame rate
+  honor it while nothing else wants frames (macOS: `macos.md` "Frames"; iOS: the graph's display link and Core
+  Animation's keyframes); the others run at the screen's rate.
 
 ## Pointer-driven motion follows the pointer
 

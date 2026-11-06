@@ -46,7 +46,7 @@
 //! shortcuts after `nsh/keymap`'s bindings ([`shortcut`]), so a binding
 //! wins over a menu item of the same keystroke, then Ctrl+W / Cmd+W, which
 //! closes the window unless the app takes it. Quitting and closing (keys,
-//! roles, `Window.close()`, the close button) go to the embedding app's
+//! roles, `Application.quit()`, `Window.close()`, the close button) go to the embedding app's
 //! handler instead when it set one ([`crate::AppView::on_close_request`]).
 
 mod menus;
@@ -385,6 +385,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // the runtime does not send these here.
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
+        DesktopCommand::Quit => push(surface, Op::Quit),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);

@@ -410,6 +410,7 @@ view()
 | `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | 首次开始前的延迟。 |
 | `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | 缓动曲线。 |
 | `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | 重复次数。 |
+| `animationFrameRate` | `number` | `.animation(KeyframeAnimation { … })` | 它需要的最高帧率，单位 Hz（默认为屏幕的最高帧率）；macOS 和 iOS 会据此降低屏幕帧率。 |
 
 由数值、手势或弹簧驱动的动画请使用 [`nsh` 的动画 API](./nsh.md#animation)。
 
