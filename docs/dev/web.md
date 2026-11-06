@@ -514,6 +514,11 @@ canvas measures them differently. The CSS of runs (`src/text/css.rs`) and line b
 CJK punctuation's line start and end rules) depend on nothing of the browser and are tested on the host
 (`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws.
 
+Each run is a span placed at its position. The characters a line broke at (the space a soft break ate, a hard
+break's newline: a run's `after`) stand between the spans as text nodes (`Player.lineBreaks`), so a text's
+`textContent` and its `aria-label` read as the text was written ("it now brings", never "it nowbrings"), which is
+what search engines and screen readers get; beside absolutely placed spans that whitespace collapses and shows nothing.
+
 ## Styles as classes
 
 No element has an inline style but its geometry (frames, a field's content box, sticky offsets, a zoomed layer, snap
