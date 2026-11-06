@@ -341,6 +341,11 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     }))
 }
 
+/// The selected text of a selectable view (`text`).
+pub(crate) fn selected_text(p: &EventPayload) -> Option<Cow<'_, str>> {
+    Some(Cow::Borrowed(string(p, "text").unwrap_or_default()))
+}
+
 pub(crate) fn paste(p: &EventPayload) -> Option<Cow<'_, crate::PasteEvent>> {
     match p {
         EventPayload::Paste(paste) => Some(Cow::Borrowed(paste)),

@@ -420,9 +420,10 @@ const ANSWER = `Every one with a native backend:
 
 /** Two documents and a plain text that select as one, around a label that stays out. */
 function Selection() {
+  const selected = signal("");
   return (
     <Card icon="text" title="Selectable view" subtitle="One selection across texts and TextViews">
-      <View selectable class="gap-3">
+      <View selectable class="gap-3" onSelectionChange={({ text }) => selected.set(text)}>
         <TextView markdown={QUESTION} />
         <TextView markdown={ANSWER} />
         <View class="flex-row items-baseline gap-2">
@@ -431,6 +432,7 @@ function Selection() {
         </View>
       </View>
       <Caption label="Drag from the question into the answer, or long press and move the handles" />
+      <Caption label="Selected (onSelectionChange)" note={selected() || "nothing"} />
     </Card>
   );
 }

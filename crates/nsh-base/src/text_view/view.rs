@@ -140,6 +140,21 @@ pub enum TextViewEvent {
     /// copied): its id and the code block.
     #[args(event)]
     CodeBlockAction(TextViewCodeActionEvent),
+    /// The selection of a `selectable` text view changed: the selected
+    /// text, as a copy gives it, empty once nothing is selected (to quote
+    /// a part of a reply). Inside another `selectable` view the outer
+    /// view's selection is the one there is, and it reports it.
+    #[args(event)]
+    SelectionChange(TextViewSelectionEvent),
+}
+
+/// The selection of a [`TextView`] changed (`onSelectionChange`).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct TextViewSelectionEvent {
+    /// The selected text, as a copy gives it (blocks joined by line
+    /// breaks); empty when nothing is selected.
+    pub text: SharedString,
 }
 
 /// An action of the code blocks of a [`TextView`] (`codeBlockActions`).
@@ -240,6 +255,11 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         // Selectable: its texts share one selection, block to block (inside
         // a `selectable` view, the outer one's).
         .selectable(props.selectable)
+        .on_text_selection_change(move |text: &str| {
+            cx.emit(TextViewEvent::SelectionChange(TextViewSelectionEvent {
+                text: text.to_owned().into(),
+            }));
+        })
         .map(|mut el| {
             if let Some(parts) = use_context::<TextViewParts>() {
                 let style = std::mem::take(el.style());

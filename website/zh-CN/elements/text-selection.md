@@ -81,6 +81,34 @@ import { TextView } from "nsh/base";
 </Scroll>
 ```
 
+## 读取选中的文字
+
+在可选择视图上设置 `onSelectionChange`（Rust 中为 `.on_text_selection_change(..)`），每次选区变化时都会收到选中的文字：`{ text }`，即复制会得到的内容；不再有选中内容时（点击别处、按 Escape、另一个视图开始选择）收到 `""`。只在内容变化时报告。可选择视图嵌套时由外层视图报告，因为选区只有一个。设置了 `selectable` 的 [`TextView`](./text-view.md) 也以同样方式报告自己的选区（`onSelectionChange`，Rust 中为 `.on_selection_change(..)`）。聊天应用可以用它引用读者在回答中选中的部分：
+
+```rust tabs
+use nsh_core::prelude::*;
+
+fn reply(markdown: SharedString, quote: Signal<String>) -> impl IntoElement {
+    view()
+        .selectable(true)
+        .on_text_selection_change(move |text: &str| quote.set(text.to_owned()))
+        .child(nsh_base::text_view().markdown(markdown))
+}
+```
+
+```tsx tabs
+import { signal, View } from "nsh";
+import { TextView } from "nsh/base";
+
+const quote = signal("");
+
+<View selectable onSelectionChange={({ text }) => quote.set(text)}>
+  <TextView markdown={reply} />
+</View>
+```
+
+[`Input`](./input.md) 的 `onSelectionChange` 是它自己的：输入框文字中的光标和选区（`{ start, end }`）。
+
 ## 如何选择
 
 | 平台 | 如何选择 |

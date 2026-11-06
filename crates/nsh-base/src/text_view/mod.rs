@@ -5,10 +5,10 @@
 mod common;
 pub mod document;
 mod extension;
+mod formula;
 mod highlight;
 mod html;
 mod markdown;
-mod formula;
 #[cfg(feature = "math")]
 mod math;
 mod parts;
@@ -28,7 +28,7 @@ pub use self::{
     view::{
         CodeHighlighter, TextView, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
         TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewProps,
-        text_view,
+        TextViewSelectionEvent, text_view,
     },
 };
 

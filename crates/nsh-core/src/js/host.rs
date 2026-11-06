@@ -863,6 +863,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "",
     ),
     (
+        EventKind::SelectionChange,
+        on::VIEW,
+        "(e: { text: string }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected. Only the outermost selectable view of an area reports it.",
+    ),
+    (
         EventKind::Paste,
         on::INPUT,
         "(e: PasteEvent) => void",

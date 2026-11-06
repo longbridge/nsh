@@ -88,6 +88,38 @@ import { TextView } from "nsh/base";
 </Scroll>
 ```
 
+## Reading the selection
+
+`onSelectionChange` on a selectable view (`.on_text_selection_change(..)` in Rust) hears the selected text each
+time the selection changes: `{ text }`, what Copy would take, and `""` once nothing is selected (a press elsewhere,
+Escape, another view selecting). It reports only changes. In a selectable view inside another, the outer view
+reports, as it holds the one selection. A `selectable` [`TextView`](./text-view.md) reports its own the same way
+(`onSelectionChange`, `.on_selection_change(..)`). A chat uses it to quote the part of a reply the reader selected:
+
+```rust tabs
+use nsh_core::prelude::*;
+
+fn reply(markdown: SharedString, quote: Signal<String>) -> impl IntoElement {
+    view()
+        .selectable(true)
+        .on_text_selection_change(move |text: &str| quote.set(text.to_owned()))
+        .child(nsh_base::text_view().markdown(markdown))
+}
+```
+
+```tsx tabs
+import { signal, View } from "nsh";
+import { TextView } from "nsh/base";
+
+const quote = signal("");
+
+<View selectable onSelectionChange={({ text }) => quote.set(text)}>
+  <TextView markdown={reply} />
+</View>
+```
+
+An [`Input`](./input.md)'s `onSelectionChange` is its own: the caret and selection in its text (`{ start, end }`).
+
 ## How a selection is made
 
 | Platform | How a selection is made |
