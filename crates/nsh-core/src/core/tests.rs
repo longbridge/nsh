@@ -21587,6 +21587,58 @@ fn scroll_content(batch: &MountBatch, id: NodeId) -> Option<f32> {
     })
 }
 
+/// A list in its parent's viewport is a plain view: its props tell the
+/// platforms to read its recycled cells in screen order, along its axis.
+/// A list of its own is a scroll view, read so already.
+#[test]
+fn a_list_in_its_parents_viewport_is_read_in_screen_order() {
+    let screen_order = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id: i, props } if *i == id => Some(props.screen_order),
+            _ => None,
+        })
+    };
+    let mut c = core();
+    page(&mut c, 100.0, &[100]);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 20,
+                tag: Tag::List,
+            },
+            Op::SetProp {
+                id: 20,
+                prop: Prop::Count(10),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 20,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        screen_order(&batch, 4),
+        Some(Some(crate::geometry::Axis::Vertical))
+    );
+    assert_eq!(screen_order(&batch, 20).flatten(), None);
+    // A horizontal one is read along its axis.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Horizontal(true),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        screen_order(&batch, 4),
+        Some(Some(crate::geometry::Axis::Horizontal))
+    );
+}
+
 #[test]
 fn a_list_below_a_header_renders_the_rows_in_the_pages_viewport() {
     let mut c = core();

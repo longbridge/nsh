@@ -95,7 +95,9 @@
   `refreshing`, `refreshIndicator`, `pullValue`, paging and snapping, `contentInset`, `scrollbar`, `scrollable`,
   `keyboardDismissMode`) and what needs a scroll view of the list's own (`inverted`,
   `maintainVisibleContentPosition`) are ignored there, each warned of once; a zoomable scroll view around it is not
-  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Lists of their
+  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Its props carry
+  `ViewProps::screen_order` (its axis): the platforms read its cells in the order they are on screen, as they read a
+  scroll view's content, since recycled cells are not in their rows' order in the tree. Lists of their
   own pay nothing (`crates/nsh-core/src/core/parent_viewport.rs`).
 - **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`.
 - **Paced binding** (the runtime's lists): what shows binds in the commit that assigns it (the viewport, sticky items,
