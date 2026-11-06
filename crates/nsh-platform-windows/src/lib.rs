@@ -39,6 +39,7 @@ mod file_requests;
 mod fps;
 mod geom;
 mod gfx;
+mod global_shortcut;
 mod image;
 mod input;
 mod keymap;
@@ -58,6 +59,7 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
 mod window;
 

@@ -174,6 +174,11 @@ pub(crate) fn button_created(surface: &Rc<Surface>) {
     }
 }
 
+/// The app's name, when the process is an app of its own.
+pub(crate) fn app_name() -> Option<String> {
+    app().map(|(_, name)| name)
+}
+
 /// The app's id and name, when it has them.
 fn app() -> Option<(String, String)> {
     APP.with(|app| app.borrow().clone())

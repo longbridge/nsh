@@ -378,6 +378,8 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        crate::global_shortcut::clear(self);
+        crate::tray::clear(self);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
@@ -697,6 +699,8 @@ impl Surface {
 
 impl Drop for Surface {
     fn drop(&mut self) {
+        crate::global_shortcut::clear(self);
+        crate::tray::clear(self);
         let key = self.key;
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
