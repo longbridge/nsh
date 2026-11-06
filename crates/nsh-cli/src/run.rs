@@ -147,7 +147,7 @@ impl HostWindow<'_> {
 /// loads bundles from the dev server and reloads on change.
 pub(crate) fn run(
     entry: &Path,
-    port: u16,
+    listen: crate::dev::Listen,
     release: bool,
     flags: HostFlags,
     target: Target,
@@ -181,7 +181,7 @@ pub(crate) fn run(
     if target == Target::Tui {
         return run_tui(
             entry,
-            port,
+            listen,
             release,
             HostFlags {
                 limits,
@@ -193,13 +193,13 @@ pub(crate) fn run(
         );
     }
     if crate::rust_app::is_root(entry) {
-        return run_rust_app(entry, port, target, device, &work);
+        return run_rust_app(entry, listen, target, device, &work);
     }
     if target == Target::Android {
-        return run_android(entry, port, release, limits, &work, trace);
+        return run_android(entry, listen, release, limits, &work, trace);
     }
     if target == Target::Web {
-        return run_web(entry, port, release, limits);
+        return run_web(entry, listen, release, limits);
     }
     // The host a previous session left running would connect to this one
     // until it is replaced.
@@ -219,7 +219,7 @@ pub(crate) fn run(
         | Target::Tui => None,
     };
     // The host it starts connects by itself: no addresses to show.
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, listen, release, limits)?;
     let host = crate::runtime::file(target.platform(), false)?;
     let mut args = vec!["--dev-server".to_owned(), session.local_url()];
     if trace {
@@ -251,6 +251,10 @@ pub(crate) fn run(
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
                 .args(window.args());
+            let schemes = crate::package::read_config(entry)?.schemes;
+            if !schemes.is_empty() {
+                command.args(["--schemes", &schemes.join(",")]);
+            }
             run_local(&session, &mut command, "the Linux host")
         }
         // In place too: the AppKit host makes itself a regular app (menu
@@ -278,6 +282,7 @@ pub(crate) fn run(
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
+                .args(crate::windows::host_args(entry, &work))
                 .args(window.args());
             run_local(&session, &mut command, "the Windows host")
         }
@@ -323,13 +328,13 @@ pub(crate) fn run(
 /// changed) finds its page still open, and it reloads by itself.
 fn run_web(
     entry: &Path,
-    port: u16,
+    listen: crate::dev::Listen,
     release: bool,
     limits: Option<HostLimits>,
 ) -> anyhow::Result<()> {
     // Built first in a checkout: the session serves the runtime it finds.
     crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, listen, release, limits)?;
     session.print_web_url();
     session.watch(|| Ok(false))
 }
@@ -342,7 +347,7 @@ fn run_web(
 /// `nsh` builds it again and runs it anew.
 fn run_rust_app(
     entry: &Path,
-    port: u16,
+    listen: crate::dev::Listen,
     target: Target,
     device: Option<&str>,
     work: &Path,
@@ -475,7 +480,7 @@ fn run_rust_app(
         }
         Target::Web => {
             crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-            let session = DevSession::start(&entry, port, false, None)?;
+            let session = DevSession::start(&entry, listen, false, None)?;
             session.print_web_url();
             session.watch(|| Ok(false))
         }
@@ -501,6 +506,7 @@ fn package_for_run(
         profile: None,
         keystore: None,
         abis,
+        format: crate::android::Format::Apk,
         run: false,
     })
 }
@@ -546,7 +552,7 @@ pub(crate) fn parse_points_per_cell(value: &str) -> Result<String, String> {
 
 fn run_tui(
     entry: &Path,
-    port: u16,
+    listen: crate::dev::Listen,
     release: bool,
     flags: HostFlags,
     work: &Path,
@@ -565,9 +571,14 @@ fn run_tui(
     parse_points_per_cell(cells).map_err(anyhow::Error::msg)?;
     fs::create_dir_all(work)?;
     let path = work.join("tui.log");
-    let session = DevSession::start(entry, port, release, limits)?;
+    let building = ui::Step::start(format!("building {}", ui::path(entry)));
+    let session = DevSession::start(entry, listen, release, limits)?;
+    building.finish();
     // A Rust root also uses the development host, which receives the Root event.
     let host = crate::runtime::test_host(Platform::Tui)?;
+    // Preparation stays visible until the host takes over the terminal. From
+    // here, diagnostics belong in the panel so they cannot overwrite its UI.
+    let _terminal_logs = ui::LogFile::open(&path)?;
     let diagnostics = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -729,7 +740,7 @@ impl Drop for KillOnClose {
 /// host.
 fn run_android(
     entry: &Path,
-    port: u16,
+    listen: crate::dev::Listen,
     release: bool,
     limits: Option<HostLimits>,
     work: &Path,
@@ -740,7 +751,7 @@ fn run_android(
     let serial = android::device(&sdk)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, listen, release, limits)?;
     install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
@@ -798,9 +809,11 @@ pub(crate) fn install_android_host(
                 label: APP_NAME,
                 version_name: "0.1.0",
                 version_code: 1,
+                target_sdk: android::DEFAULT_TARGET_SDK,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
                 notifications: true,
+                schemes: &[],
                 rust: false,
                 dark: false,
                 runtime,

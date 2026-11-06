@@ -107,6 +107,7 @@ fn app_config(
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 
@@ -1586,6 +1587,61 @@ fn picked_images_reach_js_as_files() {
     );
 }
 
+const FILE_PICKER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const files = await Picker.pickFiles({
+    multiple: true,
+    limit: 2,
+    filters: [{ name: "Documents", extensions: [".PDF", "*.md"] }],
+  });
+  const [{ file }] = files;
+  const text = await file.text();
+  const url = URL.createObjectURL(file);
+  shown.set(
+    `${files.length} ${file instanceof File} ${file.name} ${file.type} ${file.size} ${text} ${url.startsWith("blob:")}`,
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_reach_js_with_their_names_and_bytes() {
+    let (engine, rx) = start(FILE_PICKER);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let mut file = nsh_core::picker::PickedFile::default();
+                file.name = "/tmp/report.final.pdf".into();
+                file.data = nsh_core::ImageData::new(b"%PDF".to_vec());
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: vec![file.clone(), file.clone(), file],
+                    },
+                );
+            }
+        }
+        shows(batch, "2 true report.final.pdf application/pdf 4 %PDF true")
+    });
+    let asked = asked.expect("a pick");
+    assert_eq!(asked.limit, 2);
+    assert_eq!(asked.filters[0].name, "Documents");
+    assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -2199,6 +2255,39 @@ fn menus_reach_the_platform_and_call_back() {
             ..
         }
     )));
+}
+
+const QUIT: &str = r#"import { mount, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+Application.quit();
+mount(() => <Text>{`quit ${typeof Application.quit}`}</Text>);
+"#;
+
+/// `Application.quit()` reaches the platform as the root's quit command, which it
+/// carries out as its quit menu role.
+#[test]
+fn app_quit_reaches_the_platform() {
+    use nsh_core::desktop::DesktopCommand;
+
+    let (_engine, rx) = start_in(
+        QUIT,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "quit function"));
+    assert!(
+        batches.iter().flat_map(|b| &b.items).any(|item| matches!(
+            item,
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } if **command == DesktopCommand::Quit
+        )),
+        "{batches:?}"
+    );
 }
 
 const LOCALE: &str = r#"import { mount, Text } from "nsh";

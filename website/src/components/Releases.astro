@@ -33,8 +33,8 @@ const t = lang === 'zh-CN'
 ---
 
 <div class="releases-page">
-  <div class="releases-hero">
-    <span class="releases-kicker">{t.kicker}</span>
+  <div class="releases-hero page-head">
+    <span class="releases-kicker page-head__kicker">{t.kicker}</span>
     <h1>{t.title}</h1>
     <p>{t.lead}</p>
     <p><a href={releasesUrl} target="_blank" rel="noopener noreferrer">{t.all}</a></p>
@@ -70,12 +70,6 @@ const t = lang === 'zh-CN'
     margin-bottom: clamp(2.5rem, 5vw, 3.5rem);
   }
 
-  .releases-hero h1 {
-    font-size: clamp(2rem, 3.6vw, 3rem);
-    font-weight: 660;
-    letter-spacing: -0.045em;
-    line-height: 1.1;
-  }
 
   :global(html[lang^='zh']) .releases-hero h1 { letter-spacing: normal; }
 

@@ -387,6 +387,29 @@ impl SelectionModel {
         out
     }
 
+    /// Where the selection starts in the copy of all of `texts` (what
+    /// [`Self::text`] gives once everything is selected), in UTF-16 code
+    /// units: what maps it back to the document the texts show.
+    pub fn start_offset(&self, texts: &impl SelectionTexts) -> u32 {
+        let Some((start, _)) = self.bounds() else {
+            return 0;
+        };
+        if texts.is_empty() || (start.text == 0 && start.offset == 0) {
+            return 0;
+        }
+        let before = Self {
+            anchor: Some(TextPosition { text: 0, offset: 0 }),
+            focus: Some(start),
+            ..Self::default()
+        };
+        let mut len = utf16_len(&before.text(texts));
+        // A selection from the start of a text: the break before it.
+        if start.offset == 0 && len > 0 {
+            len += 1;
+        }
+        len
+    }
+
     /// Puts the anchor at `pos` and selects the unit of `granularity`
     /// around it (nothing for characters).
     fn select_unit(

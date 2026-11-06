@@ -88,6 +88,84 @@ import { TextView } from "nsh/base";
 </Scroll>
 ```
 
+## Reading the selection
+
+`onSelectionChange` on a selectable view (`.on_text_selection_change(..)` in Rust) hears the selected text each
+time the selection changes: `{ text, start }`, what Copy would take and where it starts in the view's whole text, and `""` once nothing is selected (a press elsewhere,
+Escape, another view selecting). It reports only changes. In a selectable view inside another, the outer view
+reports, as it holds the one selection. A `selectable` [`TextView`](./text-view.md) reports its own the same way
+(`onSelectionChange`, `.on_selection_change(..)`). A chat uses it to quote the part of a reply the reader selected:
+
+```rust tabs
+use nsh_core::prelude::*;
+
+fn reply(markdown: SharedString, quote: Signal<String>) -> impl IntoElement {
+    view()
+        .selectable(true)
+        .on_text_selection_change(move |e: &TextSelectionEvent| quote.set(e.text.clone()))
+        .child(nsh_base::text_view().markdown(markdown))
+}
+```
+
+```tsx tabs
+import { signal, View } from "nsh";
+import { TextView } from "nsh/base";
+
+const quote = signal("");
+
+<View selectable onSelectionChange={({ text }) => quote.set(text)}>
+  <TextView markdown={reply} />
+</View>
+```
+
+### As Markdown or HTML
+
+A `selectable` `TextView`'s ref reads its selection when the app asks: `selectedText({ format })` gives the selected
+text (`"plain"`, the default, what Copy takes), or the selected part of the document as `"markdown"` or `"html"`,
+rebuilt from the nodes it covers, so the marks, links, list items and code blocks around it are kept (a list keeps its
+numbers, a table row keeps the table's header). With all of it selected it gives the source as written, when the
+document came in that format. `""` when nothing is selected. In Rust it is `TextViewApi::selected_text` with
+`TextSelectionOptions::format(TextSelectionFormat::Markdown)`.
+
+```rust tabs
+use nsh_base::{TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, text_view};
+use nsh_core::prelude::*;
+
+fn reply(markdown: SharedString, quote: Signal<String>) -> impl IntoElement {
+    let doc = component_ref::<TextView>();
+    text_view()
+        .markdown(markdown)
+        .selectable(true)
+        .component_ref(&doc)
+        .on_selection_change(move |_| {
+            if let Some(api) = doc.api::<TextViewApi>() {
+                let options = TextSelectionOptions::format(TextSelectionFormat::Markdown);
+                quote.set(api.selected_text(Some(options)));
+            }
+        })
+}
+```
+
+```tsx tabs
+import { signal } from "nsh";
+import { TextView, type TextViewRef } from "nsh/base";
+
+let doc: TextViewRef | undefined;
+const quote = signal("");
+
+<TextView
+  ref={(r) => (doc = r)}
+  selectable
+  markdown={reply}
+  onSelectionChange={async () => quote.set((await doc?.selectedText({ format: "markdown" })) ?? "")}
+/>
+```
+
+It reads the selection the view holds: in a `selectable` view inside another, the outer view holds it, and the inner
+`TextView`'s ref gives `""`.
+
+An [`Input`](./input.md)'s `onSelectionChange` is its own: the caret and selection in its text (`{ start, end }`).
+
 ## How a selection is made
 
 | Platform | How a selection is made |

@@ -68,10 +68,10 @@ use nsh_core::{
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
-    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent,
-    NSEventModifierFlags, NSEventPhase, NSEventType, NSImage,
+    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage,
 };
-use objc2_foundation::NSSize;
+use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -82,6 +82,8 @@ use crate::{
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
 /// mice, accelerated by the system), as `NSScrollView`'s line scroll.
 const WHEEL_LINE: f32 = 10.0;
+/// Movement in points before a window press becomes a native drag.
+const WINDOW_DRAG_SLOP: f64 = 3.0;
 /// The mouse's middle button (`buttonNumber`).
 const MIDDLE_BUTTON: isize = 2;
 /// The mouse's back button (`buttonNumber`), as Linux's button 8.
@@ -104,6 +106,8 @@ struct Transform {
 /// Pointer state of one surface.
 #[derive(Default)]
 pub(crate) struct Input {
+    /// The view pressed while a draggable background waits for a click or drag.
+    window_press: RefCell<Option<NshView>>,
     /// The mouse, while its left button is down.
     pointer: RefCell<Option<Pointer>>,
     /// A trackpad pinch.
@@ -242,6 +246,7 @@ struct Wheel {
 pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
+    input.window_press.borrow_mut().take();
     input.pointer.borrow_mut().take();
     input.pinch.borrow_mut().take();
     input.rotation.borrow_mut().take();
@@ -630,7 +635,9 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
-            // A title bar of the app's own moves the window.
+            if window_press(surface, event, x, y, time) {
+                return;
+            }
             if crate::chrome::mouse_down(surface, event, x, y) {
                 return;
             }
@@ -703,11 +710,12 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
         };
         if listens {
             let (location_x, location_y) = local(surface, &v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: point(Points(location_x), Points(location_y)),
-                page_position: point(Points(x), Points(y)),
-                modifiers: modifiers(flags),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(location_x), Points(location_y)),
+                point(Points(x), Points(y)),
+                modifiers(flags),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }
@@ -918,6 +926,48 @@ pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
         return false;
     }
     activate(surface, view, "accessibility");
+    true
+}
+
+/// Whether an assistive technology's "show menu" (`AXShowMenu`, VoiceOver's
+/// VO-Shift-M) opens a context menu on `view`: it listens to
+/// `onContextMenu` and is inside the newest modal. Other views do not
+/// offer the action.
+pub(crate) fn takes_accessibility_show_menu(surface: &Surface, view: &NshView) -> bool {
+    view.state().events.contains(EventKind::ContextMenu)
+        && view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
+}
+
+/// `AXShowMenu` on `view`: it hears `onContextMenu` with no pointer, at its
+/// bottom-start corner ([`nsh_core::input::context_menu_anchor`]), where a
+/// menu opened below it starts. AppKit has no keyboard key for context
+/// menus (Shift+F10 is Windows' and GTK's), so this is how the keyboard
+/// reaches them on a Mac: VoiceOver and the other clients that perform
+/// `AXShowMenu`.
+pub(crate) fn accessibility_show_menu(surface: &Surface, view: &NshView) -> bool {
+    if !takes_accessibility_show_menu(surface, view) {
+        return false;
+    }
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let (id, size) = {
+        let s = view.state();
+        (s.id, s.frame.size)
+    };
+    let position = nsh_core::input::context_menu_anchor(size, rtl);
+    let page = view.ns().convertPoint_toView(
+        objc2_foundation::NSPoint::new(f64::from(position.x.0), f64::from(position.y.0)),
+        Some(surface.root.ns()),
+    );
+    let event = nsh_core::ContextMenuEvent::new(
+        position,
+        point(Points(page.x as f32), Points(page.y as f32)),
+        Default::default(),
+        None,
+    );
+    log::debug!(target: "nsh::input", "onContextMenu on {id} (accessibility)");
+    surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     true
 }
 
@@ -1479,6 +1529,56 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
         _ => {}
     }
     put(surface, p);
+}
+
+/// Reports a drag region's click on release, or gives its movement to AppKit.
+fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) -> bool {
+    if event.clickCount() != 1 || !window_drag(surface, x, y) {
+        return false;
+    }
+    let Some(window) = surface.root.ns().window() else {
+        return false;
+    };
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return false;
+    };
+    cancel_pointer(surface);
+    *surface.input.window_press.borrow_mut() = Some(hit.view);
+    let start = event.locationInWindow();
+    // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
+    let mode = unsafe { NSEventTrackingRunLoopMode };
+    while let Some(next) = window.nextEventMatchingMask_untilDate_inMode_dequeue(
+        NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp,
+        Some(&NSDate::distantFuture()),
+        mode,
+        true,
+    ) {
+        if surface.input.window_press.borrow().is_none() {
+            return true;
+        }
+        let point = next.locationInWindow();
+        let distance = (point.x - start.x).hypot(point.y - start.y);
+        if distance >= WINDOW_DRAG_SLOP && next.r#type() == NSEventType::LeftMouseDragged {
+            surface.input.window_press.borrow_mut().take();
+            // AppKit expects the original mouse-down event for native dragging.
+            crate::chrome::mouse_down(surface, event, x, y);
+            return true;
+        }
+        if next.r#type() == NSEventType::LeftMouseUp {
+            let pressed = surface.input.window_press.borrow_mut().take();
+            let same_view = pressed.is_some_and(|pressed| {
+                pick(&surface.root, x, y).is_some_and(|hit| hit.view == pressed)
+            });
+            if distance < WINDOW_DRAG_SLOP && same_view && window_drag(surface, x, y) {
+                surface.input.last.set(Some((x, y)));
+                down(surface, x, y, time, 1, event.modifierFlags());
+                up(surface, x, y, next.timestamp() * 1000.0);
+            }
+            return true;
+        }
+    }
+    surface.input.window_press.borrow_mut().take();
+    true
 }
 
 fn up(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {

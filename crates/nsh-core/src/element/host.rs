@@ -1476,6 +1476,14 @@ impl WebView {
         })
     }
 
+    /// Keeps the page's website data (cookies, storage, the cache) only
+    /// as long as the web view, apart from the app's other web views
+    /// (default no; Android: no HTTP cache and no saved form data). Read
+    /// when the web view is made, so it takes a value, not a signal.
+    pub fn incognito(self, incognito: bool) -> Self {
+        self.set(Prop::Native(NativeProp::Incognito(incognito)))
+    }
+
     /// A page started loading.
     pub fn on_load_start<M>(self, listener: impl IntoListener<WebNavigation, M>) -> Self {
         self.listen(

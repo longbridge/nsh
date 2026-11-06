@@ -34,8 +34,9 @@
   at the size their view shows them: `Want` (the box in points, the device scale, the resize mode; an empty box: the
   natural size; one side alone scales by that side) gives the longest side the fitted image needs in pixels, rounded
   up to a size bucket (`image::bucket`), so views of similar sizes share an entry. The natural size comes from the
-  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is remembered, so a request
-  for an image decoded before is answered from memory, here and now. Entries are keyed by (source key, bucket,
+  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is retained while at least
+  one decoded entry for the source remains. Eviction of its last bucket releases the metadata too; active images
+  keep it through their leases. A cached request is answered from memory, here and now. Entries are keyed by (source key, bucket,
   `Frames`), one decode per key at a time. Every entry, the SVG drawings of `element::svg` included, counts in one
   `Budget` per process (`image::budget()`, `default_budget()`: on desktops a sixteenth of the memory, at most
   256 MiB; on phones an eighth, at most 128 MiB) with what it costs: its pixels, its GPU copies (`MemoryCache::add_cost`) and each variant (a smaller
@@ -53,10 +54,11 @@
   `window::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
   WIC cannot read; a `Frame` keeps its premultiplied BGRA pixels and makes its Direct2D bitmap when first drawn,
   which then adds its bytes to the entry (`add_cost`, once: one made again after a device loss replaces it);
-  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`; type-checked, not
-  run): ImageIO thumbnails (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it
-  shrinks) and the bucket's SVG raster; the CGImages are what Core Animation draws, counted once; a blur and the
-  view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
+  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`): ImageIO thumbnails
+  (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it shrinks) and the bucket's
+  SVG raster; each frame reserves two page-rounded stores at its actual CGImage row stride,
+  for the decoded pixels and Core Animation's display copy (a conservative estimate, not a process footprint cap);
+  a blur and the view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
   and the look) on a GCD queue; a view starts once its decoration sees a size and loads a larger bucket when it
   grows; it downloads through `UrlSession` (the shared `NSURLSession`, a task delegate per download handing the
   response and data to the loader thread, which cancels the task when its ticket is dropped, past `TIMEOUT` or past
@@ -167,6 +169,14 @@
   from the bytes (`PickedFile::fill_in`, `imagesize`), and `nsh-js` makes each a `File` over a `Blob` sharing those
   bytes, so `URL.createObjectURL(file)` shows it in an `Image` and `fetch` / `FormData` upload it without a copy in JS.
   An embedder's `PickerBackend` (`EngineConfig::picker`) answers in place of the platform: no command is sent.
+- **Picked files** (`Picker.pickFiles`, `nsh_core::picker::FilePickRequest`): `Command::PickFiles` with a limit and the
+  `file_dialog::FileFilter`s offered, gated by the same `picker` capability and answered by the same `Pick` event. The
+  desktops reuse the open dialog of `file_dialog` (`FilePickRequest::dialog`) and read the paths on a thread
+  (`read_picked_files`); iOS: `UIDocumentPickerViewController` `asCopy` (`UTType` by extension, `public.data` for any
+  file; UniformTypeIdentifiers loaded with `dlopen`); Android: `ACTION_OPEN_DOCUMENT` from the same headless fragment,
+  `EXTRA_MIME_TYPES` from `MimeTypeMap` unless an extension has no type; web: an `<input type=file>` without a canvas.
+  The bytes and the name stay as they are (`finish_files`: no `fill_in`, whose renames serve images); a file larger
+  than `MAX_PICKED_FILE_BYTES` (512 MiB) is left out and logged, since its bytes must all fit in memory.
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the

@@ -60,8 +60,6 @@ futures-util.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
-# `process`'s children: their process groups and exits (`runtime/process.rs`).
-libc.workspace = true
 # The image disk cache (`image/cache.rs`).
 httpdate.workspace = true
 # The image loader's downloads (`image/loader.rs`, feature `loader`).
@@ -69,6 +67,12 @@ ureq = { workspace = true, optional = true }
 crc32fast.workspace = true
 # `nsh/updater`.
 nsh-updater.workspace = true
+
+# `process`'s children: their process groups and exits (`runtime/process.rs`);
+# the names of Unix error numbers (`element/system.rs`). Emscripten is wasm32
+# and `unix` both, so it needs libc for the `cfg(unix)` code too.
+[target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
+libc.workspace = true
 
 # `process`'s children on Windows: their jobs (`runtime/process.rs`); the
 # machine's memory for the image budget (`image/memory.rs`).

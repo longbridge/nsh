@@ -41,7 +41,7 @@
 //! a scroll view's offsets, the live region it is in, and the actions it
 //! takes: `Click` (its `activate` action, else a press), `Focus`,
 //! `Increment` / `Decrement`, `Expand` / `Collapse`, `ShowContextMenu`
-//! (`longpress`), `SetValue`, custom actions (the other
+//! (`onContextMenu` with no pointer, else `longpress`), `SetValue`, custom actions (the other
 //! `accessibilityActions`, by their labels), scrolling and
 //! `ScrollIntoView`. The listeners are registered as the surface paints
 //! ([`paint`]); each sends the action to the view's node by id, so a
@@ -573,7 +573,10 @@ fn describe(
         if state.expanded.is_some() && (pressable || declares(s, "collapse")) {
             actions.push(Action::Collapse);
         }
-        if declares(s, "longpress") || s.events.contains(EventKind::LongPress) {
+        if declares(s, "longpress")
+            || s.events.contains(EventKind::LongPress)
+            || s.events.contains(EventKind::ContextMenu)
+        {
             actions.push(Action::ShowContextMenu);
         }
         let stepped = range.is_some() && (declares(s, "increment") || declares(s, "decrement"));
@@ -688,7 +691,9 @@ fn walk(
     live: LiveRegion,
     kids: &mut Vec<accesskit::NodeId>,
 ) {
-    for child in &view.child_views() {
+    // A scroll view's content as it is on screen: a list's recycled cells
+    // are not in their rows' order.
+    for child in &view.with_children_in_reading_order(<[NshView]>::to_vec) {
         let Some(s) = child.try_state() else { continue };
         let part = part(&s);
         if part == Part::Hidden {
@@ -1157,7 +1162,11 @@ fn perform(
             }
         }
         Action::ShowContextMenu => {
-            if !action_or_press(surface, view, "longpress", false) {
+            // Its context menu (`onContextMenu`, no pointer), else its long
+            // press, as the mobile platforms map the action.
+            if crate::input::hears_show_menu(view) {
+                crate::input::show_context_menu(surface, view);
+            } else if !action_or_press(surface, view, "longpress", false) {
                 surface.event(
                     view.id(),
                     EventKind::LongPress,
@@ -1439,6 +1448,37 @@ mod tests {
             .find(|e| e.view == id)
             .unwrap_or_else(|| panic!("no node for {id}"))
             .node
+    }
+
+    /// A list's recycled cells are read in the order they show, not in the
+    /// order they were made (bound to rows further down as the list
+    /// scrolled): a scroll view's content is read as it is on screen.
+    #[test]
+    fn a_scroll_views_content_is_read_in_screen_order() {
+        let root = view(0, ViewKind::View, Accessibility::default());
+        root.set_invalidate(Rc::new(|| {}));
+        let list = view(2, ViewKind::Scroll, Accessibility::default());
+        list.insert_before(&root, None);
+        for (id, y) in [(4, 160.0), (6, 200.0), (8, 80.0), (10, 120.0)] {
+            let cell = pressable(id, Accessibility::default());
+            cell.state_mut().frame = crate::geom::rect(0.0, y, 100.0, 40.0);
+            cell.insert_before(&list, None);
+        }
+        let b = built(&root);
+        assert_eq!(
+            node(&b, 2).children(),
+            [8, 10, 4, 6].map(|id| node_id(7, id))
+        );
+        // A list in its parent's viewport is a plain view, looked through:
+        // its cells are read in screen order too.
+        list.unparent();
+        let page = view(12, ViewKind::View, Accessibility::default());
+        page.state_mut().props.screen_order = Some(nsh_core::geometry::Axis::Vertical);
+        page.insert_before(&root, None);
+        for cell in list.child_views() {
+            cell.insert_before(&page, None);
+        }
+        assert_eq!(built(&root).top, [8, 10, 4, 6].map(|id| node_id(7, id)));
     }
 
     #[test]

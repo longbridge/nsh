@@ -3,7 +3,8 @@
 //! wait for display frames, components set the layout direction and read
 //! the pixel ratio, the device, the locale and whether the app is in use;
 //! they speak, move the screen reader and set the status bar with their
-//! dialogs.
+//! dialogs; they read the desktop window's state, a move once it stops,
+//! and the displays.
 
 use std::{
     collections::HashMap,
@@ -19,8 +20,12 @@ use nsh_base::dialog;
 use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
+    desktop::{Display, DisplayId, WindowBounds, WindowState},
     element::{AssetFile, AssetKind, Registry, Root},
-    platform::{Idiom, Lifecycle, Locale, Os},
+    geometry::{Bounds, point, size},
+    platform::{
+        Idiom, Languages, Lifecycle, Locale, LocaleSettings, Os, TemperatureUnit, TimeZone,
+    },
     prelude::*,
 };
 use nsh_engine::{App, Assets, Engine, EngineConfig, Environment, MountSink};
@@ -66,6 +71,7 @@ fn config(app: App) -> EngineConfig {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 
@@ -375,6 +381,128 @@ fn components_follow_whether_the_app_is_in_use() {
     );
 }
 
+/// Greets in the first of the user's languages it has, as an app's
+/// translated text does.
+#[component]
+fn Greeting() -> impl IntoElement {
+    view().child(text(move || {
+        let languages = locale_settings().languages;
+        let words = languages
+            .iter()
+            .find_map(|l| match l.as_str().split('-').next() {
+                Some("de") => Some("Willkommen"),
+                Some("fr") => Some("Bienvenue"),
+                _ => None,
+            })
+            .unwrap_or("Welcome");
+        format!("{words} ({})", languages.as_slice().len())
+    }))
+}
+
+#[test]
+fn components_follow_the_preferred_languages() {
+    let (engine, rx, _) = start::<Greeting>(Environment::default());
+    until(&rx, "Welcome (1)");
+    for (tags, shown) in [
+        (&["ja-JP", "fr-FR", "de-DE"][..], "Bienvenue (3)"),
+        (&["de_AT", "en-US"][..], "Willkommen (2)"),
+    ] {
+        let mut env = Environment::default();
+        env.locale_settings.languages = Languages::parse(tags.iter().copied()).unwrap();
+        engine.control().set_environment(env);
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
+}
+
+/// Shows a time, a temperature and the week as the user reads them, and
+/// counts the runs of an effect that reads the hour cycle alone through a
+/// `computed`, as a clock's does.
+#[component]
+fn Forecast() -> impl IntoElement {
+    let clock_runs = signal(0);
+    let hour_cycle = computed(|| locale_settings().hour_cycle);
+    effect(move || {
+        let _ = hour_cycle.get();
+        clock_runs.update(|r| *r += 1);
+    });
+    view().child(text(move || {
+        let settings = locale_settings();
+        let time = if settings.hour_cycle.twelve_hour() {
+            "3 PM"
+        } else {
+            "15:00"
+        };
+        let temperature = match settings.temperature_unit {
+            TemperatureUnit::Celsius => "20 °C",
+            TemperatureUnit::Fahrenheit => "68 °F",
+        };
+        format!(
+            "{time}, {temperature}, weeks from {}, {} units, clock ran {}",
+            settings.first_day_of_week.number(),
+            settings.measurement_system.name(),
+            clock_runs.get()
+        )
+    }))
+}
+
+#[test]
+fn components_follow_the_regional_preferences() {
+    let (engine, rx, _) = start::<Forecast>(Environment::default());
+    until(&rx, "3 PM, 68 °F, weeks from 7, us units, clock ran 1");
+    let mut celsius = LocaleSettings::default();
+    celsius.temperature_unit = TemperatureUnit::Celsius;
+    let germany = LocaleSettings::of(Locale::parse("de-DE").unwrap());
+    for (settings, shown) in [
+        // Only the unit changes: the clock's effect does not run again.
+        (celsius, "3 PM, 20 °C, weeks from 7, us units, clock ran 1"),
+        (
+            germany,
+            "15:00, 20 °C, weeks from 1, metric units, clock ran 2",
+        ),
+    ] {
+        engine.control().set_environment(Environment {
+            locale_settings: settings,
+            ..Environment::default()
+        });
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
+}
+
+/// Shows the time zone and counts its effect's runs, as a clock that
+/// shows times in it does.
+#[component]
+fn Zoned() -> impl IntoElement {
+    let runs = signal(0);
+    effect(move || {
+        let _ = locale_settings().time_zone;
+        runs.update(|r| *r += 1);
+    });
+    view().child(text(move || {
+        format!("{} after {} runs", locale_settings().time_zone, runs.get())
+    }))
+}
+
+#[test]
+fn components_follow_the_time_zone() {
+    let (engine, rx, _) = start::<Zoned>(Environment::default());
+    until(&rx, "UTC after 1 runs");
+    for (zone, shown) in [
+        ("Europe/Berlin", "Europe/Berlin after 2 runs"),
+        (
+            "America/Argentina/Buenos_Aires",
+            "America/Argentina/Buenos_Aires after 3 runs",
+        ),
+    ] {
+        let mut env = Environment::default();
+        env.locale_settings.time_zone = TimeZone::parse(zone).unwrap();
+        engine.control().set_environment(env);
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
+}
+
 /// Speaks, moves the screen reader and opens a dialog
 /// that sets the status bar.
 #[component]
@@ -458,4 +586,161 @@ fn components_speak_move_the_reader_and_set_the_status_bar() {
     );
     // The reader's focus went to the note's view.
     assert_eq!(focused[0].0, texts["The note"]);
+}
+
+/// Shows the window's x, mode and whether it is minimized, and how many
+/// displays there are.
+#[component]
+fn WindowInfo() -> impl IntoElement {
+    view().child(text(move || {
+        let displays = nsh_core::element::desktop::displays().len();
+        match nsh_core::element::desktop::window_state() {
+            Some(state) => {
+                let mode = match state.window_bounds {
+                    WindowBounds::Windowed(_) => "windowed",
+                    WindowBounds::Maximized(_) => "maximized",
+                    WindowBounds::Fullscreen(_) => "fullscreen",
+                };
+                format!(
+                    "x {} {mode} minimized {} displays {displays}",
+                    state.bounds.origin.x.0, state.minimized
+                )
+            }
+            None => format!("no window, displays {displays}"),
+        }
+    }))
+}
+
+/// A window at `x`, 800 × 600, in `mode`'s mode.
+fn window_at(x: f32, mode: fn(Bounds<Points>) -> WindowBounds) -> Environment {
+    let bounds = Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
+    Environment {
+        window_state: Some(WindowState::new(bounds, mode(bounds))),
+        ..Environment::default()
+    }
+}
+
+fn display(id: u64, x: f32) -> Display {
+    let bounds = Bounds::new(point(px(x), px(0.0)), size(px(1440.0), px(900.0)));
+    Display::new(DisplayId(id), bounds, bounds, x == 0.0)
+}
+
+/// The last text the batches so far showed.
+fn last_text(rx: &Receiver<MountBatch>, last: &mut String) -> String {
+    while let Ok(batch) = rx.try_recv() {
+        for item in &batch.items {
+            if let MountItem::Text { text, .. } = item {
+                last.clone_from(&text.text);
+            }
+        }
+    }
+    last.clone()
+}
+
+/// Moves `engine`'s manual clock by `ms`, then waits until it got there.
+fn advance(engine: &Engine, ms: u64) {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    engine
+        .control()
+        .advance_clock(Duration::from_millis(ms), move || {
+            let _ = tx.send(());
+        });
+    rx.recv_timeout(Duration::from_secs(10)).unwrap();
+}
+
+#[test]
+fn components_read_the_window_once_it_stops_and_the_displays() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: window_at(0.0, WindowBounds::Windowed),
+        clock: nsh_core::time::Clock::manual(
+            std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_225_600),
+        ),
+        ..config(App::Rust(Root::of::<WindowInfo>()))
+    };
+    let sink = FrameSink {
+        batches: tx,
+        frames: Arc::new(AtomicUsize::new(0)),
+    };
+    // The displays sent before the start are there as the app first renders.
+    let engine = Engine::start_with(
+        config,
+        || ApproxTextEngine,
+        sink,
+        |control| {
+            control.set_displays(vec![display(1, 0.0), display(2, 1440.0)]);
+        },
+    )
+    .unwrap();
+    let mut last = String::new();
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 windowed minimized false displays 2"
+    );
+    // A drag: held back while the window moves, reported 150 ms after it
+    // stopped.
+    engine
+        .control()
+        .set_environment(window_at(10.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    engine
+        .control()
+        .set_environment(window_at(20.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 windowed minimized false displays 2"
+    );
+    advance(&engine, 60);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 20 windowed minimized false displays 2"
+    );
+    // Another part of the environment while the window moves does not
+    // hold it longer.
+    engine
+        .control()
+        .set_environment(window_at(30.0, WindowBounds::Windowed));
+    advance(&engine, 100);
+    engine.control().set_environment(Environment {
+        font_scale: 1.5,
+        ..window_at(30.0, WindowBounds::Windowed)
+    });
+    advance(&engine, 60);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 30 windowed minimized false displays 2"
+    );
+    // A change of mode or minimizing comes at once, with the bounds of then.
+    engine
+        .control()
+        .set_environment(window_at(0.0, WindowBounds::Maximized));
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized false displays 2"
+    );
+    let mut minimized = window_at(0.0, WindowBounds::Maximized);
+    if let Some(state) = &mut minimized.window_state {
+        state.minimized = true;
+    }
+    engine.control().set_environment(minimized);
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized true displays 2"
+    );
+    // A display unplugged.
+    engine.control().set_displays(vec![display(1, 0.0)]);
+    advance(&engine, 0);
+    assert_eq!(
+        last_text(&rx, &mut last),
+        "x 0 maximized minimized true displays 1"
+    );
+    // Off desktops there is no window and no display.
+    engine.control().set_environment(Environment::default());
+    engine.control().set_displays(Vec::new());
+    advance(&engine, 0);
+    assert_eq!(last_text(&rx, &mut last), "no window, displays 0");
 }

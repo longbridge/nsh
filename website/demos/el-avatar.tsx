@@ -68,10 +68,10 @@ function App() {
             <Panel title="AvatarGroup · limit">
               <Segmented options={[2, 3, 4]} value={limit()} onChange={(v) => (limit.set(v), log(`limit ${v}`))} />
               <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
-                <Button onPress={() => (members.set(Math.min(MEMBERS.length, members() + 1)), log(`members ${members()}`))} disabled={members() >= MEMBERS.length} {...button("secondary")}>
+                <Button onPress={() => (members.set(Math.min(MEMBERS.length, members() + 1)), log(`members ${members()}`))} disabled={members() >= MEMBERS.length} {...button("secondary", { disabled: () => members() >= MEMBERS.length })}>
                   <Text style={buttonText()}>Add</Text>
                 </Button>
-                <Button onPress={() => (members.set(Math.max(1, members() - 1)), log(`members ${members()}`))} disabled={members() <= 1} {...button("ghost")}>
+                <Button onPress={() => (members.set(Math.max(1, members() - 1)), log(`members ${members()}`))} disabled={members() <= 1} {...button("ghost", { disabled: () => members() <= 1 })}>
                   <Text style={buttonText("ghost")}>Remove</Text>
                 </Button>
               </View>

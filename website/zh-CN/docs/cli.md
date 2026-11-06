@@ -92,9 +92,9 @@ nsh run my-app/App.tsx --target web
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--target <TARGET>` | macOS 上为 `macos`，Linux 上为 `linux`，Windows 上为 `windows` | `catalyst`：Mac Catalyst 宿主，一个 iPhone 大小的窗口（390×844）。`ios`：iOS 模拟器中的宿主。`android`：Android 设备或模拟器上的宿主。`macos`：AppKit 宿主，一个 1200×800 的窗口（[macOS](./macos.md)）。`linux`：GTK 宿主，一个 390×844 的窗口（[Linux](./linux.md)）。`windows`：Win32 宿主，一个 1200×800 的窗口（[Windows](./windows.md)）。`gpui`：GPUI 宿主，一个 1200×800 的窗口，可在 macOS、Windows 或 Linux 上运行，以嵌入它的 GPUI 应用的方式显示 TSX 应用（[GPUI](./gpui.md)）。`tui`：当前终端中的宿主（[终端](./tui.md)）。`web`：开发服务器的页面，地址会打印出来（[Web](./web.md#在浏览器里开发)）。 |
+| `--target <TARGET>` | macOS 上为 `macos`，Linux 上为 `linux`，Windows 上为 `windows` | `catalyst`：Mac Catalyst 宿主，一个 iPhone 大小的窗口（390×844）。`ios`：iOS 模拟器中的宿主。`android`：Android 设备或模拟器上的宿主。`macos`：AppKit 宿主，一个 1200×800 的窗口（[macOS](./macos.md)）。`linux`：GTK 宿主，一个 390×844 的窗口（[Linux](./linux.md)）。`windows`：Win32 宿主，一个 1200×800 的窗口（[Windows](./windows.md)）。`gpui`：GPUI 宿主，一个 1200×800 的窗口，可在 macOS、Windows 或 Linux 上运行，以嵌入它的 GPUI 应用的方式显示 TSX 应用（[GPUI](./gpui.md)）。`tui`：当前终端中的宿主（[TUI](./tui.md)）。`web`：开发服务器的页面，地址会打印出来（[Web](./web.md#在浏览器里开发)）。 |
 | `--device <DEVICE>` | | 要使用的 iOS 模拟器，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。 |
-| `--port <PORT>` | `8790` | 开发服务器端口。等待此端口上的旧 NSH 开发会话清理完成后接管。 |
+| `--port <PORT>` | 此应用上次的端口，否则从 `8790` 起第一个空闲端口 | 开发服务器端口。等待此端口上的旧 NSH 开发会话清理完成后接管。 |
 | `--release` | | 压缩代码并去掉调试信息。release 包没有热模块替换：每次保存都会重新加载应用。 |
 | `--limits [<LIMITS>]` | | 按嵌入在其他应用中的方式运行应用，使用宿主应用设置的限制：`memory` 和 `stack`（单位为 `KB`、`MB` 或 `GB`）、`load` 和 `call`（单位为 `ms` 或 `s`）以及 `nodes`，例如 `--limits memory=128MB,call=500ms`。没写的项保持嵌入时的默认值，只写 `--limits` 就全部使用默认值（[沙箱与能力](./sandbox-and-capabilities.md#限制)）。不带它时，应用像打包后的应用一样独立运行。仅 TSX 入口。 |
 | `--trace` | | 宿主把每次 commit 的耗时（JS、布局、挂载项）记录到终端。 |
@@ -106,7 +106,7 @@ nsh run my-app/App.tsx --target web
 
 使用 `--target android` 时，会选用 `adb devices` 列出的第一台设备；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 
-新会话最多等待十秒，让旧会话完成清理。端口被其他程序或旧版 NSH CLI 占用时，会报错并指出端口。同时运行多个应用时，为它们指定不同的 `--port`；`--port 0` 由操作系统分配空闲端口。
+新会话最多等待十秒，让旧会话完成清理。多个应用可同时运行，各用自己的端口，再次运行同一应用会替换它之前的会话。`--port` 指定的端口被其他程序或旧版 NSH CLI 占用时，会报错并指出端口；`--port 0` 由操作系统分配空闲端口。`nsh run` 只服务本机，使用 `--target ios`、`android` 或 `web` 时也服务局域网。
 使用 `--target tui` 时，应用在当前终端中运行，保存源文件时热更新。CLI 和宿主的诊断日志写入应用的 `.nsh/tui.log`；按 `C-h e` 查看日志与错误，按 Escape 或 `C-g` 关闭面板，按 `r` 重新加载。应用错误会自动打开面板，更新后恢复应用画面。每个单元格默认是 8×16 点；`--points-per-cell 10x20` 优先于 `nsh.json` 中的 `"tui": { "pointsPerCell": "10x20" }`，宽高均须是有限正数，重启运行后生效。Rust 应用在为它生成的终端开发宿主中运行根组件，Rust 代码保存后重新构建并重启。
 
 在 Unix 上，终端宿主收到 SIGHUP、SIGTERM、SIGINT 或终端断开时退出，并恢复仍可访问的终端设置。应用空闲时在输入检查之间休眠；交互运行使用有效的终端输入，测试使用 `--headless` 接受重定向输入。
@@ -216,6 +216,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--keystore <FILE>` | Android：release keystore。默认使用 `~/.android/debug.keystore` 中的调试密钥（不存在时创建）。 |
 | `--key-alias <ALIAS>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <PASSWORD>` | Android：keystore 密码，也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
+| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。不能与 `--run` 同时使用。 |
 | `--abi <ABI>` | Android：APK 包含的 ABI（`arm64-v8a`、`armeabi-v7a`、`x86_64`），可重复或用逗号分隔。默认：`arm64-v8a` 和 `armeabi-v7a`，加上 `--run` 时还有设备的 ABI。 |
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
 
@@ -292,6 +293,23 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 | `--strip-debug` | 字节码中不保留行号和列号表：更小，但报错调用栈里没有位置。 |
 | `--min-runtime <VERSION>` | 能运行该包的最低运行时版本，例如 `0.2.0`；更旧的运行时会拒绝它。默认：本 CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 
+### nsh publish android
+
+```sh
+nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+```
+
+把 Android App Bundle 上传到 Google Play，并发布到**内部测试**轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
+会被删除）。它不会走得更远：要发布到封闭测试、开放测试或正式版，请在 Play Console 中推进。登录身份是一个在 Play Console
+中有该应用发布权限的 Google Cloud 服务账号（[Android](./android.md#上传到-google-play)）。
+
+| 参数 | 说明 |
+|---|---|
+| `--entry <DIR>` | 应用目录或入口，其 `nsh.json` 的 `id` 即包名。默认：`.`。 |
+| `--package <NAME>` | Google Play 上的包名。默认：`nsh.json` 的 `id`。 |
+| `--credentials <KEY.json>` | 服务账号的 JSON 密钥。默认读取 `NSH_PLAY_CREDENTIALS`。不要提交到仓库。 |
+| `--draft` | 以草稿发布：应用在 Play Console 中完成首次发布之前，Play 只接受草稿。 |
+
 ### nsh verify
 
 ```sh
@@ -338,3 +356,13 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |
 | `NSH_WASM_BINDGEN` | `run`、`package`（`--target web`） | 应用的 crate [调用浏览器 API](./web.md#在-rust-中使用浏览器-api) 时使用的 `wasm-bindgen` CLI。默认使用 `PATH` 中的。 |
 | `NO_COLOR` | 所有命令 | 设置后，终端输出不带颜色。 |
+
+## nsh publish ios
+
+```sh
+nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+```
+
+在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，用于 TestFlight。参数也可通过
+`NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。

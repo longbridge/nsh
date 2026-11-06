@@ -114,6 +114,14 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
             ("position", point(p.position)?),
             ("pagePosition", point(p.page_position)?),
             ("modifiers", modifiers(&p.modifiers)?),
+            (
+                "pointerType",
+                match p.pointer_type {
+                    Some(pointer) => Value::string(pointer.name())?,
+                    // `null`, as `PayloadValue::Null`.
+                    None => Value(1),
+                },
+            ),
         ])?,
         EventPayload::FileDrop(uris) => object([("uris", strings(uris)?)])?,
         EventPayload::FileDropAt {
@@ -140,7 +148,8 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
         }
         EventPayload::Picked { id, .. }
         | EventPayload::FileRequest { id, .. }
-        | EventPayload::Speech { id, .. } => object([("id", number(*id))])?,
+        | EventPayload::Speech { id, .. }
+        | EventPayload::Audio { id, .. } => object([("id", number(*id))])?,
         EventPayload::Native { name, data } => object([
             ("name", Value::string(name)?),
             ("data", Value(host.json(data)?.0[0] as u32)),

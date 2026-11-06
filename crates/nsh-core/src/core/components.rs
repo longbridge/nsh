@@ -64,13 +64,20 @@ type Rows = (u32, Option<Rc<[u64]>>);
 
 /// The parts of a view's list cells that show rows: the index each one's
 /// content reads, and the content's owner.
-type CellRows =
-    Rc<RefCell<FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>>>;
+type CellRows = Rc<RefCell<CellRowMap>>;
+
+/// The index and owner of each part of a list's cells showing a row.
+type CellRowMap = FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>;
 
 /// A component's own list.
 struct VirtualListState {
     /// The component whose view it is in (its rows' handlers are its).
     owner: NodeId,
+    /// The owner of the run that made the list, if any: its rows are made
+    /// under it and disposed with it. Shared with the cleanup each run
+    /// registers, which disposes the rows only while the list is still
+    /// that run's.
+    scope: Rc<std::cell::Cell<Option<crate::element::Owner>>>,
     row: RowFn,
     count: u32,
     keys: Option<Rc<[u64]>>,
@@ -491,6 +498,17 @@ struct Notifications {
     next_press: Option<AnswerSlot<String>>,
 }
 
+/// The links that open the app ([`crate::url_scheme`]).
+#[derive(Default)]
+struct UrlScheme {
+    /// The schemes the app claims (lower case).
+    schemes: Vec<String>,
+    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
+    pending: std::collections::VecDeque<String>,
+    /// The listener waiting for a link.
+    next: Option<AnswerSlot<String>>,
+}
+
 /// The speech recognition session running ([`crate::speech`]).
 struct SpeechSession {
     id: u32,
@@ -568,15 +586,19 @@ pub(super) struct Components {
     picks: FxHashMap<
         u32,
         (
-            crate::picker::PickRequest,
+            crate::picker::Pick,
             AnswerSlot<Vec<crate::picker::PickedFile>>,
         ),
     >,
     next_pick: u32,
     /// The speech recognition session running, if any.
     speech: Option<SpeechSession>,
+    /// The sounds and players open, by id: where their events go.
+    audio: FxHashMap<u32, crate::audio::AudioSink>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
+    /// The links that open the app ([`crate::url_scheme`]).
+    url_schemes: UrlScheme,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -697,7 +719,9 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             speech: None,
+            audio: FxHashMap::default(),
             notifications: Notifications::default(),
+            url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -972,6 +996,12 @@ impl<M: TextEngine> Core<M> {
         self.system_dark = environment.dark;
         environment.dark = self.shown_dark();
         self.apply_environment(environment);
+    }
+
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
     }
 
     /// The environment components read is now `environment`.
@@ -2051,7 +2081,9 @@ impl<M: TextEngine> Core<M> {
                     let at = row_position(index, count, count_signal, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
-                let el = self.build_cell(host, inst, build);
+                // The wrapper is the placing component's.
+                let parent = self.list_component_owner(list);
+                let el = self.build_cell(parent, inst, build);
                 inst.row_index = made.take();
                 if let (Some(list), Some(index), Some(owner)) =
                     (list, inst.row_index, inst.cell_owner)
@@ -2075,11 +2107,16 @@ impl<M: TextEngine> Core<M> {
                     .and_then(|k| self.nodes[k as usize].list.as_ref())
                     .is_some_and(|l| l.inverted);
                 let state = self.components.virtual_lists.get(&list).map(|state| {
+                    // The run that made the list went (its view goes in
+                    // this commit): no row is made under it.
+                    let scope = state.scope.get();
+                    let gone = scope.is_some_and(|s| !s.is_live());
                     (
-                        state.count as usize,
+                        if gone { 0 } else { state.count as usize },
                         state.row.clone(),
                         state.separator.clone(),
                         state.rows.clone(),
+                        scope,
                     )
                 });
                 match state {
@@ -2094,7 +2131,7 @@ impl<M: TextEngine> Core<M> {
                         inst.row_index = None;
                         ElNode::empty_view()
                     }
-                    Some((count, row, separator, rows)) => {
+                    Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
                         let build = || {
@@ -2114,7 +2151,12 @@ impl<M: TextEngine> Core<M> {
                             .into_element()
                             .0
                         };
-                        let el = self.build_cell(host, inst, build);
+                        // Under the run that made the list, also when the
+                        // row is inside another component's wrapper (an
+                        // `Items` prop): the list is known here, not from
+                        // the cell's parent.
+                        let parent = scope.unwrap_or_else(|| self.list_component_owner(Some(list)));
+                        let el = self.build_cell(parent, inst, build);
                         inst.row_index = made.take();
                         if let (Some(index), Some(owner)) = (inst.row_index, inst.cell_owner) {
                             rows.borrow_mut().insert(host, (index, owner));
@@ -2145,27 +2187,26 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Builds a list cell's row with `build` under an owner of the cell's
-    /// own (the previous row's goes), made under the list component's so the
-    /// row sees its context.
+    /// own (the previous row's goes), made under `parent` so the row sees
+    /// its context.
     fn build_cell(
         &mut self,
-        cell: NodeId,
+        parent: crate::element::Owner,
         inst: &mut Instance,
         build: impl FnOnce() -> ElNode,
     ) -> Result<ElNode, String> {
         if let Some(owner) = inst.cell_owner.take() {
             owner.dispose();
         }
-        let parent = self.cell_parent_owner(cell);
         let (owner, el) = parent.run(|| crate::element::create_root(|| caught(build)));
         inst.cell_owner = Some(owner);
         el
     }
 
-    /// The owner of the component whose list cell `cell` is in.
-    fn cell_parent_owner(&self, cell: NodeId) -> crate::element::Owner {
-        let component = self
-            .list_of(cell)
+    /// The owner of the component whose list `list` is (its own list, or
+    /// the list it places another component's `Items` in).
+    fn list_component_owner(&self, list: Option<NodeId>) -> crate::element::Owner {
+        let component = list
             .and_then(|list| {
                 self.components
                     .virtual_lists
@@ -4110,6 +4151,7 @@ impl<M: TextEngine> Core<M> {
             .entry(id)
             .or_insert_with(|| VirtualListState {
                 owner,
+                scope: Rc::default(),
                 row: list.row.clone(),
                 count: 0,
                 keys: None,
@@ -4124,6 +4166,24 @@ impl<M: TextEngine> Core<M> {
                 latest: None,
                 report: None,
             });
+        // The rows go with the run that made the list. A list a later run
+        // keeps takes that run's owner: its cells are made again below.
+        if state.scope.get() != list.scope {
+            state.scope.set(list.scope);
+            if let Some(scope) = list.scope {
+                let rows = Rc::downgrade(&state.rows);
+                let current = Rc::downgrade(&state.scope);
+                scope.run(|| {
+                    crate::element::cleanup(move || {
+                        // A run the list has since left keeps the rows of
+                        // the run it is in now.
+                        if current.upgrade().is_some_and(|c| c.get() == Some(scope)) {
+                            dispose_rows(&rows);
+                        }
+                    })
+                });
+            }
+        }
         let cells = state.rows.clone();
         let bound = matches!(list.count, Reactive::Bound(_)) || list.keys.is_some();
         let (count, keys) = (list.count, list.keys);
@@ -4924,6 +4984,38 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
+    /// Hands `url`, a link the system gave the app, to the listener, or
+    /// keeps it for the next; drops it when the app does not claim it.
+    fn url_scheme(&mut self, url: String) {
+        let links = &mut self.components.url_schemes;
+        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+            log::warn!("link dropped: {dropped}");
+            return;
+        }
+        if let Some(answer) = links.next.take() {
+            answer.borrow_mut().deliver(url);
+            return;
+        }
+        if links.pending.len() == crate::url_scheme::MAX_PENDING {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            links.pending.pop_front();
+        }
+        links.pending.push_back(url);
+    }
+
+    /// The schemes the app claims (`nsh.json` `schemes`,
+    /// [`crate::url_scheme`]), from the app's own resources: the links the
+    /// platform reports of other schemes are dropped. None by default.
+    pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
+        self.components.url_schemes.schemes = schemes
+            .into_iter()
+            .map(|s| s.into().to_ascii_lowercase())
+            .collect();
+    }
+
     /// Answers what waits for the platform's [`EventKind::Notification`].
     fn notification_event(&mut self, payload: &EventPayload) {
         use crate::notifications::{NotificationEvent as Field, NotificationPermission};
@@ -5055,9 +5147,100 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Applies a sound's or a player's request: through the embedding
+    /// app's audio stack when it gave one, else as commands on the root the
+    /// platform answers with [`EventKind::Audio`].
+    fn audio_action(&mut self, action: crate::element::AudioAction) {
+        use crate::{
+            audio::{AudioCommand, AudioError, AudioEvent},
+            element::AudioAction,
+        };
+        let (command, sink) = match action {
+            AudioAction::Available(answer) => {
+                let available = match &self.audio {
+                    Some(backend) => backend.available(),
+                    None => self.components.environment.audio,
+                };
+                answer.borrow_mut().deliver(available);
+                return;
+            }
+            AudioAction::Open { command, sink } => {
+                debug_assert!(matches!(
+                    command,
+                    AudioCommand::Load { .. }
+                        | AudioCommand::LoadUrl { .. }
+                        | AudioCommand::Open { .. }
+                ));
+                let failed = |error, message: &str| AudioEvent::Failed {
+                    error,
+                    message: message.into(),
+                };
+                if !self.access.allows_audio() {
+                    sink.send(failed(AudioError::NotAllowed, "sound is not granted"));
+                    sink.close();
+                    self.deny(
+                        "sound is not granted: add `\"audio\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let AudioCommand::Open { src, .. } | AudioCommand::LoadUrl { url: src, .. } =
+                    &command
+                    && !self.access.allows_media(src)
+                {
+                    sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
+                    sink.close();
+                    self.deny(format!(
+                        "`{src}` is not granted by capabilities.network in nsh.json"
+                    ));
+                    return;
+                }
+                if self.audio.is_none() && !self.components.environment.audio {
+                    sink.send(failed(AudioError::Unavailable, "nothing plays sound here"));
+                    sink.close();
+                    return;
+                }
+                self.components.audio.insert(command.id(), sink.clone());
+                (command, sink)
+            }
+            AudioAction::Command(command) => {
+                let id = command.id();
+                let sink = if command.ends() {
+                    self.components.audio.remove(&id)
+                } else {
+                    self.components.audio.get(&id).cloned()
+                };
+                // A command of an object that failed to open, or closed.
+                let Some(sink) = sink else {
+                    return;
+                };
+                if command.ends() {
+                    sink.close();
+                }
+                (command, sink)
+            }
+        };
+        match self.audio.clone() {
+            Some(backend) => backend.command(command, &sink),
+            None => {
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Audio(command),
+                });
+            }
+        }
+    }
+
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, command) => {
+            Action::Command(id, mut command) => {
+                // Saved bounds go onto the displays there are now, whichever
+                // side (Rust or JS) restores them.
+                if let Command::Desktop(desktop) = &mut command
+                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
+                {
+                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
+                }
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -5154,10 +5337,43 @@ impl<M: TextEngine> Core<M> {
                 }
                 let id = self.components.next_pick;
                 self.components.next_pick += 1;
-                self.components.picks.insert(id, (request, answer));
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Images(request), answer));
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::PickImages { id, request },
+                });
+            }
+            Action::PickFiles(request, answer) => {
+                if !self.access.allows_picker() {
+                    answer.borrow_mut().deliver(Vec::new());
+                    self.deny(
+                        "the picker is not granted: add `\"picker\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(picker) = self.picker.clone() {
+                    let picked = picker.pick_files(request.clone());
+                    crate::element::task::spawn_raw(
+                        &self.components.executor,
+                        crate::ROOT_ID,
+                        Box::pin(async move {
+                            let files = crate::picker::finish_files(&request, picked.await);
+                            answer.borrow_mut().deliver(files);
+                        }),
+                    );
+                    return;
+                }
+                let id = self.components.next_pick;
+                self.components.next_pick += 1;
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Files(request.clone()), answer));
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickFiles { id, request },
                 });
             }
             Action::ReadClipboard(read) => {
@@ -5225,7 +5441,15 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::Speech(action) => self.speech_action(action),
+            Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::NextUrlSchemeOpen(answer) => {
+                let links = &mut self.components.url_schemes;
+                match links.pending.pop_front() {
+                    Some(url) => answer.borrow_mut().deliver(url),
+                    None => links.next = Some(answer),
+                }
+            }
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5568,18 +5792,42 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            EventKind::Audio if id == crate::ROOT_ID => {
+                let EventPayload::Audio { id: object, event } = payload else {
+                    return false;
+                };
+                // Dropped once the object is closed.
+                if let Some(sink) = self.components.audio.get(object) {
+                    sink.send(event.clone());
+                }
+                true
+            }
             EventKind::Pick if id == crate::ROOT_ID => {
                 let EventPayload::Picked { id: request, files } = payload else {
                     return false;
                 };
                 if let Some((asked, answer)) = self.components.picks.remove(request) {
-                    let files = crate::picker::finish(&asked, files.clone());
+                    let files = asked.finish(files.clone());
                     answer.borrow_mut().deliver(files);
                 }
                 true
             }
             EventKind::Notification if id == crate::ROOT_ID => {
                 self.notification_event(payload);
+                true
+            }
+            EventKind::UrlScheme if id == crate::ROOT_ID => {
+                let EventPayload::Map(entries) = payload else {
+                    return false;
+                };
+                let url = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(url) if *k == crate::url_scheme::URL => Some(url),
+                    _ => None,
+                });
+                let Some(url) = url else {
+                    return false;
+                };
+                self.url_scheme(url.clone());
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {
@@ -5935,6 +6183,17 @@ impl<M: TextEngine> Core<M> {
 fn drop_caught<T>(value: T) {
     if let Err(message) = caught(move || drop(value)) {
         log::error!(target: "js", "a value of a call into Rust panicked as it dropped: {message}");
+    }
+}
+
+/// Disposes the contents of a list's cells: the run that made the list went.
+fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
+    let Some(rows) = rows.upgrade() else {
+        return;
+    };
+    let owners: Vec<_> = rows.borrow_mut().drain().map(|(_, (_, o))| o).collect();
+    for owner in owners {
+        owner.dispose();
     }
 }
 

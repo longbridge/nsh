@@ -13,7 +13,10 @@ use nsh_base::{
 };
 use nsh_core::prelude::*;
 use nsh_platform_tui::{App, AppView, CursorStyle, Handled, Input, Modifiers, Root};
-use ratatui_core::{backend::TestBackend, terminal::Terminal};
+use ratatui_core::{
+    backend::{Backend, TestBackend},
+    terminal::Terminal,
+};
 
 use super::{
     app::{draw_until, mouse, surface},
@@ -125,6 +128,32 @@ fn tab_until(
         }
     }
     panic!("Tab never reached {expected:?}: {:?}", contents(terminal));
+}
+
+/// Draws until the terminal's cursor is at `at`. The editor places its
+/// sink, where the cursor is, with where its rows were measured after a
+/// layout: a commit or two after the rows and the focus show.
+fn draw_until_cursor(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    at: (u16, u16),
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let cursor = terminal.backend_mut().get_cursor_position().unwrap();
+        if cursor == at.into() {
+            return;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the cursor stayed at {cursor:?}, not {at:?}:\n{}",
+            dump(terminal)
+        );
+    }
 }
 
 /// An editor reporting its focus and each change.
@@ -283,15 +312,13 @@ fn an_editors_caret_is_the_terminal_cursor() {
     tab_until(&mut view, &mut terminal, &rx, "focus yes");
     // The sink sits at the caret, the text's start: the terminal's bar is
     // on the `l` of `let`, and nsh-base draws no caret of its own.
-    terminal.backend_mut().assert_cursor_position(start);
+    draw_until_cursor(&mut view, &mut terminal, &rx, start);
     assert_eq!(view.cursor_style(), CursorStyle::Bar);
     assert_eq!(terminal.backend().buffer()[start].symbol(), "l");
     // Typing moves it with the caret, after the `Q`.
     assert_eq!(view.handle(key("Q")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "Qlet total");
-    terminal
-        .backend_mut()
-        .assert_cursor_position((start.0 + 1, start.1));
+    draw_until_cursor(&mut view, &mut terminal, &rx, (start.0 + 1, start.1));
 }
 
 #[test]

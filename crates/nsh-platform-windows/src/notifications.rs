@@ -5,11 +5,12 @@
 //! NSH apps are not packaged, so the system knows them by nothing but what
 //! the process says. Toasts of an unpackaged app need:
 //! - an AppUserModelID: the app's id, the one the taskbar groups it by
-//!   ([`start`]). A surface embedded in another app's window has none of its
-//!   own: its notifications stay the embedding app's, the permission is
-//!   `unavailable` and nothing shows;
+//!   ([`start`]), set only for a view that owns the process's notifications
+//!   (`AppOptions::notifications`, [`start_app`]; `run_app` sets it).
+//!   Without it the notifications stay the embedding app's, the permission
+//!   is `unavailable` and nothing shows;
 //! - the id's registration, `HKCU\Software\Classes\AppUserModelId\<id>`, with
-//!   the name toasts show and the COM class that hears presses. Written when
+//!   the name and icon toasts show and the COM class that hears presses. Written when
 //!   the app first asks about notifications ([`register`]), not on every
 //!   start. It needs no Start Menu shortcut;
 //! - that class's `LocalServer32`, the command that starts the app when a
@@ -30,6 +31,7 @@
 use std::{
     cell::{Cell, RefCell},
     ffi::c_void,
+    path::{Path, PathBuf},
     rc::{Rc, Weak},
     sync::OnceLock,
 };
@@ -44,7 +46,7 @@ use windows::{
         NotificationSetting, ToastNotification, ToastNotificationManager, ToastNotifier,
     },
     Win32::{
-        Foundation::{HWND, RECT},
+        Foundation::{ERROR_NOT_FOUND, HWND, RECT},
         Graphics::Gdi::{
             ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS,
             CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET,
@@ -92,6 +94,8 @@ const MAX_BADGE: u32 = 99;
 thread_local! {
     /// The app's id and name, when the process is an app of its own.
     static APP: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// The app's icon file, which toasts show.
+    static ICON: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// The id is registered ([`register`]).
     static REGISTERED: Cell<bool> = const { Cell::new(false) };
     /// The surface that listens to presses, once the app does.
@@ -102,15 +106,29 @@ thread_local! {
     static BADGE: Cell<u32> = const { Cell::new(0) };
 }
 
+/// Makes the process the app `id` ([`start`]) for an [`AppView`] that owns
+/// its notifications (`AppOptions::notifications`), once per process: the
+/// first such view's app wins.
+///
+/// [`AppView`]: crate::AppView
+pub(crate) fn start_app(id: &str, name: &str, icon: Option<&Path>) {
+    if APP.with(|app| app.borrow().is_some()) {
+        return;
+    }
+    crate::system::set_app_id(id);
+    start(id, name, icon);
+}
+
 /// Makes the process the app `id`, named `name`, for toasts, and starts
 /// hearing their presses. On the UI thread, in its apartment, before the
 /// message loop.
-pub(crate) fn start(id: &str, name: &str) {
+pub(crate) fn start(id: &str, name: &str, icon: Option<&Path>) {
     if id.encode_utf16().count() > MAX_APP_ID {
         log::warn!("notifications: the app id is over {MAX_APP_ID} characters: none will show");
         return;
     }
     APP.with(|app| *app.borrow_mut() = Some((id.to_owned(), name.to_owned())));
+    ICON.with(|i| *i.borrow_mut() = icon.and_then(|icon| std::path::absolute(icon).ok()));
     let factory: IClassFactory = Factory.into();
     // SAFETY: a valid class id and factory. The registration lasts as the
     // process does, so its cookie is not kept.
@@ -174,6 +192,11 @@ pub(crate) fn button_created(surface: &Rc<Surface>) {
     }
 }
 
+/// The app's name, when the process is an app of its own.
+pub(crate) fn app_name() -> Option<String> {
+    app().map(|(_, name)| name)
+}
+
 /// The app's id and name, when it has them.
 fn app() -> Option<(String, String)> {
     APP.with(|app| app.borrow().clone())
@@ -201,6 +224,15 @@ fn register(id: &str, name: &str) -> Result<()> {
     let app_key = format!("Software\\Classes\\AppUserModelId\\{id}");
     set_value(&app_key, Some("DisplayName"), name)?;
     set_value(&app_key, Some("CustomActivator"), &class)?;
+    // The icon toasts show by the app's name; without one, a blank one.
+    let icon = ICON.with(|i| i.borrow().clone());
+    set_value(
+        &app_key,
+        Some("IconUri"),
+        &icon
+            .map(|icon| icon.display().to_string())
+            .unwrap_or_default(),
+    )?;
     if !cfg!(feature = "dev") {
         let exe = std::env::current_exe().map_err(|_| windows::core::Error::from_thread())?;
         set_value(
@@ -234,7 +266,7 @@ fn set_value(key: &str, name: Option<&str>, value: &str) -> Result<()> {
 fn permission() -> NotificationPermission {
     let setting = match notifier() {
         None => return NotificationPermission::Unavailable,
-        Some(notifier) => notifier.and_then(|n| n.Setting()),
+        Some(notifier) => notifier.and_then(|n| setting(&n)),
     };
     match setting {
         Ok(NotificationSetting::Enabled) => NotificationPermission::Granted,
@@ -246,13 +278,24 @@ fn permission() -> NotificationPermission {
     }
 }
 
+/// The user's setting for the app's notifications. An app that has not
+/// shown one yet has no entry in Settings > System > Notifications, and
+/// `Setting` fails with `ERROR_NOT_FOUND` until the first toast makes it:
+/// nothing turned off, so they are on.
+fn setting(notifier: &ToastNotifier) -> Result<NotificationSetting> {
+    match notifier.Setting() {
+        Err(err) if err.code() == ERROR_NOT_FOUND.to_hresult() => Ok(NotificationSetting::Enabled),
+        setting => setting,
+    }
+}
+
 /// Whether the system took `notification`.
 fn show(notification: &Notification) -> Result<bool> {
     let Some(notifier) = notifier() else {
         return Ok(false);
     };
     let notifier = notifier?;
-    if notifier.Setting()? != NotificationSetting::Enabled {
+    if setting(&notifier)? != NotificationSetting::Enabled {
         return Ok(false);
     }
     let document = XmlDocument::new()?;

@@ -798,6 +798,13 @@ impl Node {
         if self.spare {
             props.accessibility.hidden = true;
         }
+        if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
+            props.screen_order = Some(if list.horizontal {
+                crate::geometry::Axis::Horizontal
+            } else {
+                crate::geometry::Axis::Vertical
+            });
+        }
         props
     }
 
@@ -1128,8 +1135,12 @@ pub struct Core<M: TextEngine> {
     /// headers under the status bar).
     safe_area: EdgeInsets,
     list_binds: Vec<ListBind>,
-    /// The lists keeping items rendered for [`Core::set_kept`].
+    /// The lists keeping items rendered ([`Core::sync_kept`]).
     kept_lists: Vec<Key>,
+    /// The nodes of the last [`Core::set_kept`].
+    selection_kept: Vec<NodeId>,
+    /// [`Core::sync_kept`]'s buffer, reused.
+    kept_scratch: Vec<Key>,
     /// The runtime's lists with overscan cells waiting to bind
     /// ([`Core::take_paced_list_binds`]), in the order they asked.
     paced_lists: Vec<NodeId>,
@@ -1242,6 +1253,8 @@ pub struct Core<M: TextEngine> {
     /// Recognizes the app's speech in place of the platform
     /// ([`Core::set_speech`]).
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
+    /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
+    audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1303,6 +1316,7 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             speech: None,
+            audio: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1331,6 +1345,8 @@ impl<M: TextEngine> Core<M> {
             safe_area: EdgeInsets::default(),
             list_binds: Vec::new(),
             kept_lists: Vec::new(),
+            selection_kept: Vec::new(),
+            kept_scratch: Vec::new(),
             paced_lists: Vec::new(),
             paced_scratch: Vec::new(),
             events: Vec::new(),
@@ -1528,6 +1544,13 @@ impl<M: TextEngine> Core<M> {
         self.speech = backend;
     }
 
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
+    /// embedding app's own audio stack or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
+        self.audio = backend;
+    }
+
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
     /// memory, for the core's life.
     pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
@@ -1666,12 +1689,41 @@ impl<M: TextEngine> Core<M> {
     /// the render window too, until the next call: the ends of a text
     /// selection across a list's rows, whose texts must outlive scrolling
     /// away (a recycled cell would show another row). Replaces the last
-    /// call's; none releases them.
+    /// call's; none releases them. The rows holding the keyboard focus or
+    /// an open overlay are kept anyway ([`Core::sync_kept`]).
     pub fn set_kept(&mut self, nodes: &[NodeId]) {
+        self.selection_kept.clear();
+        self.selection_kept.extend_from_slice(nodes);
+        self.sync_kept();
+    }
+
+    /// Keeps the rows of lists rendered wherever they scroll while they
+    /// hold what must outlive scrolling away: [`Core::set_kept`]'s nodes,
+    /// the keyboard focus and open overlays (a row's menu or popover). A
+    /// recycled cell would show another row, drop the focus and close the
+    /// overlay. Each list's kept rows are all that hold one; in a list in
+    /// another list's row, both rows are kept.
+    fn sync_kept(&mut self) {
+        let mut holders = std::mem::take(&mut self.kept_scratch);
+        holders.clear();
+        holders.extend(
+            self.selection_kept
+                .iter()
+                .filter_map(|&id| self.key(id).ok()),
+        );
+        if let Some((key, id)) = self.focus
+            && self.nodes.get(key as usize).is_some_and(|n| n.id == id)
+        {
+            holders.push(key);
+        }
+        holders.extend(self.overlays.iter().copied().filter(|&key| {
+            self.overlay(key)
+                .is_some_and(|o| o.host.is_some() && o.config.hint.is_none())
+        }));
         let mut kept: Vec<(Key, u32)> = Vec::new();
-        for &id in nodes {
-            let Ok(mut key) = self.key(id) else { continue };
-            // Up to the cell: the ancestor whose parent is a list holding
+        for &holder in &holders {
+            let mut key = holder;
+            // Up to each cell: an ancestor whose parent is a list holding
             // it in a slot.
             loop {
                 let parent = self.nodes[key as usize].parent;
@@ -1686,10 +1738,13 @@ impl<M: TextEngine> Core<M> {
                         .and_then(|s| s.index)
                 {
                     kept.push((parent, index));
-                    break;
                 }
                 key = parent;
             }
+        }
+        self.kept_scratch = holders;
+        if kept.is_empty() && self.kept_lists.is_empty() {
+            return;
         }
         let mut lists: Vec<Key> = kept.iter().map(|&(list, _)| list).collect();
         lists.sort_unstable();
@@ -2259,12 +2314,35 @@ impl<M: TextEngine> Core<M> {
         if std::mem::take(&mut self.tree_order_changed) {
             let mut order = Vec::new();
             let mut pending = vec![self.root];
+            let mut cells = Vec::new();
             while let Some(key) = pending.pop() {
                 let node = &self.nodes[key as usize];
                 if node.created {
                     order.push(node.id);
                 }
-                pending.extend(node.children.iter().rev().copied());
+                match &node.list {
+                    // A list recycles its cells, so they are not in their
+                    // rows' order among its children: they go as they are
+                    // on screen, along the list's axis, then across it.
+                    Some(list) if node.children.len() > 1 => {
+                        cells.clear();
+                        cells.extend_from_slice(&node.children);
+                        let start = |k: &Key| {
+                            let at = self.nodes[*k as usize].frame.origin;
+                            if list.horizontal {
+                                (at.x.0, at.y.0)
+                            } else {
+                                (at.y.0, at.x.0)
+                            }
+                        };
+                        cells.sort_by(|a, b| {
+                            let (a, b) = (start(a), start(b));
+                            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+                        });
+                        pending.extend(cells.iter().rev().copied());
+                    }
+                    _ => pending.extend(node.children.iter().rev().copied()),
+                }
             }
             self.mount.push(MountItem::TreeOrder(order));
         }
@@ -2318,6 +2396,11 @@ impl<M: TextEngine> Core<M> {
         self.sync_ch();
         self.sync_fixed();
         self.sync_overlays();
+        // The rows holding the focus or an open overlay stay rendered,
+        // before the lists update their windows.
+        if self.focus.is_some() || !self.overlays.is_empty() || !self.kept_lists.is_empty() {
+            self.sync_kept();
+        }
         self.sync_back();
         self.sync_keys();
         // Platforms animate the frames, insertions and removals that follow
@@ -2492,6 +2575,12 @@ impl<M: TextEngine> Core<M> {
                 }
                 Command::SendInput(_) if !self.access.allows_web_input() => {
                     self.deny("trusted web view input is not granted: add `\"input\": true` to capabilities.webview in nsh.json".into());
+                    continue;
+                }
+                // As a `src` the capability does not allow: the page is
+                // not loaded, so its headers go nowhere.
+                Command::Load(load) if !self.access.allows_webview(&load.src) => {
+                    self.deny(not_granted("the web page", &load.src, "webview.hosts"));
                     continue;
                 }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
@@ -4017,6 +4106,8 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.sync_spacer(key, true);
                         self.outer_moved = true;
+                        // Its children are read along the new axis.
+                        flags |= dirty::VIEW_PROPS;
                     }
                 }
             }
@@ -4145,6 +4236,14 @@ impl<M: TextEngine> Core<M> {
             Prop::FollowEnd(threshold) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_follow_end(threshold.map(|t| t.0));
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
+                }
+            }
+            Prop::ListAlignment(alignment) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.set_alignment(alignment);
                     if list.parent {
                         self.warn_ignored(key);
                     }
@@ -4703,6 +4802,20 @@ impl<M: TextEngine> Core<M> {
                     self.set_disabled(key, d);
                 }
                 let node = &mut self.nodes[key as usize];
+                // The platforms make a web view's website data store with
+                // the web view, from its first props.
+                if let (NativeProp::Incognito(on), Some(NativeProps::WebView(p))) =
+                    (&prop, node.control.as_deref())
+                    && node.created
+                {
+                    if *on != p.incognito {
+                        log::warn!(
+                            target: "js",
+                            "a web view's `incognito` is read when it is made; render a new element to change it"
+                        );
+                    }
+                    return Ok(());
+                }
                 if let Some(control) = node.control.as_mut() {
                     apply_native(control, prop);
                     flags |= dirty::NATIVE;
@@ -5501,7 +5614,7 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare {
+        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {
@@ -7371,6 +7484,14 @@ impl<M: TextEngine> Core<M> {
             }
             self.mount.push(MountItem::Frame { id, frame });
             let node = &self.nodes[key as usize];
+            // A list's cell moved: the logical order goes by where cells are.
+            if self.track_tree_order
+                && node.parent != NO_KEY
+                && self.nodes[node.parent as usize].list.is_some()
+            {
+                self.tree_order_changed = true;
+            }
+            let node = &self.nodes[key as usize];
             // Translations by a fraction of the size follow it, and so does
             // the perspective of its parent, seen from the parent's center.
             let parent_perspective = self.perspective_steps(key) > 0;
@@ -7608,11 +7729,12 @@ impl<M: TextEngine> Core<M> {
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
         list.offset += anchor;
+        let kept = anchor;
         // A splice above the viewport already moved the offset.
         anchor += list.take_splice_anchor();
         // Inverted lists keep their distance from the end instead;
         // `maintainVisibleContentPosition` follows the end near it.
-        anchor += list.anchor_end();
+        anchor += list.anchor_end(kept);
         // The last scroll command's target moves as its cells are
         // measured: the list follows it.
         let mut retarget = None;
@@ -8515,6 +8637,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::Scrollable(v)) => p.scrollable = v,
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
+        (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),

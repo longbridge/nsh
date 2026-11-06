@@ -466,7 +466,7 @@ checks what it shows (`nsh test my-app`). A Rust app's opens its root (`open("."
 - [JSX and components](./jsx-and-components.md) and [Reactivity](./reactivity.md): components and signals, in Rust and
   TSX.
 - [Platforms](./platforms.md): what each platform supports, and its own page ([iOS](./ios.md),
-  [Android](./android.md), [macOS](./macos.md), [Windows](./windows.md), [Linux](./linux.md)).
+  [Android](./android.md), [macOS](./macos.md), [Windows](./windows.md), [Linux](./linux.md), [Web](./web.md), [TUI](./tui.md)).
 - [Signed packages](./signed-packages.md) and [Sandbox and capabilities](./sandbox-and-capabilities.md): delivery and
   what modules may do.
 - [Project structure](./project-structure.md): what goes in `nsh.json`, assets, files.

@@ -6,7 +6,9 @@ import { type JSX, View, mount, signal } from "nsh";
 import ModStandardAccess from "./mod-standard-access";
 import ModAccessibility from "./mod-accessibility";
 import ModAndroid from "./mod-android";
+import ModAudio from "./mod-audio";
 import ModClipboard from "./mod-clipboard";
+import ModUrlScheme from "./mod-url-scheme";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
 import ModHost from "./mod-host";
@@ -23,7 +25,9 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-standard-access": ModStandardAccess,
   "mod-accessibility": ModAccessibility,
   "mod-android": ModAndroid,
+  "mod-audio": ModAudio,
   "mod-clipboard": ModClipboard,
+  "mod-url-scheme": ModUrlScheme,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,
   "mod-host": ModHost,
