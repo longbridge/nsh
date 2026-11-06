@@ -514,6 +514,7 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
         .root
         .ns()
         .setAppearance(ns_appearance(appearance).as_deref());
+    crate::window::set_appearance(surface, ns_appearance(appearance).as_deref());
     update(surface);
 }
 

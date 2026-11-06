@@ -30,7 +30,8 @@ use objc2::{
     runtime::{Bool, ProtocolObject},
 };
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSScreen, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSAppearance, NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSScreen, NSWindow,
+    NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
@@ -189,10 +190,33 @@ fn open(surface: &Rc<Surface>, view: &NshView, options: &WindowOptions) {
         Size::new(Points(size.width as f32), Points(size.height as f32)),
     );
     view.set_window_of(Rc::downgrade(surface));
+    if let Some(appearance) = surface.root.ns().appearance() {
+        view.ns().setAppearance(Some(&appearance));
+    }
+    if crate::file_drop::accepting(surface) {
+        crate::file_drop::register(view.ns());
+    }
     window.setContentView(Some(view.ns()));
     resized(surface, view);
     window.makeKeyAndOrderFront(None);
     window.makeFirstResponder(Some(view.ns()));
+}
+
+/// The root views of the surface's windows of the app's own.
+pub(crate) fn roots(surface: &Surface) -> Vec<NshView> {
+    surface
+        .windows
+        .try_borrow()
+        .map(|windows| windows.values().map(|w| w.view.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// The app's appearance changed (`setColorScheme`): its windows follow, as
+/// the main window's root does.
+pub(crate) fn set_appearance(surface: &Surface, appearance: Option<&NSAppearance>) {
+    for root in roots(surface) {
+        root.ns().setAppearance(appearance);
+    }
 }
 
 /// The root view of a window of the app's own was resized (it is the
@@ -239,6 +263,7 @@ pub(crate) fn close_all(surface: &Surface) {
 
 fn close(w: AppWindow) {
     w.view.set_window_of(std::rc::Weak::new());
+    w.view.ns().unregisterDraggedTypes();
     w.window.setDelegate(None);
     w.window.orderOut(None);
     w.window.setContentView(None);

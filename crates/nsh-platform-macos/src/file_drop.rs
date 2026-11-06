@@ -52,8 +52,18 @@ pub(crate) fn deleted(surface: &Surface, id: nsh_core::NodeId) {
 fn destination_changed(surface: &Surface, id: nsh_core::NodeId, enabled: bool) {
     let registration = surface.file_drop.destinations.borrow_mut().set(id, enabled);
     match registration {
-        Some(true) => register(surface.root.ns()),
-        Some(false) => surface.root.ns().unregisterDraggedTypes(),
+        Some(true) => {
+            register(surface.root.ns());
+            for root in crate::window::roots(surface) {
+                register(root.ns());
+            }
+        }
+        Some(false) => {
+            surface.root.ns().unregisterDraggedTypes();
+            for root in crate::window::roots(surface) {
+                root.ns().unregisterDraggedTypes();
+            }
+        }
         None => {}
     }
     if !enabled {
@@ -69,7 +79,13 @@ pub(crate) fn reset(surface: &Surface) {
     *surface.file_drop.destinations.borrow_mut() = Destinations::default();
 }
 
-fn register(view: &NSView) {
+/// Whether a view of the surface takes file drops: a window's root view
+/// made later registers then ([`crate::window`]).
+pub(crate) fn accepting(surface: &Surface) -> bool {
+    surface.file_drop.destinations.borrow().count > 0
+}
+
+pub(crate) fn register(view: &NSView) {
     let kind = NSString::from_str("public.file-url");
     view.registerForDraggedTypes(&NSArray::from_slice(&[&*kind]));
 }
@@ -81,8 +97,7 @@ fn target(surface: &Surface, sender: &ProtocolObject<dyn NSDraggingInfo>) -> Opt
     {
         return None;
     }
-    let point = surface
-        .root
+    let point = input::event_root(surface)
         .ns()
         .convertPoint_fromView(sender.draggingLocation(), None);
     input::file_drop_target(surface, point.x as f32, point.y as f32)
