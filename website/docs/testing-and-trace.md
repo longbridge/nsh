@@ -170,6 +170,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `clipboard` | empty | The text on the clipboard at the start. |
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
+| `localeSettings` | the locale's, in UTC | The user's locale settings (`localeSettings()`), the ones it names over the locale's: `languages` (BCP 47 tags, most preferred first; `[locale]`), `timeZone` (an IANA name; `"UTC"`), `hourCycle` (`"h12"`, `"h23"`, `"h11"` or `"h24"`), `firstDayOfWeek` (1 for Monday to 7 for Sunday), `measurementSystem` (`"metric"`, `"us"` or `"uk"`) and `temperatureUnit` (`"celsius"` or `"fahrenheit"`), the last four the locale's region's. A time zone names the zone: local times, `Date`'s and `Intl`'s, stay the machine's, and so does the zone `Intl` names. |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
@@ -358,7 +359,8 @@ prefixes arrive.
 (JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
 inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0
 (`text:Delete >> nth=1`). A selector finds the views a user would look at first: in the top modal, then on screen,
-and of a navigation stack only the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
+and of a navigation stack only the top screen; the content of a scroll view or a list comes in the order it is on
+screen, top to bottom (left to right in a horizontal one), as Tab and screen readers go through it. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
 the views that clip them (`overflow: hidden`), or anywhere in the content of a scroll view the user can scroll, which
 scrolling brings in (`opacity` and transforms aside, as in Playwright). A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
 one: a selector matching several fails the step, and the error says how to narrow it.
@@ -392,7 +394,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.storage()` | What the app's storage holds now. |
-| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
+| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, that is laid out with a size (not in a tab laid out at no size) pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
 | `app.dialogs()` | The dialogs the app showed, in order. |
 | `app.onPick(handler)` | Answers the picks the app asks for from now on (`Picker.pickImages`, `Picker.pickFiles`): `handler` gets what the pick asks (`kind`: `"images"` or `"files"`, `multiple`, `limit`, `maxDimension`, `quality`, `format`, `filters`) and returns the files the user picks (`{ name, type?, data: Uint8Array }`, given to the app as they are), or `null` to cancel. Without a handler, picks are cancelled. Headless runs. |
@@ -400,6 +402,8 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.hear(text)` | The user says `text` into the running speech session (`Speech.start`): its `result` reports `text` as the whole transcript so far. Headless runs. |
 | `app.endSpeech(error?)` | Ends the running speech session: with `error` (`"no-speech"`, `"network"`, ...) it fails, else a last final result and `end` come, `no-speech` when nothing was heard. Headless runs. |
 | `app.speechRequests()` | The speech sessions the app started, in order: `lang` (`null` for the user's) and `interim`. |
+| `app.audio()` | What the app asked of the speaker (`Sound`, `AudioPlayer`), in order: `command` (`"load"`, `"play"`, `"stop"`, `"unload"`, `"open"`, `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"`), `src`, and `volume`, `rate`, `position` where they apply. Headless runs. |
+| `app.endAudio()` | The players playing reach their end (`end`; those that loop start again). Headless runs. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
 | `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
 | `await app.host.send(name, data?)` | Sends an event of the host app's to the app (`host.on`), then waits until it is quiet. See [Playing the host app](#playing-the-host-app). |
@@ -409,6 +413,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
+| `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
@@ -430,6 +435,7 @@ a test matches the code:
 |---|---|
 | `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
+| `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
 | `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `url`. The message names it. |
@@ -461,6 +467,7 @@ that only a real platform can do:
 - **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` and `Picker.pickFiles` resolve `[]`.
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
+- **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
@@ -561,7 +568,7 @@ the platform shows moves it a frame (1/60 s), so the app's time passes while it 
 `delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. Sockets and WebSockets connect on the host's network with `"live"`, and are refused as headless otherwise. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
-`reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
+the locale settings `localeSettings` names, `reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
 and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
 as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends

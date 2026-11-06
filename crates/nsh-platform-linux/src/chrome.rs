@@ -18,7 +18,8 @@
 //!   ([`crate::input::window_drag`]) moves the window
 //!   (`gdk::Toplevel::begin_move`); a double press does what
 //!   `gtk-titlebar-double-click` says (maximize by default); a secondary
-//!   press opens the window menu. Such presses never reach the app.
+//!   press opens the window menu. A single click without dragging reaches
+//!   the app on release, so overlays can close.
 //! - **Menus** are `gio::Menu` models: separators split sections, each
 //!   item is an action of a group inserted on the window (`nsh.item-N`;
 //!   checkable items are stateful boolean actions, so the menu shows the
@@ -192,6 +193,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
         // The docks show apps, not windows.
@@ -424,8 +427,8 @@ fn update_area(surface: &Surface) {
     }
 }
 
-/// A button press at `(x, y)` (root coordinates): true when it was on a
-/// view that drags the window, which handled it.
+/// Handles a drag region's window menu or double click. A single primary
+/// press waits in input routing until it becomes a click or native drag.
 pub(crate) fn press(surface: &Surface, event: &gdk::Event, x: f32, y: f32) -> bool {
     let Some(button_event) = event.downcast_ref::<gdk::ButtonEvent>() else {
         return false;
@@ -476,10 +479,24 @@ pub(crate) fn press(surface: &Surface, event: &gdk::Event, x: f32, y: f32) -> bo
         return true;
     }
     c.last_press.set(Some((time, sx, sy)));
+    false
+}
+
+/// Starts native movement once a draggable background press crosses GTK's threshold.
+pub(crate) fn begin_move(surface: &Surface, event: &gdk::Event) {
+    let Some(window) = window(surface) else {
+        return;
+    };
+    let Some(toplevel) = window.surface().and_downcast::<gdk::Toplevel>() else {
+        return;
+    };
+    let Some((sx, sy)) = event.position() else {
+        return;
+    };
+    surface.chrome.last_press.set(None);
     if let Some(device) = event.device() {
-        toplevel.begin_move(&device, button as i32, sx, sy, time);
+        toplevel.begin_move(&device, gdk::BUTTON_PRIMARY as i32, sx, sy, event.time());
     }
-    true
 }
 
 // --- Menus ------------------------------------------------------------------------------

@@ -12,6 +12,7 @@ mod byte_size;
 pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
+pub mod audio;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;
@@ -115,7 +116,7 @@ pub use crate::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
         BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
         TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
-        font_data,
+        font_data, font_family,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

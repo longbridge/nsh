@@ -830,6 +830,12 @@ fn props_json(p: &ViewProps) -> String {
     if p.continues_text {
         s.push_str(",\"continuesText\":true");
     }
+    // A list in its parent's viewport: its cells are read in screen order.
+    match p.screen_order {
+        Some(nsh_core::geometry::Axis::Vertical) => s.push_str(",\"screenOrder\":\"vertical\""),
+        Some(nsh_core::geometry::Axis::Horizontal) => s.push_str(",\"screenOrder\":\"horizontal\""),
+        None => {}
+    }
     s.push('}');
     s
 }
@@ -1485,6 +1491,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str(&notification.id)
                     .str(&notification.title)
                     .str(&notification.body)
+                    .bool(notification.silent)
                     .end(),
                 N::Close(name) => out
                     .item("cmd")
@@ -1498,6 +1505,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 _ => {}
             }
         }
+        Command::Audio(command) => encode_audio(out, id, command),
         Command::OpenUrl { id: request, url } => out
             .item("cmd")
             .num(id)
@@ -1611,4 +1619,131 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::StatusBar(_) => {}
         other => log::debug!("web: command {other:?} is not supported"),
     }
+}
+
+/// An audio command as `audio*` / `player*` items for `nsh.js` (durations in
+/// seconds). `Load`'s bytes cross as base64: only `data:` sources have
+/// them, and every other source is fetched by the page (`LoadUrl`).
+fn encode_audio(out: &mut Out, id: u32, command: &nsh_core::audio::AudioCommand) {
+    use nsh_core::audio::AudioCommand as A;
+    let cmd = |out: &mut Out, name: &str| {
+        out.item("cmd").num(id).str(name);
+    };
+    match command {
+        A::Load {
+            id: sound,
+            bytes,
+            hint,
+            max_duration,
+        } => {
+            cmd(out, "audioLoad");
+            out.num(*sound)
+                .str(&base64(bytes.bytes()))
+                .str(hint)
+                .num(max_duration.as_secs_f64())
+                .end();
+        }
+        A::LoadUrl {
+            id: sound,
+            url,
+            max_bytes,
+            max_duration,
+        } => {
+            cmd(out, "audioLoadUrl");
+            out.num(*sound)
+                .str(url)
+                .num(*max_bytes as f64)
+                .num(max_duration.as_secs_f64())
+                .end();
+        }
+        A::Play {
+            id: sound,
+            volume,
+            rate,
+        } => {
+            cmd(out, "audioPlay");
+            out.num(*sound).num(*volume).num(*rate).end();
+        }
+        A::Stop { id: sound } => {
+            cmd(out, "audioStop");
+            out.num(*sound).end();
+        }
+        A::Unload { id: sound } => {
+            cmd(out, "audioUnload");
+            out.num(*sound).end();
+        }
+        A::Open {
+            id: player,
+            src,
+            settings,
+        } => {
+            cmd(out, "playerOpen");
+            out.num(*player)
+                .str(src)
+                .num(settings.volume)
+                .num(settings.rate)
+                .bool(settings.looped)
+                .end();
+        }
+        A::Preload { id: player } => {
+            cmd(out, "playerPreload");
+            out.num(*player).end();
+        }
+        A::Resume { id: player } => {
+            cmd(out, "playerResume");
+            out.num(*player).end();
+        }
+        A::Pause { id: player } => {
+            cmd(out, "playerPause");
+            out.num(*player).end();
+        }
+        A::Seek {
+            id: player,
+            position,
+        } => {
+            cmd(out, "playerSeek");
+            out.num(*player).num(position.as_secs_f64()).end();
+        }
+        A::Set {
+            id: player,
+            settings,
+        } => {
+            cmd(out, "playerSet");
+            out.num(*player)
+                .num(settings.volume)
+                .num(settings.rate)
+                .bool(settings.looped)
+                .end();
+        }
+        A::Close { id: player } => {
+            cmd(out, "playerClose");
+            out.num(*player).end();
+        }
+        // Commands added later: a page that does not know them plays nothing.
+        _ => {}
+    }
+}
+
+/// `bytes` as standard base64 (no dependency for a `data:` sound's bytes).
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        s.push(ALPHABET[(n >> 18) as usize & 63] as char);
+        s.push(ALPHABET[(n >> 12) as usize & 63] as char);
+        s.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        s.push(if chunk.len() > 2 {
+            ALPHABET[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    s
 }

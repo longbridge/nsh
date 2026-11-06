@@ -452,6 +452,49 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     {
         env.locale = locale;
     }
+    if let Some(languages) = value
+        .get("languages")
+        .and_then(|v| v.as_array())
+        .and_then(|tags| {
+            nsh_core::platform::Languages::parse(tags.iter().filter_map(|t| t.as_str()))
+        })
+    {
+        env.locale_settings.languages = languages;
+    }
+    if let Some(regional) = value.get("regional") {
+        // The region's preferences, with the browser's hour cycle and first
+        // day of the week where it has them.
+        let locale = regional.get("locale").and_then(|v| v.as_str());
+        let parsed =
+            nsh_core::platform::LocaleSettings::parse(locale.unwrap_or(env.locale.as_str()));
+        let preferences = &mut env.locale_settings;
+        preferences.hour_cycle = parsed.hour_cycle;
+        preferences.first_day_of_week = parsed.first_day_of_week;
+        preferences.measurement_system = parsed.measurement_system;
+        preferences.temperature_unit = parsed.temperature_unit;
+        if let Some(cycle) = regional
+            .get("hourCycle")
+            .and_then(|v| v.as_str())
+            .and_then(nsh_core::platform::HourCycle::parse)
+        {
+            preferences.hour_cycle = cycle;
+        }
+        if let Some(day) = regional
+            .get("firstDay")
+            .and_then(|v| v.as_u64())
+            .and_then(|d| u8::try_from(d).ok())
+            .and_then(nsh_core::platform::Weekday::from_number)
+        {
+            preferences.first_day_of_week = day;
+        }
+    }
+    if let Some(zone) = value
+        .get("timeZone")
+        .and_then(|v| v.as_str())
+        .and_then(nsh_core::platform::TimeZone::parse)
+    {
+        env.locale_settings.time_zone = zone;
+    }
     env.rtl = flag("rtl").unwrap_or(env.rtl);
     env.apple_keyboard = flag("appleKeyboard").unwrap_or(env.apple_keyboard);
     env.reduce_motion = flag("reduceMotion").unwrap_or(env.reduce_motion);
@@ -485,10 +528,12 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     env.notifications = flag("notifications").unwrap_or(env.notifications);
+    env.audio = flag("audio").unwrap_or(env.audio);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
         e.locale = env.locale;
+        e.locale_settings = env.locale_settings;
         e.rtl = env.rtl;
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
@@ -500,6 +545,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
         e.notifications = env.notifications;
+        e.audio = env.audio;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {
@@ -602,6 +648,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]

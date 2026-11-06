@@ -10,6 +10,27 @@
 //! menus ([`popup_menu`]) are [`MenuItem`]s whose [`MenuItem::on_select`]
 //! runs when the user chooses the item, by a click or its shortcut.
 //!
+//! The window's bounds, mode and display are [`window_state`], the
+//! displays [`displays`]: both reactive. An app that opens its window as
+//! the user left it saves [`WindowState::window_bounds`] when it changes
+//! and, as its root first renders, gives it back to
+//! [`set_window_bounds`], which fits it on the displays there are now.
+//!
+//! ```ignore
+//! // In the root component, as it first renders.
+//! if let Some(saved) = Storage::get_item("window")
+//!     .and_then(|json| serde_json::from_str::<WindowBounds>(&json).ok())
+//! {
+//!     set_window_bounds(saved);
+//! }
+//! effect(|| {
+//!     if let Some(state) = window_state() {
+//!         let json = serde_json::to_string(&state.window_bounds).unwrap();
+//!         let _ = Storage::set_item("window", json);
+//!     }
+//! });
+//! ```
+//!
 //! On platforms without desktop windows these have no effect.
 //!
 //! [`Interactive::window_drag`]: super::Interactive::window_drag
@@ -19,8 +40,8 @@ use std::{fmt, rc::Rc};
 use super::{ImageSrc, Owner, cleanup, menus::MenuHandler, task::Answer};
 use crate::{
     desktop::{
-        self, DesktopCommand, MenuAction, MenuBarMode, MenuRole, Shortcut, TitleBarStyle,
-        WindowFrame, WindowLevel,
+        self, DesktopCommand, Display, MenuAction, MenuBarMode, MenuRole, Shortcut, TitleBarStyle,
+        WindowBounds, WindowFrame, WindowLevel, WindowState,
     },
     geometry::{Edges, Point, Points},
     keymap::When,
@@ -90,6 +111,11 @@ pub fn toggle_full_screen() {
 /// growing down. Sizing works on macOS, Windows and Linux; positioning on
 /// macOS and Windows. Widths and heights take positive finite numbers, `x`
 /// and `y` finite ones: other values keep the field's value.
+///
+/// A GPUI window sizes its content (each side at least 1 point), ignores
+/// the origin and `animated`, and keeps its size while maximized or full
+/// screen; on a tiling compositor the compositor decides a tiled window's
+/// size.
 pub fn set_frame(frame: WindowFrame) {
     super::desktop_command(DesktopCommand::SetFrame(WindowFrame {
         x: frame.x.filter(|v| v.is_finite()),
@@ -98,6 +124,40 @@ pub fn set_frame(frame: WindowFrame) {
         height: frame.height.filter(|v| v.is_finite() && v.0 > 0.0),
         animated: frame.animated,
     }));
+}
+
+/// The app's window (TS: `windowState()`): its bounds on the screen, its
+/// mode with the bounds it returns to ([`WindowState::window_bounds`],
+/// what to save), whether it is minimized and the display it is on.
+/// Reading subscribes: a move or a resize comes once the window stops for
+/// a moment, a change of mode, display or being minimized at once. `None`
+/// off desktops and where the surface has no window of its own yet.
+pub fn window_state() -> Option<WindowState> {
+    super::ambient::window_state()
+}
+
+/// The displays (TS: `displays()`): their bounds and the parts of them
+/// windows use, in screen coordinates. Reading subscribes: plugging in a
+/// display, unplugging one or arranging them again changes them. Empty
+/// off desktops.
+pub fn displays() -> Vec<Display> {
+    super::ambient::displays()
+}
+
+/// Restores a window saved earlier (TS: `Window.setBounds`): puts it in
+/// `bounds`' mode with its windowed bounds, restored to the bounds, then
+/// maximized or in full screen when the mode says so; doing it again
+/// changes nothing. The bounds are first fitted on the displays there are
+/// now, as bounds of [`window_state`] saved in an earlier launch may be off
+/// every display: unchanged when at least 100 × 20 points of the window's
+/// top 40 points are on a display's visible bounds, where the user can take
+/// it by its title bar; otherwise centered on the primary display's visible
+/// bounds (the first display's without one), no larger than them. Without
+/// displays (off desktops) they apply as they are. [`set_frame`] moves and
+/// sizes the window as it is. A view embedded in another app's window
+/// leaves its window to that app.
+pub fn set_window_bounds(bounds: WindowBounds) {
+    super::desktop_command(DesktopCommand::SetBounds(bounds));
 }
 
 /// Sets the window's level on macOS and Windows (TS: `Window.setLevel`):

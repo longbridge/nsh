@@ -96,7 +96,7 @@ impl Sdk {
             .env(
                 format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"),
                 format!(
-                    "--sysroot=\"{}\"",
+                    "--target={clang_target}{MIN_SDK} --sysroot=\"{}\"",
                     toolchain
                         .join("sysroot")
                         .display()

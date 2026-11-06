@@ -567,6 +567,8 @@ pub(crate) struct Mounter {
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
+    /// The engine's sounds and players ([`crate::audio`]).
+    audio: crate::audio::Speaker,
     /// What the app may reach (web view navigations check it).
     access: std::sync::Arc<nsh_engine::Access>,
     control: EngineControl,
@@ -696,6 +698,7 @@ impl Mounter {
                 },
                 access.clone(),
             ),
+            audio: Default::default(),
             control,
             access,
             shared,
@@ -1724,6 +1727,14 @@ impl Mounter {
             }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
+            }
+            (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
+                use nsh_core::image::loader::AssetBase as Base;
+                let base = self.images.asset_base().map(|base| match base {
+                    crate::image::AssetBase::Http(url) => Base::Http(url.clone()),
+                    crate::image::AssetBase::Directory(dir) => Base::Directory(dir.clone()),
+                });
+                crate::audio::command(&self.audio, &self.control, &command, base.as_ref());
             }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {

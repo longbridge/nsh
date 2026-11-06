@@ -16,6 +16,9 @@ dropped files.
   URIs use `file:` URLs, preserving spaces and escaped filenames. Native code
   converts the platform's local file list; the app can use its existing URL
   parser to obtain paths. Arbitrary text and remote URLs are not file drops.
+  AppKit resolves Finder's file reference URLs (`file:///.file/id=…`) to the
+  path's URL (`file_drop::local_file_uri`), for drops, pastes and
+  `Clipboard.readFiles` alike.
 - The native destination is the closest eligible ancestor of the hit view.
   It must listen to FileDrop and be enabled. Native modal roots bound the search.
   Native code answers drag acceptance synchronously from mounted state; it

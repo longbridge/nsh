@@ -18,8 +18,13 @@ export interface MachineLocale {
 const ROOT = join(process.cwd(), 'translations');
 const REGISTRY = join(ROOT, 'locales.json');
 
+// Chinese scripts lead the machine locales, so Traditional Chinese sits right
+// after Simplified Chinese in the language menu; the rest keep the registry's
+// order (the sort is stable).
 export const machineLocales: MachineLocale[] = existsSync(REGISTRY)
-  ? (JSON.parse(readFileSync(REGISTRY, 'utf8')) as MachineLocale[]).filter((l) => existsSync(join(ROOT, l.code, 'ui.json')))
+  ? (JSON.parse(readFileSync(REGISTRY, 'utf8')) as MachineLocale[])
+      .filter((l) => existsSync(join(ROOT, l.code, 'ui.json')))
+      .sort((a, b) => Number(b.code.startsWith('zh-')) - Number(a.code.startsWith('zh-')))
   : [];
 
 /** The direction a page in `locale` is written in. */

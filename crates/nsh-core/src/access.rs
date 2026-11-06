@@ -374,6 +374,8 @@ pub struct Capabilities {
     /// The app may show notifications and set its badge (`Notifications` of
     /// `nsh`). The user's permission is the system's, on top of this.
     pub notifications: bool,
+    /// The app may play sound (`Sound` and `AudioPlayer` of `nsh`).
+    pub audio: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -475,6 +477,7 @@ impl Capabilities {
             picker: true,
             speech: true,
             notifications: true,
+            audio: true,
             open_url: Some(OpenUrlGrant::default()),
             // The host's functions are never granted without a declaration.
             ..Self::default()
@@ -502,7 +505,7 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 11] = [
+        const KNOWN: [&str; 12] = [
             "network",
             "webview",
             "statusBar",
@@ -510,6 +513,7 @@ impl Capabilities {
             "picker",
             "speech",
             "notifications",
+            "audio",
             "openUrl",
             "process",
             "fs",
@@ -630,6 +634,11 @@ impl Capabilities {
             caps.notifications = notifications
                 .as_bool()
                 .ok_or("capabilities.notifications must be a boolean")?;
+        }
+        if let Some(audio) = obj.get("audio") {
+            caps.audio = audio
+                .as_bool()
+                .ok_or("capabilities.audio must be a boolean")?;
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -815,6 +824,9 @@ impl Capabilities {
         }
         if self.notifications {
             obj.insert("notifications".into(), true.into());
+        }
+        if self.audio {
+            obj.insert("audio".into(), true.into());
         }
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
@@ -1366,6 +1378,11 @@ impl Access {
         self.each(|c| c.notifications)
     }
 
+    /// Whether the app may play sound (`Sound` and `AudioPlayer` of `nsh`).
+    pub fn allows_audio(&self) -> bool {
+        self.each(|c| c.audio)
+    }
+
     /// Whether `nsh/host` may call the embedding app's function `name`.
     pub fn allows_host(&self, name: &str) -> bool {
         self.each(|c| c.allows_host(name))
@@ -1881,6 +1898,7 @@ mod tests {
         assert!(!access.allows_clipboard());
         assert!(!access.allows_picker());
         assert!(!access.allows_speech());
+        assert!(!access.allows_audio());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
     }
@@ -1997,7 +2015,7 @@ mod tests {
     fn the_embedder_grants_at_most() {
         let a = Access {
             declared: caps(
-                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true, "speech": true }"#,
+                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true, "speech": true, "audio": true }"#,
             ),
             granted: Some(caps(
                 r#"{ "network": { "hosts": ["b.com"] }, "clipboard": true }"#,
@@ -2007,6 +2025,7 @@ mod tests {
         assert!(!a.allows_http("GET", "https://a.com/"));
         assert!(!a.allows_picker());
         assert!(!a.allows_speech());
+        assert!(!a.allows_audio());
         assert!(a.allows_http("GET", "https://b.com/"));
         assert!(!a.allows_status_bar());
     }

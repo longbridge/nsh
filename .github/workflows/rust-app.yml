@@ -32,6 +32,9 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/rust-app.yml"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
@@ -81,6 +84,13 @@ env:
 
 jobs:
   check:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     strategy:
       fail-fast: false
       matrix:
@@ -98,9 +108,9 @@ jobs:
       - name: Set up Windows compiler stack
         if: runner.os == 'Windows'
         run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
-      - name: Install GTK 4
+      - name: Install GTK 4 and GStreamer
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -131,6 +141,13 @@ jobs:
   # The same crate compiled into the app's own web runtime: `nsh package
   # --target web` builds it for wasm32 and publishes the site.
   web:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -141,8 +158,8 @@ jobs:
       # QuickJS is C: bindgen needs libclang for the CLI; the web runtime's
       # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
-      - name: Install clang, LLVM and GTK 4
-        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev
+      - name: Install clang, LLVM, GTK 4 and GStreamer
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
