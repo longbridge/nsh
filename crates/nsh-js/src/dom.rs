@@ -3699,6 +3699,33 @@ mod tests {
     }
 
     #[test]
+    fn a_signals_methods_passed_on_their_own_write_it() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ signal }} from "nsh";
+            const n = signal(1);
+            const other = signal(0);
+            const {{ set, update }} = n;
+            [5].forEach(n.set);
+            const first = n();
+            update((x) => x + 1);
+            const second = n();
+            set.call(other, 9);
+            const proto = Object.getPrototypeOf(n);
+            let thrown = "";
+            try {{ Reflect.get(proto, "set", proto)(1); }} catch (e) {{ thrown = e.message; }}
+            report([first, second, n(), other(), n.set === n.set, n.set === other.set, n.set.name, thrown]);
+            "#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [r#"[5,6,9,0,true,false,"set","not a live signal"]"#]
+        );
+    }
+
+    #[test]
     fn mounting_props_events_and_text_updates() {
         let host = Host::new().unwrap();
         host.eval_source(

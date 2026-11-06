@@ -296,7 +296,7 @@ export interface Accessor<T> {
   (): T;
 }
 
-/** A signal: `count()` reads it, `count.set(1)` and `count.update((n) => n + 1)` write it. */
+/** A signal: `count()` reads it, `count.set(1)` and `count.update((n) => n + 1)` write it (both bound: `count.set` can be passed on its own). */
 export interface Signal<T> extends Accessor<T> {
   set(value: T): void;
   update(fn: (value: T) => T): void;
