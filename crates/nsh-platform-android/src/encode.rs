@@ -703,10 +703,26 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::HostCall { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
-                    | Command::PickScreenColor { .. }
-                    // No file dialogs (`Environment::file_requests`): the
-                    // core answers first.
-                    | Command::FileRequest { .. }
+                    | Command::PickScreenColor { .. } => e.int(-1),
+                    // `SystemUi.openPath`: the file at the path, a `content:`
+                    // URI the app's FilesProvider serves, to the system's
+                    // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
+                    // have no answer on Android.
+                    Command::FileRequest { id, request } => match *request {
+                        nsh_core::file_dialog::FileRequest::OpenPath(path) => {
+                            e.int(28);
+                            e.int(id as i32);
+                            e.string(path.to_string_lossy().into_owned());
+                        }
+                        // Every other file request has no Android
+                        // implementation. The environment says file
+                        // requests exist, so the core waits for an answer:
+                        // fail it now (op 30), or the call would hang.
+                        _ => {
+                            e.int(30);
+                            e.int(id as i32);
+                        }
+                    },
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
                     | Command::Speech(_)
@@ -1728,6 +1744,54 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
                 e.float(offset.0);
                 e.int(argb(*color));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::file_dialog::{self, FileRequest};
+
+    use super::*;
+
+    /// The ints a batch of one file request is encoded as.
+    fn ints(request: FileRequest) -> Vec<i32> {
+        let batch = MountBatch {
+            items: vec![MountItem::Command {
+                id: 3,
+                command: Command::FileRequest {
+                    id: 7,
+                    request: Box::new(request),
+                },
+            }],
+        };
+        encode(batch)
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn open_path_is_sent_and_the_other_file_requests_fail() {
+        // `COMMAND`, the view id, op 28, the request id, the path's
+        // object index: `Mounter.java` opens the file and answers.
+        assert_eq!(
+            ints(FileRequest::OpenPath("/data/user/0/app/files/a.pdf".into())),
+            vec![COMMAND, 3, 28, 7, 0]
+        );
+
+        // `Environment::file_requests` is set, so the core waits for an
+        // answer to every request: op 30 fails the rest instead of leaving
+        // `pick_paths`, `pick_save_path`, `reveal_path` and `move_to_trash`
+        // pending forever.
+        for request in [
+            FileRequest::OpenDialog(file_dialog::OpenDialog::default()),
+            FileRequest::SaveDialog(file_dialog::SaveDialog::default()),
+            FileRequest::RevealPath("a".into()),
+            FileRequest::MoveToTrash("a".into()),
+        ] {
+            assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
     }
 }
