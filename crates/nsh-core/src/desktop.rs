@@ -2,7 +2,9 @@
 //! application menu, context menus and keyboard shortcuts (TS
 //! `nsh/desktop`). The platforms get them as [`DesktopCommand`]s on the
 //! root and report a chosen menu item as [`crate::EventKind::Menu`];
-//! mobile platforms ignore them.
+//! mobile platforms ignore them. The platforms report the window's
+//! bounds in the environment ([`WindowState`]) and the displays with
+//! their own message ([`Display`]).
 
 use std::sync::Arc;
 
@@ -15,6 +17,9 @@ use crate::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
+mod window_state;
+
+pub use window_state::{Display, DisplayId, WindowBounds, WindowState};
 
 /// How the window's title bar looks (`Window.setTitleBar`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -58,11 +63,13 @@ pub struct WindowFrame {
     /// keeps the top edge where it is (the window grows and shrinks at its
     /// bottom edge).
     pub y: Option<Points>,
-    /// Its outer width on macOS / Windows, GTK default width on Linux.
+    /// Its outer width on macOS / Windows, GTK default width on Linux;
+    /// in GPUI windows, the content's width (at least 1 point).
     pub width: Option<Points>,
-    /// Its outer height on macOS / Windows, GTK default height on Linux.
+    /// Its outer height on macOS / Windows, GTK default height on Linux;
+    /// in GPUI windows, the content's height (at least 1 point).
     pub height: Option<Points>,
-    /// Animates the change on macOS (false by default).
+    /// Animates the change on macOS (false by default; GPUI ignores it).
     pub animated: Option<bool>,
 }
 
@@ -799,6 +806,10 @@ pub enum DesktopCommand {
     /// Moves and sizes the window (screen coordinates, points; a field
     /// left out keeps its value).
     SetFrame(WindowFrame),
+    /// Puts the window in a mode with its windowed bounds (screen
+    /// coordinates, points): restored to the bounds, then maximized or in
+    /// full screen when the mode says so. Doing it again changes nothing.
+    SetBounds(WindowBounds),
     /// The window's level (a floating window stays above normal ones).
     SetLevel(WindowLevel),
     /// Keeps the window out of the taskbar (`true`) or puts it back
@@ -809,6 +820,11 @@ pub enum DesktopCommand {
     OrderFront,
     /// Closes the window (the app ends with its last window).
     Close,
+    /// Quits the app, as its `quit` menu role does: its windows close and
+    /// its run ends, also when closing the window would leave it running
+    /// (a window kept hidden, a tray icon). A view embedded in another app
+    /// leaves the app's lifecycle to that app.
+    Quit,
     /// Hides the window; [`DesktopCommand::OrderFront`] shows it again.
     Hide,
     /// Shows the dialog root the command is addressed to in a window of its
@@ -830,6 +846,40 @@ pub enum DesktopCommand {
         /// Where its top left corner goes.
         at: Option<Point<Points>>,
     },
+    /// Shows the app's icon in the system tray (the notification area on
+    /// Windows, the menu bar's status items on macOS, a StatusNotifierItem
+    /// on Linux), or changes it; `None` removes it. One per app: the last
+    /// window's wins.
+    SetTray(Option<Tray>),
+    /// Registers `shortcut` system-wide, whichever app has the keyboard: the
+    /// root's [`crate::EventKind::Menu`] reports `id` with `registered`
+    /// (whether the system took it), then `id` alone at each press.
+    RegisterGlobalShortcut {
+        /// Reported at each press (not 0).
+        id: u32,
+        /// The keystroke.
+        shortcut: Shortcut,
+    },
+    /// Gives back the global shortcut registered as `id`.
+    UnregisterGlobalShortcut(u32),
+}
+
+/// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Tray {
+    /// The icon, the app's own image (an SVG is a template, drawn in the
+    /// panel's text color where the platform has such icons: macOS);
+    /// `None`: the app's icon where the platform has one.
+    pub icon: Option<ImageSource>,
+    /// Shown when the pointer rests on it; `""` for the app's name.
+    pub tooltip: String,
+    /// Its menu: opened by a secondary click (a primary one too when
+    /// [`Self::click`] is 0); empty for none.
+    pub menu: Arc<[MenuItem]>,
+    /// Reported as [`crate::EventKind::Menu`] when the icon is clicked
+    /// (primary button); 0: the click opens the menu.
+    pub click: u32,
 }
 
 pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {

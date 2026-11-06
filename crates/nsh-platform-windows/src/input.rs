@@ -669,7 +669,7 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return Cursor::Arrow;
     };
     if let Some(native) = &hit.item {
@@ -699,7 +699,7 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
 /// (header buttons, editors) or a view with press or touch handlers is
 /// nearer.
 pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return false;
     };
     if hit.item.is_some() {
@@ -770,7 +770,7 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// unless a text field or selectable text is nearer: that shows its edit
 /// menu.
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let mut view = Some(hit.view);
@@ -907,7 +907,7 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
             if event.kind != PointerKind::Down {
                 return false;
             }
-            let Some(hit) = pick(&surface.root, x, y, true) else {
+            let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
             match hit.item {
@@ -954,7 +954,7 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
 /// True when a press at `(x, y)` (root coordinates) goes to a raw item (a
 /// web view), which takes the keyboard focus itself.
 pub(crate) fn raw_at(surface: &Rc<Surface>, x: f32, y: f32) -> bool {
-    pick(&surface.root, x, y, true)
+    pick(&surface.input_root(), x, y, true)
         .and_then(|hit| hit.item)
         .is_some_and(|n| n.item.raw())
 }
@@ -977,7 +977,7 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     if latched {
         return false;
     }
-    let Some(hit) = pick(&surface.root, event.x, event.y, true) else {
+    let Some(hit) = pick(&surface.input_root(), event.x, event.y, true) else {
         return false;
     };
     let (lx, ly) = local(&hit.view, event.x, event.y);
@@ -1076,7 +1076,8 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     true
 }
 
-/// The enabled text fields shown under `view`, in tree order.
+/// The enabled text fields shown under `view`, in tree order (a scroll
+/// view's content as it is on screen).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
     {
         let s = view.state();
@@ -1087,7 +1088,7 @@ fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
             out.push(view.clone());
         }
     }
-    view.with_children(|children| {
+    view.with_children_in_reading_order(|children| {
         for child in children {
             collect_fields(child, out);
         }
@@ -1106,7 +1107,7 @@ struct Hit {
 
 /// Finds the nearest mounted destination, bounded by the native modal root.
 pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    let mut view = pick(&surface.root, x, y, false)?.view;
+    let mut view = pick(&surface.input_root(), x, y, false)?.view;
     loop {
         if view.state().events.contains(EventKind::FileDrop) {
             return Some(view);
@@ -1252,7 +1253,7 @@ fn down(
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
     }
-    let Some(mut hit) = pick(&surface.root, x, y, true) else {
+    let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let touch = key != Key::Mouse;
@@ -1263,7 +1264,7 @@ fn down(
             item = Some(hosted);
         } else {
             // The item declined: the views below it get the press.
-            let Some(below) = pick(&surface.root, x, y, false) else {
+            let Some(below) = pick(&surface.input_root(), x, y, false) else {
                 return;
             };
             hit = below;
@@ -1987,7 +1988,7 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
     let mut t = match current {
         Some((t, _)) => t,
         None => {
-            let Some(hit) = pick(&surface.root, x, y, true) else {
+            let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
             let view = chain(&hit.view).into_iter().find(|v| {
@@ -2037,7 +2038,7 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers, button: Op
     let input = &surface.input;
     let tracking = !input.hover_tracked.borrow().is_empty() || !input.hovered.borrow().is_empty();
     let pressed = input.pointers.borrow().iter().any(|p| p.key == Key::Mouse);
-    let hit = pick(&surface.root, x, y, true);
+    let hit = pick(&surface.input_root(), x, y, true);
     // Reveal only the scroll thumb under the pointer, including in nested scroll views.
     if let Some(hit) = &hit {
         for v in chain(&hit.view)
@@ -2118,7 +2119,7 @@ fn mouse_moved(
     if surface.input.mouse_tracked.borrow().is_empty() {
         return;
     }
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     for view in chain(&hit.view) {
@@ -2218,7 +2219,7 @@ enum WheelInput {
 /// scrolls the page around it, as in browsers; horizontal views take
 /// vertical wheels only where nothing around scrolls vertically.
 fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<NshView> {
-    let hit = pick(&surface.root, x, y, true)?;
+    let hit = pick(&surface.input_root(), x, y, true)?;
     input::scroll_target(
         chain(&hit.view),
         Points(dx),

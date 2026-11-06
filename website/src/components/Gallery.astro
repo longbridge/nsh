@@ -49,7 +49,7 @@ const t = zh
 ---
 
 <section class="gallery" data-gallery>
-  <header class="gallery__head">
+  <header class="gallery__head page-head page-head--compact">
     <div>
       <h1>{t.title}</h1>
       <p>{t.intro}</p>
@@ -131,7 +131,6 @@ const t = zh
     justify-content: space-between;
     gap: 1rem 2rem;
   }
-  .gallery__head h1 { margin: 0; font-size: 1.75rem; letter-spacing: -0.02em; }
   .gallery__head p { margin: 0.35rem 0 0; color: var(--muted-foreground); max-width: 52rem; }
   .gallery__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
   .gallery__stage {

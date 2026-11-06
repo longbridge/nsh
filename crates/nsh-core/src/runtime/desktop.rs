@@ -1,10 +1,10 @@
-//! `nsh/desktop`'s window functions (macOS, Windows, Linux; nothing
-//! happens elsewhere). Menus, which call the app's functions, are
+//! `nsh/desktop`'s window and app functions (macOS, Windows, Linux;
+//! nothing happens elsewhere). Menus, which call the app's functions, are
 //! `nsh-js`'s.
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
+    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowBounds, WindowFrame, WindowLevel},
     element::{JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
@@ -103,6 +103,19 @@ impl Window {
         desktop(cx, DesktopCommand::SetFrame(frame));
     }
 
+    /// Restores a window saved earlier: puts it in `bounds.mode` with its
+    /// windowed bounds `bounds.bounds` (points, screen coordinates, as
+    /// `windowState()` reports them), restored to the bounds, then
+    /// maximized or in full screen when the mode says so; doing it again
+    /// changes nothing. The bounds are first fitted on the displays there
+    /// are now: unchanged when the window's title bar can still be taken on
+    /// one, else centered on the primary display, no larger than it.
+    /// `setFrame` moves and sizes the window as it is. A view embedded in
+    /// another app's window leaves its window to that app.
+    pub(crate) fn set_bounds(bounds: WindowBounds, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetBounds(bounds));
+    }
+
     /// Sets the window's level on macOS and Windows: `"normal"` restores the
     /// normal level; `"floating"` stays above normal windows. `"desktopIcon"`
     /// selects macOS's desktop icon level or moves a Windows window to the
@@ -130,5 +143,22 @@ impl Window {
     /// Closes the window; the app ends with it.
     pub(crate) fn close(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Close);
+    }
+}
+
+/// The application as a whole (desktops; its functions do nothing elsewhere).
+#[module]
+pub(crate) struct Application;
+
+#[module]
+impl Application {
+    /// Quits the app, as the application menu's `quit` role and the
+    /// platform's quit key do: its windows close and the app stops as when
+    /// its last window closes, then its run ends, also while closing the
+    /// window alone would leave it running (a window kept hidden, a tray
+    /// icon). A view embedded in another app leaves the app's lifecycle to
+    /// that app.
+    pub(crate) fn quit(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::Quit);
     }
 }

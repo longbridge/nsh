@@ -18,7 +18,8 @@
 //!   ([`crate::input::window_drag`]) moves the window
 //!   (`gdk::Toplevel::begin_move`); a double press does what
 //!   `gtk-titlebar-double-click` says (maximize by default); a secondary
-//!   press opens the window menu. Such presses never reach the app.
+//!   press opens the window menu. A single click without dragging reaches
+//!   the app on release, so overlays can close.
 //! - **Menus** are `gio::Menu` models: separators split sections, each
 //!   item is an action of a group inserted on the window (`nsh.item-N`;
 //!   checkable items are stateful boolean actions, so the menu shows the
@@ -192,6 +193,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
         // The docks show apps, not windows.
@@ -202,6 +205,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::Close => close(surface),
+        DesktopCommand::Quit => {
+            crate::app::quit();
+        }
         DesktopCommand::Hide => {
             if let Some(window) = window(surface) {
                 window.set_visible(false);
@@ -211,6 +217,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, *shortcut)
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 
@@ -414,8 +427,8 @@ fn update_area(surface: &Surface) {
     }
 }
 
-/// A button press at `(x, y)` (root coordinates): true when it was on a
-/// view that drags the window, which handled it.
+/// Handles a drag region's window menu or double click. A single primary
+/// press waits in input routing until it becomes a click or native drag.
 pub(crate) fn press(surface: &Surface, event: &gdk::Event, x: f32, y: f32) -> bool {
     let Some(button_event) = event.downcast_ref::<gdk::ButtonEvent>() else {
         return false;
@@ -466,10 +479,24 @@ pub(crate) fn press(surface: &Surface, event: &gdk::Event, x: f32, y: f32) -> bo
         return true;
     }
     c.last_press.set(Some((time, sx, sy)));
+    false
+}
+
+/// Starts native movement once a draggable background press crosses GTK's threshold.
+pub(crate) fn begin_move(surface: &Surface, event: &gdk::Event) {
+    let Some(window) = window(surface) else {
+        return;
+    };
+    let Some(toplevel) = window.surface().and_downcast::<gdk::Toplevel>() else {
+        return;
+    };
+    let Some((sx, sy)) = event.position() else {
+        return;
+    };
+    surface.chrome.last_press.set(None);
     if let Some(device) = event.device() {
-        toplevel.begin_move(&device, button as i32, sx, sy, time);
+        toplevel.begin_move(&device, gdk::BUTTON_PRIMARY as i32, sx, sy, event.time());
     }
-    true
 }
 
 // --- Menus ------------------------------------------------------------------------------
@@ -483,7 +510,7 @@ fn unsupported(role: Option<MenuRole>) -> bool {
 }
 
 /// The shortcut as a GTK accelerator (`<Control><Shift>n`).
-fn accelerator(shortcut: &Shortcut) -> Option<String> {
+pub(crate) fn accelerator(shortcut: &Shortcut) -> Option<String> {
     let mut out = String::new();
     for (on, name) in [
         (shortcut.ctrl, "<Control>"),
@@ -834,8 +861,10 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
 
 /// An item was chosen: the platform carries out its role, the app hears
 /// about the rest.
-fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
+pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     match role {
+        Some(MenuRole::Quit) if crate::app::quit() => {}
+        // A view embedded in another app closes its window, as before.
         Some(MenuRole::Quit | MenuRole::Close) => close(surface),
         Some(MenuRole::Minimize) => {
             if let Some(window) = window(surface) {

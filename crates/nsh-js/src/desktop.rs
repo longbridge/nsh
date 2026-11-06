@@ -1,5 +1,6 @@
 //! `nsh/desktop`'s hand-written exports (with the registry's `Window`):
-//! `isAvailable`, `titleBar()` (the environment's accessor) and `Menu`,
+//! `isAvailable`, `titleBar()`, `windowState()` and `displays()` (the
+//! environment's accessors) and `Menu`,
 //! whose items call the app's functions: the menus are decoded natively
 //! into [`MenuItem`]s with an id per item, the functions kept by id, and
 //! the platform's [`EventKind::Menu`] calls the chosen item's.
@@ -14,8 +15,8 @@ use std::{
 use nsh_core::{
     Command, EventKind, ImageSource, NodeId, Op, ROOT_ID, Tag,
     desktop::{
-        DesktopCommand, MenuAction, MenuItem, MenuRole, Shortcut, WindowFrameStyle, WindowLevel,
-        WindowOptions,
+        DesktopCommand, MenuAction, MenuItem, MenuRole, Shortcut, Tray, WindowFrameStyle,
+        WindowLevel, WindowOptions,
     },
     geometry::{Points, Size, point},
     keymap::When,
@@ -46,6 +47,10 @@ pub(crate) struct Menus {
     /// Resolves the promise of the context menu shown (owned), once the
     /// platform reports it closed.
     closed: Cell<JsValue>,
+    /// The tray's functions: its menu's and its click's.
+    tray: RefCell<Vec<(u32, JsValue)>>,
+    /// The global shortcuts registered.
+    globals: RefCell<Vec<Global>>,
     /// The root's `onMenu` handler is set.
     listening: Cell<bool>,
     next: Cell<u32>,
@@ -73,6 +78,8 @@ impl Default for Menus {
         Menus {
             app: RefCell::default(),
             popup: RefCell::default(),
+            tray: RefCell::default(),
+            globals: RefCell::default(),
             closed: Cell::new(UNDEFINED),
             listening: Cell::new(false),
             next: Cell::new(0),
@@ -94,9 +101,51 @@ fn resolve_closed(cx: *mut JsContext) {
     }
 }
 
+/// A global shortcut (`GlobalShortcut.register`).
+struct Global {
+    id: u32,
+    shortcut: Shortcut,
+    /// Called at each press (owned).
+    on_press: JsValue,
+    /// Resolves `register`'s promise once the platform answers (owned;
+    /// `undefined` once it did).
+    resolve: JsValue,
+}
+
+impl Global {
+    /// Frees its functions, settling `register`'s promise with `false` when
+    /// the platform has not answered yet.
+    fn free(self, cx: *mut JsContext) {
+        settle(cx, self.resolve, false);
+        free(cx, self.on_press);
+    }
+}
+
+/// Calls the owned resolving function `resolve` (if any) with `value`, then
+/// frees it.
+fn settle(cx: *mut JsContext, resolve: JsValue, value: bool) {
+    if nullish(resolve) {
+        return;
+    }
+    let mut arg = if value { qjs::JS_TRUE } else { qjs::JS_FALSE };
+    // SAFETY: an owned resolving function, called then freed.
+    unsafe {
+        let r = qjs::JS_Call(cx, resolve, UNDEFINED, 1, &mut arg);
+        qjs::JS_FreeValue(cx, r);
+        qjs::JS_FreeValue(cx, resolve);
+    }
+}
+
 impl Menus {
     /// Frees the values held (the state is unregistered).
     pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
+        for g in self.globals.get_mut().drain(..) {
+            // SAFETY: owned values; no JS runs from here on.
+            unsafe {
+                qjs::JS_FreeValue(raw, g.on_press);
+                qjs::JS_FreeValue(raw, g.resolve);
+            }
+        }
         // SAFETY: owned; no JS runs from here on.
         unsafe { qjs::JS_FreeValue(raw, self.closed.replace(UNDEFINED)) };
         for (_, f) in self
@@ -104,6 +153,7 @@ impl Menus {
             .get_mut()
             .drain(..)
             .chain(self.popup.get_mut().drain(..))
+            .chain(self.tray.get_mut().drain(..))
         {
             // SAFETY: owned values; no JS runs from here on.
             unsafe { qjs::JS_FreeValue(raw, f) };
@@ -308,9 +358,7 @@ impl Decoder {
         let on_select = get(cx, v, c"onSelect");
         // SAFETY: an inline check.
         let id = if unsafe { qjs::JS_IsFunction(cx, on_select) } {
-            let m = menus(cx);
-            let id = m.next.get() + 1;
-            m.next.set(id);
+            let id = next_id(cx);
             self.functions.push((id, on_select));
             id
         } else {
@@ -491,19 +539,51 @@ unsafe extern "C" fn on_menu(
     unsafe { qjs::JS_ToFloat64(cx, &mut id, v) };
     free(cx, v);
     let id = id as u32;
+    // The platform's answer to a global shortcut's registration.
+    if let Some(registered) = flag(cx, e, c"registered") {
+        let m = menus(cx);
+        let resolve = m
+            .globals
+            .borrow_mut()
+            .iter_mut()
+            .find(|g| g.id == id)
+            .map(|g| std::mem::replace(&mut g.resolve, UNDEFINED));
+        if !registered {
+            m.globals.borrow_mut().retain(|g| {
+                if g.id == id {
+                    free(cx, g.on_press);
+                }
+                g.id != id
+            });
+        }
+        if let Some(resolve) = resolve {
+            settle(cx, resolve, registered);
+        }
+        return UNDEFINED;
+    }
     // A context menu closed (after its chosen item was reported).
     if flag(cx, e, c"closed") == Some(true) {
         resolve_closed(cx);
         return UNDEFINED;
     }
     let m = menus(cx);
-    let f = [&m.app, &m.popup].into_iter().find_map(|slot| {
-        slot.borrow()
-            .iter()
-            .find(|(i, _)| *i == id)
-            // SAFETY: a dup for the call.
-            .map(|&(_, f)| unsafe { qjs::JS_DupValue(cx, f) })
-    });
+    let f = [&m.app, &m.popup, &m.tray]
+        .into_iter()
+        .find_map(|slot| {
+            slot.borrow()
+                .iter()
+                .find(|(i, _)| *i == id)
+                // SAFETY: a dup for the call.
+                .map(|&(_, f)| unsafe { qjs::JS_DupValue(cx, f) })
+        })
+        .or_else(|| {
+            m.globals
+                .borrow()
+                .iter()
+                .find(|g| g.id == id)
+                // SAFETY: a dup for the call.
+                .map(|g| unsafe { qjs::JS_DupValue(cx, g.on_press) })
+        });
     let Some(f) = f else { return UNDEFINED };
     // SAFETY: a call of an owned function, freed after it.
     unsafe {
@@ -515,6 +595,220 @@ unsafe extern "C" fn on_menu(
         qjs::JS_FreeValue(cx, r);
     }
     UNDEFINED
+}
+
+/// The next id of a menu item, a tray's click or a global shortcut.
+fn next_id(cx: *mut JsContext) -> u32 {
+    let m = menus(cx);
+    let id = m.next.get() + 1;
+    m.next.set(id);
+    id
+}
+
+/// `Tray.set(options | null)`.
+unsafe extern "C" fn set_tray(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    if !os(cx).is_desktop() {
+        return UNDEFINED;
+    }
+    let options = arg(argc, argv, 0);
+    if nullish(options) {
+        keep(cx, &menus(cx).tray, Vec::new());
+        return send(cx, DesktopCommand::SetTray(None))
+            .err()
+            .unwrap_or(UNDEFINED);
+    }
+    if !is_object(options) {
+        return throw(cx, "nsh/desktop: Tray.set takes an object or null");
+    }
+    let icon = match icon(cx, options) {
+        Ok(icon) => icon,
+        Err(_) => {
+            return throw(
+                cx,
+                "nsh/desktop: the tray's `icon` is a URL or an imported image",
+            );
+        }
+    };
+    let menu = get(cx, options, c"menu");
+    let (items, mut functions) = if nullish(menu) {
+        free(cx, menu);
+        (Arc::from([]), Vec::new())
+    } else {
+        let decoded = decode(cx, menu);
+        free(cx, menu);
+        match decoded {
+            Ok(decoded) => decoded,
+            Err(e) => return e,
+        }
+    };
+    let on_click = get(cx, options, c"onClick");
+    // SAFETY: an inline check.
+    let click = if unsafe { qjs::JS_IsFunction(cx, on_click) } {
+        let id = next_id(cx);
+        functions.push((id, on_click));
+        id
+    } else {
+        free(cx, on_click);
+        0
+    };
+    keep(cx, &menus(cx).tray, functions);
+    let mut tray = Tray::default();
+    tray.icon = icon;
+    tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
+    tray.menu = items;
+    tray.click = click;
+    listen(cx)
+        .and_then(|()| send(cx, DesktopCommand::SetTray(Some(tray))))
+        .err()
+        .unwrap_or(UNDEFINED)
+}
+
+/// `Tray`: an object of its functions.
+fn tray(cx: *mut JsContext) -> JsValue {
+    // SAFETY: a new object taking the function.
+    unsafe {
+        let o = qjs::JS_NewObject(cx);
+        let set = reactive::new_function(cx, c"set", set_tray, 1);
+        qjs::JS_SetPropertyStr(cx, o, c"set".as_ptr(), set);
+        o
+    }
+}
+
+/// The keystroke of argument `i`, or the exception of a wrong one.
+fn global_shortcut_arg(
+    cx: *mut JsContext,
+    argc: c_int,
+    argv: *mut JsValue,
+    name: &str,
+) -> Result<Shortcut, JsValue> {
+    let v = arg(argc, argv, 0);
+    let text = (!nullish(v)).then(|| dom::string_arg(cx, v)).flatten();
+    let Some(text) = text else {
+        return Err(throw(
+            cx,
+            &format!(
+                "nsh/desktop: GlobalShortcut.{name} takes a keystroke such as \"mod+shift+k\""
+            ),
+        ));
+    };
+    Shortcut::parse(&text, os(cx) == Os::MacOs)
+        .map_err(|e| throw(cx, &format!("nsh/desktop: GlobalShortcut.{name}: {e}")))
+}
+
+/// Gives back the global shortcuts `remove` picks.
+fn unregister_where(cx: *mut JsContext, remove: impl Fn(&Global) -> bool) -> Result<(), JsValue> {
+    let removed: Vec<Global> = {
+        let mut globals = menus(cx).globals.borrow_mut();
+        let (removed, kept) = std::mem::take(&mut *globals).into_iter().partition(&remove);
+        *globals = kept;
+        removed
+    };
+    let mut result = Ok(());
+    for g in removed {
+        result = result.and(send(cx, DesktopCommand::UnregisterGlobalShortcut(g.id)));
+        g.free(cx);
+    }
+    result
+}
+
+/// `GlobalShortcut.register(shortcut, onPress)`: a promise of whether the
+/// system took it.
+unsafe extern "C" fn register_global(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let shortcut = match global_shortcut_arg(cx, argc, argv, "register") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let on_press = arg(argc, argv, 1);
+    // SAFETY: an inline check.
+    if !unsafe { qjs::JS_IsFunction(cx, on_press) } {
+        return throw(
+            cx,
+            "nsh/desktop: GlobalShortcut.register takes a function to call at each press",
+        );
+    }
+    let mut funcs = [UNDEFINED; 2];
+    // SAFETY: a new promise and its resolving functions (owned).
+    let promise = unsafe { qjs::JS_NewPromiseCapability(cx, funcs.as_mut_ptr()) };
+    free(cx, funcs[1]);
+    if !os(cx).is_desktop() {
+        settle(cx, funcs[0], false);
+        return promise;
+    }
+    // Registering a keystroke again replaces its function.
+    if let Err(e) = unregister_where(cx, |g| g.shortcut == shortcut) {
+        settle(cx, funcs[0], false);
+        free(cx, promise);
+        return e;
+    }
+    let id = next_id(cx);
+    menus(cx).globals.borrow_mut().push(Global {
+        id,
+        shortcut,
+        // SAFETY: a dup kept with the shortcut.
+        on_press: unsafe { qjs::JS_DupValue(cx, on_press) },
+        resolve: funcs[0],
+    });
+    match listen(cx)
+        .and_then(|()| send(cx, DesktopCommand::RegisterGlobalShortcut { id, shortcut }))
+    {
+        Ok(()) => promise,
+        Err(e) => {
+            let _ = unregister_where(cx, |g| g.id == id);
+            free(cx, promise);
+            e
+        }
+    }
+}
+
+/// `GlobalShortcut.unregister(shortcut)`.
+unsafe extern "C" fn unregister_global(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let shortcut = match global_shortcut_arg(cx, argc, argv, "unregister") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    unregister_where(cx, |g| g.shortcut == shortcut)
+        .err()
+        .unwrap_or(UNDEFINED)
+}
+
+/// `GlobalShortcut.unregisterAll()`.
+unsafe extern "C" fn unregister_all_globals(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+) -> JsValue {
+    unregister_where(cx, |_| true).err().unwrap_or(UNDEFINED)
+}
+
+/// `GlobalShortcut`: an object of its functions.
+fn global_shortcut(cx: *mut JsContext) -> JsValue {
+    // SAFETY: a new object taking the functions.
+    unsafe {
+        let o = qjs::JS_NewObject(cx);
+        let f = reactive::new_function(cx, c"register", register_global, 2);
+        qjs::JS_SetPropertyStr(cx, o, c"register".as_ptr(), f);
+        let f = reactive::new_function(cx, c"unregister", unregister_global, 1);
+        qjs::JS_SetPropertyStr(cx, o, c"unregister".as_ptr(), f);
+        let f = reactive::new_function(cx, c"unregisterAll", unregister_all_globals, 0);
+        qjs::JS_SetPropertyStr(cx, o, c"unregisterAll".as_ptr(), f);
+        o
+    }
 }
 
 /// `Menu`: an object of its functions.
@@ -534,7 +828,7 @@ fn menu(cx: *mut JsContext) -> JsValue {
 
 /// The platforms that show windows of the app's own.
 fn opens_windows(os: Os) -> bool {
-    matches!(os, Os::Linux)
+    matches!(os, Os::Linux | Os::Windows)
 }
 
 /// Number property `key`, if it is a finite number.
@@ -812,6 +1106,22 @@ pub(crate) const EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "windowState",
+        Export::Value(crate::env::window_state),
+        Ts::value(
+            "The app's window (reactive): its bounds on the screen, its mode with the\nbounds it returns to (`windowBounds`, what to save to open it the same\nway next time), whether it is minimized or hidden and the display it is on.\nA move or a resize comes once the window stops for a moment; a change of\nmode, display or being minimized or hidden at once. `null` off desktops\nand while the view is in no window.",
+            "Accessor<WindowState | null>",
+        ),
+    ),
+    (
+        "displays",
+        Export::Value(crate::env::displays),
+        Ts::value(
+            "The displays (reactive): their bounds and the parts of them windows\nuse, in points, in screen coordinates. Plugging in a display, unplugging\none or arranging them again changes them. Empty off desktops.",
+            "Accessor<Display[]>",
+        ),
+    ),
+    (
         "Window",
         Export::Value(window_module),
         Ts::value(
@@ -825,6 +1135,22 @@ pub(crate) const EXPORTS: &[Item] = &[
         Ts::value(
             "The application menu and context menus (desktops; nothing happens\nelsewhere).",
             "MenuModule",
+        ),
+    ),
+    (
+        "Tray",
+        Export::Value(tray),
+        Ts::value(
+            "The app's icon in the system tray (desktops; nothing happens elsewhere).",
+            "TrayModule",
+        ),
+    ),
+    (
+        "GlobalShortcut",
+        Export::Value(global_shortcut),
+        Ts::value(
+            "Keystrokes the app hears whichever app has the keyboard (desktops;\n`register` resolves `false` elsewhere).",
+            "GlobalShortcutModule",
         ),
     ),
 ];
@@ -866,8 +1192,28 @@ export interface WindowOpener {
    * the open window of the same `id`. The window runs in the app's one JS
    * runtime: it reads and writes the same signals, stores and modules as
    * the main window, so there is nothing to send between windows. Closing
-   * the main window closes it too. Linux for now; elsewhere it throws. */
+   * the main window closes it too. Linux and Windows; elsewhere it throws. */
   open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
+}
+
+/** The app's window (`windowState()`). Rectangles are in points, in screen
+ * coordinates: from the primary display's top left corner, `y` growing
+ * down, as `Window.setFrame` takes them. */
+export interface WindowState {
+  /** Its outer frame now, window decorations included. */
+  bounds: Bounds;
+  /** Its mode and windowed bounds: what to save, and give to
+   * `Window.setBounds`, to open it the same way next time. */
+  windowBounds: WindowBounds;
+  /** It is minimized (in the Dock, the taskbar). */
+  minimized: boolean;
+  /** It is off the screen without being minimized: the app is hidden
+   * (macOS's Hide), or the window is not shown yet or any more. A window on
+   * the screen is `!minimized && !hidden`; one there that `lifecycle()`
+   * reports in the background is covered by other windows. */
+  hidden: boolean;
+  /** The display it is on (the one with most of it). */
+  display: Display | null;
 }
 
 /** The hidden title bar's area, in points. */
@@ -973,6 +1319,49 @@ export interface MenuModule {
    * the menu closes, chosen or dismissed: a button that opened it can look
    * pressed until then. */
   popup(items: readonly (MenuItem | null | undefined | false)[], at?: Point): Promise<void>;
+}
+
+/** The app's icon in the system tray. */
+export interface TrayOptions {
+  /** The icon, as `<Image>`'s `src` takes it (an imported file, or a URL).
+   * Keep it simple and square: panels draw it at 16 to 24 pixels. An SVG is
+   * a template on macOS, drawn in the menu bar's text color; elsewhere it
+   * keeps its colors. Without one, the app's icon where the system has
+   * one. */
+  icon?: ImageAsset | string;
+  /** Shown when the pointer rests on the icon (the app's name without it). */
+  tooltip?: string;
+  /** Its menu, opened by a secondary click (and a primary one without
+   * `onClick`). */
+  menu?: readonly (MenuItem | null | undefined | false)[];
+  /** Called when the icon is clicked with the primary button. */
+  onClick?: () => void;
+}
+
+/** The app's icon in the system tray: the notification area on Windows, the
+ * menu bar's right side on macOS, a StatusNotifierItem on Linux (Plasma,
+ * Waybar and most panels; GNOME needs the AppIndicator extension). */
+export interface TrayModule {
+  /** Shows the icon, or changes it (in an `effect`, it follows the signals
+   * it reads); `null` removes it. One per app. */
+  set(options: TrayOptions | null): void;
+}
+
+/** Keystrokes the app hears whichever app has the keyboard. */
+export interface GlobalShortcutModule {
+  /** Registers `shortcut` (a keystroke as a menu item's `shortcut`:
+   * `"mod+shift+k"`) and calls `onPress` at each press. Resolves with
+   * whether the system took it: `false` when another app holds it, or off
+   * desktops. On Linux it goes through the desktop portal
+   * (`org.freedesktop.portal.GlobalShortcuts`): the desktop may ask the user
+   * to confirm it or let them pick another keystroke, and Hyprland binds it
+   * in its own configuration (`bind = …, global, <app id>:<shortcut>`).
+   * Registering a keystroke again replaces its function. */
+  register(shortcut: string, onPress: () => void): Promise<boolean>;
+  /** Gives back `shortcut`. */
+  unregister(shortcut: string): void;
+  /** Gives back every shortcut the app registered. */
+  unregisterAll(): void;
 }
 "#;
 

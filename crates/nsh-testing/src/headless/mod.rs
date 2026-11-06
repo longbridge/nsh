@@ -36,6 +36,7 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+mod audio;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -43,6 +44,8 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+
+pub use audio::AudioCall;
 mod stub;
 
 use std::{
@@ -283,6 +286,9 @@ pub struct Headless {
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
+    /// The speaker the app plays to; `None` when the config gave its own
+    /// (`EngineConfig::audio`).
+    audio: Option<audio::FakeAudio>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -314,6 +320,10 @@ impl Headless {
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
         }
+        let audio = config.audio.is_none().then(audio::FakeAudio::default);
+        if let Some(audio) = &audio {
+            config.audio = Some(Arc::new(audio.clone()));
+        }
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -341,6 +351,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             speech,
+            audio,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -492,6 +503,29 @@ impl Headless {
         self.step(format!("host.send({name})"));
         self.host.send(name, data)?;
         self.done()
+    }
+
+    /// The step `openWithUrl(<url>)`: the system hands the app `url`, a
+    /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
+    /// gets it when the app claims its scheme); then waits until the app
+    /// is quiet.
+    pub fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("openWithUrl({url})"));
+        self.send_url_scheme(url);
+        self.done()
+    }
+
+    /// Reports `url` as a link the system handed the app, without a step:
+    /// the one that launches it.
+    pub fn send_url_scheme(&self, url: &str) {
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![(
+                nsh_core::url_scheme::URL,
+                PayloadValue::Str(url.to_owned()),
+            )]),
+        );
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
@@ -670,6 +704,27 @@ impl Headless {
         error: Option<nsh_core::speech::SpeechError>,
     ) -> Result<(), String> {
         self.fake_speech()?.end(error)?;
+        self.done()
+    }
+
+    /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
+    /// in order. Headless apps play sound: sounds decode as WAV, players
+    /// play a minute of their source at once and end when the test says
+    /// ([`Headless::end_audio`]).
+    pub fn audio_calls(&self) -> Vec<AudioCall> {
+        self.audio
+            .as_ref()
+            .map(audio::FakeAudio::calls)
+            .unwrap_or_default()
+    }
+
+    /// The players playing reach their end (`end`; those that loop start
+    /// again), then waits until the app is quiet. Fails when none plays.
+    pub fn end_audio(&mut self) -> Result<(), String> {
+        self.audio
+            .clone()
+            .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
+            .end()?;
         self.done()
     }
 
@@ -1345,6 +1400,21 @@ impl Headless {
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        // A real finger lands where the view is drawn: a view drawn over it
+        // there takes the press, so the step fails as the user would.
+        if let Some(target) = self.screen.bounds_in_root(id) {
+            let point = self
+                .screen
+                .press_point(&parsed, id)
+                .map_or(target.center(), |p| target.origin + p);
+            if let Some(cover) = self.screen.covering(id, point) {
+                return Err(format!(
+                    "{}; {}",
+                    failure::covered(selector, &self.screen.selector_of(cover)),
+                    self.on_screen()
+                ));
+            }
+        }
         let at = self
             .screen
             .canvas_node(&parsed)
@@ -2644,6 +2714,85 @@ mod tests {
         app.press("id:chart").unwrap();
         app.wait_for("Opens 1 presses 1 steps 1 focused false")
             .unwrap();
+    }
+
+    /// A list of 200 rows of its own, each a button showing its row.
+    #[component]
+    fn LongList() -> impl IntoElement {
+        virtual_list(200, |at| {
+            view()
+                .h(px(40.0))
+                .on_press(|| {})
+                .child(text(move || format!("Row {}", at.index())))
+        })
+        .test_id("list")
+        .estimated_item_size(px(40.0))
+        .flex_1()
+    }
+
+    /// Scrolled back and forth, a list's cells are recycled out of the order
+    /// they were made in: what reads the screen, Tab and `nth=` still find
+    /// its rows in the order they show.
+    #[test]
+    fn a_lists_recycled_rows_are_found_in_screen_order() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<LongList>())).unwrap();
+        app.first_render().unwrap();
+        for distance in [
+            300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
+        ] {
+            app.scroll("id:list", px(distance)).unwrap();
+        }
+        let rows: Vec<u32> = app
+            .screen()
+            .texts()
+            .iter()
+            .filter_map(|t| t.strip_prefix("Row ")?.parse().ok())
+            .collect();
+        assert!(rows.len() > 10, "{rows:?}");
+        assert!(rows.windows(2).all(|w| w[1] == w[0] + 1), "{rows:?}");
+        // Tab's stops are the rows' buttons, in the same order.
+        assert_eq!(app.screen().tab_stops().len(), rows.len());
+    }
+
+    /// A page: a header and a list of 200 rows in the page's viewport.
+    #[component]
+    fn LongPage() -> impl IntoElement {
+        scroll()
+            .test_id("page")
+            .flex_1()
+            .child(text("Header").h(px(120.0)))
+            .child(
+                virtual_list(200, |at| {
+                    view()
+                        .h(px(40.0))
+                        .on_press(|| {})
+                        .child(text(move || format!("Row {}", at.index())))
+                })
+                .viewport(nsh_core::ListViewport::Parent)
+                .estimated_item_size(px(40.0)),
+            )
+    }
+
+    /// The same for a list in its parent's viewport: a plain view in the
+    /// page, its cells read in screen order all the same.
+    #[test]
+    fn a_page_lists_recycled_rows_are_found_in_screen_order() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<LongPage>())).unwrap();
+        app.first_render().unwrap();
+        for distance in [
+            300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
+        ] {
+            app.scroll("id:page", px(distance)).unwrap();
+        }
+        let rows: Vec<u32> = app
+            .screen()
+            .texts()
+            .iter()
+            .filter_map(|t| t.strip_prefix("Row ")?.parse().ok())
+            .collect();
+        assert!(rows.len() > 10, "{rows:?}");
+        assert!(rows.windows(2).all(|w| w[1] == w[0] + 1), "{rows:?}");
+        assert_eq!(app.screen().tab_stops().len(), rows.len());
     }
 
     #[cfg(feature = "js")]

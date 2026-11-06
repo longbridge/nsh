@@ -216,8 +216,10 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--keystore <FILE>` | Android：release keystore。默认使用 `~/.android/debug.keystore` 中的调试密钥（不存在时创建）。 |
 | `--key-alias <ALIAS>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <PASSWORD>` | Android：keystore 密码，也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
+| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。不能与 `--run` 同时使用。 |
 | `--abi <ABI>` | Android：APK 包含的 ABI（`arm64-v8a`、`armeabi-v7a`、`x86_64`），可重复或用逗号分隔。默认：`arm64-v8a` 和 `armeabi-v7a`，加上 `--run` 时还有设备的 ABI。 |
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
+| `--asset-url <URL>` | Web：站点文件所在的 http(s) 地址（CDN），页面按它引用这些文件；`index.html` 和 `manifest.webmanifest` 仍在页面自己的地址下（和不带它时一样按相对路径引用），CDN 要返回 `Access-Control-Allow-Origin`。默认：放在页面旁边，用相对路径引用。`--run` 从本机直接提供站点，所以不带它。 |
 
 ```sh
 nsh package my-app --target ios-simulator --run
@@ -292,6 +294,23 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 | `--strip-debug` | 字节码中不保留行号和列号表：更小，但报错调用栈里没有位置。 |
 | `--min-runtime <VERSION>` | 能运行该包的最低运行时版本，例如 `0.2.0`；更旧的运行时会拒绝它。默认：本 CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 
+### nsh publish android
+
+```sh
+nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+```
+
+把 Android App Bundle 上传到 Google Play，并发布到**内部测试**轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
+会被删除）。它不会走得更远：要发布到封闭测试、开放测试或正式版，请在 Play Console 中推进。登录身份是一个在 Play Console
+中有该应用发布权限的 Google Cloud 服务账号（[Android](./android.md#上传到-google-play)）。
+
+| 参数 | 说明 |
+|---|---|
+| `--entry <DIR>` | 应用目录或入口，其 `nsh.json` 的 `id` 即包名。默认：`.`。 |
+| `--package <NAME>` | Google Play 上的包名。默认：`nsh.json` 的 `id`。 |
+| `--credentials <KEY.json>` | 服务账号的 JSON 密钥。默认读取 `NSH_PLAY_CREDENTIALS`。不要提交到仓库。 |
+| `--draft` | 以草稿发布：应用在 Play Console 中完成首次发布之前，Play 只接受草稿。 |
+
 ### nsh verify
 
 ```sh
@@ -338,3 +357,13 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |
 | `NSH_WASM_BINDGEN` | `run`、`package`（`--target web`） | 应用的 crate [调用浏览器 API](./web.md#在-rust-中使用浏览器-api) 时使用的 `wasm-bindgen` CLI。默认使用 `PATH` 中的。 |
 | `NO_COLOR` | 所有命令 | 设置后，终端输出不带颜色。 |
+
+## nsh publish ios
+
+```sh
+nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+```
+
+在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，用于 TestFlight。参数也可通过
+`NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。

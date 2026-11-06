@@ -219,8 +219,10 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--keystore <FILE>` | Android: release keystore. Default: the debug key in `~/.android/debug.keystore` (created if missing). |
 | `--key-alias <ALIAS>` | Android: key alias in the keystore. |
 | `--keystore-password <PASSWORD>` | Android: keystore password. Also read from `NSH_KEYSTORE_PASSWORD`. |
+| `--format <FORMAT>` | Android: `apk` (default) or `aab`, an Android App Bundle for Google Play, signed with `jarsigner`. Not with `--run`. |
 | `--abi <ABI>` | Android: the ABIs of the APK (`arm64-v8a`, `armeabi-v7a`, `x86_64`), repeated or separated by commas. Default: `arm64-v8a` and `armeabi-v7a`, plus the device's with `--run`. |
 | `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux` and `windows` launch it; `web` serves the site on this machine at the address it prints. |
+| `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
 ```sh
 nsh package my-app --target ios-simulator --run
@@ -296,6 +298,24 @@ may name the package read, and only `--key`, `--cert` and `-o` apply.
 | `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
 | `--min-runtime <VERSION>` | The lowest runtime that runs the package, e.g. `0.2.0`; older runtimes refuse it. Default: this CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 
+### nsh publish android
+
+```sh
+nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+```
+
+Uploads an Android App Bundle to Google Play and releases it to the **internal testing** track, in one edit (insert,
+upload, track update, commit; a failed edit is deleted). It never goes further: promote the release to closed, open or
+production testing in Play Console. Signs in as a Google Cloud service account that has release permission for the app
+in Play Console ([Android](./android.md#upload-to-google-play)).
+
+| Flag | Description |
+|---|---|
+| `--entry <DIR>` | The app's directory or entry, whose `nsh.json` `id` is the package name. Default: `.`. |
+| `--package <NAME>` | The package name on Google Play. Default: `nsh.json` `id`. |
+| `--credentials <KEY.json>` | The service account's JSON key. Default: `NSH_PLAY_CREDENTIALS`. Keep it out of the repository. |
+| `--draft` | Release as a draft: Play takes only drafts until the app's first release is made in Play Console. |
+
 ### nsh verify
 
 ```sh
@@ -342,3 +362,13 @@ Signs a revocation list: release keys and packages that must not load any more.
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |
 | `NSH_WASM_BINDGEN` | `run`, `package` (`--target web`) | The `wasm-bindgen` CLI for an app whose crates [call browser APIs](./web.md#browser-apis-from-rust). Default: the one on `PATH`. |
 | `NO_COLOR` | every command | Set: no colors on terminals. |
+
+## nsh publish ios
+
+```sh
+nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+```
+
+Uploads an App Store-signed IPA on macOS to App Store Connect for TestFlight. Flags also accept
+`NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
+`NSH_APP_STORE_PRIVATE_KEY`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.

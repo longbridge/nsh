@@ -137,6 +137,9 @@ struct Popup {
     /// What the items of a menu of the platform's own do, by id - 1 (the
     /// app's menus report their ids instead).
     actions: Vec<Action>,
+    /// The app's `Menu.popup` waits for it to close (the tray's menu is
+    /// not one the app awaits).
+    awaited: bool,
 }
 
 /// What an item of a menu of the platform's own does.
@@ -298,9 +301,17 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     if hwnd.is_invalid() {
         return;
     }
-    // The embedding app owns its window: only context menus work there.
-    if !top_level(hwnd) && !matches!(command, DesktopCommand::PopupMenu { .. }) {
-        return;
+    // The embedding app owns its window and the shell's integration: only
+    // context menus work there.
+    if !top_level(hwnd) {
+        match command {
+            DesktopCommand::PopupMenu { .. } => {}
+            DesktopCommand::RegisterGlobalShortcut { id, .. } => {
+                crate::global_shortcut::answer(surface, *id, false);
+                return;
+            }
+            _ => return,
+        }
     }
     let c = &surface.chrome;
     match command {
@@ -325,6 +336,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
         DesktopCommand::SetSkipTaskbar(skip) => set_skip_taskbar(surface, *skip),
         DesktopCommand::OrderFront => {
@@ -338,10 +351,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
-        // Windows of the app's own (`Window.open`) are not on this backend yet:
-        // the runtime does not send these here.
+        // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
+        DesktopCommand::Quit => quit(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);
@@ -354,8 +367,16 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 items: items.clone(),
                 at: at.map(|p| (p.x.0, p.y.0)),
                 actions: Vec::new(),
+                awaited: true,
             },
         ),
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, shortcut);
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 
@@ -553,6 +574,21 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
             items: items.into(),
             at: None,
             actions,
+            awaited: false,
+        },
+    );
+}
+
+/// Shows the tray icon's menu at `at` (in the window's points): its items
+/// are reported as the app's context menus' are.
+pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f32)) {
+    popup(
+        surface,
+        Popup {
+            items,
+            at: Some(at),
+            actions: Vec::new(),
+            awaited: false,
         },
     );
 }
@@ -560,6 +596,16 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
 fn close(hwnd: HWND) {
     // SAFETY: posting to a live window.
     let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
+/// Quits the app, as its `quit` role: the window closes as [`close`] closes
+/// it, then the message loop ends, also while a window or a tray icon
+/// would keep it running.
+fn quit(hwnd: HWND) {
+    close(hwnd);
+    // SAFETY: a plain call. The loop gets `WM_QUIT` only after the posted
+    // `WM_CLOSE`: the window closes first.
+    unsafe { PostQuitMessage(0) };
 }
 
 fn toggle_maximize(surface: &Surface) {
@@ -1242,6 +1288,8 @@ pub(crate) fn menu_command(surface: &Rc<Surface>, command: u16) {
 fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     let hwnd = surface.hwnd();
     match role {
+        // An embedding app's window is its own to close or keep.
+        Some(MenuRole::Quit) if top_level(hwnd) => quit(hwnd),
         Some(MenuRole::Quit | MenuRole::Close) => close(hwnd),
         Some(MenuRole::Minimize) => {
             // SAFETY: a plain call.
@@ -1286,7 +1334,13 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
 
 /// `WM_NSH_MENU`: shows the context menu asked for.
 pub(crate) fn show_popup(surface: &Rc<Surface>) {
-    let Some(Popup { items, at, actions }) = surface.chrome.popup.borrow_mut().take() else {
+    let Some(Popup {
+        items,
+        at,
+        actions,
+        awaited,
+    }) = surface.chrome.popup.borrow_mut().take()
+    else {
         return;
     };
     let hwnd = surface.hwnd();
@@ -1348,7 +1402,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
     }
     // The app's `Menu.popup` promise settles.
-    if actions.is_empty() {
+    if awaited {
         surface.event(
             ROOT_ID,
             EventKind::Menu,
@@ -1361,7 +1415,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
 }
 
 /// The shortcut key of virtual key `vk`, if it can be one.
-fn shortcut_key(vk: u16) -> Option<Key> {
+pub(crate) fn shortcut_key(vk: u16) -> Option<Key> {
     let k = VIRTUAL_KEY(vk);
     Some(match vk {
         0x30..=0x39 | 0x41..=0x5A => Key::Char((vk as u8 as char).to_ascii_lowercase()),

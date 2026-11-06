@@ -24,12 +24,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # What each workflow builds and tests (its `-p` packages), and the files
 # outside those crates it reads (tests' fixtures, `include_bytes!`).
 WORKFLOWS = {
+    "tui.yml": {
+        "packages": ["nsh-platform-tui", "nsh-base"],
+        "files": ["examples/counter/**"],
+    },
     "core.yml": {
         "packages": [
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
             "nsh-bundler", "nsh-package", "nsh-updater", "nsh-base", "nsh-testing",
         ],
-        # The fonts nsh-core's, nsh-macros' and nsh-bundler's tests read.
+        # The fonts nsh-core's, nsh-macros', nsh-bundler's and nsh-engine's
+        # tests read.
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/bench/**",
             "tests/compat/cases/layout/fonts/**",

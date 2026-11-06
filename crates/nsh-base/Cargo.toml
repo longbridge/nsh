@@ -11,11 +11,13 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["editor", "highlight", "plot", "rich-editor"]
+default = ["editor", "highlight", "plot", "rich-editor", "term"]
 # `Editor` and `DiffView`, which draws with the Editor's text measure.
 editor = ["dep:ropey", "dep:imara-diff"]
 # `RichEditor` and its schema, session and plugin classes.
 rich-editor = []
+# `Terminal` and its emulator on `vte` (pure Rust, no C).
+term = ["dep:vte"]
 # The charts: `nsh/base/plot`.
 plot = []
 # Built-in syntax highlighting of `TextView`'s code blocks (syntect).
@@ -40,6 +42,7 @@ ropey = { workspace = true, optional = true }
 unicode-segmentation.workspace = true
 imara-diff = { workspace = true, optional = true }
 unicode-width.workspace = true
+vte = { workspace = true, optional = true }
 log.workspace = true
 syntect = { workspace = true, optional = true }
 ratex-parser = { workspace = true, optional = true }

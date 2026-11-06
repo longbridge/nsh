@@ -224,8 +224,8 @@ pub(crate) struct Surface {
     /// its deadline ([`Next::At`]; a new one's is when it was added).
     frame_callbacks: RefCell<Vec<(FrameCallback, Option<f64>)>>,
     /// How many of the frame callbacks have only cosmetic work left (a
-    /// scroll indicator fading out): what [`Surface::animating`] does not
-    /// count.
+    /// scroll indicator fading out, keyframes repeating forever): what
+    /// [`Surface::animating`] does not count.
     #[cfg(feature = "dev")]
     cosmetic_frames: Cell<usize>,
     /// The model of a test session's app (`nsh test --target`).
@@ -233,6 +233,12 @@ pub(crate) struct Surface {
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The display link, while it runs.
     link: RefCell<Option<Retained<CADisplayLink>>>,
+    /// The rate the display link was last asked for
+    /// ([`Surface::frame_rate`]; `None`: the screen's highest).
+    link_rate: Cell<Option<f32>>,
+    /// The frame callbacks that asked for a rate in the last frame
+    /// ([`Surface::cap_frame`]): how many, and the highest rate.
+    capped_frames: Cell<(usize, f32)>,
     /// The performance monitor ([`Surface::set_perf_monitor`]), and whether
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
@@ -259,10 +265,14 @@ pub(crate) struct Surface {
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The engine's sounds and players ([`crate::audio`]).
+    pub(crate) audio: crate::audio::Speaker,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// The window observed for its bounds ([`crate::window_state`]).
+    pub(crate) window: crate::window_state::Watch,
     /// Videos, web views and registered native components.
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
@@ -329,6 +339,8 @@ impl Surface {
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
             link: RefCell::new(None),
+            link_rate: Cell::new(None),
+            capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
             last_tick: Cell::new(0.0),
@@ -341,11 +353,13 @@ impl Surface {
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),
+            audio: Default::default(),
             image_cache: RefCell::new(None),
             native: Default::default(),
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            window: Default::default(),
             shaders: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
@@ -393,10 +407,13 @@ impl Surface {
         *self.pending.borrow_mut() = pending;
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.borrow().clone();
+        // The displays are there as the app first renders.
+        let displays = crate::window_state::displays(self.mtm);
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
+            control.set_displays(displays);
         };
         // Remote images download with NSURLSession.
         crate::image::install_transport();
@@ -432,6 +449,8 @@ impl Surface {
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
         crate::keymap::clear(self);
+        crate::tray::release(self.key);
+        crate::global_shortcut::release(self.key);
         self.js_frame.set(false);
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
@@ -749,8 +768,9 @@ impl Surface {
     }
 
     /// A frame callback's work left became cosmetic (`on`: a scroll
-    /// indicator fading out, which shows nothing the app did) or no longer
-    /// is; it ends with `on` false.
+    /// indicator fading out, which shows nothing the app did; keyframes
+    /// repeating forever, a spinner, which never end) or no longer is; it
+    /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
         #[cfg(feature = "dev")]
         {
@@ -763,9 +783,10 @@ impl Surface {
     }
 
     /// Whether a native animation runs: the graph's (not one looping
-    /// forever, which no test step waits for), or the platform's own
-    /// (scroll glides, zooms; not a scroll indicator's fade, after which
-    /// nothing changes); or batches wait for the next frame.
+    /// forever, which no test step waits for), the platform's own (scroll
+    /// glides, zooms; not a scroll indicator's fade, after which nothing
+    /// changes) or a view's transitions (not its keyframes repeating
+    /// forever); or batches wait for the next frame.
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
         self.anim.borrow().finishing()
@@ -815,8 +836,14 @@ impl Surface {
         if let Some(link) = &*self.link.borrow() {
             if link.isPaused() {
                 // The window may have moved to another screen meanwhile.
+                self.capped_frames.set((0, 0.0));
+                self.link_rate.set(self.frame_rate());
                 link.setPreferredFrameRateRange(self.frame_rate_range());
                 link.setPaused(false);
+            } else {
+                // What starts now may want more frames than what runs;
+                // only a full frame lowers the rate (`ticked`).
+                self.update_frame_rate(link, true);
             }
             return;
         }
@@ -830,6 +857,8 @@ impl Surface {
                 .ns()
                 .displayLinkWithTarget_selector(&ticker, sel!(tick:))
         };
+        self.capped_frames.set((0, 0.0));
+        self.link_rate.set(self.frame_rate());
         link.setPreferredFrameRateRange(self.frame_rate_range());
         // SAFETY: the main run loop exists while the app runs.
         unsafe {
@@ -841,9 +870,59 @@ impl Surface {
         *self.link.borrow_mut() = Some(link);
     }
 
-    /// The frame rates the display link asks for: the screen's highest
-    /// (120 Hz on ProMotion), at least 80 there. Without it the link may
-    /// settle on 60 Hz.
+    /// A frame callback that keeps running needs at most `hz` frames per
+    /// second (a keyframe animation alone on its view): it says so on each
+    /// of its frames.
+    pub(crate) fn cap_frame(&self, hz: f32) {
+        let (count, highest) = self.capped_frames.get();
+        self.capped_frames.set((count + 1, highest.max(hz)));
+    }
+
+    /// The highest frame rate what wants frames needs, in Hz: the graph's
+    /// animations ([`nsh_core::animation::Graph::frame_rate`]) and the
+    /// frame callbacks that asked for a rate. `None`, the screen's
+    /// highest, as soon as one runs uncapped or anything else wants frames:
+    /// a JS frame request, batches waiting, a frame callback without a rate
+    /// (transitions, scroll glides, gestures).
+    fn frame_rate(&self) -> Option<f32> {
+        if self.js_frame.get() || !self.queued.borrow().is_empty() {
+            return None;
+        }
+        let (capped, highest) = self.capped_frames.get();
+        if self.frame_callbacks.borrow().len() > capped {
+            return None;
+        }
+        let callbacks = (capped > 0).then_some(highest);
+        let anim = self.anim.borrow();
+        if !anim.animating() {
+            return callbacks;
+        }
+        let graph = anim.frame_rate();
+        match callbacks {
+            Some(_) => nsh_core::animation::highest_frame_rate(graph, callbacks),
+            None => graph,
+        }
+    }
+
+    /// Asks the display link for the rate what runs needs, when it changed
+    /// (`raise_only`: when it is higher).
+    fn update_frame_rate(&self, link: &CADisplayLink, raise_only: bool) {
+        let rate = self.frame_rate();
+        let old = self.link_rate.get();
+        let changed = match (old, rate) {
+            (Some(old), Some(new)) => new > old || (!raise_only && new < old),
+            (Some(_), None) => true,
+            (None, Some(_)) => !raise_only,
+            (None, None) => false,
+        };
+        if changed {
+            self.link_rate.set(rate);
+            link.setPreferredFrameRateRange(self.frame_rate_range());
+        }
+    }
+
+    /// The frame rates the display link asks for ([`frame_rate_range`]) at
+    /// the rate it was last asked for, on the window's screen.
     fn frame_rate_range(&self) -> objc2_quartz_core::CAFrameRateRange {
         let max = self
             .root
@@ -853,11 +932,7 @@ impl Surface {
             .or_else(|| objc2_app_kit::NSScreen::mainScreen(self.mtm))
             .map_or(60, |s| s.maximumFramesPerSecond())
             .max(1) as f32;
-        objc2_quartz_core::CAFrameRateRange {
-            minimum: max.min(80.0),
-            maximum: max,
-            preferred: max,
-        }
+        frame_rate_range(self.link_rate.get(), max)
     }
 
     /// When the next thing that changes the app's state comes due without
@@ -943,6 +1018,8 @@ impl Surface {
         self.frame(now, link.targetTimestamp() - link.timestamp());
         if !self.wants_frames() && self.perf.borrow().is_none() {
             link.setPaused(true);
+        } else {
+            self.update_frame_rate(link, false);
         }
     }
 
@@ -972,6 +1049,8 @@ impl Surface {
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
+        // The callbacks kept say again which rate they need.
+        self.capped_frames.set((0, 0.0));
         let mut kept: Vec<(FrameCallback, Option<f64>)> = callbacks
             .into_iter()
             .filter_map(|(mut f, _)| match f(self, now) {
@@ -1061,7 +1140,24 @@ impl Drop for Surface {
         if let Some(link) = self.link.borrow_mut().take() {
             link.invalidate();
         }
+        crate::tray::release(key);
+        crate::global_shortcut::release(key);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
+    }
+}
+
+/// The frame rates a display link asks for to run at `rate` Hz (`None`:
+/// the screen's highest) on a screen of `max` Hz: `rate` within the
+/// screen's as the preferred and the highest, and at least 80 Hz below
+/// it on a faster screen (else the link may settle on 60) or the rate
+/// itself on a slower one, so a request of 30 Hz is honored.
+fn frame_rate_range(rate: Option<f32>, max: f32) -> objc2_quartz_core::CAFrameRateRange {
+    let max = max.max(1.0);
+    let preferred = rate.map_or(max, |rate| rate.clamp(1.0, max));
+    objc2_quartz_core::CAFrameRateRange {
+        minimum: preferred.min(80.0),
+        maximum: preferred,
+        preferred,
     }
 }
 
@@ -1081,4 +1177,34 @@ pub(crate) fn quiet<R>(f: impl FnOnce() -> R) -> R {
     let r = f();
     CATransaction::commit();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_rate_range;
+
+    fn range(rate: Option<f32>, max: f32) -> [f32; 3] {
+        let r = frame_rate_range(rate, max);
+        [r.minimum, r.maximum, r.preferred]
+    }
+
+    #[test]
+    fn frame_rate_ranges_ask_for_the_rate_within_the_screens() {
+        // Nothing asked for: the screen's highest, at least 80 Hz.
+        assert_eq!(range(None, 120.0), [80.0, 120.0, 120.0]);
+        assert_eq!(range(None, 60.0), [60.0, 60.0, 60.0]);
+        // A rate below the screen's: that rate, not forced up to 80.
+        assert_eq!(range(Some(30.0), 120.0), [30.0, 30.0, 30.0]);
+        assert_eq!(range(Some(100.0), 120.0), [80.0, 100.0, 100.0]);
+        // Above the screen's: the screen's.
+        assert_eq!(range(Some(240.0), 120.0), [80.0, 120.0, 120.0]);
+        assert_eq!(range(Some(90.0), 60.0), [60.0, 60.0, 60.0]);
+        // Every range is one the display link takes.
+        for rate in [None, Some(0.5), Some(24.0), Some(48.0), Some(144.0)] {
+            for max in [0.0, 30.0, 60.0, 120.0, 144.0] {
+                let [minimum, maximum, preferred] = range(rate, max);
+                assert!(0.0 < minimum && minimum <= preferred && preferred <= maximum);
+            }
+        }
+    }
 }

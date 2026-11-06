@@ -1,5 +1,5 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { TextView, type TextViewImage } from "nsh/base";
+import { TextView, type TextViewImage, type TextViewRef } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 import { LucideIcon } from "../icons";
@@ -419,10 +419,11 @@ const ANSWER = `Every one with a native backend:
 - macOS, Windows and Linux: AppKit, Win32 and GTK 4`;
 
 /** Two documents and a plain text that select as one, around a label that stays out. */
-function Selection() {
+function SelectionAcross() {
+  const selected = signal("");
   return (
     <Card icon="text" title="Selectable view" subtitle="One selection across texts and TextViews">
-      <View selectable class="gap-3">
+      <View selectable class="gap-3" onSelectionChange={({ text }) => selected.set(text)}>
         <TextView markdown={QUESTION} />
         <TextView markdown={ANSWER} />
         <View class="flex-row items-baseline gap-2">
@@ -431,7 +432,49 @@ function Selection() {
         </View>
       </View>
       <Caption label="Drag from the question into the answer, or long press and move the handles" />
+      <Caption label="Selected (onSelectionChange)" note={selected() || "nothing"} />
     </Card>
+  );
+}
+
+const FORMATS = [
+  { value: "plain", label: "Text" },
+  { value: "markdown", label: "Markdown" },
+  { value: "html", label: "HTML" },
+] as const;
+
+type Format = (typeof FORMATS)[number]["value"];
+
+/** A selectable TextView's ref reads its selection as text, Markdown or HTML. */
+function SelectionRead() {
+  let view: TextViewRef | undefined;
+  const format = signal<Format>("markdown");
+  const out = signal("");
+  const read = async () => out.set((await view?.selectedText({ format: format() })) ?? "");
+  return (
+    <Card icon="text" title="Read the selection" subtitle="selectedText({ format }) of a TextView ref">
+      <TextView ref={(r) => (view = r)} selectable markdown={ANSWER} onSelectionChange={() => void read()} />
+      <Segmented
+        options={FORMATS}
+        value={format()}
+        onChange={(f) => {
+          format.set(f);
+          void read();
+        }}
+      />
+      <View class="rounded-md bg-muted p-3">
+        <Text style={{ fontFamily: "monospace", fontSize: 12, userSelect: "text" }}>{out() || "Select part of the answer"}</Text>
+      </View>
+    </Card>
+  );
+}
+
+function Selection() {
+  return (
+    <View style={{ gap: 16 }}>
+      <SelectionAcross />
+      <SelectionRead />
+    </View>
   );
 }
 
