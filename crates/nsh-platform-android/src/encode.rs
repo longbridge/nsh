@@ -736,6 +736,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                                 e.string(notification.id);
                                 e.string(notification.title);
                                 e.string(notification.body);
+                                e.bool(notification.silent);
                             }
                             N::Close(id) => {
                                 e.int(2);

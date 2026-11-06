@@ -66,16 +66,16 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 | `minimize()` | `minimize()` | 最小化窗口。 |
 | `toggleMaximize()` | `toggle_maximize()` | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | `toggle_full_screen()` | 进入或退出全屏。 |
-| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`）是窗口的左上角，从主屏幕（macOS 上是带菜单栏的那块屏幕）的左上角量起，`y` 向下增长，各平台相同；只给 `height` 而不给 `y` 时顶边保持不动，窗口从底边伸缩。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。用它按窗口当前的样子移动或调整大小；恢复保存的窗口用 `setBounds`。 |
+| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`）是窗口的左上角，从主屏幕（macOS 上是带菜单栏的那块屏幕）的左上角量起，`y` 向下增长，各平台相同；只给 `height` 而不给 `y` 时顶边保持不动，窗口从底边伸缩。`animated: true` 启用 macOS 的窗口调整动画（默认为 false；GPUI 应用忽略此项）。用它按窗口当前的样子移动或调整大小；恢复保存的窗口用 `setBounds`。 |
 | `setBounds(bounds)` | `set_window_bounds(bounds)` | 恢复之前保存的窗口：让窗口进入 `bounds.mode`（`"windowed"`、`"maximized"` 或 `"fullscreen"`），窗口化时的外框为 `bounds.bounds`，先还原到这个外框，模式要求时再最大化或进入全屏。它接受 [`windowState()`](#窗口状态与显示器) 报告的 `windowBounds`，用于按用户上次离开时的样子打开窗口。外框会先放到当前的显示器上，因为保存时所在的显示器可能已经拔掉：窗口顶部 40 点内至少有 100 × 20 点落在某个显示器的可用区域内（用户能抓住标题栏拖动）时保持不变；否则居中放到主显示器的可用区域，尺寸不超过它。用同样的值再调用一次不会有变化。按窗口当前的样子移动或调整大小用 `setFrame`。 |
 | `setLevel(level)` | `set_level(level)` | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
 | `setSkipTaskbar(skip)` | `set_skip_taskbar(skip)` | 在 Windows 上，`true` 让窗口不出现在任务栏（对应 Electron 和 Tauri 的 `skipTaskbar`），适合浮层、桌宠和弹出窗口；`false` 让它回到任务栏。macOS 的 Dock 和 Linux 的 Dock 按应用而不是按窗口列出，其他平台不做处理。 |
 | `orderFront()` | `order_front()` | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
 | `close()` | `close_window()` | 关闭窗口，应用随之结束。 |
 
-窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。在 GPUI 应用中，`setFrame` 设置窗口尺寸，窗口位置由平台决定；GPUI 窗口的位置和层级由宿主在创建窗口时配置。
+窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。在 GPUI 应用中，`setFrame` 设置窗口内容区域的尺寸（每边至少 1 点），窗口位置由平台决定；GPUI 窗口的位置和层级由宿主在创建窗口时配置。最大化或全屏的 GPUI 窗口保持原有尺寸；在平铺式合成器（Hyprland、Sway）上，平铺窗口的尺寸由合成器决定：由合成器绘制窗口装饰时，GPUI 无法判断窗口是否处于平铺状态。
 
-使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
+使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。在 Linux 上由窗口管理器绘制装饰的 GPUI 应用无需预留：装饰位于所设尺寸之外。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
 
 ### Window.open
 

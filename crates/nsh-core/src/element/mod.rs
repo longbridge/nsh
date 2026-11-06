@@ -223,7 +223,10 @@ pub use crate::{
         transparent_black, transparent_white, white, yellow,
     },
     overlay::{Align, Placement},
-    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Lifecycle, Locale, Os},
+    platform::{
+        Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
+        Locale, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
+    },
     style::Color,
 };
 
