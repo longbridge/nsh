@@ -278,7 +278,7 @@
   `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever
   order the widths come in, as `outlineStyle: "none"` does, `Pending`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`
   (`continuous`: corners easing into the edges, Figma's 60% corner smoothing, shrinking to circular where the box is too
-  small, so pills stay pills; the outline geometry is `nsh_core::shape::rounded_rect`, ported to `Decor.java`; iOS layers that
+  small, so pills stay pills; the outline geometry is `nsh_core::shape::rounded_rect`, ported to `Decor.java`, where Android below API 30 casts the shadow of the smallest corner's round rect instead, as API 28 and 29 take only convex outlines and smoothed corners are not always convex; iOS layers that
   draw their own corners use `cornerCurve`), `overflow`, `opacity`,
   the transform properties as CSS composes them (`Style::set_transform`: `translate`, `rotate`, `scale`, then
   `transform`, CSS's string of `translate()` / `scale()` / `rotate()` / `rotateX()` / `rotateY()` / `skew()` /
