@@ -147,6 +147,8 @@
   --active-shadow: 0 1px 2px rgb(0 0 0 / 35%);
   --callout-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px -12px rgb(0 0 0 / 45%);
 
+  /* Headings everywhere are set in the banner's Figtree; CJK falls back to the sans stack. */
+  --font-display: "Figtree Variable", var(--font-sans);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto,
     "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "Cascadia Mono", Consolas, monospace;
@@ -181,7 +183,7 @@ html.light {
 
 
 
-  --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
+  --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(16 20 30 / 5%);
   --accent-border: #a7cf3f;
 
   --code-bg: #f7f7f8;
@@ -200,10 +202,10 @@ html.light {
   --scrollbar-thumb-hover: rgb(21 22 26 / 34%);
 
   --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 14%);
-  --shadow-raise: 0 1px 2px rgb(20 20 10 / 8%);
-  --shadow-window: 0 1px 2px rgb(20 20 10 / 5%), 0 12px 28px -8px rgb(20 20 10 / 12%), 0 40px 72px -28px rgb(20 20 10 / 16%);
-  --shadow-panel: 0 20px 50px -24px rgb(20 20 10 / 24%);
-  --shadow-dialog: 0 25px 60px -12px rgb(20 20 10 / 28%);
+  --shadow-raise: 0 1px 2px rgb(16 20 30 / 8%);
+  --shadow-window: 0 1px 2px rgb(16 20 30 / 5%), 0 12px 28px -8px rgb(16 20 30 / 12%), 0 40px 72px -28px rgb(16 20 30 / 16%);
+  --shadow-panel: 0 20px 50px -24px rgb(16 20 30 / 24%);
+  --shadow-dialog: 0 25px 60px -12px rgb(16 20 30 / 28%);
 
   --nav-shadow: 0 1px 0 rgb(40 40 20 / 4%);
   --nav-bg: color-mix(in srgb, var(--background) 74%, transparent);
@@ -234,13 +236,13 @@ html.light:root {
   --logo-bead-hi: #565c66;
   --logo-bead-rim: #07080a;
   --code-surface: rgb(24 24 27 / 2.5%);
-  --code-shadow: 0 1px 2px rgb(20 20 10 / 5%), 0 6px 18px rgb(20 20 10 / 5%);
+  --code-shadow: 0 1px 2px rgb(16 20 30 / 5%), 0 6px 18px rgb(16 20 30 / 5%);
   --chip-bg: rgb(21 22 26 / 5.5%);
   --chip-edge: rgb(21 22 26 / 4%);
   --glass-fill: rgb(255 255 255 / 62%);
   --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 81.1%));
-  --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(20 20 10 / 8%);
-  --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(20 20 10 / 14%);
+  --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(16 20 30 / 8%);
+  --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(16 20 30 / 14%);
   --nav-active: rgb(0 0 0 / 4.5%);
   --nav-hover: rgb(0 0 0 / 2.8%);
   --callout-tint: 7%;
@@ -278,6 +280,8 @@ body {
   font-size: 15px;
   letter-spacing: -0.003em;
 }
+
+h1, h2, h3 { font-family: var(--font-display); }
 
 html[lang^="zh"] body { letter-spacing: normal; }
 html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
@@ -783,8 +787,8 @@ html[lang^="zh"] .sidebar-group__title,
 html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 .doc-header h1 {
   margin: 0;
-  font-size: clamp(1.8rem, 2.8vw, 2.25rem);
-  font-weight: 680;
+  font-size: clamp(1.9rem, 3vw, 2.5rem);
+  font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.15;
 }

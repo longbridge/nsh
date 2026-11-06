@@ -6,7 +6,6 @@
 // nothing else to install, a backend for each of eight platforms, one component
 // taking each device's form (live), retained views, UI delivered after release.
 // Every number is from website/docs/performance-report.md or web.md.
-import '@fontsource-variable/figtree/wght.css';
 import { BASE, REPO_URL, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, url, type Lang } from '../lib/site';
 import { hasPlayer } from '../lib/demo.js';
 import HeroArches from './HeroArches.astro';
@@ -851,7 +850,6 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
 <style>
   .home {
     --section-gap: 7rem;
-    --font-display: "Figtree Variable", var(--font-sans);
     --halftone: radial-gradient(circle, color-mix(in srgb, var(--foreground) 16%, transparent) 1.1px, transparent 1.6px);
     /* The room the arches take at the hero's foot on narrow screens (HeroArches.astro). */
     --arch-room: calc(min(46vw, 290px) * 1.14);

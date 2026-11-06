@@ -16,14 +16,14 @@ const photo = "https://pbs.twimg.com/media/HS6UGjvXkAAyHtp?format=jpg&name=small
 /** The finishes of ui.tsx as classes: a top-lit gradient, a highlight along the top edge, a soft shadow. */
 const finish = {
   card:
-    "bg-linear-to-b from-white to-[#fafaf8] inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(20,20,10,0.08)] " +
+    "bg-linear-to-b from-white to-[#f9fafb] inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(16,20,30,0.08)] " +
     "dark:from-[#1d1e22] dark:to-[#17181b] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.06)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)]",
-  inset: "inset-shadow-[0_1px_2px_rgba(20,20,10,0.07)] dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)]",
+  inset: "inset-shadow-[0_1px_2px_rgba(16,20,30,0.07)] dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)]",
   raised:
-    "bg-linear-to-b from-white to-[#f2f2ee] inset-shadow-[0_1px_0_#ffffff] shadow-[0_1px_2px_rgba(20,20,10,0.12)] " +
+    "bg-linear-to-b from-white to-[#f1f2f5] inset-shadow-[0_1px_0_#ffffff] shadow-[0_1px_2px_rgba(16,20,30,0.12)] " +
     "dark:from-[#2d2f34] dark:to-[#222428] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.08)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.45)]",
   light:
-    "bg-linear-to-b from-[#2c2e33] to-[#16171a] inset-shadow-[0_1px_0_rgba(255,255,255,0.14)] shadow-[0_3px_10px_rgba(20,20,10,0.22)] " +
+    "bg-linear-to-b from-[#262a31] to-[#0e1117] inset-shadow-[0_1px_0_rgba(255,255,255,0.14)] shadow-[0_3px_10px_rgba(16,20,30,0.22)] " +
     "dark:from-[#fbfbfc] dark:to-[#d4d6d9] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.9)] dark:shadow-[0_3px_10px_rgba(0,0,0,0.4)]",
   accent:
     "bg-linear-to-b from-[#d8f88f] to-[#bde65a] inset-shadow-[0_1px_0_rgba(255,255,255,0.6)] shadow-[0_3px_10px_rgba(110,150,20,0.25)] " +
@@ -58,7 +58,7 @@ function Label(props: { children: string }) {
 function Hero() {
   return (
     <View
-      class="overflow-hidden rounded-2xl border border-border bg-linear-to-br from-white via-[#fafaf8] to-inset p-5 inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(20,20,10,0.08)] dark:from-[#26282d] dark:via-card dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)]"
+      class="overflow-hidden rounded-2xl border border-border bg-linear-to-br from-white via-[#f9fafb] to-inset p-5 inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(16,20,30,0.08)] dark:from-[#26282d] dark:via-card dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)]"
     >
       <View class="absolute -right-20 -top-24 size-72 rounded-full bg-radial from-brand-fill/20 to-transparent to-70%" />
       <View class="flex-row flex-wrap items-center gap-2">
@@ -96,7 +96,7 @@ function Stats() {
       <View class="grid grid-cols-2 gap-2">
         <Each of={stats}>
           {(s) => (
-            <View class="gap-1 rounded-[10px] border border-line bg-linear-to-b from-white to-[#fafaf8] p-3 inset-shadow-[0_1px_0_#ffffff] dark:from-[#1d1e22] dark:to-[#17181b] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.05)]">
+            <View class="gap-1 rounded-[10px] border border-line bg-linear-to-b from-white to-[#f9fafb] p-3 inset-shadow-[0_1px_0_#ffffff] dark:from-[#1d1e22] dark:to-[#17181b] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.05)]">
               <Text class="text-xs text-zinc-500">{s().label}</Text>
               <Text class="text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">{s().value}</Text>
               <Text style={{ numberOfLines: 1 }} class={`text-xs tabular-nums ${s().tone}`}>
@@ -164,7 +164,7 @@ function Cards() {
   ];
   return (
     <Card icon="styles" title="Cards and badges" subtitle="group-active: ring-inset shadow-*">
-      <View class="group flex-row items-center gap-3 rounded-xl bg-linear-to-b from-white to-[#f2f2ee] p-3 shadow-md shadow-black/10 ring-1 ring-inset ring-black/5 dark:from-[#2d2f34] dark:to-[#222428] dark:shadow-black/40 dark:ring-white/10 transition-transform duration-200 active:scale-[0.98]">
+      <View class="group flex-row items-center gap-3 rounded-xl bg-linear-to-b from-white to-[#f1f2f5] p-3 shadow-md shadow-black/10 ring-1 ring-inset ring-black/5 dark:from-[#2d2f34] dark:to-[#222428] dark:shadow-black/40 dark:ring-white/10 transition-transform duration-200 active:scale-[0.98]">
         <Image src={logo} class="size-12 rounded-[10px]" />
         <View class="flex-1 gap-0.5">
           <Text class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Group press</Text>
@@ -398,7 +398,7 @@ function Inputs() {
     <Card icon="form" title="Inputs" subtitle="focus: placeholder: caret-*">
       <Input
         placeholder="Focus me"
-        class="h-11 rounded-[10px] border border-border bg-card px-3.5 inset-shadow-[0_1px_2px_rgba(20,20,10,0.07)] text-[15px] text-zinc-900 placeholder:text-zinc-400 caret-brand focus:border-brand focus:ring-2 focus:ring-brand-fill/40 dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)] dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:ring-brand-fill/25"
+        class="h-11 rounded-[10px] border border-border bg-card px-3.5 inset-shadow-[0_1px_2px_rgba(16,20,30,0.07)] text-[15px] text-zinc-900 placeholder:text-zinc-400 caret-brand focus:border-brand focus:ring-2 focus:ring-brand-fill/40 dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)] dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:ring-brand-fill/25"
       />
       <Label>Focus adds a border and a ring; the placeholder and caret colors are classes too.</Label>
     </Card>
