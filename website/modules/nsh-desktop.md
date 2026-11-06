@@ -76,7 +76,7 @@ interface WindowProps extends WindowOptions {
 }
 ```
 
-`<Window>` is a window of the app's own, controlled as a [`Dialog`](./nsh-base.md) is: it is open while `open` is not `false` (`defaultOpen` without `open`, `true` by default) and closes when it unmounts. Its content is part of the tree around it: it reads the same signals and context, and `currentWindow()` inside it is this window. When the window closes without the app closing it, `onOpenChange({ open: false, reason })` tells the app, which sets `open` from it. The reasons are `"closePress"` (the user closed it), `"escape"` (`closeOnEscape`), `"blur"` (`closeOnBlur`) and `"parentClose"` (its parent closed).
+`<Window>` is a window of the app's own, controlled as a [`Dialog`](./nsh-base.md) is: it is open while `open` is not `false` (`defaultOpen` without `open`, `true` by default) and closes when it unmounts. Its content is part of the tree around it: it reads the same signals and context, and `currentWindow()` inside it is this window. When the window closes other than by its `open` prop, `onOpenChange({ open: false, reason })` tells the app, which sets `open` from it. The reasons are `"closePress"` (the user closed it), `"escape"` (`closeOnEscape`), `"blur"` (`closeOnBlur`), `"parentClose"` (its parent closed) and `"close"` (the app called its `WindowRef.close()`).
 
 Its props are its [options](#options) and [attributes](#attributes); the attributes are reactive, so `title={`${doc().name} – Editor`}` follows the signal.
 
@@ -263,11 +263,11 @@ The Rust column names the methods of `WindowHandle`.
 | `main` | `is_main()` | It is the main window. |
 | `parent` | | The window that owns it, or `null`. |
 | `state()` | `state()` | What the platform reports of it (reactive; [below](#the-windows-state-and-the-displays)). `null` off desktops, before it shows and once it closed. |
-| `titleBar()` | `title_bar()` (a function) | Its hidden title bar's area ([below](#titlebar)). |
+| `titleBar()` | `title_bar()` | Its hidden title bar's area ([below](#titlebar)). |
 | `set(attributes)` | `set(WindowAttributes)` | Changes the [attributes](#attributes) it names; the others keep their values. An attribute the app's capabilities do not grant is left as it is, with a warning. |
 | `show()`, `hide()` | `show()`, `hide()` | Shows it (restoring it when minimized), or hides it. |
 | `focus()` | `focus()` | Shows it, brings it to the front of its level and gives it the keyboard focus; the app activates. The window keeps its level. |
-| `close()` | `close()` | Closes it, whatever `closeOnPress` says. A window of the app's own unmounts its content; the main window closes as when the user closes it, and the app ends with its last window. |
+| `close()` | `close()` | Closes it, whatever `closeOnPress` says. A window of the app's own unmounts its content (`<Window>`: `onOpenChange` with `reason: "close"`); the main window closes as when the user closes it, and the app ends with its last window. |
 | `minimize()`, `restore()` | `minimize()`, `restore()` | Minimizes it, or brings it back in the mode it had: a maximized window minimized comes back maximized. |
 | `setMode(mode)` | `set_mode(mode)` | Puts it in `"normal"`, `"maximized"` or `"fullScreen"`; asking for the mode it is in changes nothing. |
 | `setBounds({ origin?, size?, animated? })` | `set_bounds(WindowFrame { .. })` | Moves and sizes it, in points; omitted fields keep their values. `origin` (`x`, `y`) is its top left corner from the primary display's top left, `y` growing down; a `height` without a `y` keeps the top edge where it is. On macOS and Windows `size` includes the window's decorations; on Linux it sets GTK's default window size. `animated: true` enables macOS's resize animation. Widths and heights take positive finite numbers, `x` and `y` finite ones; other values keep the field's. |

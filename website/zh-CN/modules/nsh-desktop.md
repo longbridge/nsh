@@ -76,7 +76,7 @@ interface WindowProps extends WindowOptions {
 }
 ```
 
-`<Window>` 是应用自己的一个窗口，和 [`Dialog`](./nsh-base.md) 一样受控：`open` 不为 `false` 时打开（没有 `open` 时看 `defaultOpen`，默认为 `true`），卸载时关闭。它的内容是周围组件树的一部分：读取相同的 signal 和 context，其中的 `currentWindow()` 就是这个窗口。窗口不是由应用关闭时，`onOpenChange({ open: false, reason })` 通知应用，应用据此设置 `open`。原因有 `"closePress"`（用户关闭了它）、`"escape"`（`closeOnEscape`）、`"blur"`（`closeOnBlur`）和 `"parentClose"`（父窗口关闭了）。
+`<Window>` 是应用自己的一个窗口，和 [`Dialog`](./nsh-base.md) 一样受控：`open` 不为 `false` 时打开（没有 `open` 时看 `defaultOpen`，默认为 `true`），卸载时关闭。它的内容是周围组件树的一部分：读取相同的 signal 和 context，其中的 `currentWindow()` 就是这个窗口。窗口不是因 `open` prop 而关闭时，`onOpenChange({ open: false, reason })` 通知应用，应用据此设置 `open`。原因有 `"closePress"`（用户关闭了它）、`"escape"`（`closeOnEscape`）、`"blur"`（`closeOnBlur`）、`"parentClose"`（父窗口关闭了）和 `"close"`（应用调用了它的 `WindowRef.close()`）。
 
 它的 props 就是它的[选项](#选项)和[属性](#属性)；属性是响应式的，`title={`${doc().name} – Editor`}` 会跟随 signal。
 
@@ -263,11 +263,11 @@ Rust 列给出 `WindowHandle` 的方法。
 | `main` | `is_main()` | 它是主窗口。 |
 | `parent` | | 拥有它的窗口，或 `null`。 |
 | `state()` | `state()` | 平台报告的它的状态（响应式；[见下](#窗口状态与显示器)）。在非桌面平台上、显示之前和关闭之后为 `null`。 |
-| `titleBar()` | `title_bar()`（函数） | 它隐藏的标题栏的区域（[见下](#titlebar)）。 |
+| `titleBar()` | `title_bar()` | 它隐藏的标题栏的区域（[见下](#titlebar)）。 |
 | `set(attributes)` | `set(WindowAttributes)` | 修改给出的[属性](#属性)；其他保持原值。应用的权限不允许的属性保持不变，并给出警告。 |
 | `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。 |
 | `focus()` | `focus()` | 显示它，提到所在层级的最前并给它键盘焦点；应用随之激活。窗口保持原有层级。 |
-| `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何。应用自己的窗口卸载其内容；主窗口像用户关闭它那样关闭，最后一个窗口关闭时应用结束。 |
+| `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何。应用自己的窗口卸载其内容（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）；主窗口像用户关闭它那样关闭，最后一个窗口关闭时应用结束。 |
 | `minimize()`、`restore()` | `minimize()`、`restore()` | 最小化它，或按原来的模式还原：最大化的窗口最小化后还原时仍是最大化。 |
 | `setMode(mode)` | `set_mode(mode)` | 让它进入 `"normal"`、`"maximized"` 或 `"fullScreen"`；请求它当前的模式不会有变化。 |
 | `setBounds({ origin?, size?, animated? })` | `set_bounds(WindowFrame { .. })` | 移动它并调整大小，单位为点；省略的字段保持原值。`origin`（`x`、`y`）是它的左上角，从主显示器的左上角量起，`y` 向下增长；只给 `height` 而不给 `y` 时顶边保持不动。macOS 和 Windows 上的 `size` 包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`animated: true` 启用 macOS 的窗口调整动画。宽度和高度接受正有限数值，`x` 和 `y` 接受有限数值；其他值保留字段原值。 |

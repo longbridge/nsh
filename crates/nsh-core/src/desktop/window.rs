@@ -833,45 +833,21 @@ pub fn declarations() -> String {
     use std::fmt::Write as _;
     let mut types = TsTypes::default();
     let mut out = String::new();
-    for (name, doc, ts) in [
-        (
-            "WindowKind",
-            "What a window is for: its attributes' defaults.",
-            WindowKind::ts_type(&mut types),
-        ),
-        (
-            "WindowMode",
-            "A window's mode (minimized apart: `WindowState.minimized`).",
-            WindowMode::ts_type(&mut types),
-        ),
-        (
-            "CloseReason",
-            "How the user asked to close a window.",
-            CloseReason::ts_type(&mut types),
-        ),
-        (
-            "WindowCloseCause",
-            "Why a window of the app's own closed without the app closing it.",
-            WindowCloseCause::ts_type(&mut types),
-        ),
-        (
-            "WindowControl",
-            "A system window button a view of the app's title bar acts as.",
-            WindowControl::ts_type(&mut types),
-        ),
-        (
-            "ResizeEdge",
-            "An edge or a corner a frameless window is resized by.",
-            ResizeEdge::ts_type(&mut types),
-        ),
-        (
-            "DisplayId",
-            "A display, the same in the app's next launch (sixteen hexadecimal digits).",
-            DisplayId::ts_type(&mut types),
-        ),
-    ] {
-        let _ = write!(out, "/** {doc} */\nexport type {name} = {ts};\n\n");
-    }
+    // The enumerations declare themselves (with their own docs) as their
+    // types are asked for; only a type that has no declaration of its own
+    // gets an alias here.
+    WindowKind::ts_type(&mut types);
+    WindowMode::ts_type(&mut types);
+    CloseReason::ts_type(&mut types);
+    WindowCloseCause::ts_type(&mut types);
+    WindowControl::ts_type(&mut types);
+    ResizeEdge::ts_type(&mut types);
+    let _ = write!(
+        out,
+        "/** A display, the same in the app's next launch (sixteen hexadecimal digits). */\n\
+         export type DisplayId = {};\n\n",
+        DisplayId::ts_type(&mut types)
+    );
     WindowAttributes::declare(&mut types);
     WindowPlacement::ts_type(&mut types);
     super::Display::ts_type(&mut types);
