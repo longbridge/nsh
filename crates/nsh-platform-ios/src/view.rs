@@ -130,7 +130,7 @@ impl AppView {
     }
 
     /// Hands `url`, one of the embedding app's URLs, to the running app as
-    /// the system opening it would (`Linking.on("url")`, `nsh`); before an
+    /// the system opening it would (`UrlScheme.on("open")`, `nsh`); before an
     /// app runs, the next one loaded gets it. On the main thread.
     pub fn open_url(&self, url: &str) {
         let mut state = self.inner.state.borrow_mut();

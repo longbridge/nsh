@@ -414,7 +414,7 @@ impl Surface {
         self.control(|c| c.dispatch_event(id, kind, payload));
     }
 
-    /// Hands the app a URL the system opened it with (`EventKind::Link`),
+    /// Hands the app a URL the system opened it with (`EventKind::UrlScheme`),
     /// kept until the engine starts.
     pub(crate) fn open_url(&self, url: &str) {
         if self.control.borrow().is_none() {
@@ -423,7 +423,7 @@ impl Surface {
         }
         self.event(
             nsh_core::ROOT_ID,
-            EventKind::Link,
+            EventKind::UrlScheme,
             EventPayload::Map(vec![("url", nsh_core::PayloadValue::Str(url.to_owned()))]),
         );
     }

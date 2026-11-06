@@ -535,7 +535,7 @@ public class NshView extends FrameLayout {
      */
     public void openUrl(String url) {
         if (url == null || handle == 0) return;
-        mounter.eventMap(1, Native.LINK, new String[] {"url"}, new Object[] {url});
+        mounter.eventMap(1, Native.URL_SCHEME, new String[] {"url"}, new Object[] {url});
     }
 
     /**
@@ -545,7 +545,7 @@ public class NshView extends FrameLayout {
      *
      * @param intent the activity's intent
      */
-    public void handleLinkIntent(android.content.Intent intent) {
+    public void handleUrlSchemeIntent(android.content.Intent intent) {
         if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
         android.net.Uri data = intent.getData();
         if (data != null) openUrl(data.toString());

@@ -235,7 +235,7 @@ char *_Nullable nsh_app_set_host_params(NshApp *app, const char *_Nullable json)
 char *_Nullable nsh_app_send_host_event(NshApp *app, const char *name, const char *_Nullable json);
 
 /// Hands `url`, one the embedding app was opened with, to the running app
-/// (`Linking.on("url")`); before an app runs, the next one loaded gets it.
+/// (`UrlScheme.on("open")`); before an app runs, the next one loaded gets it.
 /// Returns why it cannot, or NULL.
 char *_Nullable nsh_app_open_url(NshApp *app, const char *url);
 

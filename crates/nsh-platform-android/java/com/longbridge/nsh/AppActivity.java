@@ -20,7 +20,7 @@ public final class AppActivity extends Activity {
         setContentView(view);
         view.handleNotificationIntent(getIntent());
         // A recreated activity's intent was handed in already.
-        if (state == null) view.handleLinkIntent(getIntent());
+        if (state == null) view.handleUrlSchemeIntent(getIntent());
         if (rustApp()) view.runRustApp("nsh");
         else view.loadAssetBundle("nsh");
     }
@@ -48,7 +48,7 @@ public final class AppActivity extends Activity {
         super.onNewIntent(intent);
         if (view != null) {
             view.handleNotificationIntent(intent);
-            view.handleLinkIntent(intent);
+            view.handleUrlSchemeIntent(intent);
         }
     }
 

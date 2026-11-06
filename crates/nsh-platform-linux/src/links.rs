@@ -1,4 +1,4 @@
-//! URL schemes that open the app (nsh.json `schemes`, `Linking` of `nsh`).
+//! URL schemes that open the app (nsh.json `schemes`, `UrlScheme` of `nsh`).
 //!
 //! The desktop finds the app that opens `myapp://` through a `.desktop`
 //! file with `MimeType=x-scheme-handler/myapp`: the runner writes its own

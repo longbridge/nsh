@@ -1082,7 +1082,7 @@ pub unsafe extern "C" fn nsh_app_send_host_event(
 }
 
 /// Hands `url`, one the embedding app was opened with, to the running app
-/// (`Linking.on("url")`, `nsh`); before an app runs, the next one loaded
+/// (`UrlScheme.on("open")`, `nsh`); before an app runs, the next one loaded
 /// gets it. Returns why it cannot (`url` is not UTF-8), or `NULL`.
 ///
 /// # Safety

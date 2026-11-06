@@ -1844,9 +1844,9 @@ only the running app: one left on screen after the app exits does nothing.
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
 `"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
 
-## Linking
+## UrlScheme
 
-`Linking` hears the URLs the system opens the app with. List the app's URL schemes in `nsh.json`, and a link such as
+`UrlScheme` hears the URLs the system opens the app with. List the app's URL schemes in `nsh.json`, and a link such as
 `myapp://chat/42`, pressed in the browser or opened by another app, opens the app and reaches it:
 
 ```json
@@ -1854,13 +1854,13 @@ only the running app: one left on screen after the app exits does nothing.
 ```
 
 ```tsx
-import { Linking } from "nsh";
+import { UrlScheme } from "nsh";
 
-Linking.on("url", ({ url }) => openRoute(new URL(url)));
+UrlScheme.on("open", ({ url }) => openRoute(new URL(url)));
 ```
 
 A link can start the app: the URL waits for the first listener, so listen when the app starts. A link opened while the
-app runs brings its window to the front. Rust code awaits `next_link` of `nsh_core::prelude`.
+app runs brings its window to the front. Rust code awaits `next_url_scheme_open` of `nsh_core::prelude`.
 
 | Platform | Registered by |
 | --- | --- |
@@ -1870,7 +1870,7 @@ app runs brings its window to the front. Rust code awaits `next_link` of `nsh_co
 | Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, macOS, Windows),
-`NshAppView.openURL` (iOS), `NshView.openUrl` or `NshView.handleLinkIntent` (Android).
+`NshAppView.openURL` (iOS), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
 ## Speech
 

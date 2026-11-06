@@ -39,7 +39,7 @@ public final class DevActivity extends Activity {
         setContentView(view);
         view.handleNotificationIntent(getIntent());
         // A recreated activity's intent was handed in already.
-        if (state == null) view.handleLinkIntent(getIntent());
+        if (state == null) view.handleUrlSchemeIntent(getIntent());
         String pkg = getIntent().getStringExtra("package");
         if (pkg != null) {
             trust = new NshTrust(new java.io.File(getCacheDir(), "nsh-trust"));
@@ -70,7 +70,7 @@ public final class DevActivity extends Activity {
         super.onNewIntent(intent);
         if (view != null) {
             view.handleNotificationIntent(intent);
-            view.handleLinkIntent(intent);
+            view.handleUrlSchemeIntent(intent);
         }
     }
 

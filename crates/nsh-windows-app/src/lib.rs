@@ -108,7 +108,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     if let Some(name) = field("name") {
         options.title = name;
     }
-    // The URL schemes it registers and opens (`EventKind::Link`).
+    // The URL schemes it registers and opens (`EventKind::UrlScheme`).
     if let Some(schemes) = info
         .as_ref()
         .and_then(|info| info.get("schemes")?.as_array().cloned())

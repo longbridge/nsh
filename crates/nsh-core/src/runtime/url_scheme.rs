@@ -1,8 +1,8 @@
-//! `nsh`'s `Linking`: URLs the system opens the app with, of the schemes
+//! `nsh`'s `UrlScheme`: URLs the system opens the app with, of the schemes
 //! the app registers in nsh.json (`"schemes": ["myapp"]` makes
 //! `myapp://...` open the app). The platforms register the schemes when
 //! they package or run the app and report each URL as
-//! [`crate::EventKind::Link`] on the root; the one that started the app
+//! [`crate::EventKind::UrlScheme`] on the root; the one that started the app
 //! waits for the first listener.
 
 use std::{
@@ -14,27 +14,27 @@ use crate::element::{Callback, JsError, JsObject, Local, PropEnum, Stop, System,
 
 /// The URLs the system opens the app with.
 #[module]
-pub(crate) struct Linking;
+pub(crate) struct UrlScheme;
 
 #[module]
-impl Linking {
+impl UrlScheme {
     /// Listens to `event`. `url`: the system opened the app with a URL of a
     /// scheme nsh.json's `schemes` registers (a link pressed in the browser,
     /// another app's `openUrl`), the one that started the app included,
     /// which waits for the first listener. Returns a function that stops
     /// listening.
     pub(crate) fn on(
-        event: LinkingEvent,
-        #[args(url)] listener: Callback<LinkOpen>,
+        event: UrlSchemeEvent,
+        #[args(url)] listener: Callback<UrlSchemeOpen>,
         sys: System,
         cx: crate::element::CallCx<'_>,
     ) -> Result<Stop, JsError> {
-        let LinkingEvent::Url = event;
+        let UrlSchemeEvent::Open = event;
         let links = sys.locals.get::<Links>();
         let id = links.next.get();
         links.next.set(id.wrapping_add(1));
         for url in links.unheard.take() {
-            listener.post(LinkOpen { url });
+            listener.post(UrlSchemeOpen { url });
         }
         links.listeners.borrow_mut().push((id, listener));
         if !links.started.replace(true) {
@@ -49,17 +49,17 @@ impl Linking {
     }
 }
 
-/// `Linking.on`'s events.
+/// `UrlScheme.on`'s events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
-pub(crate) enum LinkingEvent {
+pub(crate) enum UrlSchemeEvent {
     /// The system opened the app with a URL.
     #[default]
-    Url,
+    Open,
 }
 
-/// A URL the system opened the app with (the `url` event).
+/// A URL the system opened the app with (the `open` event).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
-pub(crate) struct LinkOpen {
+pub(crate) struct UrlSchemeOpen {
     /// The whole URL, its scheme one of nsh.json's `schemes`.
     url: String,
 }
@@ -67,7 +67,7 @@ pub(crate) struct LinkOpen {
 /// The VM's `url` listeners.
 #[derive(Default)]
 struct Links {
-    listeners: RefCell<Vec<(u32, Callback<LinkOpen>)>>,
+    listeners: RefCell<Vec<(u32, Callback<UrlSchemeOpen>)>>,
     next: Cell<u32>,
     /// The task waiting for the core's URLs started; it lasts as the VM
     /// does.
@@ -85,7 +85,7 @@ impl Local for Links {
 /// Posts the core's URLs to the listeners, while the VM lasts.
 async fn deliver(links: Weak<Links>) {
     loop {
-        let url = crate::prelude::next_link().await;
+        let url = crate::prelude::next_url_scheme_open().await;
         let Some(links) = links.upgrade() else {
             return;
         };
@@ -95,7 +95,7 @@ async fn deliver(links: Weak<Links>) {
             continue;
         }
         for (_, listener) in &*listeners {
-            listener.post(LinkOpen { url: url.clone() });
+            listener.post(UrlSchemeOpen { url: url.clone() });
         }
     }
 }

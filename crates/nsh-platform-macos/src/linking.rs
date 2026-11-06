@@ -1,4 +1,4 @@
-//! Inbound URLs (`nsh`'s `Linking`, `EventKind::Link`): the URLs the system
+//! Inbound URLs (`nsh`'s `UrlScheme`, `EventKind::UrlScheme`): the URLs the system
 //! opens the app with, its schemes from nsh.json `schemes` (the bundle's
 //! `CFBundleURLTypes`). Shared by macOS and iOS (the iOS crate includes this
 //! file, as it does `notifications.rs`).
@@ -54,7 +54,7 @@ pub(crate) fn open(url: String) {
 pub(crate) fn send(control: &EngineControl, url: String) {
     control.dispatch_event(
         ROOT_ID,
-        EventKind::Link,
+        EventKind::UrlScheme,
         EventPayload::Map(vec![("url", PayloadValue::Str(url))]),
     );
 }

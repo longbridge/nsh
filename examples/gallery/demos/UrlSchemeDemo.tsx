@@ -1,14 +1,14 @@
-import { Linking, openUrl, signal } from "nsh";
+import { UrlScheme, openUrl, signal } from "nsh";
 import { Button, Caption, Card, DemoPage, Row } from "../ui";
 
 /**
- * `Linking` of `nsh`: the URLs of the gallery's scheme (`nsh-gallery`, in
+ * `UrlScheme` of `nsh`: the URLs of the gallery's scheme (`nsh-gallery`, in
  * nsh.json `schemes`) that open the app, from the browser, another app or
  * the button here.
  */
-export function LinkingDemo() {
+export function UrlSchemeDemo() {
   const urls = signal<string[]>([]);
-  Linking.on("url", ({ url }) => urls.set([url, ...urls()].slice(0, 5)));
+  UrlScheme.on("open", ({ url }) => urls.set([url, ...urls()].slice(0, 5)));
   return (
     <DemoPage
       cards={[

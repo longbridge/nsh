@@ -152,7 +152,7 @@ pub struct AppOptions {
     pub host: nsh_engine::HostChannel,
     /// The URL schemes that open the app (nsh.json `schemes`), for
     /// [`run_app`]: it registers them with the desktop, runs one instance
-    /// and hands each URL to the app (`Linking.on("url", ...)`). An app
+    /// and hands each URL to the app (`UrlScheme.on("open", ...)`). An app
     /// embedding a view hands URLs in with [`AppView::open_url`].
     pub schemes: Vec<String>,
 }
@@ -255,7 +255,7 @@ impl AppView {
         view
     }
 
-    /// Hands the app a URL the system opened it with (`Linking.on("url",
+    /// Hands the app a URL the system opened it with (`UrlScheme.on("open",
     /// ...)` hears it; the app's listener may come later).
     pub fn open_url(&self, url: &str) {
         self.surface.open_url(url);

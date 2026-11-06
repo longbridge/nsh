@@ -991,7 +991,7 @@ impl Surface {
         }
     }
 
-    /// Sends `url` to the running app (`Linking.on("url")`, `nsh`), or to
+    /// Sends `url` to the running app (`UrlScheme.on("open")`, `nsh`), or to
     /// the app once it starts.
     pub fn open_url(&self, url: &str) {
         match &*self.view.ivars().running.borrow() {

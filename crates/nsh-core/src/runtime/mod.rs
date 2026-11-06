@@ -21,7 +21,6 @@ mod device;
 mod fs;
 mod host;
 mod image;
-mod linking;
 mod net;
 mod notifications;
 mod os;
@@ -30,6 +29,7 @@ mod process;
 mod speech;
 mod storage;
 mod updater;
+mod url_scheme;
 mod websocket;
 mod webview;
 
@@ -59,7 +59,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<picker::Picker>()
             .module::<speech::Speech>()
             .module::<notifications::Notifications>()
-            .module::<linking::Linking>()
+            .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()
             .module::<storage::Storage>()
             .module::<host::Host>()

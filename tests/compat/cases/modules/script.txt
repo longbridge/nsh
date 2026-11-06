@@ -90,13 +90,13 @@ expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
 expect Shown: false
 covers [nsh] Notifications
-# mod-linking
-tap id:case-mod-linking
+# mod-url-scheme
+tap id:case-mod-url-scheme
 # no URL opens the app there: the listener hears nothing and stops.
 expect Link: none
 tap id:stop
 expect Link: stopped function
-covers [nsh] Linking
+covers [nsh] UrlScheme
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup

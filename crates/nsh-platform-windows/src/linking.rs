@@ -1,4 +1,4 @@
-//! URL schemes on Windows (`EventKind::Link`, nsh.json `schemes`): the system
+//! URL schemes on Windows (`EventKind::UrlScheme`, nsh.json `schemes`): the system
 //! opens `<scheme>:...` URLs with the app, and the app hears them.
 //!
 //! - Registration: `HKCU\Software\Classes\<scheme>` marks the scheme a URL
@@ -136,7 +136,7 @@ pub(crate) fn attach(surface: &Rc<Surface>) {
 fn send(surface: &Surface, url: String) {
     surface.event(
         ROOT_ID,
-        EventKind::Link,
+        EventKind::UrlScheme,
         EventPayload::Map(vec![("url", PayloadValue::Str(url))]),
     );
 }

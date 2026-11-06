@@ -253,7 +253,7 @@ events! {
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
     Download = "onDownload": "A web view's download started, finished or failed (payload: `state`, `id`, `url`, `filename`, `path`; `bytes` once finished, `message` when it failed).",
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
-    Link = "onLink": "The system opened a URL of a scheme the app registered (nsh.json `schemes`), the one that started the app included (root only; payload: `url`).",
+    UrlScheme = "onUrlScheme": "The system opened a URL of a scheme the app registered (nsh.json `schemes`), the one that started the app included (root only; payload: `url`).",
 
 }
 

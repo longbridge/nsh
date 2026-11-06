@@ -579,7 +579,7 @@ extension NshAppView {
 
     /// Hands `url`, one the embedding app was opened with (its scene's
     /// `openURLContexts`, for example), to the running app: its
-    /// `Linking.on("url")` listeners get it (`nsh`). While no app runs, the
+    /// `UrlScheme.on("open")` listeners get it (`nsh`). While no app runs, the
     /// next one loaded gets it.
     public func openURL(_ url: URL) {
         do {

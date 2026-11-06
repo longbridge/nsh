@@ -116,7 +116,7 @@ pub(crate) struct AppConfig {
     pub(crate) tui: TuiConfig,
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
-    /// `Linking.on("url", ...)`.
+    /// `UrlScheme.on("open", ...)`.
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
 }

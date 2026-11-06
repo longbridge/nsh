@@ -474,6 +474,9 @@ struct PendingFetch {
     answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
 }
 
+/// The URLs the system opened the app with that wait for a listener
+/// (`UrlScheme.on("open", ...)`): the oldest go first.
+const MAX_UNHEARD_URLS: usize = 16;
 /// What notifications wait for ([`crate::notifications`]).
 #[derive(Default)]
 struct Notifications {
@@ -580,7 +583,7 @@ pub(super) struct Components {
     /// URLs the system opened the app with, no listener took yet.
     links: std::collections::VecDeque<String>,
     /// The listener waiting for a URL.
-    next_link: Option<AnswerSlot<String>>,
+    next_url_scheme_open: Option<AnswerSlot<String>>,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -703,7 +706,7 @@ impl Default for Components {
             speech: None,
             notifications: Notifications::default(),
             links: Default::default(),
-            next_link: None,
+            next_url_scheme_open: None,
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -5267,7 +5270,7 @@ impl<M: TextEngine> Core<M> {
             Action::Notification(action) => self.notification_action(action),
             Action::NextLink(answer) => match self.components.links.pop_front() {
                 Some(url) => answer.borrow_mut().deliver(url),
-                None => self.components.next_link = Some(answer),
+                None => self.components.next_url_scheme_open = Some(answer),
             },
             Action::WebInputAvailable(answer) => {
                 let available =
@@ -5625,7 +5628,7 @@ impl<M: TextEngine> Core<M> {
                 self.notification_event(payload);
                 true
             }
-            EventKind::Link if id == crate::ROOT_ID => {
+            EventKind::UrlScheme if id == crate::ROOT_ID => {
                 let EventPayload::Map(entries) = payload else {
                     return false;
                 };
@@ -5635,9 +5638,22 @@ impl<M: TextEngine> Core<M> {
                 }) else {
                     return false;
                 };
-                match self.components.next_link.take() {
+                // Anyone can make a link of the app's scheme: the app gets
+                // only well-formed ones, as `openUrl` checks what it opens.
+                if let Err(why) = crate::open_url::check_url(&url) {
+                    log::warn!("nsh: dropped a URL the app was opened with: {why}");
+                    return true;
+                }
+                match self.components.next_url_scheme_open.take() {
                     Some(answer) => answer.borrow_mut().deliver(url),
-                    None => self.components.links.push_back(url),
+                    None => {
+                        // Links that come while nothing listens wait for the
+                        // next listener, the newest few.
+                        if self.components.links.len() == MAX_UNHEARD_URLS {
+                            self.components.links.pop_front();
+                        }
+                        self.components.links.push_back(url);
+                    }
                 }
                 true
             }
