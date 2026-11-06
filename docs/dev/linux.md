@@ -65,10 +65,17 @@ works and its runner only needs GTK.
   draws `gsk::TextNode`s where the engine put them. Hinted metrics and rounded positions are off on both sides, so
   what was measured is what is drawn (`text.rs`).
 - **Animations run on the frame clock**: native animation values (`animation.rs` over `nsh_core::animation`, the
-  Android animator's design), JS frame requests (the root's tick callback, `surface.rs`), `LayoutAnimation`, style
-  transitions and keyframes (`transition.rs`; curves, interpolation and timing in `nsh_core::transition`, shared
-  with Windows, GPUI and macOS), scroll glides and navigation transitions; tick callbacks exist only while something
-  animates.
+  Android animator's design), JS frame requests, `LayoutAnimation`, style transitions and keyframes (`transition.rs`;
+  curves, interpolation and timing in `nsh_core::transition`, shared with Windows, GPUI and macOS), scroll glides and
+  navigation transitions all run in the root's one tick callback (`surface.rs`; the last three as the surface's frame
+  callbacks, `Surface::add_frame_callback`), which exists only while something animates; image fades and shader views
+  keep tick callbacks of their own, as they only draw. The frame clock stops while the window is not shown (minimized,
+  hidden, throttled by the compositor). Frame callbacks report what they have left (`Next`: done, drawing only, or a
+  deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's; every running
+  callback's is now after a batch, which may change what it has left) with one `glib::timeout_add_local_once` timer
+  50 ms past it: if no frame ran since it came due, it runs one at GLib's monotonic time (the frame clock's), so
+  animations end and report it on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an
+  endless animation, a JS frame request) waits for the frame clock.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a widget; `run_app` opens one in a window. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets).

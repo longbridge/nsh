@@ -12,7 +12,8 @@ cargo build -p nsh-cli -p nsh-tui-host
 ```
 
 The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
-profile, and starts it with inherited stdin/stdout. CLI diagnostics, the host's stderr and the host logger append
+profile, and starts it with inherited stdin/stdout. App preparation and host builds show their progress on stderr
+until the host is ready to launch. While it runs, CLI diagnostics, the host's stderr and the host logger append
 to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C copies a selection and otherwise exits;
 Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the
 screen and raw mode before the CLI reaps it.

@@ -81,7 +81,7 @@ use crate::{
     geom::rect,
     input::{Cursor, KeyEvent, PointerKind},
     render::{DrawCx, border_quad, corners},
-    surface::Surface,
+    surface::{Next, Surface},
     view::{Hosted, ItemPointer},
 };
 
@@ -1464,11 +1464,11 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     let mut start = None;
     surface.on_frame(move |surface, now| {
         let Some(kind) = find(serial) else {
-            return false;
+            return Next::Done;
         };
         // A newer fade took over (a dialog answered while fading in).
         if !remove && matches!(&kind, OverlayKind::Dialog(d) if d.closing.get()) {
-            return false;
+            return Next::Done;
         }
         let t0 = *start.get_or_insert(now);
         let t = ((now - t0) / secs).clamp(0.0, 1.0) as f32;
@@ -1476,12 +1476,18 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
         kind.opacity().set(from + (to - from) * eased);
         surface.root.changed();
         if t < 1.0 {
-            return true;
+            // Fading in only draws; fading out ends with the overlay gone
+            // (a millisecond past it, whatever the rounding).
+            return if remove {
+                Next::At(t0 + secs + 0.001)
+            } else {
+                Next::Frame
+            };
         }
         if remove {
             drop_overlay(surface, serial);
         }
-        false
+        Next::Done
     });
 }
 

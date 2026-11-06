@@ -29,10 +29,12 @@ pub mod dev;
 mod file_drop;
 mod file_requests;
 mod fps;
+mod global_shortcut;
 #[cfg(test)]
 mod gtk_test;
 mod image;
 mod input;
+mod key_focus;
 mod keymap;
 mod menu_style;
 mod mount;
@@ -50,7 +52,9 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
+mod window;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};

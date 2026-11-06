@@ -87,7 +87,7 @@ pub(crate) fn set_app_name(name: &str) {
     APP_NAME.with(|n| *n.borrow_mut() = Some(name.to_owned()));
 }
 
-fn app_name() -> String {
+pub(crate) fn app_name() -> String {
     APP_NAME
         .with(|n| n.borrow().clone())
         .or_else(|| {
@@ -349,6 +349,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // The Dock shows apps, not windows (an app leaves it with
+        // `LSUIElement`).
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let (Some(window), Some(mtm)) = (window(surface), MainThreadMarker::new()) {
                 window.deminiaturize(None);
@@ -358,6 +361,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 window.makeKeyAndOrderFront(None);
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => {
             // Close after the batch, as Windows posts WM_CLOSE and GTK
             // waits for idle: performClose runs windowWillClose: at once,
@@ -396,6 +402,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             unsafe {
                 objc2_foundation::NSRunLoop::mainRunLoop().performInModes_block(&modes, &block)
             };
+        }
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, shortcut)
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
         }
     }
 }
@@ -645,7 +658,7 @@ fn key_equivalent(shortcut: &Shortcut) -> (String, NSEventModifierFlags) {
 /// The pixels per point menu icons draw at: the largest of the screens',
 /// since a menu opens on whichever screen it is asked to, not only the
 /// window's (the menu bar is on each of them).
-fn menu_icon_scale(mtm: MainThreadMarker) -> f32 {
+pub(crate) fn menu_icon_scale(mtm: MainThreadMarker) -> f32 {
     NSScreen::screens(mtm)
         .iter()
         .map(|screen| screen.backingScaleFactor() as f32)
@@ -673,21 +686,21 @@ fn set_icon(
     let uri = icon.uri.clone();
     let scale = menu_icon_scale(surface.mtm);
     let load = crate::image::load_menu_icon(surface, icon, scale, move |loaded| match loaded {
-        Ok(loaded) => item.setImage(Some(&menu_image(&loaded))),
+        Ok(loaded) => item.setImage(Some(&icon_image(&loaded, menu_icon::SIDE))),
         Err(e) => log::warn!("menu icon {uri}: {e}"),
     });
     loads.extend(load);
 }
 
-/// `icon` as an image for a menu item, of the size it shows at whatever the
-/// size it was decoded at: AppKit draws the image at its size, so its
-/// pixels at the screen's scale are what make it sharp.
-fn menu_image(icon: &crate::image::MenuIcon) -> Retained<NSImage> {
+/// `icon` as an image for a menu item or the tray, fitted in a square of
+/// `side` whatever the size it was decoded at: AppKit draws the image at its
+/// size, so its pixels at the screen's scale are what make it sharp.
+pub(crate) fn icon_image(icon: &crate::image::MenuIcon, side: Points) -> Retained<NSImage> {
     let pixels = size(
         DevicePixels(CGImage::width(Some(&icon.image)) as i32),
         DevicePixels(CGImage::height(Some(&icon.image)) as i32),
     );
-    let shown = menu_icon::fitted(pixels, menu_icon::SIDE);
+    let shown = menu_icon::fitted(pixels, side);
     let image = NSImage::initWithCGImage_size(
         NSImage::alloc(),
         &icon.image,
@@ -699,7 +712,7 @@ fn menu_image(icon: &crate::image::MenuIcon) -> Retained<NSImage> {
 
 /// A menu of `items`, titled `title`; the loads of their icons go in
 /// `loads`.
-fn menu(
+pub(crate) fn menu(
     surface: &Surface,
     title: &str,
     items: &[MenuItem],

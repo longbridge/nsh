@@ -126,6 +126,33 @@ pub(crate) fn menu_icon(surface: &Surface, source: &ImageSource) -> Option<gio::
     }
 }
 
+/// Loads `source` fitted in a `side` × `side` pixel square, off the main
+/// thread; `done` runs on the main thread with it (an animation's first
+/// frame). For pixels that leave GTK: the tray's icon.
+pub(crate) fn load_icon(
+    surface: &Surface,
+    source: &ImageSource,
+    side: u32,
+    done: impl FnOnce(Result<gdk::Texture, String>) + 'static,
+) {
+    let want = Want {
+        size: nsh_core::geometry::size(Points(side as f32), Points(side as f32)),
+        scale: 1.0,
+        mode: nsh_core::ResizeMode::Contain,
+    };
+    if let Some(load) = fetch(
+        surface,
+        source,
+        want,
+        Frames::First,
+        Priority::Normal,
+        None,
+        Box::new(move |result| done(result.map(|(p, _)| p.texture))),
+    ) {
+        load.detach();
+    }
+}
+
 /// Frames of an animated image decoded at most (as iOS; longer ones stop
 /// at the last of them).
 const MAX_FRAMES: usize = 600;

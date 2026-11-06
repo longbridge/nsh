@@ -64,3 +64,11 @@ serde_json.workspace = true
 libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }
+
+[[test]]
+name = "accessibility"
+harness = false
+
+[[test]]
+name = "draw_on_show"
+harness = false

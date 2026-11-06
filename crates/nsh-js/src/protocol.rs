@@ -965,6 +965,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
             easing: nsh_core::js::animation::easing(&Js(c.get::<_, Value>("easing")?))
                 .unwrap_or(Easing::EaseInOut),
             delay_ms: num("delay")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         "spring" => Driver::Spring {
             to: num("to")?.unwrap_or(0.0),
@@ -972,6 +973,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
             damping: num("damping")?.unwrap_or(26.0),
             mass: num("mass")?.unwrap_or(1.0),
             velocity: num("velocity")?,
+            frame_rate: num("frameRate")?,
         },
         "decay" => Driver::Decay {
             velocity: num("velocity")?,
@@ -987,6 +989,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
                 None => None,
             },
             bounce: num("bounce")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         other => {
             return Err(Exception::throw_type(

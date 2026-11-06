@@ -83,3 +83,15 @@ test("a web view takes a click, typing and a key as trusted input", async () => 
   await app.press("Backspace page");
   await app.waitFor("Page: true:a");
 });
+
+test("presses at one place count double and triple clicks, a press elsewhere starts again", async () => {
+  const app = await openFixture();
+  await app.press("Count here");
+  await app.waitFor("Clicks: here 1");
+  await app.press("Count here");
+  await app.waitFor("Clicks: here 2");
+  await app.press("Count here");
+  await app.waitFor("Clicks: here 3");
+  await app.press("Count there");
+  await app.waitFor("Clicks: there 1");
+});

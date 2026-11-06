@@ -425,13 +425,22 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].handle = true;
     }
 
+    /// Whether node `id`'s handle owns what the node holds: it is freed with
+    /// the handle ([`Self::drop_handle`]), as a signal or a disposed
+    /// computation is. A live computation belongs to its owner and outlives
+    /// its handle, so what it holds is not the handle's (a garbage collector
+    /// must not count it among the handle's children).
+    pub fn held_by_handle(&self, id: u32) -> bool {
+        let n = &self.nodes[id as usize];
+        n.kind == Kind::Signal || n.disposed
+    }
+
     /// The handle of node `id` went: a signal, or a disposed computation,
     /// is freed now (what it held comes back, to free once the graph is no
     /// longer borrowed).
     pub fn drop_handle(&mut self, id: u32) -> Option<Held<H>> {
-        let n = &mut self.nodes[id as usize];
-        n.handle = false;
-        if n.kind == Kind::Signal || n.disposed {
+        self.nodes[id as usize].handle = false;
+        if self.held_by_handle(id) {
             self.unlink_observers(id);
             Some(self.release(id))
         } else {

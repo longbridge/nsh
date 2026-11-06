@@ -684,6 +684,11 @@ pub(crate) fn merge_values(cx: *mut JsContext, values: &mut [JsValue]) -> JsValu
     unsafe { merge(cx, UNDEFINED, values.len() as c_int, values.as_mut_ptr()) }
 }
 
+/// The surface's root node (borrowed).
+pub(crate) fn root_value(cx: *mut JsContext) -> JsValue {
+    dom(cx).root.get()
+}
+
 /// Queues `op` (for the components' glue).
 pub(crate) fn push_op(cx: *mut JsContext, op: Op) -> Result<(), JsValue> {
     dom(cx).push(cx, op)

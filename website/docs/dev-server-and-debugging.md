@@ -39,7 +39,7 @@ nsh dev App.tsx --server-only       # server only
 |---|---|
 | `--target <catalyst \| ios \| android \| macos \| linux \| windows \| gpui \| web>` | Where to run. Default `macos` on macOS (AppKit), `linux` on Linux, `windows` on Windows. A Rust app runs on all of them but `gpui`, which embeds its root in a GPUI app ([GPUI](./gpui.md)). |
 | `--device <name or UDID>` | The iOS simulator to use. Default: a booted one, else the newest iPhone (booted for you). |
-| `--port <port>` | Dev server port. Default 8790; the next free port is used if it is taken. |
+| `--port <port>` | Dev server port, replacing the previous NSH session on it. Default: the port this app had last, replacing its previous session, else the first free one from 8790. |
 | `--release` | Serve release builds of TSX (minified, no debug info, no hot updates). |
 | `--trace` | Log the time of every commit on the host (TSX apps). |
 
@@ -83,7 +83,7 @@ nsh dev App.tsx
 
 | Flag | Description |
 |---|---|
-| `--port <port>` | Dev server port. Default 8790 (the next free one if taken). |
+| `--port <port>` | Dev server port. As for `nsh run`; with `--server-only`, the default is 8790, replacing the previous NSH session on it. |
 | `--release` | Serve release builds. |
 
 Connect hosts to the printed URL:

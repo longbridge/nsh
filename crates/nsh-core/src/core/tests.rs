@@ -18233,6 +18233,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
     let event = crate::ContextMenuEvent {
         position: point(px(4.0), px(5.0)),
         page_position: point(px(14.0), px(25.0)),
+        pointer_type: Some(crate::PointerType::Mouse),
         ..Default::default()
     };
     assert!(c.component_event(

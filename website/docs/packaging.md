@@ -62,8 +62,9 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
-`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)) and `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)); [Project structure](./project-structure.md#nshjson) lists
+`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
+[Sandbox and capabilities](./sandbox-and-capabilities.md)) and `updater`, which makes desktop packages update themselves
+(see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
 every key. Unknown keys are an error.
 
 Every key above can be overridden on the command line, which is handy in CI:
@@ -221,7 +222,9 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 - **macOS:** converted by `sips` to `AppIcon.icns`.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
 - **Windows:** resized to 16 to 64 pixels and 256 pixels and embedded in the executable as its icon, which the window,
-  Explorer and the taskbar show.
+  Explorer and the taskbar show, and written beside the bundle as `nsh\icon.ico`, which notifications show. Packaged on
+  macOS or Linux, the executable keeps the default icon in Explorer, and the window and the taskbar show `icon.ico`.
+  `nsh run --target windows` and `nsh test --target windows` show it too.
 - **Web:** resized to 32 pixels (the favicon), 180 (`apple-touch-icon`), 192 and 512 (the web app manifest).
 
 Without an icon, the system shows its default.
@@ -270,6 +273,7 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 ## See also
 
 - [CLI](./cli.md): every command
+- [App Updates](./app-updates.md): packaged apps that update themselves
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app
