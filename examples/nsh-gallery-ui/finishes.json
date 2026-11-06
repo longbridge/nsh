@@ -67,6 +67,12 @@
       "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 1px rgba(255,255,255,0.08), 0 1px 1px rgba(0,0,0,0.12)",
       "borderColor": "rgba(0,0,0,0.5)"
     },
+    "thumb": {
+      "backgroundColor": "#33353b",
+      "backgroundImage": "linear-gradient(180deg, #33353b 0%, #33353b 100%)",
+      "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 1px rgba(255,255,255,0.08), 0 1px 1px rgba(0,0,0,0.12)",
+      "borderColor": "rgba(0,0,0,0.5)"
+    },
     "on": {
       "backgroundColor": "#4b4f57",
       "backgroundImage": "linear-gradient(180deg, #4b4f57 0%, #4b4f57 100%)",
@@ -158,6 +164,12 @@
       "backgroundImage": "linear-gradient(180deg, #f3f4f7 0%, #f3f4f7 100%)",
       "boxShadow": "inset 0 1px 0 #ffffff, inset 0 2px 0 rgba(255,255,255,0.6), 0 1px 0 rgba(10,15,25,0.05)",
       "borderColor": "#cacbcd"
+    },
+    "thumb": {
+      "backgroundColor": "#ffffff",
+      "backgroundImage": "linear-gradient(180deg, #ffffff 0%, #ffffff 100%)",
+      "boxShadow": "0 1px 2px rgba(10,15,25,0.10), 0 1px 0 rgba(10,15,25,0.04)",
+      "borderColor": "#c1c2c4"
     },
     "on": {
       "backgroundColor": "#dbdce0",

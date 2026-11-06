@@ -183,6 +183,9 @@ export interface Finish {
  * shadow. `hover` and `pressed` are a raised control's states, `fill` a
  * slider's or a meter's run of the accent; `knob` a switch's knob on its
  * sunk track, `knobOn` the white one with an olive edge on the citrus.
+ * `thumb` is a segmented control's or a tab strip's selected segment on
+ * its sunk track: the raised fill dark; white with a soft drop light, where
+ * the raised fill is all but the track's color.
  * `on` is what stays on (a toggle, a chosen tool, a selected button): a
  * fill that stands off every surface it sits on, and off a raised control
  * at rest, further than a hover does, so on and off read apart at a
@@ -192,7 +195,7 @@ export interface Finish {
  * menu's separator cut into the surface.
  */
 export const finish = themed<
-  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "knobOn" | "pill" | "on" | "chip" | "glass" | "menu" | "groove", Finish>
+  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "knobOn" | "pill" | "thumb" | "on" | "chip" | "glass" | "menu" | "groove", Finish>
 >(finishes.dark, finishes.light);
 
 export type Tone = "neutral" | "accent" | "info" | "warn" | "danger" | "up" | "down";

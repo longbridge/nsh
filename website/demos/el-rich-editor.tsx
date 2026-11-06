@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, RichEditor, type RichCommand, StarterKit, command, createRichEditor, redo, Toggle, ToggleGroup, Toolbar, ToolbarSeparator, undo } from "nsh/base";
-import { desktop, Log, Panel, Split, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, wide } from "./palette";
+import { desktop, Log, Panel, Split, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, wide, sectionSurface } from "./palette";
 
 const CONTENT = `# A document
 
@@ -84,7 +84,7 @@ function App() {
           {action("Undo", undo)}
           {action("Redo", redo)}
         </Toolbar>
-        <View style={{ height: wide() ? 360 : 300, ...ui().card, borderRadius: 14, overflow: "hidden" }}>
+        <View style={{ height: wide() ? 360 : 300, ...sectionSurface(), overflow: "hidden" }}>
           <RichEditor
             editor={editor}
             accessibilityLabel="Document"

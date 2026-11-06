@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { ResizablePanel, ResizablePanelGroup } from "nsh/base";
-import { desktop, Log, Panel, Segmented, Split, ui, wide } from "./palette";
+import { desktop, Log, Panel, Segmented, Split, ui, wide, sectionSurface } from "./palette";
 
 // The sizes are the app's: the group reports them when a drag ends, and the
 // app passes them back as each panel's `size`.
@@ -44,7 +44,7 @@ function App() {
           </>
         }
       >
-        <View style={{ height: wide() ? 360 : 300, ...ui().card, borderRadius: 14, overflow: "hidden" }}>
+        <View style={{ height: wide() ? 360 : 300, ...sectionSurface(), overflow: "hidden" }}>
           <ResizablePanelGroup
             axis="horizontal"
             handleClass={handle}

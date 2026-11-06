@@ -4,15 +4,15 @@ import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
+import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, fieldLook, fieldSize, fieldText, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
 const pointer = platform.desktop;
 
-/** A field's text size and its side padding: in the terminal the text sits
+/** A field's text size and its side padding (`fieldSize`): in the terminal the text sits
  * one Cell inside the border's own column. */
-const fieldFont = pointer ? 13 : 15;
-const fieldPad = terminal ? 2 * TERMINAL_COLUMN - 1 : pointer ? 8 : 14;
+const fieldFont = fieldSize.font;
+const fieldPad = fieldSize.pad;
 
 /** The next commit's frames ease to their new places (a message sliding in), unless motion is reduced. */
 const relayout = () => {
@@ -48,7 +48,7 @@ function Affix(props: { text: string; addon?: boolean; side: "start" | "end" }) 
 
 /**
  * A labelled input (`api` names the prop it shows, `hint` is a plain note):
- * the border glows accent while focused (a ring springing in natively), an
+ * the field's edge turns accent while focused (`fieldLook`'s focus edge), an
  * error turns it red, slides a message in (layout animation) and shakes
  * the field, again each time `attempt` grows (a submit); `valid` fades a
  * check in at its end. `prefix` / `suffix` are text around the value
@@ -78,8 +78,6 @@ function Field(
   // Made once: the views inside follow their own state.
   const leading = own.leading;
   const trailing = own.trailing;
-  const focused = signal(false);
-  const focus = follow(() => (focused() ? 1 : 0));
   const ok = follow(() => (own.valid && !own.error ? 1 : 0));
   const shake = createAnimatedValue(0);
   const wobble = () => {
@@ -101,18 +99,6 @@ function Field(
     tried = n;
     if (own.error) wobble();
   });
-  // Desktop density with a pointer (28 pt, text 13), touch density otherwise;
-  // in the terminal the text sits one Cell inside the border's own row.
-  const box = () =>
-    terminal
-      ? props.multiline
-        ? { minHeight: 3 * TERMINAL_ROW, paddingTop: TERMINAL_ROW - 1, paddingBottom: TERMINAL_ROW - 1 }
-        : { height: 3 * TERMINAL_ROW }
-      : props.multiline
-        ? pointer
-          ? { minHeight: 28, paddingTop: 6, paddingBottom: 6 }
-          : { minHeight: 46, paddingTop: 13, paddingBottom: 13 }
-        : { height: pointer ? 28 : 46 };
   return (
     <View style={{ gap: terminal ? 0 : 6, translate: [shake, 0], opacity: props.disabled ? 0.5 : 1 }}>
       {/* The terminal keeps two columns between the label, the API and the hint: one would run them together. */}
@@ -125,21 +111,8 @@ function Field(
           <Text style={{ fontSize: 13, color: own.hintColor ?? colors.faint, fontVariant: ["tabular-nums"], transitionProperty: "color", transitionDuration: 150 }}>{own.hint}</Text>
         </If>
       </View>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: props.multiline ? "flex-start" : "center",
-          borderRadius: radius.control,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: own.error ? colors.danger : props.readonly || props.disabled ? colors.line : colors.fieldBorder,
-          backgroundColor: colors.field,
-          // Recessed while editable; a read-only or disabled field lies flat.
-          ...(props.readonly || props.disabled ? {} : finish.field),
-          transitionProperty: "border-color",
-          transitionDuration: reduceMotion() ? 0 : 150,
-        }}
-      >
+      {/* The well: its edge, and the fields' focus edge while the input in it has the keys (`fieldLook`). */}
+      <View {...fieldLook({ invalid: () => !!own.error, readonly: () => !!props.readonly, disabled: () => !!props.disabled, multiline: props.multiline })}>
         <If when={own.prefix}>
           <Affix text={own.prefix!} addon={own.addon} side="start" />
         </If>
@@ -149,27 +122,14 @@ function Field(
         <Input
           returnKeyType={own.next ? "next" : "done"}
           onSubmit={() => own.next?.()?.focus()}
-          onFocus={() => {
-            focused.set(true);
-            own.onFocus?.();
-          }}
-          onBlur={() => {
-            focused.set(false);
-            own.onBlur?.();
-          }}
+          onFocus={() => own.onFocus?.()}
+          onBlur={() => own.onBlur?.()}
           {...input}
           style={[
             {
-              flex: 1,
-              paddingHorizontal: fieldPad,
+              ...fieldText({ readonly: props.readonly, multiline: props.multiline }),
               // The terminal keeps one Cell between a prefix and the value.
               paddingLeft: own.prefix && terminal ? TERMINAL_COLUMN : fieldPad,
-              fontSize: fieldFont,
-              color: props.readonly ? colors.muted : colors.text,
-              placeholderColor: colors.faint,
-              caretColor: colors.accent,
-              selectionColor: colors.accent,
-              ...box(),
             },
             ...(Array.isArray(own.style) ? own.style : [own.style]),
           ]}
@@ -185,22 +145,6 @@ function Field(
         <If when={own.suffix}>
           <Affix text={own.suffix!} addon={own.addon} side="end" />
         </If>
-        <View
-          style={{
-            pointerEvents: "none",
-            position: "absolute",
-            top: -1,
-            left: -1,
-            right: -1,
-            bottom: -1,
-            // Around the field's border: its radius plus the 1pt it reaches out.
-            borderRadius: radius.control + 1,
-            borderCurve: "continuous",
-            borderWidth: 2,
-            borderColor: own.error ? colors.danger : colors.accent,
-            opacity: focus,
-          }}
-        />
       </View>
       <If when={own.error}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>

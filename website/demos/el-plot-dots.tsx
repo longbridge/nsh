@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Dot, Grid, Plot, PlotAxis } from "nsh/base/plot";
-import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // Dots placed by two values of each row: a `Dot` per row at its `x` on a
 // linear x scale and its `value` up the y axis. Its `color` names each
@@ -112,7 +112,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
           <If
             when={chart() === "scatter"}
             else={

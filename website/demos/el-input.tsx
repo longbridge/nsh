@@ -36,7 +36,7 @@ function App() {
   );
   const notesField = () => (
     <Input
-      {...field({ style: { height: wide() ? 80 : 100 } })}
+      {...field({ multiline: true, style: { height: wide() ? 80 : 100 } })}
       multiline
       value={notes()}
       onChange={({ value }) => notes.set(value)}

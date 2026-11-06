@@ -1,7 +1,7 @@
 import { cleanup, mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { Button, Progress, Switch } from "nsh/base";
-import { button, buttonText, desktop, focusRing, hoverFill, Log, Panel, size, Split, switchLook, ui } from "./palette";
+import { button, buttonText, desktop, Log, Panel, size, Split, switchLook, ui, controlSize, listRow, plainRow, RowLabel, sectionSurface } from "./palette";
 
 // The parts: geometry and motion in classes, colors from the palette. The
 // label row comes first (`flex-col-reverse`: the children follow the track),
@@ -9,10 +9,9 @@ import { button, buttonText, desktop, focusRing, hoverFill, Log, Panel, size, Sp
 // third of the track that sweeps from end to end (the app flips its
 // translation, a transition moves it), and rests in the middle with reduced
 // motion. A determinate one is the whole track, slid back by what is left to
-// do, so a new value glides there (the track clips it). The pointer's hover
-// and the keyboard's focus ring come from the palette. Buttons are as wide as
-// their labels with a pointer.
-const pad = desktop ? "px-3 py-3" : "px-4 py-4";
+// do, so a new value glides there (the track clips it). The rows and the
+// switch's row are the shared ones (`plainRow`, `listRow`). Buttons are as
+// wide as their labels with a pointer.
 const track = "h-1.5 overflow-hidden rounded-full";
 const SWEEP = 800;
 const indicator = (indeterminate: boolean, end: boolean) =>
@@ -22,23 +21,20 @@ const indicator = (indeterminate: boolean, end: boolean) =>
       ? "h-full w-1/3 rounded-full translate-x-full"
       : `h-full w-1/3 rounded-full transition-transform duration-700 ease-in-out ${end ? "translate-x-[200%]" : "translate-x-0"}`;
 
-function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; end: boolean }) {
+function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; end: boolean; first?: boolean }) {
   return (
     <Progress
       value={props.value}
       indeterminate={props.indeterminate}
-      class={`flex-col-reverse gap-2 ${pad}`}
+      style={{ ...plainRow({ first: props.first }), flexDirection: "column-reverse", alignItems: "stretch", gap: controlSize.padding }}
       trackClass={track}
       trackStyle={ui().inset}
       indicatorClass={indicator(!!props.indeterminate, props.end)}
       indicatorStyle={{ backgroundColor: ui().accent, translate: props.indeterminate ? undefined : `${props.value - 100}% 0` }}
     >
-      <View class="flex-row items-baseline gap-3">
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ fontSize: size.label, fontWeight: "500", color: ui().text }}>{props.label}</Text>
-          <Text style={{ fontSize: size.detail, color: ui().muted }}>{props.detail}</Text>
-        </View>
-        <Text style={{ fontSize: size.label, color: ui().muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>
+      <View class="flex-row items-center gap-3">
+        <RowLabel label={props.label} detail={props.detail} />
+        <Text style={{ fontSize: controlSize.label, color: ui().muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>
           {props.indeterminate ? "—" : `${Math.round(props.value)}%`}
         </Text>
       </View>
@@ -88,7 +84,6 @@ function App() {
       }
     }, 200);
   };
-  const line = () => <View style={{ height: 1, marginLeft: desktop ? 12 : 16, backgroundColor: ui().line }} />;
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>progress</Text>
@@ -121,29 +116,26 @@ function App() {
                   if (checked) stop();
                   log(checked ? "Size unknown: indeterminate" : "Size known: value " + sent());
                 }}
-                class={`-mx-2 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
-                hoverStyle={hoverFill()}
-                focusStyle={focusRing()}
+                {...listRow({ first: true, style: { flexDirection: "row-reverse" } })}
                 {...switchLook(() => unknown())}
               >
-                <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Size unknown</Text>
+                <RowLabel label="Size unknown" />
               </Switch>
             </Panel>
             <Log title="events" lines={events()} minHeight={92} />
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, overflow: "hidden" }}>
+        <View style={sectionSurface({ padded: true })}>
           <Transfer
+            first
             label="Sending 24 photos"
             detail={unknown() ? "Counting what to send" : sent() >= 100 ? "Sent" : `${Math.round((sent() / 100) * 24)} of 24`}
             value={sent()}
             indeterminate={unknown()}
             end={end()}
           />
-          {line()}
           <Transfer label="Preparing the backup" detail="Its size is not known yet" value={0} indeterminate end={end()} />
-          {line()}
           <Transfer label="Library" detail="212 GB of 256 GB" value={83} end={end()} />
         </View>
       </Split>

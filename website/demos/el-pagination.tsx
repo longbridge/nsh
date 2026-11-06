@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Pagination } from "nsh/base";
-import { desktop, Log, Panel, Segmented, Split, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, Split, ui, sectionSurface } from "./palette";
 
 // Search results paged with a count, and a compact pager beside them. The
 // look is all `itemClass` over the component's own numbers and labels:
@@ -44,15 +44,11 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 18, gap: 14 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 14 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <Text style={{ fontSize: 13, color: ui().muted }}>{`Showing ${first()}–${last()} of ${total} results`}</Text>
             <Segmented
-              size="small"
-              options={[
-                { value: "10", label: "10" },
-                { value: "25", label: "25" },
-              ]}
+              options={["10", "25"] as const}
               value={perPage()}
               onChange={(next) => {
                 const row = first();

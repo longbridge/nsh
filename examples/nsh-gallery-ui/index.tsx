@@ -13,6 +13,7 @@ import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
 import { play } from "./sound";
 import { backdrop, sheetGrabber, sheetPanel, tooltipLook, tooltipNote, tooltipText } from "./look/overlay";
+import { density, sectionSurface } from "./look/surface";
 
 export * from "./theme";
 export * from "./look/button";
@@ -21,6 +22,11 @@ export * from "./look/switch";
 export * from "./look/tool";
 export * from "./look/menu";
 export * from "./look/overlay";
+export * from "./look/surface";
+export * from "./look/choice";
+export * from "./look/tabs";
+export * from "./look/field";
+export * from "./look/listbox";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -154,15 +160,6 @@ export function IconTile(props: { name: IconName; tint?: string; size?: number }
 const pointer = platform.desktop;
 
 /**
- * The page's density: compact with a pointer (desktops), roomier on a touch
- * screen. Section titles, surfaces, rows and their padding take these, so a
- * demo's sections read the same on every page.
- */
-export const density = pointer
-  ? { title: 13, note: 12, body: 13, row: 36, pad: 14, gap: 12, surface: 10 }
-  : { title: 13, note: 13, body: 15, row: 48, pad: 16, gap: 12, surface: 16 };
-
-/**
  * A section's title and what it shows, above its surface: 13 pt semibold on
  * a desktop, 15 on a touch screen, `right` at the trailing
  * edge (a badge, an action).
@@ -207,23 +204,6 @@ function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX
 }
 
 /**
- * The flat surface a section's content sits on: one hairline edge, no
- * shadow. In the terminal a border whose row and column on each side the
- * padding fills out, so the content starts one Cell inside it.
- */
-const surface = (): ViewStyle =>
-  terminal
-    ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
-    : {
-        backgroundColor: colors.surface,
-        borderRadius: density.surface,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: colors.border,
-        overflow: "hidden",
-      };
-
-/**
  * The one section shown, by its title in any case (null: all of them): the
  * gallery sets it from `cargo run -- <demo> --section <title>`, so a check
  * or a screenshot opens straight at a section instead of scrolling to it.
@@ -252,7 +232,8 @@ export function Card(props: {
       <If when={props.title}>
         <SectionHead title={props.title!} subtitle={props.subtitle} right={props.right} />
       </If>
-      <View style={surface()}>
+      {/* The flat surface (`sectionSurface`), clipping what reaches its edges. */}
+      <View style={{ ...sectionSurface(), overflow: terminal ? undefined : "hidden" }}>
         <If when={!props.flush} else={props.children}>
           <Inset>{props.children}</Inset>
         </If>

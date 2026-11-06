@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, DockArea, type DockAreaLayout, type DockAreaRef, Toggle } from "nsh/base";
-import { button, buttonText, desktop, focusRing, Log, Panel, Split, toggleLabel, toggleLook, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Log, Panel, Split, toggleLabel, toggleLook, ui, wide, sectionSurface } from "./palette";
 
 // The panels' keys and what each shows. The layout lists the keys; the app
 // renders a panel's content from its key, and the content moves with it.
@@ -86,7 +86,7 @@ function App() {
           </>
         }
       >
-        <View style={{ height: wide() ? 420 : 460, ...ui().card, borderRadius: 14, overflow: "hidden" }}>
+        <View style={{ height: wide() ? 420 : 460, ...sectionSurface(), overflow: "hidden" }}>
           <DockArea
             ref={area}
             class="flex-1"

@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator } from "nsh/base";
-import { desktop, Icon, Log, Split, toggleGlyph, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui } from "./palette";
+import { desktop, Icon, Log, Split, toggleGlyph, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, sectionSurface } from "./palette";
 
 type Mark = "bold" | "italic" | "underline";
 type Align = "left" | "center" | "right";
@@ -121,7 +121,7 @@ function App() {
               {glyph("⌫", () => false)}
             </Button>
           </Toolbar>
-          <View style={{ flex: 1, ...ui().card, borderRadius: 14, padding: 14, gap: 6 }}>
+          <View style={{ flex: 1, ...sectionSurface({ padded: true }), gap: 6 }}>
             <Text
               style={{
                 fontSize: 15,

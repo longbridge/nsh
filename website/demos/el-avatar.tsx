@@ -1,6 +1,6 @@
 import { type JSX, mount, reduceMotion, signal, Text, View } from "nsh";
 import { Avatar, AvatarGroup, Button } from "nsh/base";
-import { AVATAR_BROKEN, avatarIdentity, avatarPortrait, button, buttonText, desktop, focusRing, hoverFill, Log, Panel, Segmented, Split, ui } from "./palette";
+import { AVATAR_BROKEN, avatarIdentity, avatarPortrait, button, buttonText, desktop, focusRing, hoverFill, Log, Panel, Segmented, Split, ui, sectionSurface } from "./palette";
 
 // The look is the demo's: initials on a tint of the person's hue, the
 // picture round over them (the parts are rounded, not the avatar, so a
@@ -80,7 +80,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 12 : 16, gap: 14 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 14 }}>
           <View>
             {TEAM.map((name, i) => (
               <Button

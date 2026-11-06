@@ -77,6 +77,26 @@ test('the menu and overlay looks inline with their parts and the popup surface',
   expect(inlined).not.toMatch(/^(?:import|export)\s.*from\s*["']\.\.?\//m);
 });
 
+test('the surface, choice and tab looks inline with the demos that use them', () => {
+  const source = 'import { CheckboxMark, listRow, sectionSurface, tabsLook } from "./palette";\nmount(() => null);';
+  const inlined = inlineGalleryUi(source, realSources);
+  // look/choice.tsx, look/surface.tsx and look/tabs.tsx: modules with JSX of their own.
+  expect(inlined).toContain('const MARK_WEIGHT = 3.2;');
+  expect(inlined).toContain('const ROW_BLEED =');
+  expect(inlined).toMatch(/tabsLook: __nshGalleryModule\d+\.tabsLook/);
+  expect(inlined).not.toMatch(/^import\s.*from\s*["']\.\.?\//m);
+});
+
+test('the field and listbox looks inline with the demos that use them', () => {
+  const source = 'import { datePickerLook, field, otpCellLook, Picker } from "./palette";\nmount(() => null);';
+  const inlined = inlineGalleryUi(source, realSources);
+  // look/field.tsx and look/listbox.tsx: JSX of their own; `nsh/base`'s types are only types.
+  expect(inlined).toContain('const STEP_GLYPHS =');
+  expect(inlined).toContain('const WEEKDAYS =');
+  expect(inlined).toMatch(/Picker: __nshGalleryModule\d+\.Picker/);
+  expect(inlined).not.toMatch(/^import\s.*from\s*["']\.\.?\//m);
+});
+
 test('a demo with only native NSH imports stays as written', () => {
   const source = 'import { mount, Text } from "nsh"; mount(() => <Text>hello</Text>);';
   expect(inlineGalleryUi(source, {})).toBe(source);

@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Link } from "nsh/base";
-import { desktop, focusRing, Icon, Log, Panel, size, Split, tint, ui } from "./palette";
+import { desktop, focusRing, Icon, Log, Panel, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // Links of the app's look: the accent with a quiet underline that fills in
 // under the pointer, violet once visited (the app remembers what it
@@ -70,7 +70,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 18, gap: 14 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 14 }}>
           <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
             {crumb("/docs", "Docs")}
             {slash()}

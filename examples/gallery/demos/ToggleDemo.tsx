@@ -309,7 +309,7 @@ export function ToggleDemo() {
                 borderRadius: 7,
                 borderCurve: "continuous",
                 borderWidth: 1,
-                ...finish.raised,
+                ...finish.thumb,
                 transform: [{ translateX: x }],
               }}
             />
