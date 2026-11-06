@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { Button, type OpenChangeReason, Select, type SelectEntry, type SelectGroup, Switch } from "nsh/base";
-import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, ui } from "./palette";
+import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // Two selects in a settings card: a plain one (typeahead jumps by letter)
 // and a searchable one with sections, a disabled item and an empty state.
@@ -184,10 +184,7 @@ function App() {
                 class={`-mx-2 mt-1 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={locked() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={locked() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => locked())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Region disabled</Text>
               </Switch>
