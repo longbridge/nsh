@@ -223,6 +223,8 @@ pub(crate) struct Surface {
     pub(crate) backdrop_readers: RefCell<Vec<NodeId>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The engine's sounds and players ([`crate::audio`]).
+    pub(crate) audio: crate::audio::Speaker,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// Videos, web views and registered native components.
@@ -303,6 +305,7 @@ impl Surface {
             shader_renderer: std::cell::OnceCell::new(),
             backdrop_readers: RefCell::default(),
             asset_base: RefCell::new(None),
+            audio: Default::default(),
             image_cache: RefCell::new(None),
             native: Default::default(),
             keymap: Default::default(),

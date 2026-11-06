@@ -69,6 +69,7 @@ fn config(app: App) -> EngineConfig {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 

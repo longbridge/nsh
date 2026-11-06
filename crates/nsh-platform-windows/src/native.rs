@@ -854,7 +854,7 @@ fn intersect(a: RECT, b: RECT) -> Option<RECT> {
 
 /// Where a video's source is.
 #[derive(Debug, PartialEq)]
-enum Location {
+pub(crate) enum Location {
     /// A URL Media Foundation opens (`https://`, `file://`, ...).
     Url(String),
     /// A file path.
@@ -863,7 +863,7 @@ enum Location {
 
 impl Location {
     /// The URL the media engine opens.
-    fn url(&self) -> String {
+    pub(crate) fn url(&self) -> String {
         match self {
             Location::Url(url) => url.clone(),
             Location::Path(path) => file_url(&path.to_string_lossy()),
@@ -872,7 +872,7 @@ impl Location {
 }
 
 /// Resolves `source` (`asset:/` URIs against `base`).
-fn locate(source: &str, base: Option<&AssetBase>) -> Option<Location> {
+pub(crate) fn locate(source: &str, base: Option<&AssetBase>) -> Option<Location> {
     if let Some(path) = source.strip_prefix("asset:/") {
         let path = path.trim_start_matches('/');
         return match base {

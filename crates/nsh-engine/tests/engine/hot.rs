@@ -182,6 +182,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     };
     let engine = Engine::start(
         config,
@@ -342,6 +343,7 @@ fn entry_edits_keep_navigation_and_state() {
             host: Default::default(),
             picker: None,
             speech: None,
+            audio: None,
         };
         let engine = Engine::start(
             config,

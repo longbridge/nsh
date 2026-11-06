@@ -63,11 +63,13 @@ pub struct WindowFrame {
     /// keeps the top edge where it is (the window grows and shrinks at its
     /// bottom edge).
     pub y: Option<Points>,
-    /// Its outer width on macOS / Windows, GTK default width on Linux.
+    /// Its outer width on macOS / Windows, GTK default width on Linux;
+    /// in GPUI windows, the content's width (at least 1 point).
     pub width: Option<Points>,
-    /// Its outer height on macOS / Windows, GTK default height on Linux.
+    /// Its outer height on macOS / Windows, GTK default height on Linux;
+    /// in GPUI windows, the content's height (at least 1 point).
     pub height: Option<Points>,
-    /// Animates the change on macOS (false by default).
+    /// Animates the change on macOS (false by default; GPUI ignores it).
     pub animated: Option<bool>,
 }
 

@@ -109,6 +109,14 @@ pub(crate) trait Driver: Send {
         let _ = error;
         Err(headless_only("ending a speech session"))
     }
+    /// What the app asked of the speaker, in order.
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        Err(headless_only("`audio()`"))
+    }
+    /// The players playing reach their end.
+    fn end_audio(&mut self) -> Result<(), String> {
+        Err(headless_only("ending a player"))
+    }
     fn texts(&mut self) -> Result<Vec<String>, String>;
     fn count(&mut self, selector: &str) -> Result<usize, String>;
     fn enabled(&mut self, selector: &str) -> Result<bool, String>;
@@ -261,6 +269,13 @@ impl Driver for Headless {
     }
     fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
         Headless::end_speech(self, error)
+    }
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        self.catch_up();
+        Ok(Headless::audio_calls(self))
+    }
+    fn end_audio(&mut self) -> Result<(), String> {
+        Headless::end_audio(self)
     }
     fn texts(&mut self) -> Result<Vec<String>, String> {
         self.catch_up();

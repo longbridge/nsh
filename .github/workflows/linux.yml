@@ -81,9 +81,11 @@ jobs:
 
       # QuickJS is C (bindgen needs libclang); the backend links GTK 4 and
       # Pango, and WebKitGTK 6.0 for web views (the hosts' default); Xvfb
-      # is the display the examples' tests open their windows on.
-      - name: Install clang, GTK 4 and WebKitGTK
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb
+      # is the display the examples' tests open their windows on. GStreamer
+      # decodes and mixes sounds; its base and good plug-ins are what the
+      # sound tests decode (WAV) and mix with.
+      - name: Install clang, GTK 4, WebKitGTK and GStreamer
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

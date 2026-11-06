@@ -60,7 +60,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # The typed API check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
-nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor"] }
+nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor", "term"] }
 # The host's shared data in `nativeModule`'s tests.
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }

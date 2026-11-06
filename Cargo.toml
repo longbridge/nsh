@@ -30,6 +30,7 @@ ratatui-widgets = { version = "0.3.2", default-features = false, features = ["st
 ratatui-crossterm = "0.1.2"
 crossterm = "0.29.0"
 unicode-width = "0.2.2"
+vte = { version = "0.15", default-features = false }
 unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
 nsh-core = { version = "0.4.0", path = "crates/nsh-core" }
@@ -158,6 +159,8 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Imaging",
   "Win32_Graphics_Imaging_D2D",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_XAudio2",
   "Win32_Media_MediaFoundation",
   "Win32_Storage_Xps",
   "Win32_System_Com",
@@ -195,6 +198,11 @@ pango = "0.22"
 pangocairo = "0.22"
 # The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.40+).
 webkit6 = "0.6"
+# The Linux backend's sounds: decoded once into memory, mixed in one pipeline
+# (GStreamer, which GTK's media streams already run on; the glib of gtk4's).
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+gstreamer-audio = "0.25"
 taffy = { version = "0.15", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
