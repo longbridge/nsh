@@ -3032,6 +3032,7 @@ fn preset(keyframes: Keyframes) -> KeyframeAnimation {
             delay: 0.0,
             easing: [0.0, 0.0, 1.0, 1.0],
             iterations: None,
+            frame_rate: None,
         },
         Keyframes::Ping => KeyframeAnimation {
             keyframes,
@@ -3039,6 +3040,7 @@ fn preset(keyframes: Keyframes) -> KeyframeAnimation {
             delay: 0.0,
             easing: [0.0, 0.0, 0.2, 1.0],
             iterations: None,
+            frame_rate: None,
         },
         Keyframes::Pulse => KeyframeAnimation {
             keyframes,
@@ -3046,6 +3048,7 @@ fn preset(keyframes: Keyframes) -> KeyframeAnimation {
             delay: 0.0,
             easing: [0.4, 0.0, 0.6, 1.0],
             iterations: None,
+            frame_rate: None,
         },
         Keyframes::Bounce => KeyframeAnimation {
             keyframes,
@@ -3053,6 +3056,7 @@ fn preset(keyframes: Keyframes) -> KeyframeAnimation {
             delay: 0.0,
             easing: [0.8, 0.0, 1.0, 1.0],
             iterations: None,
+            frame_rate: None,
         },
     }
 }

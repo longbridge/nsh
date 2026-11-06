@@ -52,6 +52,11 @@ impl Running {
         }
     }
 
+    /// The highest frame rate it needs ([`Driver::frame_rate`]).
+    pub(crate) fn frame_rate(&self) -> Option<f32> {
+        self.driver.frame_rate()
+    }
+
     /// When an animation that ended at the frame `now` really ended: timings
     /// end on time; springs and decays when the frame noticed.
     pub(crate) fn end_time(&self, now: f64) -> f64 {
@@ -116,6 +121,7 @@ impl Running {
                 duration_ms,
                 easing,
                 delay_ms,
+                ..
             } => {
                 let t_ms = t * 1000.0 - delay_ms;
                 // A step of no duration (a keyframe's jump) ends on the
@@ -432,6 +438,7 @@ mod tests {
                 duration_ms: 300.0,
                 easing: Easing::EaseInOut,
                 delay_ms: 0.0,
+                frame_rate: None,
             },
             0.0,
             0.0,
@@ -471,6 +478,7 @@ mod tests {
                     damping,
                     mass: 1.0,
                     velocity: Some(0.0),
+                    frame_rate: None,
                 },
                 0.0,
                 0.0,
@@ -491,6 +499,7 @@ mod tests {
                 damping: 5.0,
                 mass: 1.0,
                 velocity: Some(0.0),
+                frame_rate: None,
             },
             0.0,
             0.0,
@@ -518,6 +527,7 @@ mod tests {
                 deceleration: 0.998,
                 clamp: None,
                 bounce: 0.0,
+                frame_rate: None,
             },
             0.0,
             0.0,
@@ -534,6 +544,7 @@ mod tests {
             deceleration: 0.998,
             clamp: Some((-50.0, 100.0)),
             bounce,
+            frame_rate: None,
         }
     }
 
@@ -588,6 +599,7 @@ mod tests {
             damping: 10.0,
             mass: 1.0,
             velocity: Some(0.0),
+            frame_rate: None,
         };
         let samples = sample_driver(spring, 0.0, 1.0 / 60.0, 1000);
         assert_eq!(samples[0], 0.0);

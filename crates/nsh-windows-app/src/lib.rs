@@ -1,6 +1,7 @@
 //! The executable of a packaged nsh app (`nsh package --target windows`):
 //! runs the bundle shipped next to it (`nsh\bundle.nshc`, assets in
-//! `nsh\assets`, the app's name, id and appearance in `nsh\app.json`).
+//! `nsh\assets`, the app's name, id, appearance and URL schemes in `nsh\app.json`, its
+//! icon in `nsh\icon.ico`).
 //!
 //! A library so that an app with Rust components of its own (`nsh.json`
 //! `"rust"`) builds the release runner with them: its `main` calls
@@ -86,8 +87,10 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
             .and_then(|exe| exe.parent().map(|d| d.join("nsh")))
             .unwrap_or_default(),
     };
+    let icon = dir.join("icon.ico");
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
+        icon: icon.is_file().then_some(icon),
         // An app on its own, not a module embedded in another app.
         limits: Limits::standalone(),
         ..AppOptions::default()
@@ -104,6 +107,16 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     }
     if let Some(name) = field("name") {
         options.title = name;
+    }
+    // The URL schemes it registers and opens (`EventKind::UrlScheme`).
+    if let Some(schemes) = info
+        .as_ref()
+        .and_then(|info| info.get("schemes")?.as_array().cloned())
+    {
+        options.schemes = schemes
+            .iter()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect();
     }
     // The window opens in the app's appearance (no flash of the system's).
     match field("appearance").as_deref() {

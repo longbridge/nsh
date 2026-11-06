@@ -3448,6 +3448,7 @@ dependencies = [
  "nsh-testing",
  "nsh-updater",
  "plist",
+ "ring",
  "semver",
  "serde",
  "serde_json",
@@ -3664,6 +3665,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-platform-apple"
+version = "0.4.0"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "libc",
+ "log",
+ "nsh-core",
+ "nsh-engine",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-ui-kit",
+]
+
+[[package]]
 name = "nsh-platform-ios"
 version = "0.4.0"
 dependencies = [
@@ -3675,6 +3692,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-platform-apple",
  "nsh-testing",
  "objc2",
  "objc2-core-foundation",
@@ -3722,6 +3740,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-platform-apple",
  "nsh-testing",
  "objc2",
  "objc2-app-kit",

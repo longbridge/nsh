@@ -1576,6 +1576,20 @@ impl AppView {
             tree: &self.tree,
         };
         self.selection.draw(scene, buffer);
+        let changes = self.selection.changes(&self.tree, &self.geometry);
+        if let Some(engine) = &self.surface.engine {
+            let control = engine.control();
+            for (id, text, start) in changes {
+                control.dispatch_event(
+                    id,
+                    nsh_core::EventKind::SelectionChange,
+                    nsh_core::EventPayload::Map(vec![
+                        ("text", nsh_core::PayloadValue::Str(text)),
+                        ("start", nsh_core::PayloadValue::Number(f64::from(start))),
+                    ]),
+                );
+            }
+        }
         // A view that moved under the pointer, or away from it, is drawn
         // again in its new hover state.
         if let Some(engine) = &self.surface.engine

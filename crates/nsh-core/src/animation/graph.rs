@@ -4,7 +4,7 @@ use super::{
     driver::{Running, ease},
     ops::{
         AnimationId, AnimationOp, Composite, Driver, Easing, Extrapolate, MathOp, NodeId, Operand,
-        Output,
+        Output, highest_frame_rate,
     },
 };
 
@@ -155,6 +155,9 @@ struct Program {
     root: Step,
     /// When it started (its first frame).
     at: Option<f64>,
+    /// The highest frame rate its steps need ([`Composite::frame_rate`]),
+    /// asked for while it runs, delays included.
+    frame_rate: Option<f32>,
 }
 
 /// The state of one part of a composite animation.
@@ -563,6 +566,7 @@ impl Graph {
                     key,
                     root: Step::new(&spec),
                     at: None,
+                    frame_rate: spec.frame_rate(),
                 });
             }
             AnimationOp::ResetComposite { key } => {
@@ -722,6 +726,29 @@ impl Graph {
     /// True while any animation runs (the platform keeps its frame clock on).
     pub fn is_animating(&self) -> bool {
         !self.animating.is_empty() || !self.programs.is_empty() || !self.snaps.is_empty()
+    }
+
+    /// The highest frame rate the running animations need, in Hz
+    /// ([`Driver::frame_rate`]): `None` as soon as one asks for the
+    /// screen's highest (or none runs). A composite asks for the highest
+    /// rate of its steps for as long as it runs; a snapping `diffClamp`
+    /// settling asks for the screen's highest. Platforms that can lower
+    /// their frame rate fold it with what else wants frames.
+    pub fn frame_rate(&self) -> Option<f32> {
+        if !self.snaps.is_empty() {
+            return None;
+        }
+        let drivers = self
+            .animating
+            .iter()
+            .map(|&node| match self.nodes.get(node as usize) {
+                Some(Some(Node::Value {
+                    running: Some(r), ..
+                })) => r.frame_rate(),
+                _ => None,
+            });
+        let programs = self.programs.iter().map(|p| p.frame_rate);
+        drivers.chain(programs).reduce(highest_frame_rate).flatten()
     }
 
     /// True while an animation that ends by itself runs: as
@@ -1268,6 +1295,85 @@ mod tests {
         }
     }
 
+    /// A linear timing to `to` over a second, needing at most `hz`.
+    fn capped(to: f32, hz: Option<f32>) -> Driver {
+        Driver::Timing {
+            to,
+            duration_ms: 1000.0,
+            easing: Easing::Linear,
+            delay_ms: 0.0,
+            frame_rate: hz,
+        }
+    }
+
+    #[test]
+    fn frame_rates_fold_to_the_highest() {
+        let mut finished = Vec::new();
+        let values = (1..=5).map(|node| AnimationOp::CreateValue { node, value: 0.0 });
+        let mut g = graph_of(0.0, values);
+        // Nothing runs: no rate asked for.
+        assert_eq!(g.frame_rate(), None);
+        let start = |g: &mut Graph, node, hz, finished: &mut Vec<Finished>| {
+            g.apply(
+                AnimationOp::Start {
+                    node,
+                    animation: node,
+                    driver: capped(1.0, hz),
+                },
+                finished,
+            )
+        };
+        start(&mut g, 1, Some(30.0), &mut finished);
+        assert_eq!(g.frame_rate(), Some(30.0));
+        start(&mut g, 2, Some(60.0), &mut finished);
+        assert_eq!(g.frame_rate(), Some(60.0));
+        // One without a rate: the screen's highest.
+        start(&mut g, 3, None, &mut finished);
+        assert_eq!(g.frame_rate(), None);
+        g.apply(AnimationOp::Stop { node: 3 }, &mut finished);
+        g.apply(AnimationOp::Stop { node: 2 }, &mut finished);
+        assert_eq!(g.frame_rate(), Some(30.0));
+        // Not a rate: the screen's highest.
+        start(&mut g, 2, Some(0.0), &mut finished);
+        assert_eq!(g.frame_rate(), None);
+        g.apply(AnimationOp::Stop { node: 2 }, &mut finished);
+
+        // A composite asks for its steps' highest, through its delays too.
+        let run = |node, hz| Composite::Run {
+            node,
+            driver: capped(1.0, hz),
+        };
+        let spec = Composite::Loop {
+            child: Box::new(Composite::Sequence(vec![
+                run(4, Some(24.0)),
+                Composite::Delay(500.0),
+                run(5, Some(12.0)),
+            ])),
+            iterations: None,
+            reset: true,
+        };
+        assert_eq!(spec.frame_rate(), Some(24.0));
+        g.apply(AnimationOp::Stop { node: 1 }, &mut finished);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 9,
+                key: 1,
+                spec,
+            },
+            &mut finished,
+        );
+        assert_eq!(g.frame_rate(), Some(24.0));
+        start(&mut g, 1, Some(30.0), &mut finished);
+        assert_eq!(g.frame_rate(), Some(30.0));
+        // A step without a rate makes the whole composite uncapped.
+        let uncapped = Composite::Parallel {
+            children: vec![run(4, Some(24.0)), run(5, None)],
+            stop_together: true,
+        };
+        assert_eq!(uncapped.frame_rate(), None);
+        assert_eq!(Composite::Delay(100.0).frame_rate(), None);
+    }
+
     #[test]
     fn shared_inputs_follow_every_change() {
         // Three readers of one sum of the value: evaluated once for each
@@ -1294,6 +1400,7 @@ mod tests {
                     duration_ms: 1000.0,
                     easing: Easing::Linear,
                     delay_ms: 0.0,
+                    frame_rate: None,
                 },
                 animation: 1,
             },
@@ -1595,6 +1702,7 @@ mod tests {
                     duration_ms: 100.0,
                     easing: Easing::Linear,
                     delay_ms: 0.0,
+                    frame_rate: None,
                 },
             },
             &mut finished,
@@ -1634,6 +1742,7 @@ mod tests {
             damping: 10.0,
             mass: 1.0,
             velocity: None,
+            frame_rate: None,
         };
         g.apply(
             AnimationOp::Start {
@@ -1681,6 +1790,7 @@ mod tests {
             duration_ms: ms,
             easing: Easing::Linear,
             delay_ms: 0.0,
+            frame_rate: None,
         }
     }
 
@@ -1810,6 +1920,7 @@ mod tests {
                     damping: 10.0,
                     mass: 1.0,
                     velocity: None,
+                    frame_rate: None,
                 },
             },
             &mut f,

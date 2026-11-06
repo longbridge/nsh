@@ -251,6 +251,10 @@ pub(crate) fn run(
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
                 .args(window.args());
+            let schemes = crate::package::read_config(entry)?.schemes;
+            if !schemes.is_empty() {
+                command.args(["--schemes", &schemes.join(",")]);
+            }
             run_local(&session, &mut command, "the Linux host")
         }
         // In place too: the AppKit host makes itself a regular app (menu
@@ -278,6 +282,7 @@ pub(crate) fn run(
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
+                .args(crate::windows::host_args(entry, &work))
                 .args(window.args());
             run_local(&session, &mut command, "the Windows host")
         }
@@ -501,6 +506,7 @@ fn package_for_run(
         profile: None,
         keystore: None,
         abis,
+        format: crate::android::Format::Apk,
         run: false,
     })
 }
@@ -803,9 +809,11 @@ pub(crate) fn install_android_host(
                 label: APP_NAME,
                 version_name: "0.1.0",
                 version_code: 1,
+                target_sdk: android::DEFAULT_TARGET_SDK,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
                 notifications: true,
+                schemes: &[],
                 rust: false,
                 dark: false,
                 runtime,

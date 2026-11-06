@@ -152,6 +152,7 @@ pub(crate) fn decode_command<'js>(
             Some(input) => Command::SendInput(input),
             None => return Ok(None),
         },
+        "load" => Command::Load(web_load(&arg)?),
         "seek" => Command::Seek(arg.as_number().unwrap_or(0.0)),
         "native" => {
             let o = arg.as_object();
@@ -252,6 +253,36 @@ pub(crate) fn animated_value(value: &Value<'_>) -> Option<nsh_core::animation::N
 
 fn number(value: &Value<'_>) -> Option<f32> {
     value.as_number().map(|n| n as f32)
+}
+
+/// `load`'s argument: `{ src, headers? }`, headers a plain object of
+/// strings. A header that could end the request's header and start another
+/// (a name not an HTTP token, a value with a line break) throws, as does a
+/// missing `src`: an app that meant to send a credential learns it did not.
+fn web_load(arg: &Value<'_>) -> rquickjs::Result<nsh_core::WebLoad> {
+    let invalid = |message: &str| Exception::throw_type(arg.ctx(), &format!("load: {message}"));
+    let o = arg
+        .as_object()
+        .ok_or_else(|| invalid("expected { src, headers? }"))?;
+    let src = o
+        .get::<_, Option<String>>("src")?
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| invalid("`src` must be a URL"))?;
+    let mut headers = Vec::new();
+    if let Some(h) = o.get::<_, Option<Object<'_>>>("headers")? {
+        for entry in h.props::<String, Value<'_>>() {
+            let (name, value) = entry?;
+            let value = value
+                .as_string()
+                .map(|s| s.to_string())
+                .transpose()?
+                .ok_or_else(|| invalid("header values must be strings"))?;
+            headers.push((name, value));
+        }
+    }
+    nsh_core::WebLoad::new(src, headers).ok_or_else(|| {
+        invalid("a header name must be an HTTP token and its value have no CR, LF or NUL")
+    })
 }
 
 /// `sendInput`'s argument (`None`: none of its forms, which sends nothing).
@@ -965,6 +996,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
             easing: nsh_core::js::animation::easing(&Js(c.get::<_, Value>("easing")?))
                 .unwrap_or(Easing::EaseInOut),
             delay_ms: num("delay")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         "spring" => Driver::Spring {
             to: num("to")?.unwrap_or(0.0),
@@ -972,6 +1004,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
             damping: num("damping")?.unwrap_or(26.0),
             mass: num("mass")?.unwrap_or(1.0),
             velocity: num("velocity")?,
+            frame_rate: num("frameRate")?,
         },
         "decay" => Driver::Decay {
             velocity: num("velocity")?,
@@ -987,6 +1020,7 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
                 None => None,
             },
             bounce: num("bounce")?.unwrap_or(0.0),
+            frame_rate: num("frameRate")?,
         },
         other => {
             return Err(Exception::throw_type(

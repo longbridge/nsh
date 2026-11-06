@@ -134,6 +134,15 @@ impl App {
             App::Js(bundle) => bundle.app_id.as_deref(),
         }
     }
+
+    /// The URL schemes the app claims (`nsh.json` `schemes`):
+    /// the links the core lets through (`nsh_core::url_scheme`).
+    pub fn url_schemes(&self) -> &[String] {
+        match self {
+            App::Rust(root) => root.url_schemes_ref(),
+            App::Js(bundle) => &bundle.url_schemes,
+        }
+    }
 }
 
 impl From<Root> for App {
@@ -162,6 +171,11 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
+    /// The URL schemes the app claims (`nsh.json` `schemes`, a
+    /// packaged app's `app.json`): the links its engine lets through.
+    /// Read from the app's own resources, never from its code; none for a
+    /// signed package, whose embedding app owns the schemes.
+    pub url_schemes: Vec<String>,
     /// Trusted filesystem anchors selected by the native host, never decoded
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
@@ -291,6 +305,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
+            url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
         }
@@ -305,6 +320,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
+            url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
         }
@@ -325,6 +341,16 @@ impl Bundle {
     /// gives it.
     pub fn with_app_id(mut self, id: Option<&str>) -> Self {
         self.app_id = id.map(str::to_owned);
+        self
+    }
+
+    /// The URL schemes the app claims ([`Bundle::url_schemes`]), as
+    /// `nsh.json` gives them.
+    pub fn with_url_schemes(
+        mut self,
+        schemes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.url_schemes = schemes.into_iter().map(Into::into).collect();
         self
     }
 
@@ -353,8 +379,9 @@ impl Bundle {
     }
 
     /// Reads a JS source bundle written by `nsh build` (`bundle.js`), plus
-    /// `bundle.js.map`, the app's `capabilities.json` and its id
-    /// (`app.json` `"id"`) next to it if present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
+    /// `bundle.js.map`, the app's `capabilities.json`, its id and the
+    /// schemes it claims (`app.json` `"id"` and `"schemes"`) next to it
+    /// if present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
     /// only [`Bundle::read_trusted`] (the app's own resources) or a verified
     /// package may load bytecode.
     pub fn read(path: &std::path::Path) -> io::Result<Bundle> {
@@ -388,7 +415,14 @@ impl Bundle {
         if let Ok(json) = std::fs::read_to_string(path.with_file_name("capabilities.json")) {
             bundle.policy.declared = Some(parse_capabilities(&json).map_err(io::Error::other)?);
         }
-        bundle.app_id = read_app_id(&path.with_file_name("app.json"));
+        let info = read_app_json(&path.with_file_name("app.json"));
+        bundle.app_id = info
+            .as_ref()
+            .and_then(|info| info.get("id")?.as_str().map(str::to_owned));
+        if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
+            bundle.url_schemes = nsh_core::url_scheme::schemes_from_json(url_schemes)
+                .map_err(|e| io::Error::other(format!("app.json: {e}")))?;
+        }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
             .map(std::path::Path::to_path_buf);
@@ -436,11 +470,10 @@ impl Bundle {
     }
 }
 
-/// The `"id"` of an `app.json` (`nsh build`'s, a packaged app's).
-fn read_app_id(path: &std::path::Path) -> Option<String> {
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    json.get("id")?.as_str().map(str::to_owned)
+/// An `app.json` (`nsh build`'s, a packaged app's): the app's id, the
+/// schemes it claims.
+fn read_app_json(path: &std::path::Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 /// A verified package, unpacked ([`load_package`], [`verify_package`]).
@@ -1597,6 +1630,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
+        core.set_url_schemes(config.app.url_schemes().iter().cloned());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);

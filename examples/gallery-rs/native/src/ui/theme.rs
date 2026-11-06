@@ -174,6 +174,7 @@ pub(crate) mod motion {
         damping: 34.0,
         mass: 1.0,
         velocity: None,
+        frame_rate: None,
     };
     /// Knobs and indicators settling at their place.
     pub(crate) const SETTLE: Spring = Spring {
@@ -181,6 +182,7 @@ pub(crate) mod motion {
         damping: 30.0,
         mass: 1.0,
         velocity: None,
+        frame_rate: None,
     };
     /// Content coming in.
     pub(crate) const ENTER: Timing = Timing::new(420.0, Easing::Curve(Curve::Cubic, EaseMode::Out));

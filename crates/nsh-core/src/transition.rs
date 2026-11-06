@@ -149,6 +149,19 @@ impl Live {
         .map(|t| t + 1.0)
     }
 
+    /// The highest frame rate its animations need, in Hz: a keyframe
+    /// animation's `animationFrameRate` while it is all that runs; `None`
+    /// (the screen's highest) while a transition, a layout animation or an
+    /// uncapped keyframe animation runs.
+    pub fn frame_rate(&self) -> Option<f32> {
+        let keyframes_alone = self.frame.is_none()
+            && self.style.is_none()
+            && !self.color.running()
+            && self.presence.is_none();
+        let run = self.keyframes.as_ref().filter(|_| keyframes_alone)?;
+        crate::style::frame_rate(run.animation.frame_rate)
+    }
+
     /// True while a frame callback steps it.
     pub fn ticking(&self) -> bool {
         self.ticking
@@ -1223,6 +1236,7 @@ mod tests {
             delay: 0.0,
             easing: [0.0, 0.0, 1.0, 1.0],
             iterations,
+            frame_rate: None,
         };
         let spin = anim(Keyframes::Spin, None);
         assert!(close(
@@ -1256,6 +1270,24 @@ mod tests {
             ..spin
         };
         assert_eq!(keyframes_at(&delayed, 100.0), Some((1.0, Extra::NONE)));
+    }
+
+    #[test]
+    fn keyframes_alone_ask_for_their_frame_rate() {
+        let spin = KeyframeAnimation::new(Keyframes::Spin);
+        let restyle = |animation| Restyle {
+            track: None,
+            keyframes: Some(animation),
+        };
+        let mut live = Live::default();
+        assert_eq!(live.frame_rate(), None);
+        live.restyle(restyle(Some(spin)));
+        assert_eq!(live.frame_rate(), None);
+        live.restyle(restyle(Some(spin.frame_rate(30.0))));
+        assert_eq!(live.frame_rate(), Some(30.0));
+        // With a layout animation running beside it: the screen's highest.
+        live.appear(LayoutTransition::new(LayoutCurve::Linear, 300.0));
+        assert_eq!(live.frame_rate(), None);
     }
 
     #[test]
@@ -1304,6 +1336,7 @@ mod tests {
             delay: 0.0,
             easing: [0.0, 0.0, 1.0, 1.0],
             iterations,
+            frame_rate: None,
         };
         live.keyframes = Some(KeyframeRun {
             animation: spin(None),

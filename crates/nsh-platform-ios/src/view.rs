@@ -40,6 +40,8 @@ struct State {
     /// The embedding app's theme overrides.
     host_tokens: Option<nsh_engine::Tokens>,
     on_error: Option<ErrorHandler>,
+    /// URLs opened ([`AppView::open_url`]) before any app was loaded.
+    urls: Vec<String>,
     #[cfg(feature = "dev")]
     dev: Option<crate::dev::DevSession>,
     /// A test session's model of the app, for every surface from now on.
@@ -64,6 +66,7 @@ impl AppView {
                     host: nsh_engine::HostEnvironment::default(),
                     host_tokens: None,
                     on_error: None,
+                    urls: Vec::new(),
                     #[cfg(feature = "dev")]
                     dev: None,
                     #[cfg(feature = "dev")]
@@ -87,6 +90,12 @@ impl AppView {
     /// the running app.
     pub fn run(&self, root: Root) {
         Inner::load(&self.inner, App::Rust(root));
+    }
+
+    /// Hands `url`, a link the system opened the standalone app with, to
+    /// the running app (`UrlScheme`).
+    pub(crate) fn url_scheme(&self, url: String) {
+        self.inner.url_scheme(url);
     }
 
     /// Sets where `asset:/…` files (images, fonts) are read from. A change
@@ -124,6 +133,13 @@ impl AppView {
             .options
             .components
             .register(name, factory);
+    }
+
+    /// Hands `url`, one of the embedding app's URLs, to the running app as
+    /// the system opening it would (`UrlScheme.on("open")`, `nsh`); before an
+    /// app runs, the next one loaded gets it. On the main thread.
+    pub fn open_url(&self, url: &str) {
+        self.inner.url_scheme(url.to_owned());
     }
 
     /// The channel with the apps this view runs (`nsh/host`): their
@@ -285,7 +301,21 @@ impl Inner {
         }
         // Below development overlays.
         this.container.insertSubview_atIndex(surface.view(), 0);
+        for url in std::mem::take(&mut state.urls) {
+            surface.url_scheme(url);
+        }
         state.surface = Some(surface);
+    }
+
+    /// Hands `url`, a link the system opened the app with, to the running
+    /// app ([`Surface::url_scheme`]); before an app runs, the next one
+    /// loaded gets it.
+    pub(crate) fn url_scheme(&self, url: String) {
+        let mut state = self.state.borrow_mut();
+        match &state.surface {
+            Some(surface) => surface.url_scheme(url),
+            None => state.urls.push(url),
+        }
     }
 
     /// Applies a development update in place; false when no app runs.

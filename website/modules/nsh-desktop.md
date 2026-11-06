@@ -6,20 +6,21 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
+`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), `quit`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
 
 ```rust tabs
 use nsh_core::{
     desktop::{MenuRole, TitleBarStyle},
     element::desktop::{
-        MenuItem, close_window, popup_menu, set_application_menu, set_title, set_title_bar, title_bar,
+        MenuItem, close_window, popup_menu, quit, set_application_menu, set_title, set_title_bar,
+        title_bar,
     },
     prelude::*,
 };
 ```
 
 ```tsx tabs
-import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { Application, isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 ```
 
 ## isAvailable
@@ -106,7 +107,27 @@ chat.focus();
 
 The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
 `close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
-it too. Linux only for now: on other platforms `Window.open` throws.
+it too. `Window.open` runs on Linux and Windows; on other platforms it throws.
+
+## Application
+
+```ts
+const Application: {
+  quit(): void;
+};
+```
+
+| Member | Rust | Description |
+|---|---|---|
+| `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
+
+`Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
+update. The app stops as when its last window closes, then its run ends, also when closing the window alone would
+leave it running: a window kept hidden for the Dock, a tray icon. Closing goes through the same steps as the Quit
+item: the standalone app on macOS returns from `run_app` as with Cmd+Q; in a GPUI app that owns the window, the request
+reaches its `AppView::on_close_request` handler as `CloseRequest::Quit`, which quits when the app is ready; elsewhere
+the quit goes ahead as the Quit item's does. A view
+embedded in another app leaves the app's lifecycle to that app. In the terminal the app ends, as with a quit role.
 
 ## A title bar of your own
 
@@ -384,3 +405,64 @@ text("More").on_press(|| {
 
 > [!NOTE]
 > Menus are the system's (NSMenu, Win32 menus, GTK popover menus): they look and behave like every other app's, follow the system's (or the app's) appearance and are keyboard accessible. `examples/desktop` is an app with a title bar of its own, an application menu and context menus.
+
+## Tray
+
+```ts
+interface TrayModule {
+  set(options: TrayOptions | null): void;
+}
+```
+
+`Tray.set` shows the app's icon in the system tray, or changes it; `null` removes it. There is one per app. The tray is the notification area on Windows, the right side of the menu bar on macOS, and a StatusNotifierItem on Linux, which Plasma, Waybar and most panels show (GNOME needs the AppIndicator extension).
+
+| Option | Description |
+| --- | --- |
+| `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
+| `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
+| `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
+| `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too). |
+
+Call `set` again to change it; inside an `effect` it follows the signals it reads.
+
+```tsx
+import { Tray, Window } from "nsh/desktop";
+import icon from "./tray.svg";
+
+Tray.set({
+  icon,
+  tooltip: "Mail",
+  onClick: () => Window.orderFront(),
+  menu: [
+    { label: "New Message", onSelect: compose },
+    { type: "separator" },
+    { role: "quit" },
+  ],
+});
+```
+
+TSX only for now; Rust components have no tray yet.
+
+## GlobalShortcut
+
+```ts
+interface GlobalShortcutModule {
+  register(shortcut: string, onPress: () => void): Promise<boolean>;
+  unregister(shortcut: string): void;
+  unregisterAll(): void;
+}
+```
+
+A global shortcut reaches the app whichever app has the keyboard. `register` takes a keystroke written as a menu item's `shortcut` (`"mod+shift+k"`) and resolves with whether the system took it: `false` when another app holds it, or off desktops. Registering a keystroke again replaces its function.
+
+On macOS they ask the user for no permission. A letter is the key that types it on the keyboard layout at registration, so `k` stays `k` on Dvorak.
+
+On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
+
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+
+```tsx
+import { GlobalShortcut, Window } from "nsh/desktop";
+
+const ok = await GlobalShortcut.register("mod+shift+space", () => Window.orderFront());
+```

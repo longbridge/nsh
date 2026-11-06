@@ -26,7 +26,12 @@ export function configureAPIs(nsh, modules, dom, active, env) {
   const process = modules.exports.get("process");
   if (process) { process.nextTick = nsh.nextTick; if (process.default) process.default.nextTick = nsh.nextTick; }
   const desktop = modules.exports.get("nsh/desktop");
-  if (desktop) Object.assign(desktop, { isAvailable: false, titleBar: env.titleBar, Menu: { setApplicationMenu() {}, popup: () => Promise.resolve() } });
+  if (desktop) Object.assign(desktop, {
+    isAvailable: false, titleBar: env.titleBar,
+    Menu: { setApplicationMenu() {}, popup: () => Promise.resolve() },
+    Tray: { set() {} },
+    GlobalShortcut: { register: () => Promise.resolve(false), unregister() {}, unregisterAll() {} },
+  });
   for (const [name, tag] of Object.entries({View:"view",Text:"text",Scroll:"scroll",Overlay:"overlay",Image:"image",WebView:"webview",Video:"video",Shader:"shader"})) {
     const Component = props => {const node = dom.rt.element(tag);dom.rt.spread(node,props);if ("children" in props) dom.rt.insert(node,()=>props.children);return node;};
     nsh[name] = Object.assign(Component, nsh[name]);

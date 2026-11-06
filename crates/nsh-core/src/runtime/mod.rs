@@ -1,7 +1,7 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
-//! `Speech` and `nsh/storage`,
+//! `Speech`, `UrlScheme` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -29,6 +29,7 @@ mod process;
 mod speech;
 mod storage;
 mod updater;
+mod url_scheme;
 mod websocket;
 mod webview;
 
@@ -47,7 +48,9 @@ pub fn registries() -> &'static [Registry] {
     static REGISTRIES: OnceLock<Vec<Registry>> = OnceLock::new();
     REGISTRIES.get_or_init(|| {
         let mut desktop = Registry::runtime("nsh/desktop");
-        desktop.module::<desktop::Window>();
+        desktop
+            .module::<desktop::Window>()
+            .module::<desktop::Application>();
         // `nsh`'s modules written in Rust; the rest of `nsh` is `nsh-js`'s.
         let mut nsh = Registry::runtime("nsh");
         nsh.module::<crate::element::Keyboard>()
@@ -58,6 +61,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<picker::Picker>()
             .module::<speech::Speech>()
             .module::<notifications::Notifications>()
+            .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()
             .module::<storage::Storage>()
             .module::<host::Host>()

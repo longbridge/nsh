@@ -6,20 +6,21 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、`quit`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
     desktop::{MenuRole, TitleBarStyle},
     element::desktop::{
-        MenuItem, close_window, popup_menu, set_application_menu, set_title, set_title_bar, title_bar,
+        MenuItem, close_window, popup_menu, quit, set_application_menu, set_title, set_title_bar,
+        title_bar,
     },
     prelude::*,
 };
 ```
 
 ```tsx tabs
-import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { Application, isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 ```
 
 ## isAvailable
@@ -73,6 +74,51 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。在 GPUI 应用中，`setFrame` 设置窗口尺寸，窗口位置由平台决定；GPUI 窗口的位置和层级由宿主在创建窗口时配置。
 
 使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
+
+### Window.open
+
+`Window.open(Component, options)` 打开一个应用自己的窗口，并在其中渲染 `Component`。这个窗口运行在应用唯一的 JS 运行时中，
+是同一个应用的一部分：它和主窗口读写相同的 signal、store 和模块，窗口之间不需要传递消息。打开一个已经打开的 `id` 会返回那个窗口。
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+const unread = signal(0);
+
+function Chat() {
+  return <View><Text>{`${unread()} unread`}</Text></View>;
+}
+
+const chat = Window.open(Chat, { id: "chat", title: "Chat", size: { width: 360, height: 480 } });
+chat.focus();
+```
+
+| 选项 | 说明 |
+|---|---|
+| `id` | 窗口的 id：再次打开同一个 id 会返回已打开的窗口。 |
+| `title` | 窗口标题（省略时使用主窗口的标题）。 |
+| `size` | 内容尺寸，单位为点，`{ width, height }`（默认 480×360）。 |
+| `position` | 窗口左上角在屏幕上的位置，`{ x, y }`。GTK 总是自行放置窗口。 |
+| `level` | `"normal"`、`"floating"` 或 `"desktopIcon"`，同 `setLevel`。Linux 上不适用。 |
+| `frame` | `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
+
+返回的窗口有 `id`、`focus()`（显示窗口，`hide()` 之后也可以，并把它提到最前）、`hide()` 和 `close()`（其内容随之卸载）。
+用户关闭它时，效果和 `close()` 相同；关闭主窗口也会关闭它。`Window.open` 在 Linux 和 Windows 上运行；在其他平台上会抛出异常。
+
+## Application
+
+```ts
+const Application: {
+  quit(): void;
+};
+```
+
+| 成员 | Rust | 说明 |
+|---|---|---|
+| `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
+
+`Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
 ## 自定义标题栏
 
@@ -350,3 +396,64 @@ text("更多").on_press(|| {
 
 > [!NOTE]
 > 菜单是系统原生的（NSMenu、Win32 菜单、GTK popover 菜单）：外观和行为与其他应用一致，跟随系统（或应用）的外观，并支持键盘操作。`examples/desktop` 是一个带自定义标题栏、应用菜单和右键菜单的示例应用。
+
+## Tray
+
+```ts
+interface TrayModule {
+  set(options: TrayOptions | null): void;
+}
+```
+
+`Tray.set` 在系统托盘显示应用图标，或修改它；传 `null` 移除。每个应用只有一个。托盘在 Windows 上是通知区域，在 macOS 上是菜单栏右侧，在 Linux 上是 StatusNotifierItem，Plasma、Waybar 和大多数面板都能显示（GNOME 需要 AppIndicator 扩展）。
+
+| 选项 | 说明 |
+| --- | --- |
+| `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
+| `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
+| `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
+| `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用）。 |
+
+再次调用 `set` 即可修改；放在 `effect` 里时会跟随它读取的 signal 更新。
+
+```tsx
+import { Tray, Window } from "nsh/desktop";
+import icon from "./tray.svg";
+
+Tray.set({
+  icon,
+  tooltip: "Mail",
+  onClick: () => Window.orderFront(),
+  menu: [
+    { label: "New Message", onSelect: compose },
+    { type: "separator" },
+    { role: "quit" },
+  ],
+});
+```
+
+目前只有 TSX 可用，Rust 组件还没有托盘 API。
+
+## GlobalShortcut
+
+```ts
+interface GlobalShortcutModule {
+  register(shortcut: string, onPress: () => void): Promise<boolean>;
+  unregister(shortcut: string): void;
+  unregisterAll(): void;
+}
+```
+
+全局快捷键不论哪个应用持有键盘都会送到本应用。`register` 的按键写法与菜单项的 `shortcut` 相同（`"mod+shift+k"`），返回系统是否接受：被其他应用占用、或不在桌面平台时为 `false`。同一按键再次注册会替换回调。
+
+在 macOS 上不需要用户授予权限。字母对应注册时键盘布局上输入该字母的键，所以 Dvorak 布局下 `k` 仍是 `k`。
+
+在 Windows 上一个按键只属于一个应用：已被其他应用占用或由系统保留（Win+L）时返回 `false`。按住不放只触发一次。
+
+在 Linux 上通过桌面 portal（`org.freedesktop.portal.GlobalShortcuts`）注册，这是 Wayland 下唯一的方式。按键只是建议值：桌面可能请用户确认或改选其他按键。Hyprland 在自己的配置里绑定，按应用 id 和小写的按键名：`bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`。
+
+```tsx
+import { GlobalShortcut, Window } from "nsh/desktop";
+
+const ok = await GlobalShortcut.register("mod+shift+space", () => Window.orderFront());
+```

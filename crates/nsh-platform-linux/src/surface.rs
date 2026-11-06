@@ -118,6 +118,9 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
+    /// URLs the app was opened with before its engine started
+    /// ([`Surface::open_url`]).
+    pending_links: RefCell<Vec<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
     /// The environment the engine was last told about.
@@ -234,6 +237,7 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
+            pending_links: RefCell::default(),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             environment: Cell::new(environment),
@@ -371,6 +375,9 @@ impl Surface {
                 }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
+                for url in self.pending_links.take() {
+                    self.open_url(&url);
+                }
             }
             Err(err) => log::error!("cannot start the engine: {err}"),
         }
@@ -378,6 +385,8 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        crate::global_shortcut::clear(self);
+        crate::tray::clear(self);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
@@ -403,6 +412,20 @@ impl Surface {
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         self.control(|c| c.dispatch_event(id, kind, payload));
+    }
+
+    /// Hands the app a URL the system opened it with (`EventKind::UrlScheme`),
+    /// kept until the engine starts.
+    pub(crate) fn open_url(&self, url: &str) {
+        if self.control.borrow().is_none() {
+            self.pending_links.borrow_mut().push(url.to_owned());
+            return;
+        }
+        self.event(
+            nsh_core::ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![("url", nsh_core::PayloadValue::Str(url.to_owned()))]),
+        );
     }
 
     /// Shows fatal app errors with `f` (development hosts).
@@ -697,6 +720,8 @@ impl Surface {
 
 impl Drop for Surface {
     fn drop(&mut self) {
+        crate::global_shortcut::clear(self);
+        crate::tray::clear(self);
         let key = self.key;
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }

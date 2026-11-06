@@ -1537,8 +1537,13 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         .text_color(AdaptiveColor::TRANSPARENT)
         // UIKit draws what an input method composes whatever the text's
         // color (a highlight, the caret's knobs). Not 0: UIKit would take
-        // the input out of accessibility.
-        .opacity(0.02)
+        // the input out of accessibility. A terminal has no translucency;
+        // keep its sink visible to keyboard focus traversal.
+        .opacity(if crate::terminal::is_terminal() {
+            1.0
+        } else {
+            0.02
+        })
         .caret(false)
         .multiline(true)
         .auto_correct(false)

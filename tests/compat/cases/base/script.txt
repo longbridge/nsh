@@ -622,9 +622,13 @@ style text:"Styled paragraph." userSelect text
 # The static functions.
 expect Plain: a b
 expect Parsed: 1 paragraph
+expect Cited: paragraph
 expect Extended: text,custom
+expect CJK emphasis: strong,text
+expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
+expect Unknown tag: <US tech> up
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document
@@ -668,6 +672,21 @@ style text:"Area label" userSelect none
 nostyle text:"Inner text" userSelect
 style text:"Own selection" userSelect text
 nostyle text:"Outside text" userSelect
+# The selection each area reports: its text, empty once nothing is selected.
+expect Area selected: none
+expect Own selected: none
+listens id:area onSelectionChange
+event id:area onSelectionChange text=first
+expect Area selected: first
+event id:area onSelectionChange text=
+expect Area selected: nothing
+event id:own onSelectionChange text=Own
+expect Own selected: Own
+expect Own read: Own | **Own** | <p><strong>Own</strong></p>
+event id:own onSelectionChange text=
+expect Own read: nothing
+expect Area selected: nothing
+covers [events] onSelectionChange
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
@@ -724,9 +743,11 @@ tap text:ShareItem
 expect MailItem
 expect BackRow
 absent NewItem
+expect Log: share true triggerPress
 tap text:BackRow
 expect NewItem
 absent MailItem
+expect Log: share false cancel
 # A disabled one does not open.
 tap text:LockedItem
 absent HiddenItem
@@ -759,6 +780,7 @@ covers [props] MenuItem.closeOnSelect
 covers [events] MenuItem.onSelect
 covers [props] Submenu.trigger
 covers [props] Submenu.back
+covers [events] Submenu.onOpenChange
 # The context menu: a finger held on its trigger.
 touch start text:HoldArea 5 5
 wait 600
