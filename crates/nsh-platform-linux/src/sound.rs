@@ -199,8 +199,11 @@ pub(crate) fn decode(bytes: Vec<u8>, max: Duration) -> Result<Decoded, Failure> 
     let _ = pipeline.set_state(gst::State::Null);
     let missing = missing.lock().ok().and_then(|m| m.clone());
     let format = missing.as_deref().filter(|f| !f.is_empty());
+    // The bus's missing-plug-in error does not say which format: the
+    // decoder's `unknown-type` does.
     let (bytes, truncated) = match result {
         Ok(result) => result,
+        Err(Failure::Unsupported(_)) => return Err(unsupported(format)),
         Err(Failure::Other(_)) if missing.is_some() => return Err(unsupported(format)),
         Err(failure) => return Err(failure),
     };
