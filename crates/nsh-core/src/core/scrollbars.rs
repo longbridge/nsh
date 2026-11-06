@@ -182,6 +182,10 @@ impl<M: TextEngine> Core<M> {
         }
         self.decorated.retain(|&k| k != key);
         self.sticky_changed |= !input;
+        // The bar is a Rust component: its cleanup disposes its owner, so
+        // the runtime is entered as `make_scrollbar` does (a commit that
+        // drops the bar of a view still shown runs outside it).
+        let _entered = self.components.runtime.enter();
         self.release_instance(id);
         let _ = self.release(id);
     }

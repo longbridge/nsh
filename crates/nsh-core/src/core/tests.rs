@@ -25569,6 +25569,72 @@ mod built_in_scrollbars {
         assert!(c.key(bar).is_err());
         assert!(c.decorated.is_empty());
     }
+
+    thread_local! {
+        static BAR_CLEANED_UP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// A bar that notes when its owner is disposed.
+    #[derive(Default)]
+    struct NotingBar;
+
+    impl Component for NotingBar {
+        type Props = BarProps;
+        type Event = NoEvent;
+
+        fn view(_: BarProps, _: Scope<NoEvent>) -> impl IntoElement {
+            crate::element::cleanup(|| BAR_CLEANED_UP.set(true));
+            view().child(view().w(px(4.0)).h(px(20.0)))
+        }
+    }
+
+    fn noting_bars(of: &BuiltInScrollbar) -> Option<AnyElement> {
+        (!of.horizontal).then(|| NotingBar::element(BarProps {}).into_element())
+    }
+
+    #[test]
+    fn hiding_the_bar_of_a_shown_view_disposes_it() {
+        BAR_CLEANED_UP.set(false);
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(noting_bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some((noting_bars, crate::element::AnyValue::new(()))));
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        // The view stays: only its setting changes, in a commit of its own.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scrollbar(ScrollbarSetting::Hidden),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar))
+        );
+        assert!(BAR_CLEANED_UP.get(), "the bar's owner is disposed");
+    }
 }
 
 #[test]
