@@ -121,6 +121,33 @@ pub(crate) struct AppConfig {
     /// What macOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) macos: AppleConfig,
+    /// What Android packages set in their manifest.
+    #[serde(default)]
+    pub(crate) android: AndroidConfig,
+}
+
+/// `nsh.json` `"android"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AndroidConfig {
+    /// The API level the app targets (`targetSdkVersion`; default
+    /// [`android::DEFAULT_TARGET_SDK`]), which it also compiles against:
+    /// the SDK must have its platform.
+    ///
+    /// [`android::DEFAULT_TARGET_SDK`]: crate::android::DEFAULT_TARGET_SDK
+    pub(crate) target_sdk: Option<u32>,
+}
+
+impl AndroidConfig {
+    /// `targetSdk`, checked: no lower than the runtime's minimum.
+    pub(crate) fn target_sdk(&self) -> anyhow::Result<u32> {
+        use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
+        let level = self.target_sdk.unwrap_or(DEFAULT_TARGET_SDK);
+        if level < MIN_SDK {
+            bail!("nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 9)");
+        }
+        Ok(level)
+    }
 }
 
 /// `nsh.json` `"tui"`.
@@ -212,6 +239,8 @@ pub(crate) struct PackageOptions<'a> {
     ///
     /// [`android::DEFAULT_ABIS`]: crate::android::DEFAULT_ABIS
     pub(crate) abis: &'a [String],
+    /// Android: an APK or an App Bundle.
+    pub(crate) format: crate::android::Format,
     /// Install and launch in the simulator or on the device afterwards
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
@@ -321,6 +350,16 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     }
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
+    }
+    if options.format != crate::android::Format::Apk {
+        if options.target != PackageTarget::Android {
+            bail!("--format only applies to --target android");
+        }
+        if options.run {
+            bail!(
+                "--run installs an APK: drop --format aab, or install the bundle with bundletool"
+            );
+        }
     }
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
@@ -579,16 +618,20 @@ fn package_android(
         }
     };
     fs::create_dir_all(options.out)?;
-    let apk_path = options.out.join(format!("{name}.apk"));
+    let target_sdk = config.android.target_sdk()?;
+    let apk_path = options
+        .out
+        .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
-    android::build_apk(
+    android::build(
         &sdk,
         &Apk {
             package: id,
             label: name,
             version_name: version,
             version_code: config.build.unwrap_or(1),
+            target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
             notifications: config.notifications(),
@@ -600,6 +643,7 @@ fn package_android(
             assets,
             signing,
         },
+        options.format,
         &apk_path,
     )?;
     step.done(format!(
@@ -1216,6 +1260,25 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("x86_64"), "{error}");
+    }
+
+    #[test]
+    fn android_target_sdk_defaults_and_is_checked() {
+        let target = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .target_sdk()
+        };
+        assert_eq!(
+            target(serde_json::json!({})).unwrap(),
+            crate::android::DEFAULT_TARGET_SDK
+        );
+        assert_eq!(
+            target(serde_json::json!({ "android": { "targetSdk": 36 } })).unwrap(),
+            36
+        );
+        assert!(target(serde_json::json!({ "android": { "targetSdk": 21 } })).is_err());
     }
 
     #[test]
