@@ -27,7 +27,9 @@ function Insets() {
 }
 
 function App() {
-  const edges = signal<Edge[]>([...EDGES]);
+  // A phone held upright: the status bar and the home indicator. Two edges
+  // off show the toggles' off state beside the on one.
+  const edges = signal<Edge[]>(["top", "bottom"]);
   const toggle = (edge: Edge) => edges.update((list) => (list.includes(edge) ? list.filter((e) => e !== edge) : EDGES.filter((e) => e === edge || list.includes(e))));
   const label = () => ({ fontSize: 12, color: ui().muted });
   return (
