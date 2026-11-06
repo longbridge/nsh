@@ -1052,7 +1052,12 @@ fn handle(
         WM_SETFOCUS => crate::text_input::window_focus(surface, true),
         WM_KILLFOCUS => crate::text_input::window_focus(surface, false),
         WM_GETOBJECT => return crate::access::get_object(surface, hwnd, wparam, lparam),
-        WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+        // `WM_TIMECHANGE`: the time zone changed (`localeSettings()`).
+        WM_SETTINGCHANGE
+        | WM_THEMECHANGED
+        | WM_SYSCOLORCHANGE
+        | WM_DWMCOLORIZATIONCOLORCHANGED
+        | WM_TIMECHANGE => {
             crate::system::settings_changed(surface);
         }
         WM_ACTIVATEAPP => crate::system::app_activated(surface, wparam.0 != 0),

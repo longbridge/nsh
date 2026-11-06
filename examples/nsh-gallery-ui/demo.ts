@@ -8,6 +8,7 @@ import { buttonLabel, buttonLook, type ButtonKind, type ButtonLookOptions } from
 export { ui, tint } from "./palette";
 export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
 export { switchHitSlop, switchLook, type SwitchLook, type SwitchSize } from "./look/switch";
+export { toggleGlyph, toggleLabel, toggleLook, toggleSizes, toolbarRule, toolbarTrack, type ToggleDimensions, type ToggleLookOptions, type ToggleSize, type ToolbarTrackOptions } from "./look/tool";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
  * color over its surface, quieter than pressed and than selected. Leave it
@@ -42,8 +43,9 @@ export interface ButtonOptions {
   /** `sm`: the compact size (`buttonLook`'s `small`: 24 points with a
    * pointer, 36 on a touch screen). */
   size?: "md" | "sm";
-  /** Shown as chosen (`buttonLook`'s `selected`): what it opens is open, or
-   * it is the current one of a few. */
+  /** Shown as chosen (`buttonLook`'s `selected`): the trigger of what is
+   * open, or the current one of a few. Something on or off is a `Toggle`
+   * in `toggleLook`, not a button. */
   on?: boolean | (() => boolean);
   /** Disabled (pass the same value to the element's `disabled`): no hover
    * and no press feedback; dimmed to 40%. */
