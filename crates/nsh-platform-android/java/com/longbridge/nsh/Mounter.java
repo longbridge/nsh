@@ -1152,6 +1152,12 @@ final class Mounter {
             now.rotateY = to.rotateY;
             now.perspective = to.perspective;
             now.background = decor != null ? decor.fill : to.background;
+            // The frame's border colors are what the decor now carries; a
+            // fresh Dynamic's all-transparent array would have applyDynamic
+            // "restore" them to transparent every frame (an outlined view's
+            // border vanished after its first transition and never came
+            // back).
+            if (decor != null) System.arraycopy(decor.borderColors, 0, now.borderColors, 0, 4);
             applyDynamic(v, now);
             v.invalidate();
         });
