@@ -68,7 +68,7 @@ use nsh_core::{Command, EventKind, EventPayload, PayloadValue, WebProps, WebSour
 use nsh_engine::Access;
 use webkit6::{
     CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkError, NetworkSession,
-    PolicyDecisionType, PolicyError, ResponsePolicyDecision, UserContentInjectedFrames,
+    PolicyDecisionType, PolicyError, ResponsePolicyDecision, URIRequest, UserContentInjectedFrames,
     UserContentManager, UserScript, UserScriptInjectionTime, UserStyleLevel, UserStyleSheet,
     WebView, prelude::*,
 };
@@ -286,7 +286,7 @@ impl Drop for WebHost {
 }
 
 /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-/// `injectJavaScript()` and `postMessage()`.
+/// `injectJavaScript()`, `postMessage()` and `load()`.
 pub(super) fn command(web: &WebView, command: &Command) {
     let script = match command {
         Command::InjectJavaScript(js) => Some(js.clone()),
@@ -306,6 +306,17 @@ pub(super) fn command(web: &WebView, command: &Command) {
         (Command::GoBack, _) => web.go_back(),
         (Command::GoForward, _) => web.go_forward(),
         (Command::StopLoading, _) => web.stop_loading(),
+        (Command::Load(load), _) => {
+            // Only this request carries the headers; WebKit makes its
+            // subresources' and later navigations' requests itself.
+            let request = URIRequest::new(&load.src);
+            if let Some(headers) = request.http_headers() {
+                for (name, value) in &load.headers {
+                    headers.append(name, value);
+                }
+            }
+            web.load_request(&request);
+        }
         _ => {}
     }
 }

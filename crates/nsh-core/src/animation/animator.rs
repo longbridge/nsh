@@ -171,6 +171,12 @@ impl Animator {
         self.graph.deadline(now)
     }
 
+    /// The highest frame rate the graph's running animations need
+    /// ([`Graph::frame_rate`]): `None`, the screen's highest.
+    pub fn frame_rate(&self) -> Option<f32> {
+        self.graph.frame_rate()
+    }
+
     /// True while an animation that ends by itself runs, not one looping
     /// forever ([`Graph::is_finishing`]): what a test's step waits for.
     pub fn finishing(&self) -> bool {

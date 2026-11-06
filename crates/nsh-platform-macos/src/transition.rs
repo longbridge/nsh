@@ -99,7 +99,16 @@ fn animate(surface: &Rc<Surface>, view: &NshView, f: impl FnOnce(&mut Live)) {
     };
     if start {
         let view = view.clone();
-        surface.add_frame_callback(move |_, now| tick(&view, now * 1000.0));
+        surface.add_frame_callback(move |surface, now| {
+            let next = tick(&view, now * 1000.0);
+            // A keyframe animation alone on the view may need fewer frames.
+            if !matches!(next, Next::Done)
+                && let Some(hz) = view.state().live.as_ref().and_then(|l| l.frame_rate())
+            {
+                surface.cap_frame(hz);
+            }
+            next
+        });
     }
 }
 

@@ -369,6 +369,7 @@ fn spring(stiffness: f32, damping: f32) -> Spring {
         damping,
         mass: 1.0,
         velocity: None,
+        frame_rate: None,
     }
 }
 

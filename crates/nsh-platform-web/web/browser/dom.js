@@ -6,7 +6,7 @@ export function createDom(invoke, values, reactive, live, wake) {
   const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap();
   let touches, measure, hot, platform;
   const prototype = Object.create(null);
-  for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "sendInput", "seek"]) {
+  for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "sendInput", "load", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
   }
   prototype.setSelection = function (start, end = start) { return call(314, [values.nodeIds.get(this), "setSelection", { start: Number(start), end: Number(end) }]); };
