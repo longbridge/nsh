@@ -1336,6 +1336,49 @@ impl Screen {
             .then_some((view.parent?, view.frame.center()))
     }
 
+    /// The view that takes a pointer at `at` (in the root) instead of
+    /// `target`: one drawn over it there, neither in it nor around it.
+    /// `None` when the pointer reaches `target` (or a view in it), only
+    /// views around it (a target scrolled out of view or of no size, which
+    /// a press still reaches as before), or a view that handles presses or
+    /// touches itself.
+    pub(crate) fn covering(&self, target: NodeId, at: Point<Points>) -> Option<NodeId> {
+        let hit = self.hit_pointer(at);
+        let reaches = hit == target || self.is_inside(hit, target) || self.is_inside(target, hit);
+        if reaches {
+            return None;
+        }
+        // A view over the target that hears presses or touches itself (a
+        // data table's or an editor's input layer) takes the press and
+        // places it as the app wants; only one that hears neither swallows
+        // it.
+        let mut id = hit;
+        loop {
+            if id == target || self.is_inside(target, id) {
+                return Some(hit);
+            }
+            if self.hears(id, EventKind::Press) || self.hears(id, EventKind::Touch) {
+                return None;
+            }
+            id = self.nodes.get(&id).and_then(|v| v.parent)?;
+        }
+    }
+
+    /// `id` as a selector a test would write: its test id, else the first
+    /// text in it, else `view:<id>`.
+    pub(crate) fn selector_of(&self, id: NodeId) -> String {
+        if let Some(test_id) = self.nodes.get(&id).and_then(|v| v.test_id.as_deref()) {
+            return format!("`id:{test_id}`");
+        }
+        match self
+            .down_to(id, |v| v.text.is_some())
+            .and_then(|t| self.nodes.get(&t)?.text.as_deref())
+        {
+            Some(text) => format!("`{}`", text.trim()),
+            None => format!("`view:{id}`"),
+        }
+    }
+
     /// The view a pointer at `at` (in the root) reaches: the topmost,
     /// innermost one there that receives touches. Canvas nodes are not views.
     fn hit_pointer(&self, at: Point<Points>) -> NodeId {
