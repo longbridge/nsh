@@ -393,7 +393,10 @@ impl NativeComponent for KeyLog {
             div()
                 .size_full()
                 .track_focus(&focus)
-                .on_key_down(move |e, _, _| keys.borrow_mut().push(e.keystroke.unparse()))
+                .on_key_down(move |e, _, cx| {
+                    keys.borrow_mut()
+                        .push(e.keystroke.unparse(cx.platform_info().os))
+                })
                 .into_any_element(),
         )
     }
@@ -495,7 +498,12 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
     // GPUI's test window sends no releases. K's release reaches the keymap
     // while the component has the focus, so the next Ctrl+K is not a repeat.
     cx.simulate_event(gpui::KeyUpEvent {
-        keystroke: gpui::Keystroke::parse(&format!("{primary}-k")).unwrap(),
+        keystroke: gpui::Keystroke::parse(if cfg!(target_os = "macos") {
+            "cmd-k"
+        } else {
+            "ctrl-k"
+        })
+        .unwrap(),
     });
     cx.simulate_keystrokes(&format!("{primary}-k shift-{primary}-n"));
     assert_eq!(
