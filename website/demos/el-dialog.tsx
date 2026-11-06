@@ -1,9 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, Dialog, Switch } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, Stage, tint, ui, wide } from "./palette";
+import { button, buttonText, desktop, Inspector, Panel, Stage, switchLook, tint, ui, wide } from "./palette";
 
-const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`;
-const thumb = desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5";
 
 function App() {
   const card = signal(false);
@@ -27,10 +25,7 @@ function App() {
       onChange={({ checked }) => backdropCloses.set(checked)}
       class={wide() ? "flex-row items-center gap-2 self-center active:opacity-70" : "flex-row items-center gap-3 rounded-xl p-3 active:opacity-70"}
       style={wide() ? undefined : ui().row}
-      trackClass={track}
-      trackStyle={backdropCloses() ? ui().accentFill : ui().inset}
-      thumbClass={thumb}
-      thumbStyle={backdropCloses() ? { backgroundColor: ui().onAccent } : ui().raised}
+      {...switchLook(() => backdropCloses())}
     >
       <Text style={{ color: ui().text, flex: wide() ? undefined : 1, fontSize: desktop ? 13 : undefined }}>closeOnBackdropPress {String(backdropCloses())}</Text>
     </Switch>
