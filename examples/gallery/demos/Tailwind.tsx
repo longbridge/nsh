@@ -15,11 +15,11 @@ const photo = "https://pbs.twimg.com/media/HS6UGjvXkAAyHtp?format=jpg&name=small
 
 /** The finishes of ui.tsx (`finishes.json`) as classes: a flat fill, a highlight along the top edge, a soft shadow. */
 const finish = {
-  card: "bg-card shadow-[0_1px_0_rgba(20,20,10,0.04)] dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]",
-  inset: "inset-shadow-[0_1px_1px_rgba(20,20,10,0.03)] dark:inset-shadow-[0_1px_1px_rgba(0,0,0,0.2)]",
+  card: "bg-card shadow-[0_1px_0_rgba(10,15,25,0.04)] dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+  inset: "inset-shadow-[0_1px_1px_rgba(10,15,25,0.03)] dark:inset-shadow-[0_1px_1px_rgba(0,0,0,0.2)]",
   raised:
-    "bg-[#f5f5f1] border-[#cdcdc5] inset-shadow-[0_1px_0_#ffffff] shadow-[0_1px_0_rgba(20,20,10,0.05)] " +
-    "dark:bg-[#38393d] dark:border-[rgba(0,0,0,0.5)] dark:inset-shadow-[0_1px_1px_rgba(255,255,255,0.08)] dark:shadow-[0_1px_1px_rgba(0,0,0,0.12)]",
+    "bg-[#f3f4f7] border-[#cacbcd] inset-shadow-[0_1px_0_#ffffff] shadow-[0_1px_0_rgba(10,15,25,0.05)] " +
+    "dark:bg-[#33353b] dark:border-[rgba(0,0,0,0.5)] dark:inset-shadow-[0_1px_1px_rgba(255,255,255,0.08)] dark:shadow-[0_1px_1px_rgba(0,0,0,0.12)]",
   light:
     "bg-[#c6ef6a] border-[#9cc43a] inset-shadow-[0_1px_0_rgba(255,255,255,0.55)] shadow-[0_1px_0_rgba(60,90,0,0.14)] " +
     "dark:bg-[#c4ec6a] dark:border-[rgba(40,60,0,0.55)] dark:inset-shadow-[0_1px_1px_rgba(255,255,255,0.35)] dark:shadow-[0_1px_1px_rgba(0,0,0,0.12)]",

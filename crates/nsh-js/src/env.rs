@@ -1,7 +1,8 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, lifecycle, the desktop window's
-//! state and the displays) written when the platform reports a
+//! reduced motion, pixel ratio, locale, locale settings, lifecycle, the
+//! desktop window's state and the displays)
+//! written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -46,11 +47,12 @@ enum Part {
     TitleBar,
     Locale,
     Lifecycle,
+    LocaleSettings,
     WindowState,
     Displays,
 }
 
-const PARTS: usize = 13;
+const PARTS: usize = 14;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -382,6 +384,37 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
+    if changed(&|p| p.locale_settings == next.locale_settings) {
+        let settings = &next.locale_settings;
+        let mut tags: Vec<JsValue> = settings
+            .languages
+            .iter()
+            .map(|l| string(cx, l.as_str()))
+            .collect();
+        // SAFETY: the array takes the strings.
+        let languages = unsafe { qjs::JS_NewArrayFrom(cx, tags.len() as c_int, tags.as_mut_ptr()) };
+        let first_day_of_week = f32::from(settings.first_day_of_week.number());
+        writes.push((
+            Part::LocaleSettings,
+            object(
+                cx,
+                &[
+                    (c"languages", languages),
+                    (c"timeZone", string(cx, settings.time_zone.as_str())),
+                    (c"hourCycle", string(cx, settings.hour_cycle.name())),
+                    (c"firstDayOfWeek", number(first_day_of_week)),
+                    (
+                        c"measurementSystem",
+                        string(cx, settings.measurement_system.name()),
+                    ),
+                    (
+                        c"temperatureUnit",
+                        string(cx, settings.temperature_unit.name()),
+                    ),
+                ],
+            ),
+        ));
+    }
     if changed(&|p| p.screen_reader == next.screen_reader) {
         writes.push((Part::ScreenReader, boolean(next.screen_reader)));
     }
@@ -467,6 +500,17 @@ pub(crate) fn current(cx: *mut JsContext) -> Environment {
 /// applies to what is formatted next.
 pub(crate) fn locale(cx: *mut JsContext) -> nsh_core::platform::Locale {
     current(cx).locale
+}
+
+/// The device's time zone (`Intl`'s default, `localeSettings().timeZone`),
+/// read where it is used as the locale is; `None` until the platform
+/// reports one.
+pub(crate) fn time_zone(cx: *mut JsContext) -> Option<nsh_core::platform::TimeZone> {
+    env(cx)
+        .current
+        .borrow()
+        .as_ref()
+        .map(|e| e.locale_settings.time_zone)
 }
 
 /// `safeAreaInsets()`: the insets of the nearest screen or modal (an
@@ -684,6 +728,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "localeSettings",
+        Export::Value(|cx| accessor(cx, Part::LocaleSettings)),
+        Ts::value(
+            "The user's locale settings beside the locale (reactive): the preferred\nlanguages, the device's time zone and the regional preferences, the\nsystem's settings, which change together. Their names and values are\n`Intl`'s, so they pass into its options as they are\n(`new Intl.DateTimeFormat(locale(), { timeZone, hourCycle })`). Read the\none a view shows in a `computed` to follow only it. In headless tests they\nare the locale's (it alone as the languages, its region's preferences)\nin UTC, unless `open` sets `localeSettings`.",
+            "Accessor<LocaleSettings>",
+        ),
+    ),
+    (
         "lifecycle",
         Export::Value(|cx| accessor(cx, Part::Lifecycle)),
         Ts::value(
@@ -718,6 +770,40 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+}
+
+/** The user's locale settings beside the locale (`localeSettings()`). */
+export interface LocaleSettings {
+  /** The preferred languages as BCP 47 tags, most preferred first: the
+   * system's list (`["de-DE", "en-US"]`), with the embedding app's own
+   * language first when it sets one. Show the app's text in the first it
+   * has, the others are its fallbacks. */
+  readonly languages: readonly string[];
+  /** The device's time zone as the system names it: an IANA name
+   * (`"Europe/Berlin"`, `"America/New_York"`), `"UTC"`, or an offset zone
+   * where the system has one (`"GMT+01:00"` on Android). It changes with the
+   * system's setting, as the user travels; `Intl` formats local time in it. */
+  readonly timeZone: string;
+  /** 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"`
+   * (`12:30 PM`), `"h23"` (`00:30`), and the rarer `"h11"` (`0:30 PM`) and
+   * `"h24"` (`24:30`). The system's setting, else the region's; pass it as
+   * `Intl.DateTimeFormat`'s `hourCycle` to write times as the user reads
+   * them. `TimeField`'s and `DatePicker`'s `hourCycle` is `"h12"` for
+   * `"h11"` and `"h12"`, `"h23"` for the others. */
+  readonly hourCycle: "h11" | "h12" | "h23" | "h24";
+  /** The day weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s
+   * `firstDay`): 1 for Monday to 7 for Sunday. A calendar's first column.
+   * The system's setting, else the region's (7 in the US, 1 in Germany).
+   * `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for
+   * Sunday: pass `firstDayOfWeek % 7`. */
+  readonly firstDayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  /** The units of lengths, weights and volumes: `"metric"`, `"us"` (feet,
+   * miles, pounds, gallons) or `"uk"` (metric, with miles and pints). The
+   * system's setting, else the region's. */
+  readonly measurementSystem: "metric" | "us" | "uk";
+  /** The unit of temperatures: `"celsius"` or `"fahrenheit"`. The system's
+   * setting, else the region's. */
+  readonly temperatureUnit: "celsius" | "fahrenheit";
 }
 
 export interface PlatformInfo {

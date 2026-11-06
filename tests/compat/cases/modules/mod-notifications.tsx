@@ -1,9 +1,9 @@
 // A case of the API's test suite (docs/dev/compatibility.md):
 // `Notifications` on the headless runtime, where nothing shows them:
 // `permission()` and `requestPermission()` resolve "unavailable", `show`
-// resolves false, `setBadge` and `close` resolve, `on` returns a function
-// that stops listening. An empty `id` and a badge that is not a whole number
-// reject with a `RangeError`. Its script checks each.
+// resolves false (a `silent` one too), `setBadge` and `close` resolve, `on`
+// returns a function that stops listening. An empty `id` and a badge that is
+// not a whole number reject with a `RangeError`. Its script checks each.
 import { Notifications, Text, View, signal } from "nsh";
 
 function App() {
@@ -28,7 +28,9 @@ function App() {
           const empty = await Notifications.show({ id: "", title: "T" }).catch((e: Error) => e.name);
           const count = await Notifications.setBadge(1.5).catch((e: Error) => e.name);
           refused.set(`${empty} ${count}`);
-          shown.set(String(await Notifications.show({ id: "a", title: "T", body: "B" })));
+          const loud = await Notifications.show({ id: "a", title: "T", body: "B" });
+          const quiet = await Notifications.show({ id: "b", title: "T", silent: true });
+          shown.set(`${loud} ${quiet}`);
         }}
       >
         <Text>Notify</Text>

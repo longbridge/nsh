@@ -77,21 +77,9 @@ fn has_extension(path: &Path, extensions: &[&str]) -> bool {
         .is_some_and(|e| extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-/// The family name a font registers under: the typographic family (name
-/// 16) when present, else the legacy family (name 1). A WOFF or WOFF2 font
-/// is read from what it holds.
+/// The family name a font registers under ([`nsh_core::font_family`]).
 fn font_family(data: &[u8]) -> Result<String, String> {
-    let data = nsh_core::font_data(data)?;
-    let face = ttf_parser::Face::parse(&data, 0).map_err(|e| e.to_string())?;
-    let name = |id| {
-        face.names()
-            .into_iter()
-            .filter(|n| n.name_id == id && n.is_unicode())
-            .find_map(|n| n.to_string())
-    };
-    name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
-        .or_else(|| name(ttf_parser::name_id::FAMILY))
-        .ok_or_else(|| "the font has no family name".to_owned())
+    nsh_core::font_family(data)
 }
 
 /// An SVG imported as `rel`: its size in points, as the native backends

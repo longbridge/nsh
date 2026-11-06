@@ -854,17 +854,17 @@ const toggle = () => {
 
 ## Device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density, leaving the app and coming back).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `locale_settings()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the locale settings and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size, the language or the region's settings, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Lifecycle, Os},
-    prelude::*, // window, dark, font_scale, locale, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
+    platform::{Appearance, HourCycle, Idiom, Lifecycle, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday},
+    prelude::*, // window, dark, font_scale, locale, locale_settings, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { colorScheme, fontScale, lifecycle, locale, localeSettings, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -922,6 +922,53 @@ const locale: Accessor<string>;
 ```
 
 The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. Rust: `locale() -> Locale` (`locale().as_str()` is the tag). `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
+
+### localeSettings
+
+```ts
+const localeSettings: Accessor<LocaleSettings>;
+
+interface LocaleSettings {
+  readonly languages: readonly string[];
+  readonly timeZone: string;
+  readonly hourCycle: "h11" | "h12" | "h23" | "h24";
+  readonly firstDayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  readonly measurementSystem: "metric" | "us" | "uk";
+  readonly temperatureUnit: "celsius" | "fahrenheit";
+}
+```
+
+The user's locale settings beside the locale: what the systems keep with the language and region and change
+together. Reactive: it changes when any of them does; read one of them in a `computed` to follow it alone. Rust:
+`locale_settings() -> LocaleSettings`, with the same fields in snake case (`languages`, `time_zone`, `hour_cycle`,
+`first_day_of_week`, `measurement_system`, `temperature_unit`). The names and values are `Intl`'s, so they pass into its
+options as they are ([Device and environment](../docs/device-and-environment.md#locale-settings)):
+
+- `languages`: the preferred languages as BCP 47 tags, most preferred first (`["de-DE", "en-US"]`): the system's list,
+  with the embedding app's own language first when it sets one. Never empty. Show the app's text in the first of them
+  it has a translation for: the others are its fallbacks. `locale()` is the region format, which can differ (English
+  text, German dates). Rust: `Languages` (`iter()`, `first()`, `as_slice()`, each a `Locale`).
+- `timeZone`: the device's time zone as the system names it: an IANA name (`"Europe/Berlin"`, `"America/New_York"`),
+  `"UTC"`, or an offset zone where the system has one (`"GMT+01:00"` on Android). It changes with the system's setting,
+  as when the user travels. `Date`'s local times follow the system's zone, and `Intl` names it the same
+  (`Intl.DateTimeFormat().resolvedOptions().timeZone`); read the name to show it, to store it with a date or to give it
+  to a time zone library. Rust: `TimeZone` (`as_str()` is the name).
+- `hourCycle`: 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"` (`12:30 PM`), `"h23"` (`00:30`), and the
+  rarer `"h11"` (`0:30 PM`) and `"h24"` (`24:30`). The system's setting, else the region's. `Intl` writes times in the
+  locale's own hour cycle: pass it as its `hourCycle` option to write them as the user reads them. `TimeField`'s and
+  `DatePicker`'s `hourCycle` is `"h12"` for `"h11"` and `"h12"`, `"h23"` for the others. Rust: `HourCycle`
+  (`twelve_hour()` for AM and PM).
+- `firstDayOfWeek`: the day weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s `firstDay`): 1 for Monday to
+  7 for Sunday. A calendar's first column. The system's setting, else the region's (7 in the US, 1 in Germany, 6 in
+  Egypt). `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for Sunday: pass `firstDayOfWeek % 7`. Rust:
+  `Weekday` (`number()`).
+- `measurementSystem`: the units of lengths, weights and volumes: `"metric"`, `"us"` (feet, miles, pounds, gallons) or
+  `"uk"` (metric, with miles and pints). The system's setting, else the region's. Rust: `MeasurementSystem`.
+- `temperatureUnit`: the unit of temperatures: `"celsius"` or `"fahrenheit"`. The system's setting, else the region's
+  (Fahrenheit in the US and a few others). Rust: `TemperatureUnit`.
+
+Headless tests have the locale's (it alone as the languages, its region's preferences) in UTC, unless `open` sets
+`localeSettings`; their local times stay the machine's.
 
 ### lifecycle
 
@@ -1117,6 +1164,18 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 
 - Safe area insets (Rust `safe_area()`; TSX `safeArea()`, `safeAreaInsets()`) and the software keyboard (Rust `keyboard_height()`; TSX `keyboardFrame()`) are in [Safe area and keyboard](#safe-area-and-keyboard).
 - Screen reader and reduced motion settings are in [Accessibility](#accessibility).
+
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
+```
+
+Registers a font while the app runs and resolves with `{ family }`, its family name, for `fontFamily`: a font the app downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data, or the URL of one (a file of the app's, `asset:/...`, or one on the network, read as `fetch` reads it: the `network` capability applies). Text that names the family is laid out with it from then on, and text shown before again. When the `network` capability does not grant the URL, or a URL it redirects to, it rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"network"` and `resource` the URL refused, as `fetch` does; it rejects with an `Error` when the URL does not load or the data is no font. Rust: `register_font(data) -> Answer<Result<String, String>>`, awaited in a task. Fonts the app ships are registered before the first frame instead ([Fonts](../docs/fonts.md#registering-a-font-while-the-app-runs)).
 
 ## PanResponder
 
@@ -1830,6 +1889,15 @@ Rust code calls `request_notification_permission`, `show_notification`, `close_n
 `show` resolves with whether the system took the notification, which it does not without the permission. A notification
 shows while the app is in front as it does behind it. Showing another with the same `id` replaces it, and
 `Notifications.close(id)` removes it.
+
+`silent: true` shows it without a sound or vibration, as the web's `Notification` does; by default it plays the
+system's sound. Apple platforms show it with no sound, Android in a group that does not alert (no sound, vibration or
+pop-up banner), Windows with a silent toast, Linux with the daemon's `suppress-sound` hint, and the web passes `silent`
+to the browser.
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
 
 ### Notifications.on
 
