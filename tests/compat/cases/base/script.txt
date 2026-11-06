@@ -623,6 +623,7 @@ style text:"Styled paragraph." userSelect text
 expect Plain: a b
 expect Parsed: 1 paragraph
 expect Extended: text,custom
+expect CJK emphasis: strong,text
 expect Math off: Math $x$
 expect From HTML: Hi there
 covers [nsh/base] TextView

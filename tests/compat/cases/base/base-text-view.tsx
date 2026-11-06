@@ -11,7 +11,8 @@
 // code blocks' actions (`codeBlockActions`, the built-in copy and one of
 // the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
 // images' presses (`onImagePress`), and the static functions
-// (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`). Each
+// (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`; emphasis
+// beside CJK text read by the CJK-friendly rule). Each
 // document's texts are its own, so the script finds them. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
@@ -62,6 +63,8 @@ function App() {
   const parsed = TextView.parse("**a** b");
   const first = parsed.blocks[0];
   const extended = TextView.parse("Hi @x", { math: false }, [{ name: "m", pattern: "@(\\w+)" }]).blocks[0];
+  // Emphasis beside CJK text: strong up to the full-width colon.
+  const cjk = TextView.parse("**涨幅：**5%").blocks[0];
   return (
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <TextView
@@ -122,6 +125,7 @@ function App() {
       <Text>{`Plain: ${TextView.plainText(parsed)}`}</Text>
       <Text>{`Parsed: ${parsed.blocks.length} ${first.type}`}</Text>
       <Text>{`Extended: ${extended.type === "paragraph" ? extended.content.map((i) => i.type).join(",") : extended.type}`}</Text>
+      <Text>{`CJK emphasis: ${cjk.type === "paragraph" ? cjk.content.map((i) => i.type).join(",") : cjk.type}`}</Text>
       <Text>{`Math off: ${TextView.plainText(TextView.parse("Math $x$", { math: false }))}`}</Text>
       <Text>{`From HTML: ${TextView.plainText(TextView.parseHtml("<p>Hi <i>there</i></p>"))}`}</Text>
     </View>
