@@ -2276,12 +2276,35 @@ impl<M: TextEngine> Core<M> {
         if std::mem::take(&mut self.tree_order_changed) {
             let mut order = Vec::new();
             let mut pending = vec![self.root];
+            let mut cells = Vec::new();
             while let Some(key) = pending.pop() {
                 let node = &self.nodes[key as usize];
                 if node.created {
                     order.push(node.id);
                 }
-                pending.extend(node.children.iter().rev().copied());
+                match &node.list {
+                    // A list recycles its cells, so they are not in their
+                    // rows' order among its children: they go as they are
+                    // on screen, along the list's axis, then across it.
+                    Some(list) if node.children.len() > 1 => {
+                        cells.clear();
+                        cells.extend_from_slice(&node.children);
+                        let start = |k: &Key| {
+                            let at = self.nodes[*k as usize].frame.origin;
+                            if list.horizontal {
+                                (at.x.0, at.y.0)
+                            } else {
+                                (at.y.0, at.x.0)
+                            }
+                        };
+                        cells.sort_by(|a, b| {
+                            let (a, b) = (start(a), start(b));
+                            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+                        });
+                        pending.extend(cells.iter().rev().copied());
+                    }
+                    _ => pending.extend(node.children.iter().rev().copied()),
+                }
             }
             self.mount.push(MountItem::TreeOrder(order));
         }
@@ -7417,6 +7440,14 @@ impl<M: TextEngine> Core<M> {
                 ));
             }
             self.mount.push(MountItem::Frame { id, frame });
+            let node = &self.nodes[key as usize];
+            // A list's cell moved: the logical order goes by where cells are.
+            if self.track_tree_order
+                && node.parent != NO_KEY
+                && self.nodes[node.parent as usize].list.is_some()
+            {
+                self.tree_order_changed = true;
+            }
             let node = &self.nodes[key as usize];
             // Translations by a fraction of the size follow it, and so does
             // the perspective of its parent, seen from the parent's center.
