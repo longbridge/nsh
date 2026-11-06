@@ -125,7 +125,7 @@ pub(crate) fn attach(surface: &Rc<Surface>) {
     // itself at `WM_NCDESTROY`.
     unsafe {
         let window = GetAncestor(surface.hwnd(), GA_ROOT);
-        let _ = SetPropW(window, &property, Some(HANDLE(1 as *mut _)));
+        let _ = SetPropW(window, &property, Some(HANDLE(std::ptr::dangling_mut())));
         let _ = SetWindowSubclass(window, Some(link_proc), SUBCLASS, 0);
     }
     if let Some(url) = LAUNCH.with(|l| l.borrow_mut().take()) {
