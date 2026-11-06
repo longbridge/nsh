@@ -143,10 +143,6 @@ pub struct HostOptions {
     /// resolve against: the page's on the web. `None` (native hosts):
     /// they are invalid, as there is no document they belong to.
     pub base_url: Option<String>,
-    /// A deterministic seed for `Math.random` (a test's): its draws are a
-    /// pure function of the seed and how many came before. `None`: the
-    /// VM's own entropy.
-    pub seed: Option<u64>,
 }
 
 impl Host {
@@ -195,17 +191,6 @@ impl Host {
             crate::standard::install(&cx)?;
             // Before hardening freezes the globals.
             crate::clock::install(&cx)?;
-            if let Some(seed) = options.seed {
-                // A seeded Math.random (mulberry32 over the seed): same
-                // seed, same draws, in order — a test's determinism seam.
-                let _: rquickjs::Value<'_> = cx.eval(format!(
-                    "(() => {{ let s = {seed} >>> 0; \
-                     Math.random = () => {{ s = (s + 0x6D2B79F5) >>> 0; \
-                     let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); \
-                     t ^= t + Math.imul(t ^ (t >>> 7), t | 61); \
-                     return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }}; }})()"
-                ))?;
-            }
             if options.harden {
                 sandbox::harden(&cx)?;
             }
@@ -2212,26 +2197,6 @@ const report = (v) => text(String(v));
                 .unwrap();
             assert_eq!(summary, "hi true image.png image/png 6 file:///tmp/a.txt");
         });
-    }
-
-    #[test]
-    fn seeded_math_random_is_the_same_sequence_twice() {
-        let draws = |seed: u64| -> Vec<f64> {
-            let host = Host::with_options(HostOptions {
-                seed: Some(seed),
-                ..Default::default()
-            })
-            .unwrap();
-            host.cx.with(|cx| {
-                let text: String = cx
-                    .eval("Array.from({length: 4}, () => Math.random()).join(',')")
-                    .unwrap();
-                text.split(',').map(|v| v.parse().unwrap()).collect()
-            })
-        };
-        assert_eq!(draws(7), draws(7));
-        assert_ne!(draws(7), draws(8));
-        assert!(draws(7).iter().all(|v| (0.0..1.0).contains(v)));
     }
 
     #[test]

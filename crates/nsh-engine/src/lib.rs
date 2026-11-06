@@ -827,9 +827,6 @@ pub struct EngineConfig {
     /// moves (`nsh_core::time::Clock::manual`), which its timers, frames
     /// and `Date` follow.
     pub clock: Clock,
-    /// A deterministic seed for the JS VM's `Math.random` (a test's);
-    /// `None`: the VM's own entropy. Rust apps have no `Math` and ignore it.
-    pub seed: Option<u64>,
     /// What the host gives this engine's Rust code, which its UI sets'
     /// functions and components read while it runs them
     /// (`nsh_core::element::engine_context`): a host serving several engines
@@ -944,7 +941,6 @@ impl EngineConfig {
             cache: CacheOptions::off(),
             storage: None,
             clock: Clock::system(),
-            seed: None,
             context: EngineContext::default(),
             pinned: EnvironmentPins::default(),
             clipboard: None,
@@ -1001,7 +997,6 @@ impl std::fmt::Debug for EngineConfig {
             .field("limits", &self.limits)
             .field("ui_sets", &self.ui_sets)
             .field("clock", &self.clock)
-            .field("seed", &self.seed)
             .field("context", &self.context)
             .field("pinned", &self.pinned)
             .field("clipboard", &self.clipboard.is_some())
@@ -1806,7 +1801,6 @@ impl<M: TextEngine + 'static> Driver<M> {
                             let _ = system_tx.send(Message::Wake);
                         }),
                         host: Rc::new(host_bridge),
-                        seed: config.seed,
                     }
                 };
                 #[cfg(not(any(

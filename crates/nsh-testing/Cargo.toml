@@ -63,8 +63,3 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 name = "testing"
 # It builds a test file's app in this process.
 required-features = ["bundle"]
-
-[[test]]
-name = "hit_seam"
-# It builds its app's TSX in this process (`tsx`).
-required-features = ["bundle"]

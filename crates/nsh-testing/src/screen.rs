@@ -166,13 +166,6 @@ pub struct Screen {
     next_canvas_node: NodeId,
 }
 
-/// Whether a pointer skips `view` and everything in it: it is hidden or
-/// takes no pointer (`pointer-events: none`). The hit walk
-/// ([`Screen::hit`]) and [`Screen::is_interactive`] share it.
-fn skips_pointer(view: &View) -> bool {
-    view.hidden || view.pointer_events == PointerEvents::None
-}
-
 #[derive(Debug, Default)]
 struct View {
     kind: Option<ViewKind>,
@@ -1343,6 +1336,49 @@ impl Screen {
             .then_some((view.parent?, view.frame.center()))
     }
 
+    /// The view that takes a pointer at `at` (in the root) instead of
+    /// `target`: one drawn over it there, neither in it nor around it.
+    /// `None` when the pointer reaches `target` (or a view in it), only
+    /// views around it (a target scrolled out of view or of no size, which
+    /// a press still reaches as before), or a view that handles presses or
+    /// touches itself.
+    pub(crate) fn covering(&self, target: NodeId, at: Point<Points>) -> Option<NodeId> {
+        let hit = self.hit_pointer(at);
+        let reaches = hit == target || self.is_inside(hit, target) || self.is_inside(target, hit);
+        if reaches {
+            return None;
+        }
+        // A view over the target that hears presses or touches itself (a
+        // data table's or an editor's input layer) takes the press and
+        // places it as the app wants; only one that hears neither swallows
+        // it.
+        let mut id = hit;
+        loop {
+            if id == target || self.is_inside(target, id) {
+                return Some(hit);
+            }
+            if self.hears(id, EventKind::Press) || self.hears(id, EventKind::Touch) {
+                return None;
+            }
+            id = self.nodes.get(&id).and_then(|v| v.parent)?;
+        }
+    }
+
+    /// `id` as a selector a test would write: its test id, else the first
+    /// text in it, else `view:<id>`.
+    pub(crate) fn selector_of(&self, id: NodeId) -> String {
+        if let Some(test_id) = self.nodes.get(&id).and_then(|v| v.test_id.as_deref()) {
+            return format!("`id:{test_id}`");
+        }
+        match self
+            .down_to(id, |v| v.text.is_some())
+            .and_then(|t| self.nodes.get(&t)?.text.as_deref())
+        {
+            Some(text) => format!("`{}`", text.trim()),
+            None => format!("`view:{id}`"),
+        }
+    }
+
     /// The view a pointer at `at` (in the root) reaches: the topmost,
     /// innermost one there that receives touches. Canvas nodes are not views.
     fn hit_pointer(&self, at: Point<Points>) -> NodeId {
@@ -1353,7 +1389,7 @@ impl Screen {
     fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
         let view = self.nodes.get(&id);
         let receives = view.map_or(PointerEvents::Auto, |v| v.pointer_events);
-        if view.is_some_and(skips_pointer) {
+        if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
             return None;
         }
         let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
@@ -1645,33 +1681,6 @@ impl Screen {
     /// View `id`'s bounds in the root's points: its frame moved by those
     /// of the views around it and the offsets of the scroll views around
     /// it (transforms aside).
-    /// The view a pointer at `at` (the root's points) lands on: the topmost
-    /// shown view there, or `None` when nothing is. Side-effect free: the
-    /// same walk a press takes ([`Self::hit_pointer`]), without the press.
-    pub fn hit(&self, at: Point<Points>) -> Option<NodeId> {
-        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
-        self.hit_in(ROOT, at, &attached).filter(|&id| id != ROOT)
-    }
-
-    /// View `id`'s bounds in the root's points ([`Self::bounds_in_root`]).
-    pub fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
-        self.bounds_in_root(id)
-    }
-
-    /// Whether `id` takes pointer input: it or its nearest pressable
-    /// ancestor hears presses, no view on the way is disabled, and neither
-    /// it nor any view around it is one the hit walk skips with all it
-    /// holds (hidden, or `pointer-events: none`).
-    pub fn is_interactive(&self, id: NodeId) -> bool {
-        if !self.nodes.contains_key(&id) || self.up_to(id, skips_pointer).is_some() {
-            return false;
-        }
-        let Some(target) = self.up_to(id, |v| v.events.contains(EventKind::Press)) else {
-            return false;
-        };
-        !self.disabled_from(id, Some(target))
-    }
-
     pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
         if let Some((text, ..)) = self.span(id) {
             return self.bounds_in_root(text);
@@ -2274,113 +2283,5 @@ mod tests {
         screen.apply(&batch(vec![linked(Vec::new())]));
         assert_eq!(pick(&screen, "Privacy"), Pick::None);
         assert_eq!(screen.span(102), None);
-    }
-
-    /// A walkthrough-shaped tree for the hit seam: a container, a pressable
-    /// Resume button in it, and optionally an overlay over both.
-    fn walk_screen(overlay: bool, button_size: (f32, f32)) -> Screen {
-        let mut screen = Screen::default();
-        let mut items = vec![
-            create(2, ViewKind::View),
-            create(4, ViewKind::View),
-            frame(2, 0.0, 0.0, 400.0, 300.0),
-            frame(4, 10.0, 10.0, button_size.0, button_size.1),
-            insert(1, 2),
-            insert(2, 4),
-        ];
-        if overlay {
-            items.extend([
-                create(6, ViewKind::View),
-                frame(6, 0.0, 0.0, 400.0, 300.0),
-                insert(2, 6),
-            ]);
-        }
-        screen.apply(&batch(items));
-        screen
-            .nodes
-            .get_mut(&4)
-            .unwrap()
-            .events
-            .set(EventKind::Press, true);
-        screen
-    }
-
-    #[test]
-    fn hit_bounds_and_interactive_are_public_queries() {
-        let screen = walk_screen(false, (100.0, 40.0));
-        let at = Point::new(Points(60.0), Points(30.0));
-        assert_eq!(screen.hit(at), Some(4));
-        assert_eq!(
-            screen.bounds(4),
-            Some(Bounds::new(
-                Point::new(Points(10.0), Points(10.0)),
-                Size::new(Points(100.0), Points(40.0))
-            ))
-        );
-        assert!(screen.is_interactive(4));
-        assert!(!screen.is_interactive(2));
-        // The id is stable across a re-render that only moves the view.
-        let mut moved = walk_screen(false, (100.0, 40.0));
-        moved.apply(&batch(vec![frame(4, 20.0, 10.0, 100.0, 40.0)]));
-        assert_eq!(moved.hit(Point::new(Points(70.0), Points(30.0))), Some(4));
-    }
-
-    #[test]
-    fn hit_chip_zero_size_button_takes_no_press() {
-        // Planted bug class: layout collapses the button to zero size. The
-        // model still calls it interactive; the hit test is what refuses.
-        let screen = walk_screen(false, (0.0, 0.0));
-        assert!(screen.is_interactive(4));
-        assert_ne!(screen.hit(Point::new(Points(10.0), Points(10.0))), Some(4));
-    }
-
-    #[test]
-    fn hit_chip_overlay_occludes_the_resume_target() {
-        // Planted bug class: an overlay covers the button. A press at the
-        // button's centre lands on the overlay, not the named target.
-        let screen = walk_screen(true, (100.0, 40.0));
-        assert!(screen.is_interactive(4));
-        assert_eq!(screen.hit(Point::new(Points(60.0), Points(30.0))), Some(6));
-    }
-
-    #[test]
-    fn hit_chip_missing_binding_is_not_interactive() {
-        // Planted bug class: the view is in the tree with real bounds, but
-        // its press binding never landed (no Press event). Geometry alone
-        // cannot see it; the tree can.
-        let mut screen = walk_screen(false, (100.0, 40.0));
-        screen
-            .nodes
-            .get_mut(&4)
-            .unwrap()
-            .events
-            .set(EventKind::Press, false);
-        assert_eq!(screen.hit(Point::new(Points(60.0), Points(30.0))), Some(4));
-        assert!(!screen.is_interactive(4));
-    }
-
-    #[test]
-    fn hidden_ancestors_are_not_interactive() {
-        // A press target under a hidden parent: the hit walk skips the
-        // parent with all it holds, so the target is not interactive either.
-        let mut screen = walk_screen(false, (100.0, 40.0));
-        let center = Point::new(Points(60.0), Points(30.0));
-        assert_eq!(screen.hit(center), Some(4));
-        screen.apply(&batch(vec![style(2, |s| s.hidden = true)]));
-        assert!(!screen.is_interactive(4));
-        assert_ne!(screen.hit(center), Some(4));
-
-        // A child of a hidden press target (its label) is not either.
-        let mut screen = walk_screen(false, (100.0, 40.0));
-        screen.apply(&batch(vec![
-            create(8, ViewKind::View),
-            frame(8, 0.0, 0.0, 100.0, 40.0),
-            insert(4, 8),
-        ]));
-        assert!(screen.is_interactive(8));
-        screen.apply(&batch(vec![style(4, |s| s.hidden = true)]));
-        assert!(!screen.is_interactive(8));
-        // The press falls through to the parent, past the button and label.
-        assert_eq!(screen.hit(center), Some(2));
     }
 }

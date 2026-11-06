@@ -1,7 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
 
-// A walkthrough-shaped strip for the hit seam: one honest button and the
-// three planted bug classes the hit-target law separates.
+// Buttons for `press`: one a press reaches, one under a view drawn over
+// it, one of no size and one that hears no press.
 function App() {
   const pressed = signal("none");
   const box = (left: number, top: number, width: number, height: number) => ({

@@ -70,7 +70,6 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
-        seed: None,
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,

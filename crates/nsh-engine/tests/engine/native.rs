@@ -95,7 +95,6 @@ fn start_in(
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
-        seed: None,
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,

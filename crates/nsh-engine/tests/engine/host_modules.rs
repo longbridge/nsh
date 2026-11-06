@@ -157,7 +157,6 @@ fn start(
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
-        seed: None,
         context,
         pinned: Default::default(),
         clipboard: None,

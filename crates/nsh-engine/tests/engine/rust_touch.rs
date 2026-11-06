@@ -138,7 +138,6 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
-        seed: None,
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
