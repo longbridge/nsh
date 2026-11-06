@@ -1483,7 +1483,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom();
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1724,11 +1724,12 @@ class Player {
   /**
    * The kind of device, decided when an app starts (it never changes while
    * it runs, as on every platform): a mouse (a fine pointer that hovers)
-   * and a viewport at least 600 wide make a desktop, a touch screen whose
-   * short side is at least 600 a tablet, the rest a phone.
+   * makes a desktop at any width, as a narrow window does on the native
+   * desktops, a touch screen whose short side is at least 600 a tablet,
+   * the rest a phone.
    */
-  measureIdiom(width) {
-    if (matchMedia("(pointer: fine) and (hover: hover)").matches && width >= 600) return "desktop";
+  measureIdiom() {
+    if (matchMedia("(pointer: fine) and (hover: hover)").matches) return "desktop";
     return Math.min(screen.width, screen.height) >= 600 ? "pad" : "phone";
   }
 
