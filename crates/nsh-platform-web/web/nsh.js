@@ -3968,11 +3968,10 @@ class Player {
   // the desktop backends.
 
   /** Whether `el` has a bar: a scroll view along one axis with its
-   * indicator, and horizontal ones always (a mouse without a horizontal
-   * wheel has no other way to move them, as mouse drags do not scroll),
-   * unless a built-in bar of the app's takes their place. */
+   * indicator, on either axis, unless a built-in bar of the app's takes
+   * its place. */
   barShown(el) {
-    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || (el._horizontal && !el._replaced));
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator && !el._replaced);
   }
 
   /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
