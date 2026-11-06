@@ -1890,6 +1890,15 @@ Rust code calls `request_notification_permission`, `show_notification`, `close_n
 shows while the app is in front as it does behind it. Showing another with the same `id` replaces it, and
 `Notifications.close(id)` removes it.
 
+`silent: true` shows it without a sound or vibration, as the web's `Notification` does; by default it plays the
+system's sound. Apple platforms show it with no sound, Android in a group that does not alert (no sound, vibration or
+pop-up banner), Windows with a silent toast, Linux with the daemon's `suppress-sound` hint, and the web passes `silent`
+to the browser.
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
 ### Notifications.on
 
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
