@@ -227,7 +227,7 @@ nsh run App.tsx --target macos --fps --release
 环境变量 `NSH_FPS=1` 无论应用怎样启动都会打开监视器：开发宿主、打包后的应用、Rust 应用、嵌入 NSH 的应用都一样。从 Dock 或
 访达打开的 macOS 打包应用从 `Info.plist` 的 `LSEnvironment` 取得它（`nsh.json`：`"macos": { "infoPlist": { "LSEnvironment": { "NSH_FPS": "1" } } }`）。
 应用自己用 `setFpsEnabled(enabled)` 打开或关闭它，用 `fpsEnabled()` 读取它（见 [`nsh`](../modules/nsh.md#fpsenabled-和-setfpsenabled)）；
-gallery 的侧边栏有一个对应的按钮。
+gallery 侧边栏的菜单里有对应的开关。
 
 终端目标用 `nsh run examples/gallery --target tui --fps` 在角落显示一行读数。
 在文本输入框外，`C-h p` 切换显示。读数包括活跃时的 FPS、空闲时的 `idle`、帧耗时和 p95、

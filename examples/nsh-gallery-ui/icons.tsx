@@ -92,7 +92,7 @@ export type IconName =
   | "folder-open"
   | "file"
   | "tree"
-  | "activity";
+  | "hamburger";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -203,8 +203,6 @@ const glyphs: Record<IconName, Draw> = {
     rect(c, 2.5, 8, 15, 4, 2);
     line(c, [4.5, 10, 10.5, 10]);
   },
-  // A pulse: flat, a spike up and down, flat again.
-  activity: (c) => line(c, [2.5, 10, 6, 10, 8, 4, 12, 16, 14, 10, 17.5, 10]),
   chart: (c) => {
     line(c, [3, 3, 3, 17, 17, 17]);
     line(c, [6, 13, 9, 9, 12, 11, 16, 5]);
@@ -240,6 +238,12 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [2.5, 8, 17.5, 8]);
     line(c, [2.5, 12.5, 17.5, 12.5]);
     line(c, [8, 3.5, 8, 16.5]);
+  },
+  // Three bars: a menu of the app's own settings.
+  hamburger: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [3.5, 10, 16.5, 10]);
+    line(c, [3.5, 14.5, 16.5, 14.5]);
   },
   menu: (c) => {
     rect(c, 3.5, 2.5, 13, 15, 2.5);

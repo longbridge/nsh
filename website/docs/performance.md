@@ -243,7 +243,7 @@ The environment variable `NSH_FPS=1` turns the monitor on however the app is sta
 app, a Rust app, an app that embeds NSH. A packaged macOS app opened from the Dock or Finder gets it from its
 `Info.plist`'s `LSEnvironment` (`nsh.json`: `"macos": { "infoPlist": { "LSEnvironment": { "NSH_FPS": "1" } } }`). The
 app turns it on and off itself with `setFpsEnabled(enabled)` and reads it with `fpsEnabled()`
-([`nsh`](../modules/nsh.md#fpsenabled-and-setfpsenabled)); the gallery's sidebar has a button for it.
+([`nsh`](../modules/nsh.md#fpsenabled-and-setfpsenabled)); the gallery's sidebar menu has a switch for it.
 
 On the terminal target, `nsh run examples/gallery --target tui --fps` shows one line in a corner.
 `C-h p` toggles it outside text fields. It shows active FPS, `idle` when the app rests, frame time and p95,
