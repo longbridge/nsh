@@ -84,6 +84,9 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The launch parameters of the next app the page starts
+    /// ([`nsh_set_host_params`]): its `host.params`.
+    static HOST_PARAMS: RefCell<serde_json::Map<String, serde_json::Value>> = RefCell::new(serde_json::Map::new());
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next start ([`nsh_start_rust`], `nsh_browser_start`).
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
@@ -645,7 +648,14 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
-        host: Default::default(),
+        host: {
+            let host = nsh_engine::HostChannel::new();
+            let params = HOST_PARAMS.with(|p| std::mem::take(&mut *p.borrow_mut()));
+            if !params.is_empty() {
+                host.set_params(params);
+            }
+            host
+        },
         picker: None,
         speech: None,
         audio: None,
@@ -730,6 +740,25 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
     let url = unsafe { string(ptr, len) };
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
+}
+
+/// Sets the launch parameters of the next app the page starts (its
+/// `host.params`, a JSON object; anything else is none): what the page
+/// knows before the app runs, such as data it was served with, so the
+/// app's first frame shows it without asking for it again.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_host_params(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let json = unsafe { string(ptr, len) };
+    let params = match serde_json::from_str(&json) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    HOST_PARAMS.with(|p| *p.borrow_mut() = params);
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the
