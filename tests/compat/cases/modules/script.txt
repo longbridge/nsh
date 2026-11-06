@@ -87,6 +87,8 @@ tap id:case-mod-audio
 # "unavailable"; a volume out of range throws a RangeError.
 expect Available: false
 expect Sound: not loaded
+# an imported audio file is its URL
+expect Imported: asset:/sounds/click.wav
 tap id:play
 expect Refused: threw RangeError
 expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM

@@ -544,7 +544,7 @@ On macOS they ask the user for no permission. A letter is the key that types it 
 
 On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
 
-On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`, or in a Lua configuration `hl.bind("CTRL + ALT + K", hl.dsp.global("com.example.mail:ctrl+alt+k"))`. The portal knows the app by its id, which needs the app's `.desktop` file: `nsh package` installs one, and `nsh run` writes one for an app with URL schemes.
 
 ```tsx
 import { GlobalShortcut, Window } from "nsh/desktop";

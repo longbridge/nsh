@@ -2089,7 +2089,7 @@ type AudioErrorCode =
 
 ### Sound.load
 
-从打包资源的路径（`"sounds/click.wav"`）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
 
 ### Sound.play
 
@@ -2097,8 +2097,9 @@ type AudioErrorCode =
 
 ```tsx
 import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
 
-const tap = await Sound.load("sounds/tap.wav");
+const tap = await Sound.load(tapFile);
 
 function Key(props: { label: string }) {
   return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
