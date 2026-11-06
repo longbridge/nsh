@@ -352,6 +352,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
+        DesktopCommand::Quit => quit(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);
@@ -593,6 +594,16 @@ pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f3
 fn close(hwnd: HWND) {
     // SAFETY: posting to a live window.
     let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
+/// Quits the app, as its `quit` role: the window closes as [`close`] closes
+/// it, then the message loop ends, also while a window or a tray icon
+/// would keep it running.
+fn quit(hwnd: HWND) {
+    close(hwnd);
+    // SAFETY: a plain call. The loop gets `WM_QUIT` only after the posted
+    // `WM_CLOSE`: the window closes first.
+    unsafe { PostQuitMessage(0) };
 }
 
 fn toggle_maximize(surface: &Surface) {
@@ -1275,6 +1286,8 @@ pub(crate) fn menu_command(surface: &Rc<Surface>, command: u16) {
 fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     let hwnd = surface.hwnd();
     match role {
+        // An embedding app's window is its own to close or keep.
+        Some(MenuRole::Quit) if top_level(hwnd) => quit(hwnd),
         Some(MenuRole::Quit | MenuRole::Close) => close(hwnd),
         Some(MenuRole::Minimize) => {
             // SAFETY: a plain call.

@@ -149,6 +149,7 @@ view.load(Bundle::source(code).into());
 设置 `AppOptions { keep_alive_on_close: true, ..Default::default() }` 可以在关闭窗口后保留独立应用的会话。
 关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
+应用自己的代码用 `nsh_core::element::desktop::quit()`（TS：`Application.quit()`）以同样的方式退出，而
 `nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
 
 ## macOS 上的差异
