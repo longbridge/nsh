@@ -112,7 +112,8 @@ The content is one of three props, read in this order:
 
 - **`markdown`**: CommonMark with GitHub's additions (tables, task lists, strikethrough, autolinks, footnotes, alerts),
   formulas (`$…$` and `$$…$$`) and HTML inside the Markdown. Emphasis beside Chinese, Japanese and Korean text
-  reads as the CJK-friendly amendment to CommonMark reads it, so `**涨幅：**5%` is bold up to the colon.
+  reads as the CJK-friendly amendment to CommonMark reads it, so `**涨幅：**5%` is bold up to the colon. A tag that
+  names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through; scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
