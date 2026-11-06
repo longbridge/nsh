@@ -712,10 +712,22 @@ final class Mounter {
      */
     void destroyComponents() {
         Notifications.forget(this);
+        if (audio != null) {
+            audio.release();
+            audio = null;
+        }
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
         }
+    }
+
+    /** The app's sounds and players (one per engine), made at its first audio command. UI thread. */
+    private Audio audio;
+
+    private Audio audio() {
+        if (audio == null) audio = new Audio(this);
+        return audio;
     }
 
     /**
@@ -1152,6 +1164,12 @@ final class Mounter {
             now.rotateY = to.rotateY;
             now.perspective = to.perspective;
             now.background = decor != null ? decor.fill : to.background;
+            // The frame's border colors are what the decor now carries; a
+            // fresh Dynamic's all-transparent array would have applyDynamic
+            // "restore" them to transparent every frame (an outlined view's
+            // border vanished after its first transition and never came
+            // back).
+            if (decor != null) System.arraycopy(decor.borderColors, 0, now.borderColors, 0, 4);
             applyDynamic(v, now);
             v.invalidate();
         });
@@ -2202,6 +2220,10 @@ final class Mounter {
             }
             case 44: {
                 Notifications.command(this, b, objects);
+                break;
+            }
+            case 47: {
+                audio().command(b, objects);
                 break;
             }
             case 26: {

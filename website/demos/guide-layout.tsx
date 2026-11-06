@@ -13,7 +13,7 @@ function Choice<T extends string>(props: { label: string; options: readonly T[];
         <Each of={props.options}>
           {(o) => (
             <View onPress={() => props.onChange(o())} {...button("secondary", { size: "sm", on: () => props.value === o() })}>
-              <Text style={buttonText("secondary", { on: () => props.value === o() })}>{o()}</Text>
+              <Text style={buttonText("secondary", { size: "sm", on: () => props.value === o() })}>{o()}</Text>
             </View>
           )}
         </Each>

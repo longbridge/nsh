@@ -281,7 +281,7 @@ says what to set instead:
 | `CFBundleIdentifier` | `id` |
 | `CFBundleName`, `CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
-| `CFBundleURLTypes` | `deepLinks` |
+| `CFBundleURLTypes` | `schemes` |
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |

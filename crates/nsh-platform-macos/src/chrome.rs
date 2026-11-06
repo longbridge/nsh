@@ -161,7 +161,7 @@ fn window(surface: &Surface) -> Option<Retained<NSWindow>> {
     surface.root.ns().window()
 }
 
-fn full_screen(window: &NSWindow) -> bool {
+pub(crate) fn full_screen(window: &NSWindow) -> bool {
     window.styleMask().contains(NSWindowStyleMask::FullScreen)
 }
 
@@ -326,6 +326,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::SetFrame(frame) => {
             if let Some(window) = window(surface) {
                 set_frame(&window, frame);
+            }
+        }
+        DesktopCommand::SetBounds(bounds) => {
+            if let Some(window) = window(surface) {
+                crate::window_state::set_bounds(surface, &window, *bounds);
             }
         }
         DesktopCommand::SetLevel(level) => {

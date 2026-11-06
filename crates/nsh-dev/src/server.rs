@@ -453,6 +453,7 @@ async fn bundle_source(State(shared): State<Arc<Shared>>) -> Response {
 async fn asset(
     State(shared): State<Arc<Shared>>,
     axum::extract::Path(path): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     let named = shared.files.lock().expect("files lock").get(&path).cloned();
     let file = match named {
@@ -470,10 +471,68 @@ async fn asset(
             file
         }
     };
-    match tokio::fs::read(&file).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, content_type(&file))], bytes).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    let Ok(bytes) = tokio::fs::read(&file).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let kind = content_type(&file);
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|r| r.to_str().ok())
+        .map(|r| byte_range(r, bytes.len() as u64));
+    // Media players (AVFoundation's) read media by ranges, and give up on
+    // a server that answers none.
+    match range {
+        None => (
+            [
+                (header::CONTENT_TYPE, kind.to_owned()),
+                (header::ACCEPT_RANGES, "bytes".to_owned()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Some(Some((start, end))) => (
+            StatusCode::PARTIAL_CONTENT,
+            [
+                (header::CONTENT_TYPE, kind.to_owned()),
+                (header::ACCEPT_RANGES, "bytes".to_owned()),
+                (
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{}", bytes.len()),
+                ),
+            ],
+            bytes[start as usize..=end as usize].to_vec(),
+        )
+            .into_response(),
+        Some(None) => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            [(header::CONTENT_RANGE, format!("bytes */{}", bytes.len()))],
+        )
+            .into_response(),
     }
+}
+
+/// The bytes a `Range` header asks of a file of `len` bytes, first and last
+/// included: one range (`bytes=0-1`, `bytes=100-`, `bytes=-500`); `None`
+/// when it asks for none of them (or for several, which no media player
+/// does).
+fn byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
+    let spec = header.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') || len == 0 {
+        return None;
+    }
+    let (start, end) = spec.split_once('-')?;
+    let (start, end) = match (start.trim(), end.trim()) {
+        ("", suffix) => {
+            let suffix: u64 = suffix.parse().ok()?;
+            if suffix == 0 {
+                return None;
+            }
+            (len.saturating_sub(suffix), len - 1)
+        }
+        (start, "") => (start.parse().ok()?, len - 1),
+        (start, end) => (start.parse().ok()?, end.parse::<u64>().ok()?.min(len - 1)),
+    };
+    (start <= end && start < len).then_some((start, end))
 }
 
 /// The web host's page and runtime ([`DevServer::serve_web`]); never
@@ -535,7 +594,12 @@ pub(crate) fn content_type(path: &std::path::Path) -> &'static str {
         Some("mov") => "video/quicktime",
         Some("mp3") => "audio/mpeg",
         Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
         Some("wav") => "audio/wav",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("aif" | "aiff") => "audio/aiff",
+        Some("caf") => "audio/x-caf",
         _ => "application/octet-stream",
     }
 }
@@ -938,5 +1002,19 @@ mod tests {
             "{two}"
         );
         assert!(!two.contains("run"), "{two}");
+    }
+
+    #[test]
+    fn ranges_of_a_file() {
+        let range = |h| super::byte_range(h, 1000);
+        assert_eq!(range("bytes=0-1"), Some((0, 1)));
+        assert_eq!(range("bytes=100-"), Some((100, 999)));
+        assert_eq!(range("bytes=-500"), Some((500, 999)));
+        assert_eq!(range("bytes=900-5000"), Some((900, 999)));
+        assert_eq!(range("bytes=1000-"), None);
+        assert_eq!(range("bytes=5-1"), None);
+        assert_eq!(range("bytes=0-1,5-6"), None);
+        assert_eq!(range("items=0-1"), None);
+        assert_eq!(super::byte_range("bytes=0-", 0), None);
     }
 }

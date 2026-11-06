@@ -15,7 +15,7 @@ function App() {
     draft.set("");
   };
   const chip = (on: () => boolean) => button("secondary", { on, size: "sm" });
-  const chipText = (on: () => boolean) => buttonText("secondary", { on });
+  const chipText = (on: () => boolean) => buttonText("secondary", { on, size: "sm" });
   const isPadding = () => behavior() === "padding";
   const isHeight = () => behavior() === "height";
   return (

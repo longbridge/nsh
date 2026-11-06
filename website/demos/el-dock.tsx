@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { Button, DockArea, type DockAreaLayout, type DockAreaRef } from "nsh/base";
+import { Button, DockArea, type DockAreaLayout, type DockAreaRef, Toggle } from "nsh/base";
 import { button, buttonText, desktop, focusRing, Log, Panel, Split, ui, wide } from "./palette";
 
 // The panels' keys and what each shows. The layout lists the keys; the app
@@ -46,9 +46,16 @@ function App() {
   const log = (line: string) => events.set([line, ...events()].slice(0, 4));
   let area!: DockAreaRef;
 
-  const toolbarButton = (label: string, onPress: () => void, on?: () => boolean) => (
-    <Button onPress={onPress} selected={on?.() ?? false} {...button("secondary", { size: "sm", on })}>
-      <Text style={buttonText("secondary", { on })}>{label}</Text>
+  // A dock shown or the layout locked is on or off: a `Toggle`. Reset is an
+  // action: a `Button`.
+  const toolbarToggle = (label: string, on: () => boolean, set: (on: boolean) => void) => (
+    <Toggle pressed={on()} onChange={({ pressed }) => set(pressed)} {...button("secondary", { size: "sm", on })}>
+      <Text style={buttonText("secondary", { size: "sm" })}>{label}</Text>
+    </Toggle>
+  );
+  const toolbarButton = (label: string, onPress: () => void) => (
+    <Button onPress={onPress} {...button("secondary", { size: "sm" })}>
+      <Text style={buttonText("secondary", { size: "sm" })}>{label}</Text>
     </Button>
   );
 
@@ -68,9 +75,9 @@ function App() {
           <>
             <Panel title="docks">
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {toolbarButton("Files", () => area.toggleDock("left"), () => shown().left)}
-                {toolbarButton("Terminal", () => area.toggleDock("bottom"), () => shown().bottom)}
-                {toolbarButton("Lock", () => locked.set(!locked()), locked)}
+                {toolbarToggle("Files", () => !!shown().left, () => area.toggleDock("left"))}
+                {toolbarToggle("Terminal", () => !!shown().bottom, () => area.toggleDock("bottom"))}
+                {toolbarToggle("Lock", locked, (on) => locked.set(on))}
                 {toolbarButton("Reset", () => layout.set(initial))}
               </View>
             </Panel>

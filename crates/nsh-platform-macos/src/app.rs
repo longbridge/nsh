@@ -374,6 +374,7 @@ impl AppView {
             host: options.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -484,6 +485,7 @@ fn initial_environment() -> Environment {
         file_requests: true,
         speech: true,
         notifications: true,
+        audio: true,
         web_input: true,
         ..Environment::default()
     }

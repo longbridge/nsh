@@ -1,12 +1,12 @@
 ---
 title: nsh/desktop
-description: 桌面专有 API：窗口（标题、标题栏、最大化、全屏）、带可拖动区域的自定义标题栏、应用菜单、右键菜单和快捷键。
+description: 桌面专有 API：窗口（标题、标题栏、最大化、全屏、位置与所在显示器）、显示器、带可拖动区域的自定义标题栏、应用菜单、右键菜单和快捷键。
 order: 12.5
 ---
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、`quit`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、窗口状态和显示器（`window_state`、`displays`、`set_window_bounds`）、`quit`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -20,7 +20,7 @@ use nsh_core::{
 ```
 
 ```tsx tabs
-import { Application, isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { Application, displays, isAvailable, Menu, titleBar, Window, windowState } from "nsh/desktop";
 ```
 
 ## isAvailable
@@ -48,6 +48,7 @@ const Window: {
     size?: Partial<Size>;
     animated?: boolean;
   }): void;
+  setBounds(bounds: WindowBounds): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
   setSkipTaskbar(skip: boolean): void;
   orderFront(): void;
@@ -65,7 +66,8 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 | `minimize()` | `minimize()` | 最小化窗口。 |
 | `toggleMaximize()` | `toggle_maximize()` | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | `toggle_full_screen()` | 进入或退出全屏。 |
-| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`）是窗口的左上角，从主屏幕（macOS 上是带菜单栏的那块屏幕）的左上角量起，`y` 向下增长，各平台相同；只给 `height` 而不给 `y` 时顶边保持不动，窗口从底边伸缩。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。 |
+| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`）是窗口的左上角，从主屏幕（macOS 上是带菜单栏的那块屏幕）的左上角量起，`y` 向下增长，各平台相同；只给 `height` 而不给 `y` 时顶边保持不动，窗口从底边伸缩。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。用它按窗口当前的样子移动或调整大小；恢复保存的窗口用 `setBounds`。 |
+| `setBounds(bounds)` | `set_window_bounds(bounds)` | 恢复之前保存的窗口：让窗口进入 `bounds.mode`（`"windowed"`、`"maximized"` 或 `"fullscreen"`），窗口化时的外框为 `bounds.bounds`，先还原到这个外框，模式要求时再最大化或进入全屏。它接受 [`windowState()`](#窗口状态与显示器) 报告的 `windowBounds`，用于按用户上次离开时的样子打开窗口。外框会先放到当前的显示器上，因为保存时所在的显示器可能已经拔掉：窗口顶部 40 点内至少有 100 × 20 点落在某个显示器的可用区域内（用户能抓住标题栏拖动）时保持不变；否则居中放到主显示器的可用区域，尺寸不超过它。用同样的值再调用一次不会有变化。按窗口当前的样子移动或调整大小用 `setFrame`。 |
 | `setLevel(level)` | `set_level(level)` | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
 | `setSkipTaskbar(skip)` | `set_skip_taskbar(skip)` | 在 Windows 上，`true` 让窗口不出现在任务栏（对应 Electron 和 Tauri 的 `skipTaskbar`），适合浮层、桌宠和弹出窗口；`false` 让它回到任务栏。macOS 的 Dock 和 Linux 的 Dock 按应用而不是按窗口列出，其他平台不做处理。 |
 | `orderFront()` | `order_front()` | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
@@ -197,6 +199,70 @@ const titleBar: Accessor<{ height: number; left: number; right: number }>;
 | Linux | `height`，否则为标题栏（header bar）的高度 | 开头的窗口按钮（按桌面的按钮布局） | 末尾的窗口按钮 |
 
 在 Windows 上，标题栏按钮由 NSH 按 Windows 11 的样式绘制，跟随应用的外观；鼠标停在最大化按钮上会出现 Windows 11 的贴靠布局。在所有平台上窗口都保留调整大小的边框、阴影和圆角。
+
+## 窗口状态与显示器
+
+```ts
+const windowState: Accessor<WindowState | null>;
+const displays: Accessor<Display[]>;
+
+interface WindowState {
+  bounds: Bounds;              // 当前的外框，包含窗口装饰
+  windowBounds: WindowBounds;  // 模式，以及还原时的外框
+  minimized: boolean;
+  hidden: boolean;             // 不在屏上但没有最小化：应用被隐藏，或窗口尚未显示 / 已不再显示
+  display: Display | null;     // 窗口大部分所在的显示器
+}
+interface WindowBounds {
+  mode: "windowed" | "maximized" | "fullscreen";
+  bounds: Bounds;
+}
+interface Display {
+  id: string;                  // 下次启动时不变
+  bounds: Bounds;
+  visibleBounds: Bounds;       // 去掉菜单栏、Dock 或任务栏后的区域
+  primary: boolean;
+}
+```
+
+`windowState()` 是平台报告的应用窗口，`displays()` 是各个显示器，主显示器排在最前；两者都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setFrame` 相同。模式、所在显示器、最小化或隐藏状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`window_state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
+
+`minimized` 和 `hidden` 说明窗口是否在屏上：两者都为 `false` 时在屏上。`hidden` 表示应用被隐藏（macOS 的「隐藏」），或窗口尚未显示 / 已不再显示。窗口在屏上而 [`lifecycle()`](./nsh.md#device) 报告 `"background"` 时，说明它被别的窗口挡住了。
+
+`windowBounds` 是按用户离开时的样子打开窗口所要保存的值：最大化或全屏的窗口带着它还原时的外框。应用启动时窗口和显示器已经有值，根组件第一次渲染时就可以恢复保存的外框；Rust 根组件和 TSX 根组件可以共用同一条记录，因为 `WindowBounds` 的 serde 形式就是 TSX 保存的那个对象。
+
+```rust tabs
+#[component]
+fn App() -> impl IntoElement {
+    if let Some(saved) = Storage::get_item("window")
+        .and_then(|json| serde_json::from_str::<WindowBounds>(&json).ok())
+    {
+        set_window_bounds(saved); // 按当前的显示器夹好
+    }
+    effect(|| {
+        if let Some(state) = window_state() {
+            let json = serde_json::to_string(&state.window_bounds).unwrap();
+            let _ = Storage::set_item("window", json);
+        }
+    });
+    view() // ...
+}
+```
+
+```tsx tabs
+import { effect, Storage } from "nsh";
+import { Window, windowState } from "nsh/desktop";
+
+const saved = await Storage.getItem("window");
+if (saved) Window.setBounds(JSON.parse(saved)); // 按当前的显示器夹好
+
+effect(() => {
+  const state = windowState();
+  if (state) Storage.setItem("window", JSON.stringify(state.windowBounds));
+});
+```
+
+macOS 报告窗口状态和显示器。在 iOS、Android 和 Web 上，`windowState()` 为 `null`，`displays()` 为空，`setBounds` 什么也不做。
 
 ## Menu
 

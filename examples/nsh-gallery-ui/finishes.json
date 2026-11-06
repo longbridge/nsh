@@ -1,7 +1,7 @@
 {
   "dark": {
     "card": {
-      "backgroundImage": "linear-gradient(180deg, #25262a 0%, #25262a 100%)",
+      "backgroundImage": "linear-gradient(180deg, #1f2228 0%, #1f2228 100%)",
       "boxShadow": "0 1px 0 rgba(0,0,0,0.35)"
     },
     "inset": {
