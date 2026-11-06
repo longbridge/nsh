@@ -4,6 +4,7 @@
 //! hosts and runners built for it.
 
 mod android;
+mod apple;
 mod bindgen;
 mod build;
 mod cdp;

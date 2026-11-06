@@ -16,6 +16,7 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
+    apple::{AppleConfig, ApplePlatform},
     runtime::{self, Platform},
     ui,
 };
@@ -120,6 +121,12 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// What iOS packages add to their `Info.plist` and entitlements.
+    #[serde(default)]
+    pub(crate) ios: AppleConfig,
+    /// What macOS packages add to their `Info.plist` and entitlements.
+    #[serde(default)]
+    pub(crate) macos: AppleConfig,
 }
 
 /// `nsh.json` `"tui"`.
@@ -266,6 +273,8 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
     }
     config.schemes = config.url_schemes()?;
+    config.ios.check(ApplePlatform::Ios)?;
+    config.macos.check(ApplePlatform::Macos)?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
@@ -461,7 +470,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Web
         | PackageTarget::Gpui => "iphonesimulator",
     };
-    let mut info = info_plist(&name, &id, &executable, config, sdk);
+    let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
     if let Some(icon) = &config.icon {
         let partial = compile_icon(icon, &app, sdk)?;
@@ -473,7 +482,15 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
 
     match options.target {
         PackageTarget::IosSimulator => {
-            codesign(&app, "-", None)?;
+            // The simulator takes the app's entitlements without a profile.
+            let entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut path = None;
+            if !entitlements.is_empty() {
+                let file = options.out.join(format!("{executable}.entitlements"));
+                plist::Value::Dictionary(entitlements).to_file_xml(&file)?;
+                path = Some(file);
+            }
+            codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
                 let udid = crate::run::simulator(None)?;
@@ -504,7 +521,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             };
             fs::copy(profile, app.join("embedded.mobileprovision"))
                 .with_context(|| format!("copy {}", profile.display()))?;
-            let entitlements = entitlements(profile, &id)?;
+            let requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            let entitlements = entitlements(profile, &id, requested)?;
             let path = options.out.join(format!("{executable}.entitlements"));
             entitlements.to_file_xml(&path)?;
             codesign(&app, identity, Some(&path))?;
@@ -818,16 +836,29 @@ fn package_macos(
         }
         None => false,
     };
-    let mut plist = macos_info_plist(name, id, executable, config, icon);
+    let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
-    let output = Command::new("codesign")
-        .args(["--force", "--sign", "-", "--timestamp=none"])
-        .arg(&app)
-        .output()
-        .context("run codesign")?;
+    let entitlements = config.macos.entitlements(ApplePlatform::Macos)?;
+    for key in entitlements.keys() {
+        if crate::apple::needs_profile(key) {
+            ui::warn(format!(
+                "macOS launches an app signed with `{key}` (nsh.json macos.entitlements) only under a provisioning profile that grants it: \
+                 sign {} again with your Developer ID and such a profile before running it",
+                ui::path(&app)
+            ));
+        }
+    }
+    let mut codesign = Command::new("codesign");
+    codesign.args(["--force", "--sign", "-", "--timestamp=none"]);
+    if !entitlements.is_empty() {
+        let path = options.out.join(format!("{executable}.entitlements"));
+        plist::Value::Dictionary(entitlements).to_file_xml(&path)?;
+        codesign.arg("--entitlements").arg(path);
+    }
+    let output = codesign.arg(&app).output().context("run codesign")?;
     if !output.status.success() {
         bail!(
             "codesign failed for {}: {}",
@@ -901,7 +932,7 @@ fn macos_info_plist(
     executable: &str,
     config: &AppConfig,
     icon: bool,
-) -> plist::Dictionary {
+) -> anyhow::Result<plist::Dictionary> {
     use plist::Value;
     let mut d = plist::Dictionary::new();
     let s = |v: &str| Value::String(v.to_owned());
@@ -930,7 +961,9 @@ fn macos_info_plist(
         d.insert("CFBundleIconFile".into(), s("AppIcon"));
     }
     config.usage_descriptions(&mut d);
-    d
+    // The app's own keys, over NSH's defaults (never over its reserved ones).
+    d.extend(config.macos.info_plist(ApplePlatform::Macos)?);
+    Ok(d)
 }
 
 /// The oldest macOS the AppKit runtime runs on (its display links are
@@ -975,7 +1008,7 @@ fn info_plist(
     executable: &str,
     config: &AppConfig,
     sdk: &str,
-) -> plist::Dictionary {
+) -> anyhow::Result<plist::Dictionary> {
     use plist::Value;
     let mut d = plist::Dictionary::new();
     let s = |v: &str| Value::String(v.to_owned());
@@ -1059,7 +1092,9 @@ fn info_plist(
             s("UIInterfaceOrientationLandscapeRight"),
         ]),
     );
-    d
+    // The app's own keys, over NSH's defaults (never over its reserved ones).
+    d.extend(config.ios.info_plist(ApplePlatform::Ios)?);
+    Ok(d)
 }
 
 /// The deployment target the runtime is built for (`cargo xtask dist`).
@@ -1136,8 +1171,15 @@ fn codesign(app: &Path, identity: &str, entitlements: Option<&Path>) -> anyhow::
     Ok(())
 }
 
-/// The entitlements a provisioning profile grants, checked against `id`.
-fn entitlements(profile: &Path, id: &str) -> anyhow::Result<plist::Value> {
+/// The entitlements an app is signed with: those a provisioning profile
+/// grants, checked against `id`, with the app's own (`requested`, `nsh.json`
+/// `ios.entitlements`) in place of the profile's values, each checked
+/// against what the profile grants.
+fn entitlements(
+    profile: &Path,
+    id: &str,
+    requested: plist::Dictionary,
+) -> anyhow::Result<plist::Value> {
     let output = Command::new("security")
         .args(["cms", "-D", "-i"])
         .arg(profile)
@@ -1164,6 +1206,7 @@ fn entitlements(profile: &Path, id: &str) -> anyhow::Result<plist::Value> {
     // A wildcard profile (`TEAMID.*`) signs the app as `TEAMID.<id>`, as
     // Xcode does: devices refuse an app signed with the wildcard itself.
     if let Some(dictionary) = entitlements.as_dictionary_mut() {
+        crate::apple::grant(dictionary, requested)?;
         dictionary.insert(
             "application-identifier".to_owned(),
             plist::Value::String(signed_app_id(&app_id, id)),
@@ -1259,8 +1302,8 @@ mod tests {
                 capabilities,
                 ..AppConfig::default()
             };
-            let info = macos_info_plist("A", "com.a", "a", &config, false);
-            let ios = info_plist("A", "com.a", "a", &config, "iphoneos");
+            let info = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+            let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
             assert_eq!(
                 info.contains_key("NSMicrophoneUsageDescription"),
                 ios.contains_key("NSSpeechRecognitionUsageDescription")
@@ -1279,7 +1322,7 @@ mod tests {
         let schemes = config.url_schemes().unwrap();
         assert_eq!(schemes, ["myapp", "myapp-dev"]);
         // The system opens the app for their links...
-        let mut info = info_plist("A", "com.a", "a", &config, "iphoneos");
+        let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
         url_types(&mut info, "com.a", &schemes);
         let types = info["CFBundleURLTypes"].as_array().unwrap();
         let url_type = types[0].as_dictionary().unwrap();
@@ -1300,7 +1343,7 @@ mod tests {
             serde_json::json!({ "id": "com.a", "schemes": ["myapp", "myapp-dev"] })
         );
         // An app that claims none declares none.
-        let mut info = macos_info_plist("A", "com.a", "a", &AppConfig::default(), false);
+        let mut info = macos_info_plist("A", "com.a", "a", &AppConfig::default(), false).unwrap();
         url_types(&mut info, "com.a", &[]);
         assert!(!info.contains_key("CFBundleURLTypes"));
         assert_eq!(
@@ -1311,6 +1354,66 @@ mod tests {
         let config: AppConfig = serde_json::from_str(r#"{ "schemes": ["https"] }"#).unwrap();
         let error = config.url_schemes().unwrap_err().to_string();
         assert!(error.starts_with("nsh.json: schemes:"), "{error}");
+    }
+
+    #[test]
+    fn apps_add_their_own_info_plist_keys() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "ios": {
+                "infoPlist": {
+                    "ITSAppUsesNonExemptEncryption": false,
+                    "NSMicrophoneUsageDescription": "Voice notes.",
+                    "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"]
+                }
+            },
+            "macos": {
+                "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" }
+            }
+        }))
+        .unwrap();
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(
+            ios["ITSAppUsesNonExemptEncryption"],
+            plist::Value::Boolean(false)
+        );
+        // The app's value replaces NSH's default.
+        assert_eq!(
+            ios["NSMicrophoneUsageDescription"],
+            plist::Value::String("Voice notes.".into())
+        );
+        assert_eq!(
+            ios["UISupportedInterfaceOrientations"],
+            plist::Value::Array(vec!["UIInterfaceOrientationPortrait".into()])
+        );
+        // NSH's own keys stay.
+        assert_eq!(
+            ios["CFBundleIdentifier"],
+            plist::Value::String("com.a".into())
+        );
+        assert!(!ios.contains_key("LSApplicationCategoryType"));
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(
+            macos["LSApplicationCategoryType"],
+            plist::Value::String("public.app-category.finance".into())
+        );
+        assert!(!macos.contains_key("ITSAppUsesNonExemptEncryption"));
+    }
+
+    #[test]
+    fn reading_nsh_json_refuses_nshs_own_keys() {
+        let app = std::env::temp_dir().join(format!("nsh-plist-{}", std::process::id()));
+        fs::create_dir_all(&app).unwrap();
+        fs::write(
+            app.join("nsh.json"),
+            serde_json::json!({ "macos": { "infoPlist": { "CFBundleVersion": "7" } } }).to_string(),
+        )
+        .unwrap();
+        let error = read_config(&app.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("macos.infoPlist: `CFBundleVersion` is set by NSH from `build`"),
+            "{error}"
+        );
+        fs::remove_dir_all(&app).unwrap();
     }
 
     #[test]

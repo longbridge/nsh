@@ -5,13 +5,16 @@
 //! The source goes through four steps: the end of a streamed reply is
 //! repaired (`streaming.rs`), TeX's `\(…\)` and `\[…\]` are rewritten as
 //! dollars (`latex.rs`), declared containers are cut out (`container.rs`)
-//! (syntax `markdown-rs` lacks), then each Markdown part is parsed and its
-//! tree converted. Definitions and footnotes are
+//! (syntax `markdown-rs` lacks), then each Markdown part is parsed, with
+//! emphasis beside CJK text read as the CJK-friendly rule reads it
+//! (`cjk.rs`), and its tree converted. Definitions and footnotes are
 //! collected from the trees first, so references resolve wherever they
 //! stand and footnotes are numbered by their first reference.
 
+mod cjk;
 mod container;
 mod latex;
+mod offsets;
 mod streaming;
 #[cfg(test)]
 mod tests;
@@ -23,8 +26,8 @@ use markdown::{
     mdast::{self, AlignKind, AttributeContent, AttributeValue, Node},
 };
 
-use self::container::Segment;
 pub(crate) use self::streaming::repair_streaming;
+use self::{container::Segment, offsets::Inserted};
 use super::{
     Parser,
     common::{self, Slugger},
@@ -103,9 +106,10 @@ pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
     Document { blocks, footnotes }
 }
 
-/// A Markdown part of the source and its syntax tree.
+/// A Markdown part of the source and its syntax tree, whose positions are
+/// offsets in it.
 struct Tree<'s> {
-    source: Cow<'s, str>,
+    source: &'s str,
     root: Node,
 }
 
@@ -126,9 +130,15 @@ fn parse_trees<'s>(
     }
 }
 
-/// Markdown `text` parsed (`first`: the document's start).
+/// Markdown `text` parsed (`first`: the document's start). What is inserted
+/// before parsing (marks beside emphasis, escapes of prose `$`) is taken out
+/// of the tree again (`offsets.rs`): its positions are offsets in `text`.
 fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
-    let mut source = Cow::Borrowed(text);
+    let mut inserted = Inserted::default();
+    let mut marks = Vec::new();
+    let mut source = cjk::mark(text, &mut marks);
+    let marked = !marks.is_empty();
+    inserted.insert(&marks, cjk::MARK.len_utf8());
     let mut root = parse_tree(parser, &source, first);
     if parser.options.math {
         // Pairs of `$` that are prose: their opening `$` escaped, the text
@@ -140,19 +150,25 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
             if opens.is_empty() {
                 break;
             }
+            opens.sort_unstable();
+            opens.dedup();
             let mut escaped = String::with_capacity(source.len() + opens.len());
             let mut at = 0;
-            for open in opens {
+            for &open in &opens {
                 escaped.push_str(&source[at..open]);
                 escaped.push('\\');
                 at = open;
             }
             escaped.push_str(&source[at..]);
+            inserted.insert(&opens, 1);
             root = parse_tree(parser, &escaped, first);
             source = Cow::Owned(escaped);
         }
     }
-    Tree { source, root }
+    if !inserted.is_empty() {
+        offsets::restore(&mut root, &source, &inserted, marked);
+    }
+    Tree { source: text, root }
 }
 
 /// The ranges of the Markdown parts of `segments`, in order.
@@ -308,7 +324,7 @@ impl<'a> Converter<'a> {
             depth: 0,
         };
         for tree in trees {
-            converter.collect(&tree.source, &tree.root);
+            converter.collect(tree.source, &tree.root);
         }
         converter
     }
@@ -359,7 +375,7 @@ impl<'a> Converter<'a> {
                 Segment::Markdown(_) => {
                     let tree = &trees[*next];
                     *next += 1;
-                    self.source = &tree.source;
+                    self.source = tree.source;
                     if let Some(children) = tree.root.children() {
                         self.blocks_into(children, out);
                     }

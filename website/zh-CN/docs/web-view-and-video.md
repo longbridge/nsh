@@ -93,7 +93,7 @@ mount(App);
 
 ### 带前进后退的浏览器
 
-Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)`、`post_message` / `postMessage(data)` 和 `send_input` / `sendInput(input)`（见[下文](#像用户一样输入)）：
+Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)`、`post_message` / `postMessage(data)`、`load` / `load({ src, headers })`（见[下文](#已登录的页面请求头)）和 `send_input` / `sendInput(input)`（见[下文](#像用户一样输入)）：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -281,6 +281,31 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### 已登录的页面：请求头
+
+要显示应用已登录的某个服务的页面，把凭据放在页面请求的请求头里，而不是 URL 里：URL 会留在历史记录、日志和 `Referer` 中。ref 的 `load` 加载一个页面，并只给这一个请求带上请求头：
+
+```rust tabs
+use nsh_core::{WebLoad, prelude::*};
+
+fn open(web: &ElementRef, token: &str) {
+    let headers = vec![("Authorization".to_owned(), format!("Bearer {token}"))];
+    if let Some(load) = WebLoad::new("https://docs.example.com/", headers) {
+        web.load(load);
+    }
+}
+```
+
+```tsx tabs
+web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer ${token}` } });
+```
+
+- 只有页面自身的请求带这些请求头：它的图片、脚本等子资源不带，之后的导航和 `reload()` 也不带，所以凭据不会发给页面用到的其他主机。页面再次需要它时（点链接、重新加载），用 `load` 再加载一次，并为那次请求生成新值（DPoP proof 与 URL 绑定）。
+- 之后页面的显示与 `src` 加载的一样；之后 `src` 属性一变，就改为加载那个页面。
+- 它的主机必须是 `webview.hosts` 允许的（[`webview`](./sandbox-and-capabilities.md#webview)），与 `src` 相同；否则什么也不加载，核心会在日志里说明要添加哪个主机。
+- 请求头的名字不是 HTTP token、或值里有换行时，抛出 `TypeError`（`WebLoad::new` 返回 `None`），一个请求头不能借此开始另一个。NSH 的日志只写请求头的名字，从不写值。
+- macOS、iOS、Mac Catalyst、Android、Windows、Linux 和 GPUI 后端会发送这些请求头；浏览器后端做不到（iframe 无法设置请求头），调用不做任何事。
 
 ### 像用户一样输入
 

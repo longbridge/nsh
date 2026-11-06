@@ -93,6 +93,7 @@ interface WebViewNavigation {
 | `stopLoading()` | 停止加载。 |
 | `injectJavaScript(script)` | 在页面中运行 `script`。 |
 | `postMessage(data)` | 向页面发送 `data`（字符串）：在 `window` 上触发 `message` 事件，`event.data` 即为 `data`。 |
+| `load({ src, headers? })` | 加载 `src`，只给页面自身的请求带上 `headers`（`Record<string, string>`），子资源、之后的导航和重新加载都不带；用于已登录的页面（`Authorization`）。主机必须是 `webview.hosts` 允许的。请求头无效时抛出 `TypeError`。浏览器后端不做任何事。见[已登录的页面](../docs/web-view-and-video.md#已登录的页面请求头)。 |
 
 ## 与页面通信
 

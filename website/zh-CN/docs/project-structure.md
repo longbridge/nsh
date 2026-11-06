@@ -134,6 +134,8 @@ mount(App);
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `web` | object | `package` | Web 包给页面添加的内容。`web.host`：一个 JS 模块，路径相对于 `nsh.json`，导出 `createHost(player)`，应答应用的 [`host`](../modules/nsh.md#host) 调用；`web.connect`：该模块自己的请求访问的主机，写法同 `capabilities.network.hosts` 的模式，页面的 Content-Security-Policy 允许它们（[Web](./web.md#宿主的函数)）。 |
 | `updater` | object | `package` | 打包后的应用从哪里获取更新：`{ "github": "owner/repo" }` 或 `{ "url": "https://…/latest.json", "publicKey": "…" }`，配 `github` 时 `publicKey` 可选（[应用更新](./app-updates.md)、[nsh/updater](../modules/nsh-updater.md#nshjson)）。 |
+| `ios` | object | `package` | iOS 包添加的内容：`infoPlist` 是应用 `Info.plist` 的键，`entitlements` 在真机构建时对照描述文件检查。NSH 自己的键会被拒绝（[打包](./packaging.md#infoplist-键与-entitlements)）。 |
+| `macos` | object | `package` | macOS 包添加的内容：`infoPlist` 和 `entitlements`，与 `ios` 的相同（[打包](./packaging.md#infoplist-键与-entitlements)）。 |
 | `root` | string | `run`, `package` | Rust 应用的根组件，即它在 `rust` crate（列表时为第一个）中的路径（`App`、`shell::Gallery`）：对应用目录执行 `nsh run` 和 `nsh package` 时，在所有平台上直接挂载它，不使用 QuickJS；`nsh run App.tsx` 仍然运行 TSX 入口（[用 Rust 开发](./rust.md)）。 |
 
 `nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。

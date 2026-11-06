@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)）以及让桌面包自我更新的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。未知的键会导致报错。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -102,7 +102,7 @@ nsh package --target ios \
 写出 `.nsh/out/<Name>.ipa`，可用于 TestFlight、App Store 上传工具或直接安装（取决于描述文件）。具体过程如下：
 
 - 描述文件以 `embedded.mobileprovision` 的名称复制进应用。
-- entitlements 取自描述文件。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
+- entitlements 取自描述文件，加上 `nsh.json` `ios.entitlements` 中应用自己的项，并对照描述文件检查（见[下文](#infoplist-键与-entitlements)）。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
   `TEAMID.com.example.*` 这样的通配描述文件也可以），不覆盖则报错退出。
 - 用 `codesign` 以指定身份签名应用，再压缩成 `.ipa`（`Payload/<Name>.app`）。
 
@@ -190,6 +190,58 @@ nsh package --target web --run
 写出 `.nsh/out/<Name>/`，一个静态站点：`index.html`、`manifest.webmanifest`、页面脚本（`nsh.<digest>.js`）和 `nsh.<digest>.wasm`
 （Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的 ES 模块 `app.<digest>.js`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
 即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
+
+## Info.plist 键与 entitlements
+
+iOS 和 macOS 包的 `Info.plist` 由 NSH 写出，签名也由它完成。应用在 `nsh.json` 的 `ios` 和 `macos` 下添加自己的键（例如出口合规、
+App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）：
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "ITSAppUsesNonExemptEncryption": false,
+      "LSApplicationCategoryType": "public.app-category.finance",
+      "NSAppTransportSecurity": {
+        "NSExceptionDomains": { "example.com": { "NSIncludesSubdomains": true } }
+      }
+    },
+    "entitlements": {
+      "com.apple.developer.associated-domains": ["applinks:example.com"]
+    }
+  },
+  "macos": {
+    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" },
+    "entitlements": { "com.apple.security.network.client": true }
+  }
+}
+```
+
+值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）；`null` 会报错。应用设置的键会替换 NSH
+的默认值，因此应用也可以改写 NSH 添加的权限说明文字，或缩小支持的屏幕方向。
+
+NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖的键由 NSH 掌握。设置其中之一会报错，并说明应改设什么：
+
+| 键 | 来自 |
+|---|---|
+| `CFBundleIdentifier` | `id` |
+| `CFBundleName`、`CFBundleDisplayName` | `name` |
+| `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
+| `CFBundleURLTypes` | `deepLinks` |
+| iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
+| iOS：`UIUserInterfaceStyle` | `appearance` |
+| iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
+| `CFBundleExecutable`、`CFBundlePackageType`、`CFBundleSupportedPlatforms`；iOS：`MinimumOSVersion`、`LSRequiresIPhoneOS`、`UIApplicationSceneManifest`、`UIApplicationSupportsMultipleScenes`；macOS：`LSMinimumSystemVersion`、`NSPrincipalClass` | 包本身 |
+| entitlements：`application-identifier`、`com.apple.application-identifier`、`com.apple.developer.team-identifier` | `id` 和描述文件 |
+
+entitlements：
+
+- **iOS 真机**包用描述文件授予的 entitlements 签名，应用写的每一项替换描述文件里的值。应用列出的每个 entitlement 都必须是描述文件授予的，
+  且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）；否则 `nsh package` 停下并指出是哪一项，
+  这时为应用的标识符启用对应的 capability，再重新下载描述文件。
+- **iOS 模拟器**包直接用应用写的 entitlements 签名。
+- **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
+  `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
 
 ## 图标
 

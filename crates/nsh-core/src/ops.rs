@@ -1722,6 +1722,53 @@ pub enum WebInput {
     Key(WebKey),
 }
 
+/// A page a web view loads with headers on its request (`WebView`'s
+/// `load`): the document request carries them; the page's subresources,
+/// its later navigations and reloads do not. Debug output names the
+/// headers but never shows their values (they are credentials, as
+/// `Authorization`).
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WebLoad {
+    /// The URL to load.
+    pub src: String,
+    /// The request's headers, in order: names are HTTP tokens and values
+    /// have no line breaks or NULs ([`WebLoad::new`] checks).
+    pub headers: Vec<(String, String)>,
+}
+
+impl WebLoad {
+    /// A load of `src` with `headers`; `None` when a header's name is not
+    /// an HTTP token (RFC 9110's `tchar`s) or its value holds a CR, LF or
+    /// NUL, which would let it end the header and start another.
+    pub fn new(src: impl Into<String>, headers: Vec<(String, String)>) -> Option<Self> {
+        let token = |name: &str| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+        };
+        let value = |value: &str| !value.contains(['\r', '\n', '\0']);
+        headers
+            .iter()
+            .all(|(n, v)| token(n) && value(v))
+            .then(|| Self {
+                src: src.into(),
+                headers,
+            })
+    }
+}
+
+impl std::fmt::Debug for WebLoad {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.headers.iter().map(|(n, _)| n.as_str()).collect();
+        f.debug_struct("WebLoad")
+            .field("src", &self.src)
+            .field("headers", &names)
+            .finish()
+    }
+}
+
 /// A key `WebInput::Key` presses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1789,6 +1836,8 @@ pub enum Command {
     PostMessage(String),
     /// Give a web view's page input as the user's own (trusted events).
     SendInput(WebInput),
+    /// Load a page in a web view with headers on its request.
+    Load(WebLoad),
     /// Seek a video to a time in seconds.
     Seek(f64),
     /// Scroll a list to an item (resolved by the core into `ScrollTo`).
