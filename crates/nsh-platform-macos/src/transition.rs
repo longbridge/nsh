@@ -99,8 +99,16 @@ fn animate(surface: &Rc<Surface>, view: &NshView, f: impl FnOnce(&mut Live)) {
     };
     if start {
         let view = view.clone();
+        // Whether only keyframes repeating forever are left, which have no
+        // deadline: the agent of `nsh test` does not wait for them, or no
+        // step would end.
+        let mut looping = false;
         surface.add_frame_callback(move |surface, now| {
             let next = tick(&view, now * 1000.0);
+            if matches!(next, Next::Frame) != looping {
+                looping = !looping;
+                surface.cosmetic_frame(looping);
+            }
             // A keyframe animation alone on the view may need fewer frames.
             if !matches!(next, Next::Done)
                 && let Some(hz) = view.state().live.as_ref().and_then(|l| l.frame_rate())

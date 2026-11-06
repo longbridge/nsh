@@ -455,7 +455,8 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame.
+  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
@@ -687,6 +688,11 @@ browsers' touches into what phones report:
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
   which going back passes over (`history.back()` again) as if the app had been left from its first page. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
+  Only shown stacks count, for the entries and for what going back acts on (`stackShown`: in the tree, visible, and
+  laid out with a size, since `display: none`, a tab not selected, is laid out by the core at zero size, which
+  `checkVisibility` does not see: the rule of `nsh_core::navigation::shown_in_layout`, which every backend asks); a
+  stack's frame becoming empty or not (`op_f`) syncs the entries again (a view around a stack of its own size
+  becoming empty does not: the entries follow at the next push, pop or back).
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
@@ -820,7 +826,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the
   runtime and runs its `createHost(player)` once the player exists, before `run`, and its `host` option forwards to
   what that returns (no callable `call`: the page's "could not be loaded" error). The host module shares the page's
-  CSP: an app restricting `network` gets a `connect-src` of `'self'`, its `capabilities.network` and `web.connect`
+  CSP: an app restricting `network` gets a `connect-src` of `'self'`, the origin of `--asset-url`, its `capabilities.network` and `web.connect`
   (`package::WebConfig::connect`, host patterns checked as `HostPattern`s, which keeps any CSP syntax out:
   `web::page_connect`). `web.connect` is the page's alone: the core checks the app's requests against its
   capabilities before `fetch` sees them, so only the redirect hops CSP guards widen with it. The module is copied as it
