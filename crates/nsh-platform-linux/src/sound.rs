@@ -19,6 +19,9 @@
 //!   [`MAX_VOICES`] the oldest stops.
 //! - An output that cannot start, or that fails later (an error on the
 //!   bus), makes sounds silence: the mixer is made again at the next play.
+//! - A sound whose format no installed plug-in decodes (WAV and FLAC need
+//!   gst-plugins-good) fails as [`Failure::Unsupported`], naming the format,
+//!   so the app sees `not-supported` rather than bytes it cannot read.
 //!
 //! The samples' format is fixed ([`RATE`], two channels): what desktop
 //! outputs mix at, so the output's own conversion is usually none.
@@ -26,7 +29,7 @@
 use std::{
     cell::Cell,
     rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -93,6 +96,44 @@ fn element(factory: &str) -> Result<gst::Element, String> {
         .map_err(|_| format!("the GStreamer element `{factory}` is not installed"))
 }
 
+/// Why a sound did not decode.
+#[derive(Debug)]
+pub(crate) enum Failure {
+    /// No installed plug-in decodes its format (`not-supported`).
+    Unsupported(String),
+    /// Anything else: bytes that are not audio, a broken pipeline
+    /// (`decode`).
+    Other(String),
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Failure::Other(message)
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Self {
+        Failure::Other(message.to_owned())
+    }
+}
+
+/// What a sound of `format` (a caps name, when the decoder said which)
+/// that no plug-in decodes fails with.
+fn unsupported(format: Option<&str>) -> Failure {
+    let format = format.map_or("its format".to_owned(), |f| format!("`{f}`"));
+    Failure::Unsupported(format!(
+        "no installed GStreamer plug-in decodes {format}: WAV, FLAC and MP3 need \
+         gst-plugins-good, AAC and most others gst-libav"
+    ))
+}
+
+/// Whether `error` is GStreamer's for a stream it recognized but has no
+/// plug-in for (as opposed to bytes it cannot read).
+fn is_missing_plugin(error: &gst::glib::Error) -> bool {
+    error.matches(gst::StreamError::CodecNotFound) || error.matches(gst::CoreError::MissingPlugin)
+}
+
 /// The duration of `frames` at [`RATE`].
 fn duration_of(frames: usize) -> Duration {
     Duration::from_secs_f64(frames as f64 / f64::from(RATE))
@@ -100,7 +141,7 @@ fn duration_of(frames: usize) -> Duration {
 
 /// Decodes `bytes` into memory, at most `max` of them. Blocks: off the main
 /// thread.
-pub(crate) fn decode(bytes: Vec<u8>, max: Duration) -> Result<Decoded, String> {
+pub(crate) fn decode(bytes: Vec<u8>, max: Duration) -> Result<Decoded, Failure> {
     init()?;
     let pipeline = gst::Pipeline::new();
     let src = gst_app::AppSrc::builder()
@@ -138,10 +179,35 @@ pub(crate) fn decode(bytes: Vec<u8>, max: Duration) -> Result<Decoded, String> {
             let _ = pad.link(&convert_sink);
         }
     });
+    // A stream the decoder recognized but has no plug-in for: its caps name
+    // the format the app is told about.
+    let missing = Arc::new(Mutex::new(None::<String>));
+    decoder.connect("unknown-type", false, {
+        let missing = missing.clone();
+        move |values| {
+            let caps = values.get(2).and_then(|v| v.get::<gst::Caps>().ok());
+            let name = caps.and_then(|c| c.structure(0).map(|s| s.name().to_string()));
+            if let Ok(mut missing) = missing.lock()
+                && missing.is_none()
+            {
+                *missing = Some(name.unwrap_or_default());
+            }
+            None
+        }
+    });
     let result = pull(&pipeline, &src, &sink, bytes, max);
     let _ = pipeline.set_state(gst::State::Null);
-    let (bytes, truncated) = result?;
+    let missing = missing.lock().ok().and_then(|m| m.clone());
+    let format = missing.as_deref().filter(|f| !f.is_empty());
+    let (bytes, truncated) = match result {
+        Ok(result) => result,
+        Err(Failure::Other(_)) if missing.is_some() => return Err(unsupported(format)),
+        Err(failure) => return Err(failure),
+    };
     if bytes.is_empty() {
+        if missing.is_some() {
+            return Err(unsupported(format));
+        }
         return Err("the sound has no audio GStreamer can decode".into());
     }
     let pcm = Pcm(bytes.into());
@@ -160,7 +226,7 @@ fn pull(
     sink: &gst_app::AppSink,
     bytes: Vec<u8>,
     max: Duration,
-) -> Result<(Vec<u8>, bool), String> {
+) -> Result<(Vec<u8>, bool), Failure> {
     let limit = (max.as_secs_f64() * f64::from(RATE)).ceil() as usize * FRAME_BYTES;
     src.push_buffer(gst::Buffer::from_slice(bytes))
         .map_err(|e| format!("the sound cannot be read: {e}"))?;
@@ -189,7 +255,11 @@ fn pull(
         if let Some(message) = bus.pop_filtered(&[gst::MessageType::Error])
             && let gst::MessageView::Error(error) = message.view()
         {
-            return Err(error.error().to_string());
+            let error = error.error();
+            if is_missing_plugin(&error) {
+                return Err(unsupported(None));
+            }
+            return Err(error.to_string().into());
         }
         if Instant::now() > deadline {
             return Err("the sound did not decode in time".into());
@@ -475,7 +545,28 @@ mod tests {
 
     #[test]
     fn refuses_what_is_not_audio() {
-        assert!(decode(b"not a sound at all".to_vec(), Duration::from_secs(5)).is_err());
+        let failure = decode(b"not a sound at all".to_vec(), Duration::from_secs(5)).err();
+        assert!(matches!(failure, Some(Failure::Other(_))), "{failure:?}");
+    }
+
+    #[test]
+    fn a_format_without_its_plug_in_is_unsupported() {
+        init().unwrap();
+        // GStreamer's base plug-ins recognize a SID tune (`audio/x-sid`) by
+        // its header; its decoder is in gst-plugins-ugly, which CI does not
+        // install.
+        if gst::ElementFactory::find("siddec").is_some() {
+            return;
+        }
+        let mut tune = b"PSID".to_vec();
+        tune.resize(512, 0);
+        match decode(tune, Duration::from_secs(5)).err() {
+            Some(Failure::Unsupported(message)) => {
+                assert!(message.contains("`audio/x-sid`"), "{message}");
+                assert!(message.contains("gst-plugins-good"), "{message}");
+            }
+            other => panic!("not unsupported: {other:?}"),
+        }
     }
 
     #[test]
