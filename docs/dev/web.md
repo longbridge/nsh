@@ -409,8 +409,8 @@ does. Its accessors are grouped as `env.rs` declares them: the exports of `nsh/d
 `environment.test.mjs` checks them against `env.rs`: `nsh` has every one, each namespace exactly those its module
 declares, so a part added to `env.rs` fails there rather than in apps.
 
-The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
-container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
+The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer at
+any width, as a narrow window on a native desktop (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
 `phone`; the player's `idiom` option overrides it, and so does a test's setup (`TestEnvironment::idiom`: `open`'s
 desktop `platform` starts the app in the desktop idiom at any width). `Environment::desktop()`

@@ -17653,7 +17653,7 @@ mod rust_desktop {
         desktop::{DesktopCommand, TitleBarStyle},
         element::{
             Root,
-            desktop::{close_window, set_title_bar, title_bar},
+            desktop::{close_window, quit, set_title_bar, title_bar},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -17681,6 +17681,7 @@ mod rust_desktop {
                     .window_drag(false)
                     .on_press(|_: &()| close_window()),
             )
+            .child(text("Quit").on_press(|_: &()| quit()))
     }
 
     #[test]
@@ -17716,6 +17717,14 @@ mod rust_desktop {
             })
             .unwrap();
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::ViewProps {id, props} if *id == close && props.window_drag == Some(false))));
+        let quit_button = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Quit" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
         assert!(
             batch
                 .items
@@ -17778,6 +17787,22 @@ mod rust_desktop {
         assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
+        // Quitting is a command of its own: the platform ends the app's run,
+        // not only its window.
+        assert!(c.component_event(quit_button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let sent: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some(&**command),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, [&DesktopCommand::Quit]);
     }
 }
 

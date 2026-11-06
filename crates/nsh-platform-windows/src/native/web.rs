@@ -81,10 +81,11 @@ use webview2_com::{
         COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOWN, COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_UP,
         COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
         COREWEBVIEW2_POINTER_EVENT_KIND, COREWEBVIEW2_WEB_ERROR_STATUS,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2, ICoreWebView2_2,
         ICoreWebView2CompositionController, ICoreWebView2Controller, ICoreWebView2Controller2,
-        ICoreWebView2Controller3, ICoreWebView2Environment, ICoreWebView2Environment3,
-        ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
+        ICoreWebView2Controller3, ICoreWebView2Environment, ICoreWebView2Environment2,
+        ICoreWebView2Environment3, ICoreWebView2ExecuteScriptCompletedHandler,
+        ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
     MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
     NavigationStartingEventHandler, WebMessageReceivedEventHandler,
@@ -734,7 +735,7 @@ impl WebItem {
     }
 
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-    /// `injectJavaScript()` and `postMessage()`.
+    /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &Command) {
         let Some(webview) = self.webview.borrow().clone() else {
             if !self.failed.get() {
@@ -754,9 +755,43 @@ impl WebItem {
                 Command::PostMessage(data) => {
                     webview.ExecuteScript(&HSTRING::from(post_message(data)), none)
                 }
+                Command::Load(load) => self.load(&webview, load),
                 _ => Ok(()),
             }
         };
+    }
+
+    /// `load()`: a navigation whose own request carries the app's headers
+    /// (WebView2 adds none of them to the page's subresources or later
+    /// navigations). Runtimes before `ICoreWebView2_2` cannot: an error.
+    fn load(&self, webview: &ICoreWebView2, load: &nsh_core::WebLoad) -> windows::core::Result<()> {
+        let env = self.env.borrow().clone();
+        let (Some(env2), Ok(webview2)) = (
+            env.and_then(|e| e.cast::<ICoreWebView2Environment2>().ok()),
+            webview.cast::<ICoreWebView2_2>(),
+        ) else {
+            self.emitter.emit(EventKind::Error, || {
+                error("this WebView2 runtime cannot send request headers".into())
+            });
+            return Ok(());
+        };
+        // `Name: value` lines; `WebLoad` has no CR or LF in them.
+        let headers: String = load
+            .headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect();
+        // SAFETY: WebView2 calls on the live environment and web view, on
+        // their thread.
+        unsafe {
+            let request = env2.CreateWebResourceRequest(
+                &HSTRING::from(load.src.as_str()),
+                w!("GET"),
+                None::<&windows::Win32::System::Com::IStream>,
+                &HSTRING::from(headers),
+            )?;
+            webview2.NavigateWithWebResourceRequest(&request)
+        }
     }
 
     /// The view's background behind the page until it paints (when the

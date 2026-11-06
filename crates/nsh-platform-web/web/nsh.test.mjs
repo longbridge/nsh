@@ -1532,3 +1532,22 @@ test("a page's shader ends on time without animation frames", (t) => {
   t.mock.timers.tick(1000);
   assert.equal(ended, 1);
 });
+
+test("a mouse makes a desktop at any width, a touch screen a tablet or a phone (#1004)", () => {
+  const saved = { matchMedia: globalThis.matchMedia, screen: globalThis.screen };
+  const measure = (mouse, width, height) => {
+    globalThis.matchMedia = () => ({ matches: mouse });
+    globalThis.screen = { width, height };
+    return Player.prototype.measureIdiom.call({});
+  };
+  try {
+    // A narrow browser window on a desktop still drags to select with the mouse.
+    assert.equal(measure(true, 390, 844), "desktop");
+    assert.equal(measure(true, 1280, 800), "desktop");
+    assert.equal(measure(false, 390, 844), "phone");
+    assert.equal(measure(false, 820, 1180), "pad");
+  } finally {
+    globalThis.matchMedia = saved.matchMedia;
+    globalThis.screen = saved.screen;
+  }
+});

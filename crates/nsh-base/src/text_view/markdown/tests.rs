@@ -84,6 +84,177 @@ fn paragraphs_and_emphasis() {
 }
 
 #[test]
+fn emphasis_beside_cjk_text() {
+    // Closing after full-width punctuation, before a digit or a letter.
+    assert_eq!(
+        blocks("**涨幅：**5%"),
+        vec![p(vec![strong(vec![t("涨幅：")]), t("5%")])]
+    );
+    // Opening after a CJK letter, before punctuation; no mispairing.
+    assert_eq!(
+        blocks("**涨幅：**5%，中**“引号”**中"),
+        vec![p(vec![
+            strong(vec![t("涨幅：")]),
+            t("5%，中"),
+            strong(vec![t("“引号”")]),
+            t("中"),
+        ])]
+    );
+    assert_eq!(
+        blocks("这是**「重点」**吗，*注：*见下"),
+        vec![p(vec![
+            t("这是"),
+            strong(vec![t("「重点」")]),
+            t("吗，"),
+            em(vec![t("注：")]),
+            t("见下"),
+        ])]
+    );
+    assert_eq!(
+        blocks("~~旧价：~~新价"),
+        vec![p(vec![
+            Inline::Strikethrough {
+                content: vec![t("旧价：")]
+            },
+            t("新价"),
+        ])]
+    );
+    assert_eq!(
+        blocks("**[文档](https://a.dev)**里有"),
+        vec![p(vec![
+            strong(vec![link("https://a.dev", vec![t("文档")])]),
+            t("里有"),
+        ])]
+    );
+    assert_eq!(
+        blocks("- **注意：**这里\n\n| 项 |\n|---|\n| **说明：**内容 |"),
+        vec![
+            Block::List {
+                ordered: false,
+                start: 1,
+                loose: false,
+                items: vec![item(vec![p(vec![strong(vec![t("注意：")]), t("这里")])])],
+            },
+            Block::Table(Table {
+                align: vec![ColumnAlign::None],
+                head: vec![TableCell::new(vec![t("项")])],
+                rows: vec![vec![TableCell::new(vec![
+                    strong(vec![t("说明：")]),
+                    t("内容")
+                ])]],
+            }),
+        ]
+    );
+    // `_` reads as in CommonMark: not inside words.
+    assert_eq!(blocks("中_“x”_中"), vec![p(vec![t("中_“x”_中")])]);
+    // Code, HTML and links keep their text as written.
+    let doc = md("`**涨幅：**5%` <span>中**“引号”**中</span>");
+    let [Block::Paragraph { content }] = doc.blocks.as_slice() else {
+        panic!("{doc:?}");
+    };
+    assert_eq!(content[0], code("**涨幅：**5%"));
+    assert_eq!(doc.plain_text().trim(), "**涨幅：**5% 中**“引号”**中");
+    let doc =
+        md("[中**“x”**中](https://a.dev/中**“x”**中 \"中**：**x\")\n\n```\n**涨幅：**5%\n```");
+    assert!(!format!("{doc:?}").contains('\u{FDD0}'), "{doc:?}");
+}
+
+/// Each node of `text`'s tree, in order, as its kind and the text its
+/// position slices from `text`; every position's line and column checked
+/// against its offset.
+fn node_sources(text: &str) -> Vec<String> {
+    let tree = super::tree(&Parser::new(), text, true);
+    assert_eq!(tree.source, text);
+    let mut out = Vec::new();
+    let mut stack = vec![&tree.root];
+    while let Some(node) = stack.pop() {
+        let position = node.position().expect("a position");
+        for point in [&position.start, &position.end] {
+            let before = &text[..point.offset];
+            let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+            assert_eq!(point.line, before.matches('\n').count() + 1, "{node:?}");
+            assert_eq!(point.column, point.offset - line_start + 1, "{node:?}");
+        }
+        let debug = format!("{node:?}");
+        let kind = debug.split([' ', '(']).next().unwrap_or_default();
+        out.push(format!(
+            "{kind}: {}",
+            &text[position.start.offset..position.end.offset]
+        ));
+        if let Some(children) = node.children() {
+            stack.extend(children.iter().rev());
+        }
+    }
+    out
+}
+
+#[test]
+fn positions_are_offsets_in_the_text_given() {
+    // Marks beside the emphasis and the escapes of prose `$` are inserted
+    // before parsing; the positions leave them out.
+    let text = "**涨幅：**5%，中**“引号”**中\n\ncosts $5 and **$10：**涨";
+    assert_eq!(
+        node_sources(text),
+        vec![
+            format!("Root: {text}"),
+            "Paragraph: **涨幅：**5%，中**“引号”**中".to_owned(),
+            "Strong: **涨幅：**".to_owned(),
+            "Text: 涨幅：".to_owned(),
+            "Text: 5%，中".to_owned(),
+            "Strong: **“引号”**".to_owned(),
+            "Text: “引号”".to_owned(),
+            "Text: 中".to_owned(),
+            "Paragraph: costs $5 and **$10：**涨".to_owned(),
+            "Text: costs $5 and ".to_owned(),
+            "Strong: **$10：**".to_owned(),
+            "Text: $10：".to_owned(),
+            "Text: 涨".to_owned(),
+        ]
+    );
+    // A plugin reads the text given.
+    struct Sources(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    impl MarkdownPlugin for Sources {
+        fn name(&self) -> &str {
+            "sources"
+        }
+        fn inline(&self, node: &mdast::Node, cx: &mut ParseContext<'_>) -> Option<Inline> {
+            assert!(!cx.source().contains('\u{FDD0}'));
+            if let mdast::Node::Strong(_) = node {
+                let source = cx.node_source(node).unwrap_or_default().to_owned();
+                self.0.lock().unwrap().push(source);
+            }
+            None
+        }
+    }
+    let sources = std::sync::Arc::default();
+    Parser::new()
+        .plugin(Sources(std::sync::Arc::clone(&sources)))
+        .markdown("中**“引号”**中，**涨幅：**5%");
+    assert_eq!(*sources.lock().unwrap(), vec!["**“引号”**", "**涨幅：**"]);
+}
+
+#[test]
+fn emphasis_beside_latin_text_is_commonmarks() {
+    // CommonMark's examples, unchanged.
+    assert_eq!(blocks("a**\"foo\"**"), vec![p(vec![t("a**\"foo\"**")])]);
+    assert_eq!(blocks("a*\"foo\"*"), vec![p(vec![t("a*\"foo\"*")])]);
+    assert_eq!(blocks("__foo__bar"), vec![p(vec![t("__foo__bar")])]);
+    assert_eq!(
+        blocks("foo**bar**"),
+        vec![p(vec![t("foo"), strong(vec![t("bar")])])]
+    );
+    assert_eq!(
+        blocks("**foo \"*bar*\" foo**"),
+        vec![p(vec![strong(vec![
+            t("foo \""),
+            em(vec![t("bar")]),
+            t("\" foo"),
+        ])])]
+    );
+    assert_eq!(blocks("naïve**“q”**x"), vec![p(vec![t("naïve**“q”**x")])]);
+}
+
+#[test]
 fn soft_and_hard_breaks() {
     assert_eq!(
         blocks("one\ntwo  \nthree\\\nfour"),

@@ -95,6 +95,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 | `stopLoading()` | `stop_loading()` | 停止加载。 |
 | `injectJavaScript(script)` | `inject_java_script(script)` | 在页面中执行 JavaScript。 |
 | `postMessage(data)` | `post_message(data)` | 向页面发送一个字符串，页面会在 `window` 上收到 `message` 事件。 |
+| `load({ src, headers })` | `load(WebLoad::new(src, headers)?)` | 加载 `src`，只给页面自身的请求带上 `headers`（如 `Authorization`），子资源和之后的导航不带（[指南](../docs/web-view-and-video.md#已登录的页面请求头)）。 |
 
 ## 通信
 

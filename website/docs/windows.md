@@ -139,6 +139,10 @@ only load it from your own app's files. A standalone window is `nsh_platform_win
 `AppSource::Rust(root)` or `AppSource::Bundle(bundle)`. `Root::tokens` gives a root its [theme](./rust.md#theme) and
 `Root::app_id` the id its data is kept under.
 
+`AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
+its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
+app's stay yours; `run_app` sets it.
+
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
 cache directory and 256 MiB of images by default).
