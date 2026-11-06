@@ -1081,6 +1081,22 @@ pub unsafe extern "C" fn nsh_app_send_host_event(
     status(name.and_then(|name| app.view.host().send(name, data?)))
 }
 
+/// Hands `url`, one the embedding app was opened with, to the running app
+/// (`UrlScheme.on("open")`, `nsh`); before an app runs, the next one loaded
+/// gets it. Returns why it cannot (`url` is not UTF-8), or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `url` must be a NUL-terminated
+/// string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_open_url(app: *mut NshApp, url: *const c_char) -> *mut c_char {
+    main_thread();
+    // SAFETY: guaranteed by the caller.
+    let (app, url) = unsafe { (&*app, utf8(url, "the URL")) };
+    status(url.map(|url| app.view.open_url(url)))
+}
+
 /// A call of the app (`host.call`) its handler answers (opaque to C): once,
 /// from any thread, with [`nsh_host_call_resolve`] or
 /// [`nsh_host_call_reject`], which free it; [`nsh_host_call_free`] fails it

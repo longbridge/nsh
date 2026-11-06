@@ -70,6 +70,11 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
+    /// The system hands the app a link that opens it (`openWithUrl`).
+    fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("openWithUrl"))
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
     fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String>;
@@ -226,6 +231,9 @@ impl Driver for Headless {
         self.set_environment(&format!("setLifecycle({})", state.name()), |e| {
             e.lifecycle = state;
         })
+    }
+    fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        Headless::open_with_url(self, url)
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
         Headless::run_for(self, time)

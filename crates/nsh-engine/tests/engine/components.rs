@@ -2257,6 +2257,39 @@ fn menus_reach_the_platform_and_call_back() {
     )));
 }
 
+const QUIT: &str = r#"import { mount, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+Application.quit();
+mount(() => <Text>{`quit ${typeof Application.quit}`}</Text>);
+"#;
+
+/// `Application.quit()` reaches the platform as the root's quit command, which it
+/// carries out as its quit menu role.
+#[test]
+fn app_quit_reaches_the_platform() {
+    use nsh_core::desktop::DesktopCommand;
+
+    let (_engine, rx) = start_in(
+        QUIT,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "quit function"));
+    assert!(
+        batches.iter().flat_map(|b| &b.items).any(|item| matches!(
+            item,
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } if **command == DesktopCommand::Quit
+        )),
+        "{batches:?}"
+    );
+}
+
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";
 

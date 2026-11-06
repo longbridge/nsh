@@ -85,6 +85,19 @@ pub struct Selection {
     pub end: u32,
 }
 
+/// The selection of a selectable view changed
+/// ([`Interactive::on_text_selection_change`](super::Interactive::on_text_selection_change)).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TextSelectionEvent {
+    /// The selected text, as a copy gives it; empty when nothing is
+    /// selected.
+    pub text: String,
+    /// Where it starts in the copy of the whole view (what a select all
+    /// would copy), in UTF-16 code units, when the platform knows it.
+    pub start: Option<u32>,
+}
+
 /// Where an input's caret is (`on_caret_move`): what opens at it (an `@`
 /// mention's suggestions) is placed with it.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -338,6 +351,18 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,
         end: number(p, "end") as u32,
+    }))
+}
+
+/// The selection of a selectable view (`text`, `start`).
+pub(crate) fn selected_text(p: &EventPayload) -> Option<Cow<'_, TextSelectionEvent>> {
+    let start = match field(p, "start") {
+        Some(PayloadValue::Number(n)) if *n >= 0.0 => Some(*n as u32),
+        _ => None,
+    };
+    Some(Cow::Owned(TextSelectionEvent {
+        text: string(p, "text").unwrap_or_default().to_owned(),
+        start,
     }))
 }
 

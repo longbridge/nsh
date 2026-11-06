@@ -44,6 +44,7 @@ mod global_shortcut;
 mod image;
 mod input;
 mod keymap;
+mod linking;
 mod mount;
 mod native;
 mod navigation;

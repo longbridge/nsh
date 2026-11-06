@@ -69,6 +69,75 @@ struct MenuContext {
     /// back on its trigger (Left on one of its items, Escape); `None` in
     /// the menu itself.
     leave: Option<Rc<dyn Fn()>>,
+    /// Why its submenus open or close, as the user asked.
+    why: Why,
+}
+
+/// Why a menu's submenus last opened or closed as the user asked: each
+/// request stamps its reason, and a submenu reports a change of its own
+/// (`onOpenChange`) only for a stamp it has not reported. The app opening
+/// or closing the menu itself is no request, as `Menu`'s `onOpenChange`
+/// does not report it either. A stamp, not a reason taken once: one
+/// request can open one submenu and close another, or close a submenu and
+/// the ones inside it, and their effects run after it, in a batch.
+///
+/// The closings come before the openings, whatever order the effects run
+/// in: an app cleans up what a submenu showed when it closes and loads
+/// what the next one shows when it opens. A submenu that opens first
+/// reports the others that closed ([`Why::report_closings`]).
+#[derive(Clone, Copy)]
+struct Why {
+    stamp: Stored<(u64, OpenChangeReason)>,
+    /// Each submenu's report of a change not reported yet, by id, in the
+    /// order they were made (a submenu after the ones around it).
+    reports: Stored<Vec<(u32, Report)>>,
+}
+
+/// A submenu's report of a change not reported yet; given `true`, it
+/// reports only a closing.
+type Report = Rc<dyn Fn(bool)>;
+
+impl Why {
+    fn new() -> Self {
+        Self {
+            stamp: stored((0, OpenChangeReason::TriggerPress)),
+            reports: stored(Vec::new()),
+        }
+    }
+
+    /// The user asked for a change of the menu or its submenus.
+    fn stamp(self, reason: OpenChangeReason) {
+        self.stamp.with(|(stamp, why)| {
+            *stamp += 1;
+            *why = reason;
+        });
+    }
+
+    fn get(self) -> (u64, OpenChangeReason) {
+        self.stamp.get()
+    }
+
+    /// Adds submenu `id`'s report, removed when the submenu goes.
+    fn add(self, id: u32, report: Report) {
+        self.reports.with(|r| r.push((id, report)));
+        let reports = self.reports;
+        cleanup(move || reports.with(|r| r.retain(|(i, _)| *i != id)));
+    }
+
+    /// Reports the closings of the submenus other than `id` not reported
+    /// yet, the ones inside first.
+    fn report_closings(self, id: u32) {
+        let reports: Vec<_> = self.reports.with(|r| {
+            r.iter()
+                .rev()
+                .filter(|(i, _)| *i != id)
+                .map(|(_, f)| f.clone())
+                .collect()
+        });
+        for report in reports {
+            report(true);
+        }
+    }
 }
 
 /// Which item an opening from the keyboard focuses, as WAI-ARIA's menu
@@ -297,6 +366,14 @@ enum At {
     Pointer(Signal<Point<Points>>, ElementRef),
 }
 
+/// What the user asked of a menu, which its items read: the item an
+/// opening from the keyboard focuses, and why its submenus open or close.
+#[derive(Clone, Copy)]
+struct Asked {
+    keyed: Stored<Option<Keyed>>,
+    why: Why,
+}
+
 /// The menu while it is open: its popup or sheet, with the context its
 /// items read. `change` asks to open or close it.
 fn surface(
@@ -305,9 +382,10 @@ fn surface(
     emit: Rc<dyn Fn(MenuEvent)>,
     at: At,
     parts: Surface,
-    keyed: Stored<Option<Keyed>>,
+    asked: Asked,
     children: Prop<Children>,
 ) -> AnyElement {
+    let Asked { keyed, why } = asked;
     let sheet = !is_desktop();
     // Why it last closed: a press outside put the focus where it pressed.
     let closed_by = stored(None::<OpenChangeReason>);
@@ -336,6 +414,7 @@ fn surface(
         popup: presence.popup(),
         items: Items::new(keyed),
         leave: None,
+        why,
     });
     // An attempt to close it: reported, then it closes (none while it
     // goes).
@@ -354,6 +433,7 @@ fn surface(
         let dismiss = dismiss.clone();
         move || {
             if !path.with_untracked(|p| p.is_empty()) {
+                why.stamp(OpenChangeReason::Cancel);
                 path.update(|p| {
                     p.pop();
                 });
@@ -581,10 +661,12 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     // An opening from the keyboard: which item it focuses once they are
     // there.
     let keyed = stored(None::<Keyed>);
+    let why = Why::new();
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
         if !next {
             keyed.replace(None);
         }
+        why.stamp(reason);
         open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let anchor = element_ref();
@@ -692,7 +774,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
             Rc::new(move |e| cx.emit(e)),
             At::Trigger(anchor),
             parts,
-            keyed,
+            Asked { keyed, why },
             props.children,
         ))
 }
@@ -761,6 +843,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
     // An opening from the keyboard or an assistive technology focuses the
     // first enabled item once they are there.
     let keyed = stored(None::<Keyed>);
+    let why = Why::new();
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
         if !next {
             keyed.replace(None);
@@ -768,6 +851,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
         if next && props.disabled.get_untracked() {
             return;
         }
+        why.stamp(reason);
         open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let point = signal(Point::<Points>::default());
@@ -851,7 +935,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             parts,
             // The secondary button and a held finger open it with no item
             // focused, the keyboard with the first.
-            keyed,
+            Asked { keyed, why },
             props.children,
         ))
 }
@@ -1019,7 +1103,10 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         })
         // Over another item, a submenu of its level closes.
         .on_mouse_enter(move |_: &MouseEvent| {
-            if let Some(m) = &hover {
+            if let Some(m) = &hover
+                && m.open_sub.get_untracked().is_some()
+            {
+                m.why.stamp(OpenChangeReason::Hover);
                 m.open_sub.set(None);
             }
         })
@@ -1073,6 +1160,21 @@ pub struct SubmenuProps {
     pub children: Prop<Children>,
 }
 
+/// The events of a [`Submenu`].
+#[derive(Debug, Clone, PartialEq, Event)]
+pub enum SubmenuEvent {
+    /// It opened or closed as the user asked, with why: its trigger hovered
+    /// (`"hover"`) or pressed, or Right, Return or Space on it
+    /// (`"triggerPress"`); the pointer over another item of its menu
+    /// (`"hover"`); Left, Escape, back or its `back` row (`"cancel"`); the
+    /// whole menu closing (the menu's reason: `"select"`,
+    /// `"pressOutside"`, ...). Its items are made as it opens, so an app
+    /// can load them here the first time. Not when the app closes the menu
+    /// itself.
+    #[args(open, reason)]
+    OpenChange(bool, OpenChangeReason),
+}
+
 /// A menu inside a menu: on the desktops its items are a popup beside its
 /// trigger, opened as the pointer comes over the trigger or presses it; on
 /// touch screens pressing the trigger shows its items in the sheet instead
@@ -1083,10 +1185,10 @@ pub struct SubmenuProps {
 /// On the desktops and in a terminal, Right, Return or Space on its
 /// focused trigger open it with the keyboard focus on its first enabled
 /// item; Left on one of its items, or Escape, closes it with the focus
-/// back on its trigger, as WAI-ARIA's menus do.
+/// back on its trigger, as WAI-ARIA's menus do. `onOpenChange` reports its
+/// openings and closings, as `Menu`'s reports the menu's.
 #[component]
-pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
-    let _ = cx;
+pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement {
     let Some(menu) = use_context::<MenuContext>() else {
         // Outside a menu: nothing to open.
         return view().child(props.trigger.place(|t| t)).into_element();
@@ -1095,15 +1197,44 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
         *n += 1;
         *n
     });
-    let (path, open_sub, around) = (menu.path, menu.open_sub, menu.open);
+    let (path, open_sub, around, why) = (menu.path, menu.open_sub, menu.open, menu.why);
     // Open while chosen at its level and every level around it is open:
     // closing the menu closes it, no state written.
     let sub_open = computed(move || around.get() && open_sub.get() == Some(id));
     let presence = PopupPresence::new(move || sub_open.get(), menu.looks);
+    // A sheet's: while its items are on the path.
+    let open = match menu.sheet {
+        true => computed(move || around.get() && path.with(|p| p.contains(&id))),
+        false => sub_open,
+    };
+    // Each change the user asked for, once; an opening after the closings
+    // of the others.
+    {
+        let (was, reported) = (stored(false), stored(why.get().0));
+        let report = Rc::new(move |closing_only: bool| {
+            let now = open.get_untracked();
+            if (closing_only && now) || was.get() == now {
+                return;
+            }
+            was.replace(now);
+            let (stamp, reason) = why.get();
+            if reported.replace(stamp) != stamp {
+                cx.emit(SubmenuEvent::OpenChange(now, reason));
+            }
+        });
+        why.add(id, report.clone());
+        effect(move || {
+            if open.get() {
+                untracked(|| why.report_closings(id));
+            }
+            untracked(|| report(false));
+        });
+    }
     let anchor = element_ref();
     // Left on one of its items, or Escape: it closes and the keyboard
     // focus goes back to its trigger, as WAI-ARIA's menus do.
     let leave: Rc<dyn Fn()> = Rc::new(move || {
+        why.stamp(OpenChangeReason::Cancel);
         open_sub.set(None);
         anchor.focus();
     });
@@ -1111,7 +1242,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
         level: id,
         popup: presence.popup(),
         open_sub: signal(None),
-        open: sub_open,
+        open,
         leave: (!menu.sheet).then(|| leave.clone()),
         ..menu.clone()
     };
@@ -1120,10 +1251,12 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
         let shown = menu.clone();
         let into = move || {
             if !props.disabled.get_untracked() {
+                why.stamp(OpenChangeReason::TriggerPress);
                 path.update(|p| p.push(id));
             }
         };
         let back = move || {
+            why.stamp(OpenChangeReason::Cancel);
             path.update(|p| {
                 p.pop();
             });
@@ -1156,8 +1289,9 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     }
     let item_key = menu.items.add(anchor, menu.level, props.disabled);
     let edges = menu.popup;
-    let open = move || {
-        if !props.disabled.get_untracked() {
+    let open_by = move |reason: OpenChangeReason| {
+        if !props.disabled.get_untracked() && open_sub.get_untracked() != Some(id) {
+            why.stamp(reason);
             open_sub.set(Some(id));
         }
     };
@@ -1179,7 +1313,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             ],
             move |key| match key {
                 SubmenuKey::Enter if !props.disabled.get_untracked() => {
-                    open_sub.set(Some(id));
+                    open_by(OpenChangeReason::TriggerPress);
                     items.focus_first(id);
                 }
                 SubmenuKey::Enter => {}
@@ -1204,6 +1338,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
         if inside.replace(false) {
             leave();
         } else {
+            why.stamp(OpenChangeReason::Cancel);
             open_sub.set(None);
         }
     };
@@ -1221,8 +1356,8 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             })
             .on_focus(move || focused.set(true))
             .on_blur(move || focused.set(false))
-            .on_mouse_enter(move |_: &MouseEvent| open())
-            .on_press(open)
+            .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+            .on_press(move || open_by(OpenChangeReason::TriggerPress))
             .child(props.trigger.place(|t| t.flex_grow(1.0)))
             .child(text(SUBMENU_ARROW).text_color(move || crate::theme::theme().muted_foreground))
             .into_element(),
@@ -1236,8 +1371,8 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                 })
                 .on_focus(move || focused.set(true))
                 .on_blur(move || focused.set(false))
-                .on_mouse_enter(move |_: &MouseEvent| open())
-                .on_press(open)
+                .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+                .on_press(move || open_by(OpenChangeReason::TriggerPress))
         }),
     };
     view()

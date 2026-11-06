@@ -1077,7 +1077,7 @@ impl Mounter {
                 self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
-                    self.areas.remove(i).1.detach();
+                    self.areas.remove(i).1.delete();
                 }
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
                     // A modal deleted while presented (the app closed it and
@@ -2953,6 +2953,9 @@ impl Mounter {
             .slot(id)
             .is_some_and(|s| s.events.contains(EventKind::Touch));
         self.set_view_events(id, events);
+        if let Some((_, area)) = self.areas.iter().find(|(a, _)| *a == id) {
+            area.set_listens(events.contains(EventKind::SelectionChange));
+        }
         let listens = self
             .slot(id)
             .is_some_and(|s| s.events.contains(EventKind::Touch));
@@ -3721,10 +3724,19 @@ impl Mounter {
         }
         // After the props: the texts below read whether they are in an area.
         match (area, was_area) {
-            (Some(view), false) => self.areas.push((
-                id,
-                crate::selectable_view::AreaResponder::attach(&view, mtm, self.control.clone()),
-            )),
+            (Some(view), false) => {
+                let listens = self
+                    .slot(id)
+                    .is_some_and(|s| s.events.contains(EventKind::SelectionChange));
+                let area = crate::selectable_view::AreaResponder::attach(
+                    &view,
+                    mtm,
+                    self.control.clone(),
+                    id,
+                    listens,
+                );
+                self.areas.push((id, area));
+            }
             (None, true) => {
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
                     self.areas.remove(i).1.detach();

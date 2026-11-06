@@ -115,12 +115,45 @@ pub(crate) struct AppConfig {
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
+    /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
+    /// packages register with the system; the app hears them through
+    /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
+    /// their case ([`AppConfig::url_schemes`]).
+    #[serde(default)]
+    pub(crate) schemes: Vec<String>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
     /// What macOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) macos: AppleConfig,
+    /// What Android packages set in their manifest.
+    #[serde(default)]
+    pub(crate) android: AndroidConfig,
+}
+
+/// `nsh.json` `"android"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AndroidConfig {
+    /// The API level the app targets (`targetSdkVersion`; default
+    /// [`android::DEFAULT_TARGET_SDK`]), which it also compiles against:
+    /// the SDK must have its platform.
+    ///
+    /// [`android::DEFAULT_TARGET_SDK`]: crate::android::DEFAULT_TARGET_SDK
+    pub(crate) target_sdk: Option<u32>,
+}
+
+impl AndroidConfig {
+    /// `targetSdk`, checked: no lower than the runtime's minimum.
+    pub(crate) fn target_sdk(&self) -> anyhow::Result<u32> {
+        use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
+        let level = self.target_sdk.unwrap_or(DEFAULT_TARGET_SDK);
+        if level < MIN_SDK {
+            bail!("nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 9)");
+        }
+        Ok(level)
+    }
 }
 
 /// `nsh.json` `"tui"`.
@@ -154,6 +187,13 @@ impl AppConfig {
         }
     }
 
+    /// The URL schemes the app claims (`"schemes": [...]`),
+    /// checked, in lower case.
+    pub(crate) fn url_schemes(&self) -> anyhow::Result<Vec<String>> {
+        nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
+            .map_err(|e| anyhow::anyhow!("nsh.json: {e}"))
+    }
+
     /// Adds what the system shows when the app first asks for the
     /// microphone and speech recognition, which it requires (it ends an app
     /// that asks without them), when the app may recognize speech.
@@ -178,6 +218,35 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
         "The app turns what you say into text.",
     ),
 ];
+
+/// The `app.json` of a package: `info` (the app's id, ...) with the
+/// schemes it claims, which its runner hands the core so the links of
+/// others are dropped (`nsh_engine::Bundle::url_schemes`).
+pub(crate) fn app_json(mut info: serde_json::Value, schemes: &[String]) -> String {
+    if !schemes.is_empty() {
+        info["schemes"] = serde_json::json!(schemes);
+    }
+    info.to_string()
+}
+
+/// Declares the URL schemes the app claims in an Apple `Info.plist`
+/// (`CFBundleURLTypes`), so the system opens the app for their links.
+fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
+    use plist::Value;
+    if schemes.is_empty() {
+        return;
+    }
+    let mut url_type = plist::Dictionary::new();
+    url_type.insert("CFBundleURLName".into(), Value::String(id.to_owned()));
+    url_type.insert(
+        "CFBundleURLSchemes".into(),
+        Value::Array(schemes.iter().cloned().map(Value::String).collect()),
+    );
+    info.insert(
+        "CFBundleURLTypes".into(),
+        Value::Array(vec![Value::Dictionary(url_type)]),
+    );
+}
 
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
@@ -212,6 +281,8 @@ pub(crate) struct PackageOptions<'a> {
     ///
     /// [`android::DEFAULT_ABIS`]: crate::android::DEFAULT_ABIS
     pub(crate) abis: &'a [String],
+    /// Android: an APK or an App Bundle.
+    pub(crate) format: crate::android::Format,
     /// Install and launch in the simulator or on the device afterwards
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
@@ -230,6 +301,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     if let Some(value) = &config.tui.points_per_cell {
         crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
     }
+    config.schemes = config.url_schemes()?;
     config.ios.check(ApplePlatform::Ios)?;
     config.macos.check(ApplePlatform::Macos)?;
     config.icon = config.icon.map(|icon| dir.join(icon));
@@ -322,9 +394,25 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
     }
+    if options.format != crate::android::Format::Apk {
+        if options.target != PackageTarget::Android {
+            bail!("--format only applies to --target android");
+        }
+        if options.run {
+            bail!(
+                "--run installs an APK: drop --format aab, or install the bundle with bundletool"
+            );
+        }
+    }
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
+    let schemes = config.url_schemes()?;
+    if options.target == PackageTarget::Web && !schemes.is_empty() {
+        ui::warn(
+            "nsh.json schemes: a web page opens from its address, so the schemes are left out",
+        );
+    }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let executable = if executable.is_empty() {
         "App".to_owned()
@@ -397,10 +485,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    // The app's id, which names where it keeps its data (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the schemes
+    // it claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
-        serde_json::json!({ "id": id }).to_string(),
+        app_json(serde_json::json!({ "id": id, "name": name }), &schemes),
     )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
@@ -421,6 +510,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Gpui => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
+    url_types(&mut info, &id, &schemes);
     if let Some(icon) = &config.icon {
         let partial = compile_icon(icon, &app, sdk)?;
         for (key, value) in partial {
@@ -561,7 +651,7 @@ fn package_android(
     // The app's id, which names where it keeps its data.
     assets.push((
         "nsh/app.json".to_owned(),
-        serde_json::json!({ "id": id }).to_string().into_bytes(),
+        app_json(serde_json::json!({ "id": id }), &config.schemes).into_bytes(),
     ));
     for asset in &built.assets {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
@@ -579,19 +669,24 @@ fn package_android(
         }
     };
     fs::create_dir_all(options.out)?;
-    let apk_path = options.out.join(format!("{name}.apk"));
+    let target_sdk = config.android.target_sdk()?;
+    let apk_path = options
+        .out
+        .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
-    android::build_apk(
+    android::build(
         &sdk,
         &Apk {
             package: id,
             label: name,
             version_name: version,
             version_code: config.build.unwrap_or(1),
+            target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
             notifications: config.notifications(),
+            schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
@@ -600,6 +695,7 @@ fn package_android(
             assets,
             signing,
         },
+        options.format,
         &apk_path,
     )?;
     step.done(format!(
@@ -671,7 +767,12 @@ fn package_linux(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
+    let mut info = serde_json::json!({
+        "name": name,
+        "id": id,
+        "version": version,
+        "schemes": config.schemes,
+    });
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
@@ -682,7 +783,7 @@ fn package_linux(
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(name, id, executable, config.icon.is_some()),
+        desktop_entry(name, id, executable, config.icon.is_some(), &config.schemes),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -770,7 +871,8 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
-    fs::write(nsh.join("app.json"), info.to_string())?;
+    let schemes = config.url_schemes()?;
+    fs::write(nsh.join("app.json"), app_json(info, &schemes))?;
     let icon = match &config.icon {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
@@ -778,7 +880,9 @@ fn package_macos(
         }
         None => false,
     };
-    plist::Value::Dictionary(macos_info_plist(name, id, executable, config, icon)?)
+    let mut plist = macos_info_plist(name, id, executable, config, icon)?;
+    url_types(&mut plist, id, &schemes);
+    plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
     let entitlements = config.macos.entitlements(ApplePlatform::Macos)?;
@@ -914,14 +1018,31 @@ const MACOS_MINIMUM: &str = "14.0";
 /// name and `StartupWMClass`, which GTK sets from the application id.
 /// `Exec` names the executable on the `PATH` (install the package
 /// directory, or a link to the executable, there).
-fn desktop_entry(name: &str, id: &str, executable: &str, icon: bool) -> String {
+/// `schemes` are the URL schemes it opens (`MimeType=x-scheme-handler/…`):
+/// the URL is `Exec`'s `%u`.
+pub(crate) fn desktop_entry(
+    name: &str,
+    id: &str,
+    executable: &str,
+    icon: bool,
+    schemes: &[String],
+) -> String {
     let icon = if icon {
         format!("Icon={id}\n")
     } else {
         String::new()
     };
+    let (url, mime) = if schemes.is_empty() {
+        ("", String::new())
+    } else {
+        let types: String = schemes
+            .iter()
+            .map(|s| format!("x-scheme-handler/{s};"))
+            .collect();
+        (" %u", format!("MimeType={types}\n"))
+    };
     format!(
-        "[Desktop Entry]\nType=Application\nName={name}\nExec={executable}\n{icon}StartupWMClass={id}\nTerminal=false\nCategories=Utility;\n"
+        "[Desktop Entry]\nType=Application\nName={name}\nExec={executable}{url}\n{icon}StartupWMClass={id}\nTerminal=false\nCategories=Utility;\n{mime}"
     )
 }
 
@@ -1219,6 +1340,25 @@ mod tests {
     }
 
     #[test]
+    fn android_target_sdk_defaults_and_is_checked() {
+        let target = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .target_sdk()
+        };
+        assert_eq!(
+            target(serde_json::json!({})).unwrap(),
+            crate::android::DEFAULT_TARGET_SDK
+        );
+        assert_eq!(
+            target(serde_json::json!({ "android": { "targetSdk": 36 } })).unwrap(),
+            36
+        );
+        assert!(target(serde_json::json!({ "android": { "targetSdk": 21 } })).is_err());
+    }
+
+    #[test]
     fn apps_that_may_recognize_speech_explain_it() {
         let usage = |capabilities: Option<serde_json::Value>| {
             let config = AppConfig {
@@ -1236,6 +1376,47 @@ mod tests {
         assert!(usage(None));
         assert!(usage(Some(serde_json::json!({ "speech": true }))));
         assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+    }
+
+    #[test]
+    fn apps_claim_their_url_schemes_in_the_package() {
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
+        let schemes = config.url_schemes().unwrap();
+        assert_eq!(schemes, ["myapp", "myapp-dev"]);
+        // The system opens the app for their links...
+        let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        url_types(&mut info, "com.a", &schemes);
+        let types = info["CFBundleURLTypes"].as_array().unwrap();
+        let url_type = types[0].as_dictionary().unwrap();
+        assert_eq!(url_type["CFBundleURLName"].as_string(), Some("com.a"));
+        let listed: Vec<_> = url_type["CFBundleURLSchemes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(listed, ["myapp", "myapp-dev"]);
+        // ...and the runner lets them through.
+        let json: serde_json::Value =
+            serde_json::from_str(&app_json(serde_json::json!({ "id": "com.a" }), &schemes))
+                .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "id": "com.a", "schemes": ["myapp", "myapp-dev"] })
+        );
+        // An app that claims none declares none.
+        let mut info = macos_info_plist("A", "com.a", "a", &AppConfig::default(), false).unwrap();
+        url_types(&mut info, "com.a", &[]);
+        assert!(!info.contains_key("CFBundleURLTypes"));
+        assert_eq!(
+            app_json(serde_json::json!({ "id": "com.a" }), &[]),
+            r#"{"id":"com.a"}"#
+        );
+        // Schemes of the system and other apps are refused.
+        let config: AppConfig = serde_json::from_str(r#"{ "schemes": ["https"] }"#).unwrap();
+        let error = config.url_schemes().unwrap_err().to_string();
+        assert!(error.starts_with("nsh.json: schemes:"), "{error}");
     }
 
     #[test]
@@ -1450,12 +1631,19 @@ mod tests {
     #[test]
     fn desktop_entries_match_windows_by_the_app_id() {
         assert_eq!(
-            desktop_entry("Counter", "com.example.counter", "Counter", true),
+            desktop_entry("Counter", "com.example.counter", "Counter", true, &[]),
             "[Desktop Entry]\nType=Application\nName=Counter\nExec=Counter\n\
              Icon=com.example.counter\nStartupWMClass=com.example.counter\nTerminal=false\n\
              Categories=Utility;\n"
         );
-        assert!(!desktop_entry("A", "com.example.a", "A", false).contains("Icon="));
+        assert!(!desktop_entry("A", "com.example.a", "A", false, &[]).contains("Icon="));
+    }
+
+    #[test]
+    fn desktop_entries_open_the_apps_schemes() {
+        let entry = desktop_entry("A", "com.example.a", "A", false, &["a".into(), "b2".into()]);
+        assert!(entry.contains("Exec=A %u\n"));
+        assert!(entry.contains("MimeType=x-scheme-handler/a;x-scheme-handler/b2;\n"));
     }
 
     // `ditto` is macOS's.

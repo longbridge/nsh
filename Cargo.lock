@@ -3591,6 +3591,7 @@ dependencies = [
  "nsh-testing",
  "nsh-updater",
  "plist",
+ "ring",
  "semver",
  "serde",
  "serde_json",

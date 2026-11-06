@@ -3,6 +3,9 @@
   "id": "com.longbridge.nsh.gallery",
   "version": "1.0.0",
   "build": 1,
+  "schemes": [
+    "nsh-gallery"
+  ],
   "icon": "icon.png",
   "appearance": "system",
   "theme": "../nsh-gallery-ui/theme.json",
@@ -46,7 +49,8 @@
     "clipboard": true,
     "openUrl": {
       "schemes": [
-        "https"
+        "https",
+        "nsh-gallery"
       ]
     },
     "picker": true,

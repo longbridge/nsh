@@ -11,14 +11,12 @@
 //! `markdown-rs` keeps CommonMark's reading, so a delimiter run of `*` or
 //! `~` that the amendment lets open or close where CommonMark does not gets
 //! [`MARK`] between it and the punctuation beside it before parsing; the
-//! parser takes the mark for a letter, and it is removed from the tree after
-//! parsing ([`unmark_node`], `offsets.rs`, which also maps the tree's
-//! positions back to the text given). `_` reads the same under both rules, and text
+//! parser takes the mark for a letter, and `offsets.rs` takes it out of the
+//! tree after parsing. `_` reads the same under both rules, and text
 //! without CJK characters is never changed.
 
 use std::{borrow::Cow, sync::OnceLock};
 
-use markdown::mdast::{AttributeContent, AttributeValue, Node};
 use regex::Regex;
 
 /// What is placed beside a delimiter run: a noncharacter (Unicode keeps
@@ -246,93 +244,6 @@ pub(super) fn is_cjk(c: char) -> bool {
             | 0x1f7da
             | 0x20000..=0x3fffd
     )
-}
-
-fn unmark_string(text: &mut String) {
-    if text.contains(MARK) {
-        text.retain(|c| c != MARK);
-    }
-}
-
-fn unmark_option(text: &mut Option<String>) {
-    if let Some(text) = text {
-        unmark_string(text);
-    }
-}
-
-/// Node `node` parsed from a marked source without its marks, in its text,
-/// URL, title, label and attributes (not its children's).
-pub(super) fn unmark_node(node: &mut Node) {
-    match node {
-        Node::Text(n) => unmark_string(&mut n.value),
-        Node::InlineCode(n) => unmark_string(&mut n.value),
-        Node::InlineMath(n) => unmark_string(&mut n.value),
-        Node::Html(n) => unmark_string(&mut n.value),
-        Node::Yaml(n) => unmark_string(&mut n.value),
-        Node::Toml(n) => unmark_string(&mut n.value),
-        Node::MdxjsEsm(n) => unmark_string(&mut n.value),
-        Node::MdxTextExpression(n) => unmark_string(&mut n.value),
-        Node::MdxFlowExpression(n) => unmark_string(&mut n.value),
-        Node::Code(n) => {
-            unmark_string(&mut n.value);
-            unmark_option(&mut n.lang);
-            unmark_option(&mut n.meta);
-        }
-        Node::Math(n) => {
-            unmark_string(&mut n.value);
-            unmark_option(&mut n.meta);
-        }
-        Node::Link(n) => {
-            unmark_string(&mut n.url);
-            unmark_option(&mut n.title);
-        }
-        Node::Image(n) => {
-            unmark_string(&mut n.url);
-            unmark_string(&mut n.alt);
-            unmark_option(&mut n.title);
-        }
-        Node::Definition(n) => {
-            unmark_string(&mut n.url);
-            unmark_option(&mut n.title);
-            unmark_string(&mut n.identifier);
-            unmark_option(&mut n.label);
-        }
-        Node::LinkReference(n) => {
-            unmark_string(&mut n.identifier);
-            unmark_option(&mut n.label);
-        }
-        Node::ImageReference(n) => {
-            unmark_string(&mut n.alt);
-            unmark_string(&mut n.identifier);
-            unmark_option(&mut n.label);
-        }
-        Node::FootnoteDefinition(n) => {
-            unmark_string(&mut n.identifier);
-            unmark_option(&mut n.label);
-        }
-        Node::FootnoteReference(n) => {
-            unmark_string(&mut n.identifier);
-            unmark_option(&mut n.label);
-        }
-        Node::MdxJsxFlowElement(n) => unmark_attributes(&mut n.attributes),
-        Node::MdxJsxTextElement(n) => unmark_attributes(&mut n.attributes),
-        _ => {}
-    }
-}
-
-fn unmark_attributes(attributes: &mut [AttributeContent]) {
-    for attribute in attributes {
-        match attribute {
-            AttributeContent::Property(property) => match &mut property.value {
-                Some(AttributeValue::Literal(value)) => unmark_string(value),
-                Some(AttributeValue::Expression(expression)) => {
-                    unmark_string(&mut expression.value)
-                }
-                None => {}
-            },
-            AttributeContent::Expression(expression) => unmark_string(&mut expression.value),
-        }
-    }
 }
 
 #[cfg(test)]

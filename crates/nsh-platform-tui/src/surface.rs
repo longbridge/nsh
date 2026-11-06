@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::MountBatch;
+use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{AppError, Engine, MountSink};
 
 use crate::WakeCallback;
@@ -18,6 +18,8 @@ pub(crate) enum Message {
     Batch(MountBatch),
     Error(AppError),
     Frame,
+    /// The engine laid the app out at this size ([`MountSink::resized`]).
+    Resized(Size<Points>),
     /// The engine caught up with the keyboard's focus change of this number.
     Focused(u64),
     #[cfg(feature = "dev")]
@@ -91,6 +93,9 @@ impl MountSink for Sink {
     fn request_frame(&self) {
         self.send(Message::Frame);
     }
+    fn resized(&self, size: Size<Points>) {
+        self.send(Message::Resized(size));
+    }
 }
 
 pub(crate) struct Surface {
@@ -99,6 +104,9 @@ pub(crate) struct Surface {
     /// Messages a key's wait for the engine received before the draw.
     pub(crate) held: std::collections::VecDeque<Message>,
     pub(crate) wake: Arc<Wake>,
+    /// The viewport the engine's layout is for: the one it started with,
+    /// then the last it reported laid out ([`Message::Resized`]).
+    pub(crate) laid_out: Size<Points>,
     pub(crate) frame: Option<Instant>,
     pub(crate) animation_frame: Option<Instant>,
     pub(crate) animation_start: Instant,
@@ -111,6 +119,7 @@ impl Default for Surface {
             inbox: crossbeam_channel::never(),
             held: Default::default(),
             wake: Arc::default(),
+            laid_out: Size::default(),
             frame: None,
             animation_frame: None,
             animation_start: Instant::now(),
@@ -128,6 +137,15 @@ impl Surface {
         } else {
             self.frame.into_iter().chain(self.animation_frame).min()
         }
+    }
+
+    /// Whether the engine has laid the app out at a size the surface had.
+    /// An app loaded before the surface's first draw starts on an empty
+    /// viewport: until the layout at the drawn area arrives, its views are
+    /// all at the origin, sized for no room, and showing them would put
+    /// them where the app never asked.
+    pub(crate) fn sized(&self) -> bool {
+        self.laid_out.width > Points(0.0) && self.laid_out.height > Points(0.0)
     }
 
     pub(crate) fn begin_frame(&mut self) {
@@ -181,6 +199,7 @@ impl Surface {
         self.engine = None;
         self.inbox = crossbeam_channel::never();
         self.held.clear();
+        self.laid_out = Size::default();
         self.frame = None;
         self.animation_frame = None;
         self.animation_start = Instant::now();

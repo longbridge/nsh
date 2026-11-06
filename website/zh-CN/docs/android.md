@@ -45,6 +45,20 @@ NSH 以 16 KB ELF 对齐构建 `libnsh.so`，并将未压缩的原生库按 16 K
 release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位于运行时旁的 `symbols/<abi>/libnsh.so`（Rust 应用的在
 `.nsh/rust/android-rust-release/symbols/<abi>/`）：把它交给 `ndk-stack`，或作为原生调试符号上传到 Play Console，即可还原原生崩溃堆栈。
 
+## 上传到 Google Play
+
+`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的内部测试轨道（[CLI](./cli.md#nsh-publish-android)）：
+
+```sh
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # 不要提交到仓库
+nsh publish android .nsh/out/App.aab
+```
+
+每个应用做一次：在 Play Console 中创建应用；在 Google Cloud 中启用 Google Play Android Developer API 并创建服务账号，下载其
+JSON 密钥；在 Play Console 的**用户和权限**中邀请该服务账号的邮箱，并授予发布到测试轨道的权限。应用在 Play Console
+中完成首次发布之前，请加 `--draft`。Bundle 的 version code 必须高于此前上传过的所有版本。发布到内部测试之外的轨道仍在 Play
+Console 中操作。
+
 ## 嵌入 Android 应用
 
 现有的 Android 应用可以在自己的界面中显示 NSH 应用。运行时以 Android 库 `nsh.aar` 的形式提供：创建一个
