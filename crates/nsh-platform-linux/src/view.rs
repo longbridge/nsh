@@ -385,7 +385,9 @@ mod imp {
             let Some(kids) = kids else {
                 return self.parent_next_accessible_sibling();
             };
-            let at = kids.iter().position(|w| w == obj.upcast_ref::<gtk::Widget>())?;
+            let at = kids
+                .iter()
+                .position(|w| w == obj.upcast_ref::<gtk::Widget>())?;
             kids.get(at + 1).map(|w| w.clone().upcast())
         }
     }
