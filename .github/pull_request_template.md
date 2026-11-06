@@ -20,7 +20,7 @@ List every public item this pull request adds, changes or removes, grouped by cr
 
 ## Breaking Changes
 
-Describe any breaking changes introduced by this pull request. If none, remove this section. What apps use (JS exports, elements, props, style keys, Tailwind utilities, their types and behavior) is never broken: see [compatibility](../docs/dev/compatibility.md).
+Describe any breaking changes introduced by this pull request. If none, remove this section. What apps use (JS exports, elements, props, style keys, Tailwind utilities, their types and behavior) is never broken: see [compatibility](https://github.com/longbridge/nsh/blob/main/docs/dev/compatibility.md).
 
 ```diff
 - Old code snippet
@@ -37,7 +37,7 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 
 ## Checklist
 
-- [ ] I have read the [CONTRIBUTING](../CONTRIBUTING.md) document and followed the guidelines.
+- [ ] I have read the [CONTRIBUTING](https://github.com/longbridge/nsh/blob/main/CONTRIBUTING.md) document and followed the guidelines.
 - [ ] Reviewed the changes in this PR and confirmed AI generated code (if any) is accurate.
 - [ ] Passed `cargo test --workspace`, `cargo +nightly fmt --all` and clippy (including the Catalyst and Android runs for platform code).
 - [ ] Changes to what apps use keep what released versions shipped and come with a case in `tests/compat/` (`cargo xtask compat`).
