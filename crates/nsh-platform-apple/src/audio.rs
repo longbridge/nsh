@@ -1,6 +1,6 @@
 //! Sound on Apple platforms (`Command::Audio`, `nsh`'s `Sound` and
-//! `AudioPlayer`; `docs/dev/audio-design.md`). Shared by macOS and iOS (the
-//! iOS crate includes this file): AVFoundation is loaded and messaged
+//! `AudioPlayer`; `docs/dev/audio-design.md`). Shared by macOS and iOS (both
+//! backends depend on this crate): AVFoundation is loaded and messaged
 //! dynamically, as the video and speech code do.
 //!
 //! - **Sounds** decode once, at their load, into an `AVAudioPCMBuffer`
@@ -54,7 +54,7 @@ const BUFFER_INTERRUPTS: usize = 2;
 
 /// One engine's sounds and players.
 #[derive(Default)]
-pub(crate) struct Speaker {
+pub struct Speaker {
     /// Shared with the decodes in flight, which find it again (or not:
     /// the surface closed) when they finish.
     inner: Rc<RefCell<Inner>>,
@@ -106,7 +106,7 @@ impl Drop for Speaker {
 
 /// Applies `command` for the engine `control` reports to, `asset:/` URIs
 /// resolving against `base`. On the main thread.
-pub(crate) fn command(
+pub fn command(
     speaker: &Speaker,
     control: &EngineControl,
     command: &AudioCommand,

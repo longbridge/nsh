@@ -122,7 +122,7 @@ submodule (the per-primitive submodules are the deprecated past).
 | The Rust face for components | `nsh_core::prelude`: `sound()`, `audio_player()` (as `speech_available()`), through `element::ambient` |
 | Root commands and events | `ops.rs`: `Command::Audio(AudioCommand)`, `EventKind::Audio` → `EventPayload::Audio { id, event }` |
 | The platform's say | `Environment::audio: bool` (`platform.rs`, `element/env.rs`) |
-| The platforms | `nsh-platform-{ios,macos}` `audio.rs` (shared, as `speech.rs` is), `nsh-platform-android` `Audio.java` + JNI, `nsh-platform-windows` `native/audio.rs`, `nsh-platform-linux` and `nsh-platform-gpui` on GStreamer, `nsh-platform-web/web/nsh.js` |
+| The platforms | `nsh-platform-apple` `audio.rs` (macOS and iOS, as `speech.rs` is), `nsh-platform-android` `Audio.java` + JNI, `nsh-platform-windows` `native/audio.rs`, `nsh-platform-linux` and `nsh-platform-gpui` on GStreamer, `nsh-platform-web/web/nsh.js` |
 | Tests | `nsh-testing`'s headless driver gets an `AudioBackend` fake (as speech's); `tests/compat/cases/audio/` |
 
 ## The API

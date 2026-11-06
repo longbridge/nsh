@@ -26,7 +26,6 @@ mod access;
 mod agent;
 mod animation;
 mod app;
-mod audio;
 mod blur;
 mod canvas;
 mod chrome;
@@ -52,7 +51,7 @@ mod selectable_view;
 mod shader;
 mod sight;
 // Shared with iOS.
-use nsh_platform_apple::{notifications, speech};
+use nsh_platform_apple::{audio, notifications, speech};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
