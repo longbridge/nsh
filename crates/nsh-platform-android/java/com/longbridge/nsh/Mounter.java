@@ -879,7 +879,7 @@ final class Mounter {
         if (v instanceof StackBox) stacks.remove(v);
         SelectableView area = selectableViews.get(id);
         if (area != null) {
-            area.clear();
+            area.remove();
             selectableViews.remove(id);
         }
         screenOptions.remove(id);
@@ -1022,6 +1022,9 @@ final class Mounter {
                 decor.borderWidths[i] = borderWidths[i] * density;
                 decor.borderColors[i] = borderColors[i];
             }
+            // A RippleDrawable rasterizes its mask once; a shape change here
+            // would leave the ripple clipped to the stale (pre-change) shape.
+            rippleMaskDirty(id);
             decor.borderStyle = borderStyle;
             decor.continuous = continuous;
             decor.originX = originXFraction ? originX : originX * density;
@@ -1134,6 +1137,9 @@ final class Mounter {
                         decor.radii[i] = from.radii[i] + (radii[i] - from.radii[i]) * t;
                         decor.borderWidths[i] = from.borderWidths[i] + (widths[i] - from.borderWidths[i]) * t;
                     }
+                    // Same as above: the ripple's cached mask must follow the
+                    // animated shape (e.g. the press corner morph).
+                    rippleMaskDirty(id);
                 }
             }
             now.opacity = opacity ? from.opacity + (to.opacity - from.opacity) * t : to.opacity;
@@ -1146,6 +1152,12 @@ final class Mounter {
             now.rotateY = to.rotateY;
             now.perspective = to.perspective;
             now.background = decor != null ? decor.fill : to.background;
+            // The frame's border colors are what the decor now carries; a
+            // fresh Dynamic's all-transparent array would have applyDynamic
+            // "restore" them to transparent every frame (an outlined view's
+            // border vanished after its first transition and never came
+            // back).
+            if (decor != null) System.arraycopy(decor.borderColors, 0, now.borderColors, 0, 4);
             applyDynamic(v, now);
             v.invalidate();
         });
@@ -1395,6 +1407,17 @@ final class Mounter {
     }
 
     /**
+     * Drops the cached mask of the ripple of view {@code id}: a
+     * RippleDrawable rasterizes its mask once and reuses it until told
+     * otherwise, so any corner-radius change under an active (or later)
+     * ripple must invalidate it for the mask to follow the new shape.
+     */
+    private void rippleMaskDirty(int id) {
+        Feedback f = feedback.get(id);
+        if (f != null && f.ripple != null) f.ripple.invalidateSelf();
+    }
+
+    /**
      * Whether presses on {@code id} show feedback. A view that also handles
      * presses shows it itself; for one that does not, the root's
      * `TouchTracker` does, and the view stays unclickable.
@@ -1528,7 +1551,7 @@ final class Mounter {
         SelectableView area = selectableViews.get(id);
         if (selectableView && (area == null || area.view != v)) {
             if (area != null) area.clear();
-            selectableViews.put(id, new SelectableView(this, v));
+            selectableViews.put(id, new SelectableView(this, v, id));
         } else if (!selectableView && area != null) {
             area.clear();
             selectableViews.remove(id);
@@ -2075,6 +2098,17 @@ final class Mounter {
                 if (v instanceof WebBox) ((WebBox) v).command(kind, text);
                 break;
             }
+            case 46: {
+                String url = (String) objects[b.getInt()];
+                int count = b.getInt();
+                java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
+                for (int i = 0; i < count; i++) {
+                    String name = (String) objects[b.getInt()];
+                    headers.put(name, (String) objects[b.getInt()]);
+                }
+                if (v instanceof WebBox) ((WebBox) v).load(url, headers);
+                break;
+            }
             case 10: {
                 float seconds = b.getFloat();
                 if (v instanceof VideoBox) ((VideoBox) v).seek(seconds);
@@ -2152,6 +2186,18 @@ final class Mounter {
                 request.maxDimension = b.getInt();
                 request.quality = b.getFloat();
                 request.current = b.getInt() != 0;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
+            case 45: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                String extensions = (String) objects[b.getInt()];
+                request.extensions = extensions.isEmpty() ? new String[0] : extensions.split(",");
+                request.maxBytes = b.getInt();
+                request.files = true;
                 request.view = host;
                 Picker.show(context, request);
                 break;
@@ -2239,8 +2285,8 @@ final class Mounter {
                     default: source = new Object[] {0};
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
-                boolean scroll = b.getInt() != 0, js = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js);
+                boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
+                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
                 break;
             }
             case 4: {

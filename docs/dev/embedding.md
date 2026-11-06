@@ -2,7 +2,10 @@
 
 - `nsh package <entry> --target ios|ios-simulator|android|linux|macos|windows` builds an installable app from the prebuilt runtime: metadata from
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
-  and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>
+  and a dark window theme, so the launch screen is in it) or flags. iOS and macOS packages add the app's
+  `ios` / `macos` `infoPlist` keys and `entitlements` (`crates/nsh-cli/src/apple.rs`: JSON as property list values,
+  the keys NSH sets refused with what to set instead; device builds check entitlements against the profile, which
+  keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
@@ -22,6 +25,14 @@
   are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- Links: `nsh.json` `"schemes": [...]` names the URL schemes a packaged app claims (checked by
+  `nsh_core::url_scheme::schemes_from_json` in the bundler, the CLI and a Rust app's generated root). `nsh package`
+  declares them to the system (`CFBundleURLTypes` on macOS and iOS) and writes them to `app.json`, which the runner
+  reads with the app's id (`nsh_engine::Bundle::url_schemes`; a Rust app's `Root::url_schemes`), never
+  from the app's code. The platform reports every URL the system opens the app with as the root's `UrlScheme` event; the
+  core drops the links of other schemes and keeps the rest until the app listens (`UrlScheme.on("open")`,
+  `next_url_scheme_open()`). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
+  A signed package embedded in another app claims no schemes: the embedding app owns them.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
   with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
@@ -184,7 +195,8 @@
   the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
   every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any
   thread), and the core resolves the pick with them (cut to the limit, sizes, types and extensions filled in from the
-  bytes), sending no `Command::PickImages`. The capability check comes first, so a pick the app is not granted never
+  bytes), sending no `Command::PickImages`. `PickerBackend::pick_files` answers `Picker.pickFiles` the same way (a
+  backend that does not implement it cancels those picks; the platform's picker is still not shown). The capability check comes first, so a pick the app is not granted never
   reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
   needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
   the view's activity).
@@ -314,6 +326,13 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Notifications.** The process's notifications (`nsh`'s `Notifications`) belong to the embedding app unless it
+  hands them to the app it embeds: `AppOptions::notifications` on macOS and Windows (off by default; `run_app` sets
+  it). Then the view's app owns them for the whole process: on macOS NSH becomes the notification center's delegate
+  (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
+  AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
+  permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
+  the app by its id either way.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),
@@ -339,3 +358,22 @@ NSH draws (`src/layers.rs`).
   handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
   `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
   `NshView.ErrorListener`) are unchanged.
+
+## TestFlight uploads
+
+`nsh publish ios <IPA>` (`publish_ios.rs`) uploads a device IPA made by `nsh package` directly
+to App Store Connect's build uploads API. It reads the IPA's Info.plist, verifies the remote app's
+bundle ID, creates a build upload and file reservation, streams the prescribed ranges, and commits
+the SHA-256 checksum. Apple then processes the build; beta distribution and review remain in
+App Store Connect. The existing `.nshpkg` signing form of `publish` is preserved (`./ios` disambiguates
+an entry directory named `ios`).
+
+Credentials use flags or `NSH_APP_STORE_{APP_ID,ISSUER_ID,KEY_ID,PRIVATE_KEY}` environment variables,
+never project configuration. Each control request gets a two-minute ES256 JWT; delivery requests
+use only Apple's supplied headers. HTTP redirects are disabled, transfer errors omit signed URLs,
+and upload ranges must cover the file exactly. The CLI uses the existing ring dependency tree for
+P-256 signing, and existing ureq, base64, sha2, zip and plist crates.
+
+Unit tests verify JWT signatures and claims, request bodies, IPA metadata and range validation.
+A real upload requires a macOS machine, an App Store-signed IPA and an owner's App Store Connect
+team API key; local tests do not prove Apple's signing validation or TestFlight processing.

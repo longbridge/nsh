@@ -427,6 +427,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) alignment: Option<crate::ListAlignment>,
     pub(crate) viewport: Option<crate::ListViewport>,
 }
 
@@ -457,6 +458,9 @@ impl ListConfig {
         }
         if self.follow_end != old.follow_end {
             out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        }
+        if self.alignment != old.alignment {
+            out.push(Prop::ListAlignment(self.alignment.unwrap_or_default()));
         }
         if self.viewport != old.viewport {
             out.push(Prop::ListViewport(self.viewport.unwrap_or_default()));
@@ -1460,6 +1464,23 @@ pub trait Interactive: Element {
         self.on(
             EventKind::ContextMenu,
             events::typed(listener.into_listener(), events::context_menu),
+        )
+    }
+
+    /// The selection across the texts of a selectable view
+    /// ([`Self::selectable`]) changed: the selected text, as a copy gives
+    /// it, empty once nothing is selected, and where it starts in the
+    /// view's whole text (TSX `onSelectionChange` of a `<View selectable>`,
+    /// `{ text, start }`). Only the outermost selectable view of an area
+    /// reports it; an [`Input`](super::Input)'s own selection is its
+    /// `on_selection_change`.
+    fn on_text_selection_change<M>(
+        self,
+        listener: impl IntoListener<super::TextSelectionEvent, M>,
+    ) -> Self {
+        self.on(
+            EventKind::SelectionChange,
+            events::typed(listener.into_listener(), events::selected_text),
         )
     }
 

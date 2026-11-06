@@ -139,6 +139,16 @@ import -window root -display :170 whole.png        # the display, if the window'
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
+  A window that is not presented (minimized, hidden, a suspended Wayland toplevel) or a surface whose view is not
+  rendered gets no frames, yet what changes the app's state when an animation ends still happens on time: a
+  transition detaching its view, a screen or modal settling with `onShow` / `onDismiss`, an animation's `finished`, a
+  scroll's end. Each frame client tells its next such deadline (`Next::At`, from the core's `Animator::deadline`,
+  `Live::deadline`, `Transitions::deadline` and `scroll::deadline`), and the surface keeps the earliest with one
+  `rt::after_ms` timer 50 ms past it (`Surface::keep_deadline`): if no tick ran since it came due, the timer runs the
+  same tick outside the paint (nothing in it needs the window; what it changes is drawn when the window shows again)
+  and schedules the next. A batch applied while frame clients run is due at once, as it may have moved what they
+  reported. While frames come they always tick first and the timer only schedules on; what only draws (an endless
+  loop, a fade, a shader, a JS frame request) gives no deadline, so a hidden window with a spinner does no work.
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
@@ -157,7 +167,7 @@ import -window root -display :170 whole.png        # the display, if the window'
   window itself (its bounds, a GPUI Kit `Root` around the view) calls `AppView::own_window` in the window's build
   closure, best with the window opened with `titlebar_options`: the app's title, title bar, application menu and window
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
-  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Window.close()`, the close
+  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `Window.close()`, the close
   button) to the host, which quits or closes when it is ready (after saving, say). `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
@@ -204,13 +214,15 @@ drawn and how many of them GPUI counted active (unfocused windows run at 30 fps 
 mean/p50/p95/max), the paint's milliseconds rasterizing canvases and its paths per frame (each batch of paths is a
 viewport-sized MSAA pass for GPUI), the animation frames requested and the notifies sent (what made GPUI draw). GPUI's
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
-real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
+real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks (its
+animations' ends are kept by a timer instead, above).
 
 ## Idle windows
 
 A window with nothing animating draws no frames and NSH's threads sleep: the engine thread waits on its channel, the
 main thread on GPUI's event loop, and nothing NSH schedules runs again on its own (the caret's timer stops when its
-window is inactive or hidden, and on Linux after its blinks, above). Measured on Linux (voluntary context switches
+window is inactive or hidden, and on Linux after its blinks; a hidden window's animations wake it only at their ends,
+above). Measured on Linux (voluntary context switches
 per thread, `/proc/<pid>/task/*/status`, an app showing static text, `nsh-gpui-host --bundle`, software Vulkan):
 
 - Wayland: about 4 a second, all of them the two idle threads of the `blocking` crate's pool (a dependency of

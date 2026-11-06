@@ -55,7 +55,7 @@ fn run(app: &AppDirectory, extra: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn tui_inherits_terminal_streams_and_keeps_cli_and_host_diagnostics_in_its_log() {
+fn tui_shows_startup_progress_and_keeps_running_host_diagnostics_in_its_log() {
     let app = app(r#"{"tui":{"pointsPerCell":"10x20"}}"#);
     for extra in [vec![], vec!["-v", "--points-per-cell", "6x12"]] {
         let output = run(&app, &extra);
@@ -76,14 +76,11 @@ fn tui_inherits_terminal_streams_and_keeps_cli_and_host_diagnostics_in_its_log()
             "{shown}"
         );
         assert!(!shown.contains("built"), "{shown}");
-        assert!(
-            output.stderr.is_empty(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let progress = String::from_utf8(output.stderr).unwrap();
+        assert!(progress.contains("built"), "{progress}");
+        assert!(!progress.contains("host-diagnostic"), "{progress}");
         let logs = fs::read_to_string(app.0.join(".nsh/tui.log")).unwrap();
         assert!(logs.contains("host-diagnostic"), "{logs}");
-        assert!(logs.contains("built"), "{logs}");
     }
 }
 

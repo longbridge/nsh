@@ -57,6 +57,9 @@ struct Sink {
     emptied: Option<String>,
     /// An input method is composing.
     composing: bool,
+    /// What the sink reported while composing: the text takes it when the
+    /// composition ends.
+    held: Option<String>,
 }
 
 /// The editor's controller. Cloned into the closures that need it.
@@ -732,12 +735,29 @@ impl Ed {
     /// The sink's text changed to `text`: what was typed (or replaced by an
     /// input method, or autocorrected) at the caret.
     pub(crate) fn sink_changed(&self, text: &str) {
+        // Platforms report the uncommitted text (pinyin, kana) as the sink's
+        // while it lasts; the text takes only the commit.
+        if self.sink.borrow().composing {
+            self.sink.borrow_mut().held = Some(text.to_owned());
+            self.sink_value.set(text.to_owned());
+            return;
+        }
+        self.sink_edited(text);
+    }
+
+    /// Applies the sink's `text`: what was deleted and typed since.
+    fn sink_edited(&self, text: &str) {
         let (deleted, inserted) = {
             let mut sink = self.sink.borrow_mut();
             let base = match sink.emptied.take() {
-                // The platform dropped the empty value: the text still
-                // extends what it held.
-                Some(old) if text.starts_with(old.as_str()) => old,
+                // The platform dropped the empty value: the text still extends
+                // what it held. A text equal to what it held was typed again
+                // into the emptied sink: platforms report each edit, so an
+                // edit to the text the platform kept would show. Linux reports
+                // the edits made before it is idle as one: there, the text
+                // deleted and typed again before the empty value arrives reads
+                // the same, and is inserted a second time.
+                Some(old) if text != old && text.starts_with(old.as_str()) => old,
                 Some(_) => String::new(),
                 None => std::mem::take(&mut sink.text),
             };
@@ -781,9 +801,23 @@ impl Ed {
         self.sink_value.set(String::new());
     }
 
-    /// An input method's composition started, changed or ended.
+    /// An input method's composition started, changed or ended: its text
+    /// shows at the caret and the text waits for the commit, which asks for
+    /// no completions (the input method offers its own candidates).
     pub(crate) fn composition(&self, composing: bool, text: &str) {
-        self.sink.borrow_mut().composing = composing;
+        let (started, held) = {
+            let mut sink = self.sink.borrow_mut();
+            let started = composing && !sink.composing;
+            sink.composing = composing;
+            (started, if composing { None } else { sink.held.take() })
+        };
+        if started {
+            self.hide_completions();
+            self.hide_inline_completion();
+        }
+        if let Some(held) = held {
+            self.without_completions(|| self.sink_edited(&held));
+        }
         {
             let mut st = self.st.borrow_mut();
             st.composition = (composing && !text.is_empty()).then(|| text.to_owned());
@@ -794,7 +828,11 @@ impl Ed {
     /// A key the sink reports (soft keyboards: Backspace in an empty
     /// sink, which changes nothing there).
     pub(crate) fn sink_key(&self, key: &str) {
-        if key == "Backspace" && self.sink.borrow().text.is_empty() {
+        // A Backspace in a composition deletes what is composed.
+        let sink = self.sink.borrow();
+        let empty = sink.text.is_empty() && !sink.composing;
+        drop(sink);
+        if key == "Backspace" && empty {
             self.run(Command::Backspace);
         }
     }

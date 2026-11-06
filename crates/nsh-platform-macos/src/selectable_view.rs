@@ -24,7 +24,7 @@ use std::{
 };
 
 use nsh_core::{
-    AttributedText, Bounds, Point, Points, ViewKind,
+    AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points, ViewKind,
     geometry::{bounds, point, size},
     selection::{
         KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
@@ -206,6 +206,8 @@ struct Active {
     pointer: Cell<Option<(f32, f32)>>,
     /// The virtual list rows its ends are in, kept rendered.
     kept: KeptRows,
+    /// The selected text last reported to the area's `onSelectionChange`.
+    reported: String,
 }
 
 impl Active {
@@ -254,6 +256,52 @@ impl Active {
     }
 }
 
+/// Reports the selected text of the area that has the selection to its
+/// `onSelectionChange` when it changed (after the selection's borrow ends:
+/// the handler may change what is shown).
+fn report(surface: &Surface) {
+    let change = {
+        let mut active = surface.selection.area.active.borrow_mut();
+        let Some(active) = active.as_mut() else {
+            return;
+        };
+        let Some(area) = active.area() else {
+            return;
+        };
+        let (id, listens) = {
+            let s = area.state();
+            (s.id, s.events.contains(EventKind::SelectionChange))
+        };
+        if !listens {
+            return;
+        }
+        let (text, start) = if active.model.is_empty() {
+            (String::new(), 0)
+        } else {
+            let texts = collect(&area);
+            (active.model.text(&texts), active.model.start_offset(&texts))
+        };
+        if text == active.reported {
+            return;
+        }
+        active.reported.clone_from(&text);
+        (id, text, start)
+    };
+    send(surface, change);
+}
+
+/// Sends `onSelectionChange` with `text` to view `id`.
+fn send(surface: &Surface, (id, text, start): (NodeId, String, u32)) {
+    surface.event(
+        id,
+        EventKind::SelectionChange,
+        EventPayload::Map(vec![
+            ("text", PayloadValue::Str(text)),
+            ("start", PayloadValue::Number(f64::from(start))),
+        ]),
+    );
+}
+
 impl AreaSelection {
     /// Whether `area` has the selection.
     fn is(&self, area: &NshView) -> bool {
@@ -269,6 +317,12 @@ impl AreaSelection {
         let active = self.active.borrow_mut().take();
         if let Some(mut active) = active {
             active.hide(surface);
+            if !active.reported.is_empty()
+                && let Some(area) = active.area()
+            {
+                let id = area.state().id;
+                send(surface, (id, String::new(), 0));
+            }
         }
     }
 
@@ -301,6 +355,8 @@ impl AreaSelection {
         let texts = collect(&area);
         active.model.select_all(&texts);
         active.show(surface, &texts);
+        drop(active);
+        report(surface);
         true
     }
 }
@@ -325,8 +381,8 @@ pub(crate) fn down(
     }
     let (lx, ly) = crate::input::local(surface, area, x, y);
     let texts = collect(area);
-    let mut active = selection.area.active.borrow_mut();
-    let active = active.get_or_insert_with(|| Active {
+    let mut selection_slot = selection.area.active.borrow_mut();
+    let active = selection_slot.get_or_insert_with(|| Active {
         area: objc2::rc::Weak::from(&**area),
         model: SelectionModel::new(),
         shown: Vec::new(),
@@ -334,6 +390,7 @@ pub(crate) fn down(
         over_press: false,
         pointer: Cell::new(None),
         kept: KeptRows::default(),
+        reported: String::new(),
     });
     let clicks = clicks.max(1) as u32;
     active.over_press = over_press;
@@ -344,6 +401,8 @@ pub(crate) fn down(
         .model
         .press(&texts, point(Points(lx), Points(ly)), clicks, shift);
     active.show(surface, &texts);
+    drop(selection_slot);
+    report(surface);
 }
 
 /// The primary button, pressed in `area`, moved by `(dx, dy)` from where it
@@ -384,12 +443,14 @@ pub(crate) fn drag(
 fn extend(surface: &Surface, area: &NshView, x: f32, y: f32) {
     let (lx, ly) = crate::input::local(surface, area, x, y);
     let texts = collect(area);
-    let mut active = surface.selection.area.active.borrow_mut();
-    let Some(active) = active.as_mut() else {
+    let mut slot = surface.selection.area.active.borrow_mut();
+    let Some(active) = slot.as_mut() else {
         return;
     };
     if active.model.drag(&texts, point(Points(lx), Points(ly))) {
         active.show(surface, &texts);
+        drop(slot);
+        report(surface);
     }
 }
 
@@ -443,7 +504,7 @@ fn autoscroll(surface: &Rc<Surface>) {
         return;
     }
     let mut last = None;
-    surface.add_frame_callback(move |surface, now| {
+    surface.add_draw_callback(move |surface, now| {
         // Frames as long as at 60 Hz move as far whatever the display's
         // rate.
         let scale = last.map_or(1.0, |l: f64| ((now - l) * 60.0).clamp(0.25, 4.0) as f32);
@@ -498,6 +559,8 @@ pub(crate) fn end_batch(surface: &Surface) {
     let texts = collect(&area);
     active.model.texts_changed(&texts);
     active.show(surface, &texts);
+    drop(slot);
+    report(surface);
 }
 
 /// Keeps the virtual list rows of `nodes` rendered (none: lets go).

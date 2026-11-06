@@ -138,8 +138,8 @@ pub use self::{
     env::Environment,
     events::{
         CaretEvent, Composition, FileDropEvent, GestureEvent, HintReason, ImageProgress,
-        NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress,
-        WebNavigation,
+        NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection, TextSelectionEvent,
+        VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -204,11 +204,11 @@ pub use crate::{
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
     EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, KeyboardAppearance,
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
-    LayoutCurve, LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation,
-    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
-    PastedFile, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
-    TouchEvent, TransformKind, TransformOrigin, Viewability,
+    LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, Measurement,
+    ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior,
+    PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType,
+    ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

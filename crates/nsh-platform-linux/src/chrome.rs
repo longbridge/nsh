@@ -193,16 +193,37 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(window) = window(surface) {
                 window.present();
             }
         }
         DesktopCommand::Close => close(surface),
+        DesktopCommand::Quit => {
+            crate::app::quit();
+        }
+        DesktopCommand::Hide => {
+            if let Some(window) = window(surface) {
+                window.set_visible(false);
+            }
+        }
+        // Addressed to a dialog root ([`crate::window`]).
+        DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
+        DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
+            crate::global_shortcut::register(surface, *id, *shortcut)
+        }
+        DesktopCommand::UnregisterGlobalShortcut(id) => {
+            crate::global_shortcut::unregister(surface, *id)
+        }
     }
 }
 
@@ -489,7 +510,7 @@ fn unsupported(role: Option<MenuRole>) -> bool {
 }
 
 /// The shortcut as a GTK accelerator (`<Control><Shift>n`).
-fn accelerator(shortcut: &Shortcut) -> Option<String> {
+pub(crate) fn accelerator(shortcut: &Shortcut) -> Option<String> {
     let mut out = String::new();
     for (on, name) in [
         (shortcut.ctrl, "<Control>"),
@@ -840,8 +861,10 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
 
 /// An item was chosen: the platform carries out its role, the app hears
 /// about the rest.
-fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
+pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     match role {
+        Some(MenuRole::Quit) if crate::app::quit() => {}
+        // A view embedded in another app closes its window, as before.
         Some(MenuRole::Quit | MenuRole::Close) => close(surface),
         Some(MenuRole::Minimize) => {
             if let Some(window) = window(surface) {

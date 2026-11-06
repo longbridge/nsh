@@ -230,6 +230,7 @@ fn FlipCard() -> impl IntoElement {
                 damping: 16.0,
                 mass: 1.0,
                 velocity: None,
+                frame_rate: None,
             },
         );
     };

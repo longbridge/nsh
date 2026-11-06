@@ -348,7 +348,12 @@ fn under_border(state: &ViewState) -> f32 {
         return 0.0;
     }
     let widths = b.widths.to_array().map(|w| w.0);
-    widths.iter().copied().fold(f32::INFINITY, f32::min).max(0.0) / 2.0
+    widths
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min)
+        .max(0.0)
+        / 2.0
 }
 
 /// The view's rounded box, filled the cheapest way its corners allow.

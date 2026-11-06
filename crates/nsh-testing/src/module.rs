@@ -256,7 +256,7 @@ impl Testing {
     /// platform cannot honor rejects (`ERR_NSH_TEST_UNSUPPORTED`, naming
     /// it): `width` and `height` on iOS and Android, a `platform` the
     /// target is not (a phone's on a desktop, a desktop's on a phone, the
-    /// other phone), `host.handlers`.
+    /// other phone), `host.handlers`, `url`.
     pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, JsError> {
         let session = Session::current().map_err(JsError::Error)?;
         let options = options.unwrap_or_default();
@@ -284,6 +284,7 @@ impl Testing {
                 .map(|c| c.time.map_or_else(std::time::SystemTime::now, |t| t.0)),
             host,
             host_handlers,
+            url_scheme: options.url_scheme,
         };
         let opening = blocking(move || session.open(&entry, launch));
         let (app, storage, requests) = serve(server.as_ref(), opening)
@@ -425,6 +426,11 @@ pub struct OpenOptions {
     /// launch parameters it reads as `host.params` and the handlers of its
     /// `host.call` and `host.post`.
     pub host: Option<HostOptions>,
+    /// The link that launched the app (none): its `UrlScheme.on("open")`
+    /// listener gets it when the app claims its scheme (`nsh.json`
+    /// `schemes`), as from the system. Headless runs only: with
+    /// `--target` it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub url_scheme: Option<String>,
 }
 
 /// The embedding app a test plays (`open`'s `host`; `nsh/host`).
@@ -708,9 +714,12 @@ pub struct Dialog {
     pub sheet: bool,
 }
 
-/// A pick the app asked for (`Picker.pickImages`), as a test reads it.
+/// A pick the app asked for (`Picker.pickImages`, `Picker.pickFiles`), as a
+/// test reads it.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct PickRequest {
+    /// What was asked for: `"images"` or `"files"`.
+    pub kind: String,
     /// The user may pick several.
     pub multiple: bool,
     /// At most this many.
@@ -720,22 +729,55 @@ pub struct PickRequest {
     pub max_dimension: Option<u32>,
     /// The quality of the JPEGs encoded (0 to 1); `null`: the default.
     pub quality: Option<f64>,
-    /// The formats asked for: `"compatible"` or `"current"`.
+    /// The formats asked for: `"compatible"` or `"current"` (files come as
+    /// they are: `"current"`).
     pub format: String,
+    /// The file types offered (`pickFiles`); empty: any.
+    pub filters: Vec<PickFilter>,
 }
 
-impl From<&nsh_core::picker::PickRequest> for PickRequest {
-    fn from(request: &nsh_core::picker::PickRequest) -> Self {
-        PickRequest {
-            multiple: request.multiple(),
-            limit: request.limit,
-            max_dimension: request.max_dimension.map(|d| d.0.max(0) as u32),
-            quality: request.quality.map(|q| f64::from(q.0)),
-            format: match request.format {
-                nsh_core::picker::PickFormat::Current => "current",
-                _ => "compatible",
-            }
-            .into(),
+/// A group of file types a pick offers, as a test reads it.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct PickFilter {
+    /// What the picker shows for it.
+    pub name: String,
+    /// Its file extensions, without the dot, lower case.
+    pub extensions: Vec<String>,
+}
+
+impl From<&nsh_core::picker::Pick> for PickRequest {
+    fn from(pick: &nsh_core::picker::Pick) -> Self {
+        use nsh_core::picker::{Pick, PickFormat};
+        match pick {
+            Pick::Images(request) => PickRequest {
+                kind: "images".into(),
+                multiple: request.multiple(),
+                limit: request.limit,
+                max_dimension: request.max_dimension.map(|d| d.0.max(0) as u32),
+                quality: request.quality.map(|q| f64::from(q.0)),
+                format: match request.format {
+                    PickFormat::Current => "current",
+                    _ => "compatible",
+                }
+                .into(),
+                filters: Vec::new(),
+            },
+            Pick::Files(request) => PickRequest {
+                kind: "files".into(),
+                multiple: request.multiple(),
+                limit: request.limit,
+                max_dimension: None,
+                quality: None,
+                format: "current".into(),
+                filters: request
+                    .filters
+                    .iter()
+                    .map(|filter| PickFilter {
+                        name: filter.name.clone(),
+                        extensions: filter.extensions.clone(),
+                    })
+                    .collect(),
+            },
         }
     }
 }
@@ -1141,6 +1183,8 @@ pub(crate) struct Launch {
     pub(crate) host: HostChannel,
     /// Whether `open`'s `host` has handlers (a headless run's only).
     pub(crate) host_handlers: bool,
+    /// The link that launched the app (a headless run's only).
+    pub(crate) url_scheme: Option<String>,
 }
 
 /// The network an app opens with, made where it starts (it is `Send`).
@@ -1837,7 +1881,8 @@ impl App {
         *self.steps.dialog.borrow_mut() = Some(handler);
     }
 
-    /// Answers the picks the app asks for from now on (`Picker.pickImages`):
+    /// Answers the picks the app asks for from now on (`Picker.pickImages`,
+    /// `Picker.pickFiles`; the request's `kind` says which):
     /// `handler` gets what the pick asks and returns the files the user
     /// picks, given as they are (no scaling or conversion), or `null` to
     /// cancel. Without a handler, every pick is cancelled. Headless runs
@@ -1994,6 +2039,15 @@ impl App {
         scheme: ColorScheme,
     ) -> Result<(), JsError> {
         step(&this, move |app| app.set_color_scheme(scheme.into())).await
+    }
+
+    /// The system hands the app `url`, a link that opens it, as when the
+    /// user opens one while the app runs: its `UrlScheme.on("open")`
+    /// listener gets it when the app claims its scheme (`nsh.json`
+    /// `schemes`; others are dropped, as on a device). Then waits
+    /// until the app is quiet. Headless only.
+    pub async fn open_with_url(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.open_with_url(&url)).await
     }
 
     /// Moves the app to `state`, as the system does when the user leaves it

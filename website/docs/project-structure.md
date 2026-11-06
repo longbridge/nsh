@@ -124,6 +124,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |
 | `minRuntime` | string | `publish` | The lowest NSH runtime that runs the signed package, e.g. `0.2.0`. Default: the CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
+| `schemes` | string[] | `package`, `run` | URL schemes that open the app, e.g. `["myapp"]` for `myapp://…` links, which reach [`UrlScheme`](../modules/nsh.md#urlscheme). Lowercase letters, digits, `+`, `-` and `.`; not one the system or browser owns (`https`, `file`, …). |
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 | `tailwind` | object | every build | Extends the Tailwind theme your `class` strings resolve against ([Tailwind](./tailwind.md#theme)). |
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
@@ -133,11 +134,15 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `web` | object | `package` | What a web package adds to its page. `web.host`: a JS module relative to `nsh.json` exporting `createHost(player)`, which answers the app's [`host`](../modules/nsh.md#host) calls; `web.connect`: the hosts that module's own requests reach, as patterns of `capabilities.network.hosts`, which the page's Content-Security-Policy allows ([Web](./web.md#the-hosts-functions)). |
+| `updater` | object | `package` | Where the packaged app gets its updates: `{ "github": "owner/repo" }` or `{ "url": "https://…/latest.json", "publicKey": "…" }`, `publicKey` optional with `github` ([App Updates](./app-updates.md), [nsh/updater](../modules/nsh-updater.md#nshjson)). |
+| `ios` | object | `package` | What iOS packages add: `infoPlist`, keys of the app's `Info.plist`, and `entitlements`, which device builds check against the provisioning profile. NSH's own keys are refused ([Packaging](./packaging.md#infoplist-keys-and-entitlements)). |
+| `android` | object | `package` | What Android packages set: `targetSdk`, the API level the app targets and compiles against (default 35) ([Packaging](./packaging.md#target-api-level)). |
+| `macos` | object | `package` | What macOS packages add: `infoPlist` and `entitlements`, as `ios`'s ([Packaging](./packaging.md#infoplist-keys-and-entitlements)). |
 | `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate, the first one of a list (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `schemes` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
 ```text
 error building App.tsx failed
@@ -233,6 +238,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`) and the system's alert dialog (`AlertDialog`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/mobile` | What iOS and Android have: `TabBar`, `InputAccessoryView` (iOS), `BackHandler` (Android) ([reference](../modules/nsh-mobile.md)) |
 | `nsh/desktop` | What macOS, Windows and Linux have: `Window`, `titleBar`, `Menu` ([reference](../modules/nsh-desktop.md)) |
+| `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart` ([reference](../modules/nsh-updater.md)) |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
 

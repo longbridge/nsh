@@ -174,6 +174,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
+| `url` | none | The link that launched the app: `UrlScheme.on("open")` gets it when the app claims its scheme (`nsh.json` `schemes`), as from the system ([UrlScheme](../modules/nsh.md#urlscheme)). Headless runs only. |
 
 ### Playing the host app
 
@@ -376,7 +377,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
 | `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. Rejects when the item is disabled or missing. |
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does. |
-| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles) and Return or Space presses the view it is on, else the focused input takes a character, Backspace or the return key, else Escape goes back. |
+| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles) and Return or Space presses the view it is on, and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless and on Linux for now. |
@@ -394,7 +395,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
 | `app.dialogs()` | The dialogs the app showed, in order. |
-| `app.onPick(handler)` | Answers the picks the app asks for from now on (`Picker.pickImages`): `handler` gets what the pick asks (`multiple`, `limit`, `maxDimension`, `quality`, `format`) and returns the files the user picks (`{ name, type?, data: Uint8Array }`, given to the app as they are), or `null` to cancel. Without a handler, picks are cancelled. Headless runs. |
+| `app.onPick(handler)` | Answers the picks the app asks for from now on (`Picker.pickImages`, `Picker.pickFiles`): `handler` gets what the pick asks (`kind`: `"images"` or `"files"`, `multiple`, `limit`, `maxDimension`, `quality`, `format`, `filters`) and returns the files the user picks (`{ name, type?, data: Uint8Array }`, given to the app as they are), or `null` to cancel. Without a handler, picks are cancelled. Headless runs. |
 | `app.picks()` | The picks the app asked for, in order. |
 | `app.hear(text)` | The user says `text` into the running speech session (`Speech.start`): its `result` reports `text` as the whole transcript so far. Headless runs. |
 | `app.endSpeech(error?)` | Ends the running speech session: with `error` (`"no-speech"`, `"network"`, ...) it fails, else a last final result and `end` come, `no-speech` when nothing was heard. Headless runs. |
@@ -404,6 +405,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.host.send(name, data?)` | Sends an event of the host app's to the app (`host.on`), then waits until it is quiet. See [Playing the host app](#playing-the-host-app). |
 | `app.host.calls()`, `app.host.posts()` | The app's calls and posts that `open`'s `host.handlers` got, in order: `name`, `data`. |
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
+| `await app.openWithUrl(url)` | The system hands the app a link that opens it, as when the user opens one while it runs (`UrlScheme.on("open")`; a link of a scheme the app does not claim is dropped, as on a device), then waits until it is quiet. Headless runs only. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
@@ -430,7 +432,7 @@ a test matches the code:
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
-| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`. The message names it. |
+| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `url`. The message names it. |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -457,7 +459,7 @@ that only a real platform can do:
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
 - **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
-- **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` resolves `[]`.
+- **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` and `Picker.pickFiles` resolve `[]`.
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
@@ -566,7 +568,7 @@ as it was; a text input's own copy and paste use the system's. `host.params` rea
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
 headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
 `height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
-the other phone's on iOS or Android) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
+the other phone's on iOS or Android), `host.handlers` and `url` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
 is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does

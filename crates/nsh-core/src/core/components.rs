@@ -491,6 +491,17 @@ struct Notifications {
     next_press: Option<AnswerSlot<String>>,
 }
 
+/// The links that open the app ([`crate::url_scheme`]).
+#[derive(Default)]
+struct UrlScheme {
+    /// The schemes the app claims (lower case).
+    schemes: Vec<String>,
+    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
+    pending: std::collections::VecDeque<String>,
+    /// The listener waiting for a link.
+    next: Option<AnswerSlot<String>>,
+}
+
 /// The speech recognition session running ([`crate::speech`]).
 struct SpeechSession {
     id: u32,
@@ -568,7 +579,7 @@ pub(super) struct Components {
     picks: FxHashMap<
         u32,
         (
-            crate::picker::PickRequest,
+            crate::picker::Pick,
             AnswerSlot<Vec<crate::picker::PickedFile>>,
         ),
     >,
@@ -577,6 +588,8 @@ pub(super) struct Components {
     speech: Option<SpeechSession>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
+    /// The links that open the app ([`crate::url_scheme`]).
+    url_schemes: UrlScheme,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -698,6 +711,7 @@ impl Default for Components {
             next_pick: 1,
             speech: None,
             notifications: Notifications::default(),
+            url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -972,6 +986,12 @@ impl<M: TextEngine> Core<M> {
         self.system_dark = environment.dark;
         environment.dark = self.shown_dark();
         self.apply_environment(environment);
+    }
+
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
     }
 
     /// The environment components read is now `environment`.
@@ -4924,6 +4944,38 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
+    /// Hands `url`, a link the system gave the app, to the listener, or
+    /// keeps it for the next; drops it when the app does not claim it.
+    fn url_scheme(&mut self, url: String) {
+        let links = &mut self.components.url_schemes;
+        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+            log::warn!("link dropped: {dropped}");
+            return;
+        }
+        if let Some(answer) = links.next.take() {
+            answer.borrow_mut().deliver(url);
+            return;
+        }
+        if links.pending.len() == crate::url_scheme::MAX_PENDING {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            links.pending.pop_front();
+        }
+        links.pending.push_back(url);
+    }
+
+    /// The schemes the app claims (`nsh.json` `schemes`,
+    /// [`crate::url_scheme`]), from the app's own resources: the links the
+    /// platform reports of other schemes are dropped. None by default.
+    pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
+        self.components.url_schemes.schemes = schemes
+            .into_iter()
+            .map(|s| s.into().to_ascii_lowercase())
+            .collect();
+    }
+
     /// Answers what waits for the platform's [`EventKind::Notification`].
     fn notification_event(&mut self, payload: &EventPayload) {
         use crate::notifications::{NotificationEvent as Field, NotificationPermission};
@@ -5057,7 +5109,14 @@ impl<M: TextEngine> Core<M> {
 
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, command) => {
+            Action::Command(id, mut command) => {
+                // Saved bounds go onto the displays there are now, whichever
+                // side (Rust or JS) restores them.
+                if let Command::Desktop(desktop) = &mut command
+                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
+                {
+                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
+                }
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -5154,10 +5213,43 @@ impl<M: TextEngine> Core<M> {
                 }
                 let id = self.components.next_pick;
                 self.components.next_pick += 1;
-                self.components.picks.insert(id, (request, answer));
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Images(request), answer));
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::PickImages { id, request },
+                });
+            }
+            Action::PickFiles(request, answer) => {
+                if !self.access.allows_picker() {
+                    answer.borrow_mut().deliver(Vec::new());
+                    self.deny(
+                        "the picker is not granted: add `\"picker\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(picker) = self.picker.clone() {
+                    let picked = picker.pick_files(request.clone());
+                    crate::element::task::spawn_raw(
+                        &self.components.executor,
+                        crate::ROOT_ID,
+                        Box::pin(async move {
+                            let files = crate::picker::finish_files(&request, picked.await);
+                            answer.borrow_mut().deliver(files);
+                        }),
+                    );
+                    return;
+                }
+                let id = self.components.next_pick;
+                self.components.next_pick += 1;
+                self.components
+                    .picks
+                    .insert(id, (crate::picker::Pick::Files(request.clone()), answer));
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickFiles { id, request },
                 });
             }
             Action::ReadClipboard(read) => {
@@ -5226,6 +5318,13 @@ impl<M: TextEngine> Core<M> {
             }
             Action::Speech(action) => self.speech_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::NextUrlSchemeOpen(answer) => {
+                let links = &mut self.components.url_schemes;
+                match links.pending.pop_front() {
+                    Some(url) => answer.borrow_mut().deliver(url),
+                    None => links.next = Some(answer),
+                }
+            }
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5573,13 +5672,27 @@ impl<M: TextEngine> Core<M> {
                     return false;
                 };
                 if let Some((asked, answer)) = self.components.picks.remove(request) {
-                    let files = crate::picker::finish(&asked, files.clone());
+                    let files = asked.finish(files.clone());
                     answer.borrow_mut().deliver(files);
                 }
                 true
             }
             EventKind::Notification if id == crate::ROOT_ID => {
                 self.notification_event(payload);
+                true
+            }
+            EventKind::UrlScheme if id == crate::ROOT_ID => {
+                let EventPayload::Map(entries) = payload else {
+                    return false;
+                };
+                let url = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(url) if *k == crate::url_scheme::URL => Some(url),
+                    _ => None,
+                });
+                let Some(url) = url else {
+                    return false;
+                };
+                self.url_scheme(url.clone());
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

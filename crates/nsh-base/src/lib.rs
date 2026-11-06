@@ -154,8 +154,8 @@ pub use crate::{
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
-        context_menu, menu, menu_item, menu_separator, submenu,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
+        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
@@ -206,9 +206,10 @@ pub use crate::{
     tabs::{Tab, TabElement, TabEvent, TabProps, Tabs, TabsElement, TabsProps, tab, tabs},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
-        TextViewParts, TextViewProps, TextViewStyles, text_view,
+        TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewClasses,
+        TextViewCodeAction, TextViewCodeActionEvent, TextViewElement, TextViewEvent,
+        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart, TextViewParts,
+        TextViewProps, TextViewSelectionEvent, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
@@ -232,7 +233,6 @@ pub use crate::{
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
     tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
 };
-
 #[cfg(feature = "editor")]
 pub use crate::{
     diff::{

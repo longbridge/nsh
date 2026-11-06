@@ -92,7 +92,7 @@ mount(App);
 
 内容来自以下三个属性之一，按此顺序读取：
 
-- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。
+- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。中日韩文字旁的强调按 CommonMark 的 CJK 友好修订判定，`**涨幅：**5%` 会加粗到冒号为止；裸网址遇到中日韩文字或弯引号即结束：`https://example.com。下一句` 只链接 `https://example.com`。写在尖括号里（`<https://zh.wikipedia.org/wiki/中文>`）或写成链接的网址保留全部字符。标签名既不是 HTML 元素、也不是 `tag` 扩展时（`<US tech>`、`<公司名>`），按原样显示为文字。
 - **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留；脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
 - **`document`**：应用构建或保存的文档块：TSX 中是普通对象，Rust 中是 `nsh_base::text_view::Document`（[文档模型](#the-document-model)）。
 
@@ -549,7 +549,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `math` | `boolean` | `true` | 公式：文本中的 `$…$`，`$$…$$` 公式块。 |
+| `math` | `boolean` | `true` | 公式：文本中的 `$…$` 和 `\(…\)`，`$$…$$` 和 `\[…\]` 公式块。转义方括号里是引用编号或中日韩文字时（`\[1\]\[3\]`、`\[注\]`）按文字显示。 |
 | `html` | `boolean` | `true` | Markdown 中的 HTML 按 `html` 属性的方式读取；`false` 时显示为文本。 |
 | `alerts` | `boolean` | `true` | GitHub 的提示块：`> [!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]`。 |
 | `frontmatter` | `boolean` | `false` | 开头的 YAML front matter（`---` … `---`）成为名为 `frontmatter` 的自定义节点，其 `text` 是 YAML。 |
@@ -756,6 +756,15 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start }`，与复制得到的内容相同的选中文字及其起始位置；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
+
+## 方法
+
+`ref` 提供 `TextViewRef`（Rust 中通过 `component_ref::<TextView>()` 取得 `TextViewApi`）。JS 中的方法返回 `Promise`。
+
+| 方法 | Rust | 说明 |
+|---|---|---|
+| `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | 读取 `selectable` 视图的选区：`format` 为 `"plain"`（默认，与复制相同）、`"markdown"` 或 `"html"`，由选中的节点重新生成；选中全部时返回原样的源文（[读取为 Markdown 或 HTML](./text-selection.md#读取为-markdown-或-html)）。没有选中内容时返回 `""`。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 
 <a id="accessibility"></a>

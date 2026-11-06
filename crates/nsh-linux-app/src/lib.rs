@@ -93,6 +93,15 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
     if let Some(name) = field("name") {
         options.title = name;
     }
+    if let Some(schemes) = info
+        .as_ref()
+        .and_then(|info| info.get("schemes")?.as_array().cloned())
+    {
+        options.schemes = schemes
+            .iter()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect();
+    }
     // The window opens in the app's appearance (no flash of the system's).
     match field("appearance").as_deref() {
         Some("light") => options.appearance = Appearance::Light,

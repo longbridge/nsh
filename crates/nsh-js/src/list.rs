@@ -48,6 +48,7 @@ const FORWARDED: &[&str] = &[
     "keyboardDismissMode",
     "numColumns",
     "inverted",
+    "alignment",
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
     "stickyHeaderOffset",
@@ -427,10 +428,34 @@ unsafe extern "C" fn items_run(
         let (old_len, next_len) = (length(cx, old), length(cx, next));
         if old_len > 0 && !qjs::JS_IsStrictEqual(cx, old, next) {
             let max = old_len.min(next_len);
+            // With a `keyExtractor`, rows are the same when their keys
+            // are: apps that rebuild their rows (new objects, same keys)
+            // keep the rows' measurements and the reader's place.
+            let key_of = get(cx, props, "keyExtractor");
+            let keyed = qjs::JS_IsFunction(cx, key_of);
+            let key = |item: JsValue, i: i64| {
+                let mut args = [qjs::JS_DupValue(cx, item), qjs::JS_NewFloat64(i as f64)];
+                let k = qjs::JS_Call(cx, key_of, UNDEFINED, 2, args.as_mut_ptr());
+                qjs::JS_FreeValue(cx, args[0]);
+                k
+            };
             let same = |i: i64, j: i64| {
                 let a = qjs::JS_GetPropertyInt64(cx, old, i);
                 let b = qjs::JS_GetPropertyInt64(cx, next, j);
-                let s = qjs::JS_IsStrictEqual(cx, a, b);
+                let mut s = qjs::JS_IsStrictEqual(cx, a, b);
+                if !s && keyed {
+                    let (ka, kb) = (key(a, i), key(b, j));
+                    s = !qjs::JS_IsException(ka)
+                        && !qjs::JS_IsException(kb)
+                        && qjs::JS_IsStrictEqual(cx, ka, kb);
+                    for k in [ka, kb] {
+                        if qjs::JS_IsException(k) {
+                            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+                        } else {
+                            qjs::JS_FreeValue(cx, k);
+                        }
+                    }
+                }
                 qjs::JS_FreeValue(cx, a);
                 qjs::JS_FreeValue(cx, b);
                 s
@@ -443,6 +468,7 @@ unsafe extern "C" fn items_run(
             while end < max - start && same(old_len - 1 - end, next_len - 1 - end) {
                 end += 1;
             }
+            qjs::JS_FreeValue(cx, key_of);
             let removed = old_len - start - end;
             let inserted = next_len - start - end;
             if removed > 0 || inserted > 0 {
@@ -1421,5 +1447,44 @@ mod tests {
                 .count()
         };
         assert_eq!((made("Head"), made("Foot")), (1, 1));
+    }
+
+    /// Rows rebuilt as new objects with the same keys are the same rows:
+    /// appending one splices only the new row in.
+    #[test]
+    fn keyed_rows_rebuilt_with_the_same_keys_splice_only_the_new_row() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const items = signal(["a", "b", "c"].map(id => ({ id })));
+            globalThis.keyed = { items };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => item.id,
+                children: item => text(item().id),
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.clear();
+        assert!(
+            host.eval_script(
+                "keyed-append",
+                "keyed.items.set([...keyed.items().map(i => ({...i})), {id: 'd'}]); true",
+            )
+            .unwrap()
+        );
+        host.take_ops(&mut ops);
+        let splices: Vec<String> = ops
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .filter(|op| op.contains("Splice"))
+            .collect();
+        assert_eq!(splices.len(), 1, "{splices:?}");
+        assert!(splices[0].contains("Splice(3, 0, 1)"), "{splices:?}");
     }
 }

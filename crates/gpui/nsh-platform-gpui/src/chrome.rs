@@ -46,7 +46,7 @@
 //! shortcuts after `nsh/keymap`'s bindings ([`shortcut`]), so a binding
 //! wins over a menu item of the same keystroke, then Ctrl+W / Cmd+W, which
 //! closes the window unless the app takes it. Quitting and closing (keys,
-//! roles, `Window.close()`, the close button) go to the embedding app's
+//! roles, `Application.quit()`, `Window.close()`, the close button) go to the embedding app's
 //! handler instead when it set one ([`crate::AppView::on_close_request`]).
 
 mod menus;
@@ -366,7 +366,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(_) => {}
+        // The docks show apps, not windows.
+        DesktopCommand::SetSkipTaskbar(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.
@@ -379,7 +383,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        // Windows of the app's own (`Window.open`) are not on this backend yet:
+        // the runtime does not send these here.
+        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
+        DesktopCommand::Quit => push(surface, Op::Quit),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
@@ -401,6 +409,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
+        // The host app owns the tray and global shortcuts.
+        DesktopCommand::SetTray(_)
+        | DesktopCommand::RegisterGlobalShortcut { .. }
+        | DesktopCommand::UnregisterGlobalShortcut(_) => {}
     }
 }
 

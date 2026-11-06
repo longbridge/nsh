@@ -7489,6 +7489,62 @@ fn refused_web_view_html_fails() {
     );
 }
 
+#[test]
+fn web_view_incognito_is_read_when_it_is_made() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::Incognito(true)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let web = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::WebView(p),
+            } => Some(p.incognito),
+            _ => None,
+        })
+    };
+    // The platform makes the web view with its first props.
+    assert_eq!(web(&c.commit().unwrap()), Some(true));
+    // Made: a change is ignored, and nothing is sent for it.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::Incognito(false)),
+        }],
+    );
+    assert_eq!(c.commit().as_ref().and_then(web), None);
+    // Other props still reach it, with the store it was made with.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::UserAgent(Some("agent".into()))),
+        }],
+    );
+    assert_eq!(web(&c.commit().unwrap()), Some(true));
+}
+
 mod components {
     use serde_json::json;
 
@@ -17653,7 +17709,7 @@ mod rust_desktop {
         desktop::{DesktopCommand, TitleBarStyle},
         element::{
             Root,
-            desktop::{close_window, set_title_bar, title_bar},
+            desktop::{close_window, quit, set_title_bar, title_bar},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -17681,6 +17737,7 @@ mod rust_desktop {
                     .window_drag(false)
                     .on_press(|_: &()| close_window()),
             )
+            .child(text("Quit").on_press(|_: &()| quit()))
     }
 
     #[test]
@@ -17716,6 +17773,14 @@ mod rust_desktop {
             })
             .unwrap();
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::ViewProps {id, props} if *id == close && props.window_drag == Some(false))));
+        let quit_button = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Quit" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
         assert!(
             batch
                 .items
@@ -17778,6 +17843,22 @@ mod rust_desktop {
         assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
+        // Quitting is a command of its own: the platform ends the app's run,
+        // not only its window.
+        assert!(c.component_event(quit_button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let sent: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some(&**command),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, [&DesktopCommand::Quit]);
     }
 }
 
@@ -18233,6 +18314,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
     let event = crate::ContextMenuEvent {
         position: point(px(4.0), px(5.0)),
         page_position: point(px(14.0), px(25.0)),
+        pointer_type: Some(crate::PointerType::Mouse),
         ..Default::default()
     };
     assert!(c.component_event(

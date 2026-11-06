@@ -535,13 +535,18 @@ export interface MouseEvent {
 /** A mouse button (GPUI's `MouseButton`). */
 export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
+/** The kind of pointer behind an event (the DOM's `pointerType`). */
+export type PointerType = "mouse" | "pen" | "touch";
+
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
-  /** Position in the view (its transforms undone). */
+  /** Position in the view (its transforms undone): the pointer's, or the view's bottom-start corner when no pointer asked. */
   position: Point;
   /** Position in the root view the view is in: where `Menu.popup` opens a menu (`Menu.popup(items, e.pagePosition)`). */
   pagePosition: Point;
   modifiers: Modifiers;
+  /** The pointer that asked for the menu, or `null` when the keyboard (Shift+F10, the Menu key) or an assistive technology's "show menu" action did: a menu opened then puts the keyboard focus on its first item. */
+  pointerType: PointerType | null;
 }
 
 /** Where a scroll view is: the payload of `onScroll`. */
@@ -858,6 +863,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "",
     ),
     (
+        EventKind::SelectionChange,
+        on::VIEW,
+        "(e: { text: string; start?: number }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it. Only the outermost selectable view of an area reports it.",
+    ),
+    (
         EventKind::Paste,
         on::INPUT,
         "(e: PasteEvent) => void",
@@ -933,7 +944,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
 ];
 
 /// The events no element's props declare: the root's (`BackHandler`,
-/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events), the runtime's own (touches, insets, native
+/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events, links), the runtime's own (touches, insets, native
 /// components' events) and those whose payload a module makes
 /// (`List`'s viewable items, with the app's items).
 pub const INTERNAL_EVENTS: &[EventKind] = &[
@@ -951,6 +962,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::FileRequest,
     EventKind::Speech,
     EventKind::Notification,
+    EventKind::UrlScheme,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

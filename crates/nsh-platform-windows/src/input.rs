@@ -669,7 +669,7 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return Cursor::Arrow;
     };
     if let Some(native) = &hit.item {
@@ -699,7 +699,7 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
 /// (header buttons, editors) or a view with press or touch handlers is
 /// nearer.
 pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return false;
     };
     if hit.item.is_some() {
@@ -724,12 +724,53 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     false
 }
 
+/// A context menu asked for on `view` without a pointer (UI Automation's
+/// `ShowContextMenu`): the view, or the nearest around it that listens to
+/// `onContextMenu`, hears it with no pointer at its bottom-start corner
+/// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
+/// selectable text is nearer. True when a view heard it.
+pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        let (id, listens, stop, size) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input || crate::text::selectable(&s) || s.props.selectable_view,
+                s.frame.size,
+            )
+        };
+        if listens {
+            let position = nsh_core::input::context_menu_anchor(size, rtl);
+            let (page_x, page_y) = v
+                .to_root()
+                .and_then(|m| m.map(position.x.0, position.y.0))
+                .unwrap_or((position.x.0, position.y.0));
+            let event = nsh_core::ContextMenuEvent::new(
+                position,
+                point(Points(page_x), Points(page_y)),
+                Default::default(),
+                None,
+            );
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if stop {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
 /// menu.
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let mut view = Some(hit.view);
@@ -746,11 +787,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         };
         if listens {
             let (location_x, location_y) = local(&v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: point(Points(location_x), Points(location_y)),
-                page_position: point(Points(x), Points(y)),
-                modifiers: modifiers.core(),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(location_x), Points(location_y)),
+                point(Points(x), Points(y)),
+                modifiers.core(),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }
@@ -865,7 +907,7 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
             if event.kind != PointerKind::Down {
                 return false;
             }
-            let Some(hit) = pick(&surface.root, x, y, true) else {
+            let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
             match hit.item {
@@ -912,7 +954,7 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
 /// True when a press at `(x, y)` (root coordinates) goes to a raw item (a
 /// web view), which takes the keyboard focus itself.
 pub(crate) fn raw_at(surface: &Rc<Surface>, x: f32, y: f32) -> bool {
-    pick(&surface.root, x, y, true)
+    pick(&surface.input_root(), x, y, true)
         .and_then(|hit| hit.item)
         .is_some_and(|n| n.item.raw())
 }
@@ -935,7 +977,7 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     if latched {
         return false;
     }
-    let Some(hit) = pick(&surface.root, event.x, event.y, true) else {
+    let Some(hit) = pick(&surface.input_root(), event.x, event.y, true) else {
         return false;
     };
     let (lx, ly) = local(&hit.view, event.x, event.y);
@@ -1064,7 +1106,7 @@ struct Hit {
 
 /// Finds the nearest mounted destination, bounded by the native modal root.
 pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    let mut view = pick(&surface.root, x, y, false)?.view;
+    let mut view = pick(&surface.input_root(), x, y, false)?.view;
     loop {
         if view.state().events.contains(EventKind::FileDrop) {
             return Some(view);
@@ -1210,7 +1252,7 @@ fn down(
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
     }
-    let Some(mut hit) = pick(&surface.root, x, y, true) else {
+    let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let touch = key != Key::Mouse;
@@ -1221,7 +1263,7 @@ fn down(
             item = Some(hosted);
         } else {
             // The item declined: the views below it get the press.
-            let Some(below) = pick(&surface.root, x, y, false) else {
+            let Some(below) = pick(&surface.input_root(), x, y, false) else {
                 return;
             };
             hit = below;
@@ -1945,7 +1987,7 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
     let mut t = match current {
         Some((t, _)) => t,
         None => {
-            let Some(hit) = pick(&surface.root, x, y, true) else {
+            let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
             let view = chain(&hit.view).into_iter().find(|v| {
@@ -1995,7 +2037,7 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers, button: Op
     let input = &surface.input;
     let tracking = !input.hover_tracked.borrow().is_empty() || !input.hovered.borrow().is_empty();
     let pressed = input.pointers.borrow().iter().any(|p| p.key == Key::Mouse);
-    let hit = pick(&surface.root, x, y, true);
+    let hit = pick(&surface.input_root(), x, y, true);
     // Reveal only the scroll thumb under the pointer, including in nested scroll views.
     if let Some(hit) = &hit {
         for v in chain(&hit.view)
@@ -2076,7 +2118,7 @@ fn mouse_moved(
     if surface.input.mouse_tracked.borrow().is_empty() {
         return;
     }
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     for view in chain(&hit.view) {
@@ -2176,7 +2218,7 @@ enum WheelInput {
 /// scrolls the page around it, as in browsers; horizontal views take
 /// vertical wheels only where nothing around scrolls vertically.
 fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<NshView> {
-    let hit = pick(&surface.root, x, y, true)?;
+    let hit = pick(&surface.input_root(), x, y, true)?;
     input::scroll_target(
         chain(&hit.view),
         Points(dx),

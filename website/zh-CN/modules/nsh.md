@@ -1574,7 +1574,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // 允许选择多个（false：一个）
+  limit?: number; // multiple 时最多选几个（最多 100）
+  filters?: { name: string; extensions: string[] }[]; // 提供的文件类型（不给：任意文件）
+}
+
+interface PickedFile {
+  file: File; // 名称、类型、字节大小和内容，都保持原样
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // 允许选多张（false：一张）
@@ -1593,6 +1604,7 @@ interface PickedImage {
 | TS | Rust |
 |---|---|
 | `await Picker.pickImages(options)` | `pick_images(request).await -> Vec<PickedFile>` |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `multiple`、`limit` | `PickRequest::new(multiple, limit)`（`limit` 为 0 表示最多 100） |
 | `maxDimension` | `request.max_dimension = Some(DevicePixels(2048))` |
 | `quality` | `request.quality = Some(Percentage(0.8))` |
@@ -1701,12 +1713,47 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+显示系统的文件选择器，可选任意类型的文件，resolve 为用户选中的文件；用户取消时 resolve 为 `[]`。拒绝的情况与
+`pickImages` 相同：超出范围的选项（`limit: 0`、没有扩展名的过滤器）以 `RangeError` reject，没有 `picker` 能力时以
+`ERR_ACCESS_DENIED` reject。Rust：`pick_files(request)`。
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "文档", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| 平台 | 选择器 | 过滤器 |
+|---|---|---|
+| macOS | `NSOpenPanel` 表单 | 所有扩展名合为一组 |
+| Windows | `IFileOpenDialog` | 每个过滤器一个选项，显示其名称 |
+| Linux | `GtkFileDialog`（有 portal 时用 portal 的） | 每个过滤器一个选项，显示其名称 |
+| iOS | `UIDocumentPickerViewController`，以副本形式 | 所有扩展名合为一组 |
+| Android | `ACTION_OPEN_DOCUMENT` | 按媒体类型；有 Android 不认识的扩展名时提供任意文件 |
+| Web | `<input type=file>` | 所有扩展名合为一组 |
+| GPUI | GPUI 的打开对话框，可选任意文件 | 不符合的文件在选择后被剔除 |
+
+所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，因此超过 512 MiB 的文件不会出现在
+结果中，并记录到日志。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
+
 ### 嵌入 NSH 的应用
 
 嵌入 NSH、并且有自己选择器（比如带有应用自己的相册）的应用可以自己回答选取：在 Rust 中，把 `PickerBackend`
 （`nsh_core::picker`）交给引擎（`EngineConfig::picker`，GPUI 和 GPUI Kit 应用用 `AppView::set_picker`），它会收到每次选取的
 `PickRequest` 并返回文件，系统的选择器不会出现。它返回的文件和平台给的一样会被补全：截到请求的数量上限，大小、类型和
-扩展名从字节中读出。
+扩展名从字节中读出。`pick_files` 以同样的方式回答 `pickFiles`；没有实现它的 backend 会取消这些选取，系统的选择器同样不会出现。
 
 ### 测试
 
@@ -1714,9 +1761,9 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 和 `pickFiles` 什么也不显示，
 > 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
-> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 中，`pick_images` 和 `pick_files` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
 
 ## Notifications
 
@@ -1738,10 +1785,10 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 | 平台 | 通知 | 角标 |
 | --- | --- | --- |
-| macOS | 通知中心，需要已签名的应用包；`nsh run` 的非应用包宿主上为 `unavailable` | Dock，无需权限 |
+| macOS | 通知中心，需要已签名的应用包；`nsh run` 的非应用包宿主上，以及未设置 `AppOptions::notifications` 的嵌入应用中为 `unavailable` | Dock，无需权限 |
 | iOS | 通知中心 | 主屏幕，需要权限 |
 | Android | 系统通知，Android 13 需要 `POST_NOTIFICATIONS`（`nsh package` 会为获得 `notifications` 能力的应用声明） | 没有可设置的数字：启动器会标记有通知显示的应用，数字随之后显示的通知一起传递 |
-| Windows | Toast 通知，除非用户在设置里关闭了应用的通知（即 `denied`）。Windows 没有授权弹窗，`requestPermission` 不会询问用户。嵌入其他应用的 surface 为 `unavailable` | 任务栏按钮上的数字，最多显示 `99+`；任务栏使用小按钮时不显示 |
+| Windows | Toast 通知，除非用户在设置里关闭了应用的通知（即 `denied`）。Windows 没有授权弹窗，`requestPermission` 不会询问用户。未设置 `AppOptions::notifications` 的嵌入应用为 `unavailable` | 任务栏按钮上的数字，最多显示 `99+`；任务栏使用小按钮时不显示 |
 | Linux | 桌面的通知守护进程（`org.freedesktop.Notifications`）：运行时为 `granted`，不弹提示，否则为 `unavailable` | Unity launcher API，支持它的 Dock 才显示（Plasma、Ubuntu Dock、Dash to Dock），其他环境不显示 |
 | Web | `Notification`，需要浏览器允许页面直接显示（Android 上不行） | Badging API，仅限已安装的应用 |
 | 终端、GPUI | `unavailable` | 无 |
@@ -1757,6 +1804,48 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 ### Notifications.permission
 
 `permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
+
+## UrlScheme
+
+`UrlScheme` 报告打开应用的链接：应用在 `nsh.json` 中认领的 scheme 的 URL，例如网页上「在应用中打开」按钮发出的
+`myapp://orders/42`，或完成登录后浏览器跳回应用的链接。应用只需认领一次，`nsh package` 会把这些 scheme 声明给系统：
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` 报告系统交给应用的每一个链接，启动时和运行中都会。没有监听者时到达的链接（包括启动应用的那个）会留给下一个监听者
+（最多 16 个，超出时丢弃最早的），所以在应用启动时，或处理链接的界面准备好后再监听都可以。Rust 代码 await
+`nsh_core::prelude` 的 `next_url_scheme_open()`；Rust 应用生成的代码会把 scheme 交给它的根组件（`Root::url_schemes`）。
+
+链接是来自应用外部的输入：任何网页或应用都能用任意路径和参数打开 `myapp://`。在执行链接要求的操作之前，像对待其他输入一样先校验
+（id 确实存在、操作经用户确认）。NSH 只放行应用自己的 scheme、长度不超过 16 KB 的链接，并且从不自行导航：链接打开什么由应用决定。
+
+scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小写比较。Web、文件和系统应用的 scheme（`http`、`https`、`file`、
+`mailto`、`tel`、`sms` 等）在构建应用时会被拒绝。
+
+| 平台 | 应用如何认领 scheme |
+| --- | --- |
+| macOS | 应用 `Info.plist` 中的 `CFBundleURLTypes`；系统会打开应用，或把链接交给正在运行的那个 |
+| iOS、Mac Catalyst | 应用 `Info.plist` 中的 `CFBundleURLTypes`；包括启动应用的链接和运行中到达的链接 |
+| Android | `nsh package` 写入清单的 `ACTION_VIEW` intent filter；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
+| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件并设为默认处理程序；`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
+
+`nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
+在运行中打开一个链接，两者都在无头模式下运行。
+
+嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
+`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
 
 ## Speech
 

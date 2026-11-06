@@ -92,6 +92,14 @@ const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
+/** How long after something animated comes due a timer makes it happen
+ * when no animation frame did (`keepDeadline`, `moveScreens`, ...): more
+ * than a frame, so that while the page shows its frames always come first. */
+const LATE_MS = 50;
+/** How long a dialog waits for the two frames before it comes in
+ * (`present`): far more than two frames, so it only waits that long while
+ * frames stop (a hidden tab). */
+const ENTER_LATE_MS = 250;
 
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
@@ -1475,7 +1483,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom();
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1584,6 +1592,8 @@ class Player {
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    clearTimeout(this.keeper?.timer);
+    this.keeper = null;
     this.browserHost?.stop();
     this.wasm?.nsh_stop();
     } finally { this.stopping = false; }
@@ -1640,12 +1650,63 @@ class Player {
     }
   }
 
+  /** The engine wants a frame (`request_frame`): the native animations
+   * run, or JS asked for one. */
   requestFrame() {
+    this.deadlineSoon();
     if (this.frame) return;
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
+      this.frameAt = performance.now();
       this.call((w) => w.nsh_frame(now));
     });
+  }
+
+  /** `keepDeadline` once the call into the engine that asked for a frame
+   * is over: the engine is not reentrant, and one look after however many
+   * asked in it is enough. */
+  deadlineSoon() {
+    if (this.deadlineQueued) return;
+    this.deadlineQueued = true;
+    queueMicrotask(() => {
+      this.deadlineQueued = false;
+      this.keepDeadline();
+    });
+  }
+
+  /**
+   * Makes what the native animations end happen on time while no
+   * animation frames come: browsers run no `requestAnimationFrame` in a
+   * hidden tab (nor, often, in an iframe out of view), and an animation
+   * must still end and tell the app (`finished`). A timer waits for the
+   * graph's next deadline (`nsh_deadline`) and `LATE_MS` more; if no frame
+   * ran since it came due, it runs one at the current time, which steps
+   * the graph there, ends what ended and gives the next deadline. While
+   * frames come it does nothing. Nothing waits for what only draws (an
+   * animation looping forever, a JS frame request), so a hidden page with
+   * a spinner does no work. Browsers throttle a hidden page's timers (to
+   * about once a second), which an end there can come as late as.
+   */
+  keepDeadline() {
+    if (this.trapped || !this.wasm?.nsh_deadline) return;
+    const now = performance.now();
+    const at = this.wasm.nsh_deadline(now);
+    if (at < 0) return;
+    // One timer at a time: the one waiting for an earlier deadline
+    // schedules the next when it fires.
+    if (this.keeper && this.keeper.at <= at) return;
+    clearTimeout(this.keeper?.timer);
+    const keeper = { at, timer: 0 };
+    keeper.timer = setTimeout(() => {
+      if (this.keeper !== keeper) return;
+      this.keeper = null;
+      if (!(this.frameAt >= at)) {
+        this.frameAt = performance.now();
+        this.call((w) => w.nsh_frame(this.frameAt));
+      }
+      this.keepDeadline();
+    }, Math.max(0, at + LATE_MS - now));
+    this.keeper = keeper;
   }
 
   resized() {
@@ -1663,11 +1724,12 @@ class Player {
   /**
    * The kind of device, decided when an app starts (it never changes while
    * it runs, as on every platform): a mouse (a fine pointer that hovers)
-   * and a viewport at least 600 wide make a desktop, a touch screen whose
-   * short side is at least 600 a tablet, the rest a phone.
+   * makes a desktop at any width, as a narrow window does on the native
+   * desktops, a touch screen whose short side is at least 600 a tablet,
+   * the rest a phone.
    */
-  measureIdiom(width) {
-    if (matchMedia("(pointer: fine) and (hover: hover)").matches && width >= 600) return "desktop";
+  measureIdiom() {
+    if (matchMedia("(pointer: fine) and (hover: hover)").matches) return "desktop";
     return Math.min(screen.width, screen.height) >= 600 ? "pad" : "phone";
   }
 
@@ -2883,6 +2945,10 @@ class Player {
     host._navOverlay = o;
     this.shaderViews.add(o);
     this.shaderDirty(o);
+    // Its frames end it (`shaderFrame`); without them (a hidden tab) this
+    // does, and the change is reported on time all the same.
+    const running = o._shader.running;
+    setTimeout(() => { if (o._shader.running === running) this.endTransition(o); }, running.ms + LATE_MS);
     return true;
   }
 
@@ -4783,7 +4849,16 @@ class Player {
       old.style.pointerEvents = "none";
       if (!motion.fade && top) top.animate(shift(parallax, 0), options);
     }
-    if (done) a.onfinish = done;
+    if (!done) return;
+    // Web Animations finish as the page renders, which stops with its
+    // frames (a hidden tab): a timer ends the change on time without them.
+    let finish = () => {
+      finish = null;
+      clearTimeout(timer);
+      done();
+    };
+    const timer = setTimeout(() => finish?.(), motion.duration + LATE_MS);
+    a.onfinish = () => finish?.();
   }
 
   /** The batch is applied: the stacks it changed animate to their new top
@@ -5079,13 +5154,17 @@ class Player {
     this.placeModal(el);
     el.style.transition = "none";
     this.hideModal(el, motion);
-    el._entering = true;
+    // This presentation's (truthy): a timer of an earlier one finds
+    // another.
+    const entering = el._entering = {};
     this.scopeFocus();
     this.syncHistorySoon();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // In two frames, once its starting place has been drawn, or without
+    // frames after a while (a hidden tab: its `onShow` still comes).
+    const enter = () => {
       // Dismissed before it came in (`endPresentation` reported it shown),
       // or presented again meanwhile: nothing more to do.
-      if (!el._entering) return;
+      if (el._entering !== entering) return;
       el._entering = false;
       if (el._navShader && !this.viewportDialogs) {
         // Through its `transitionShader` over the root: it shows at once under it.
@@ -5103,7 +5182,9 @@ class Player {
         el._showTimer = 0;
         this.event(el._id, "onShow");
       }, motion === "none" ? 0 : 350);
-    }));
+    };
+    requestAnimationFrame(() => requestAnimationFrame(enter));
+    setTimeout(enter, ENTER_LATE_MS);
   }
 
   /**
@@ -5526,6 +5607,7 @@ class Player {
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
+      case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
@@ -5707,6 +5789,55 @@ class Player {
         for (const p of picked) {
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, p.width, p.height, p.lastModified));
+        }
+        return w.nsh_picked(request);
+      });
+    };
+    input.addEventListener("change", () => answer([...(input.files ?? [])]));
+    input.addEventListener("cancel", () => answer([]));
+    this.root.append(input);
+    input.click();
+  }
+
+  /**
+   * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
+   * bytes and names stay as they are; a file larger than `maxBytes` is left
+   * out. A cancelled input sends none.
+   */
+  pickFiles(request, limit, accept, maxBytes) {
+    const app = this.app;
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) input.accept = accept;
+    input.multiple = limit > 1;
+    input.style.display = "none";
+    let answered = false;
+    const answer = async (files) => {
+      if (answered) return;
+      answered = true;
+      input.remove();
+      const picked = [];
+      for (const file of files.slice(0, limit)) {
+        if (file.size > maxBytes) {
+          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          continue;
+        }
+        try {
+          picked.push({
+            name: file.name,
+            type: file.type,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            lastModified: file.lastModified,
+          });
+        } catch {
+          // Unreadable: left out.
+        }
+      }
+      if (app !== this.app) return;
+      this.call((w) => {
+        for (const p of picked) {
+          this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
+            w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }
         return w.nsh_picked(request);
       });
@@ -6368,6 +6499,8 @@ class Player {
     // and selectable text keep theirs.
     root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
     root.addEventListener("copy", (e) => this.copyText(e));
+    // A selectable view's `onSelectionChange`: what a copy would give.
+    document.addEventListener("selectionchange", () => this.areaSelectionChanged());
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
     root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
@@ -6403,7 +6536,11 @@ class Player {
    * `onContextMenu` of the nearest view around `e`'s target that listens,
    * unless a field or selectable text is nearer (it keeps the browser's
    * menu); true when a view took it. The browser raises `contextmenu` for
-   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   * right clicks, Control-clicks on macOS, the keyboard's Menu key and
+   * Shift+F10 (on the focused element), and screen readers' "show menu"
+   * action. Those come with no pointer (an empty `pointerType` or no button): the
+   * event names none (`pointerType: null`) and is placed at the view's
+   * bottom-start corner, where a menu opened below it starts.
    */
   contextMenu(e) {
     const view = this.viewOf(e.target);
@@ -6411,12 +6548,21 @@ class Player {
     for (const el of this.ancestors(view)) {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
-        const [pageX, pageY] = this.point(e);
         const r = el.getBoundingClientRect();
+        // Chromium can name a mouse for keyboard context menus, but no
+        // button (-1). Older MouseEvents without pointerType are mouse input.
+        const pointerType = e.button === -1 ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        let at = e;
+        if (pointerType === null) {
+          const rtl = getComputedStyle(el).direction === "rtl";
+          at = { clientX: rtl ? r.right : r.left, clientY: r.bottom, target: e.target };
+        }
+        const [pageX, pageY] = this.point(at);
         this.event(el._id, "onContextMenu", {
-          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          position: { x: at.clientX - r.left, y: at.clientY - r.top },
           pagePosition: { x: pageX, y: pageY },
           modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+          pointerType: ["mouse", "pen", "touch"].includes(pointerType) ? pointerType : pointerType && "mouse",
         });
         return true;
       }
@@ -6588,16 +6734,29 @@ class Player {
    * nothing, and attachments (U+FFFC) are left out, as the native
    * platforms copy. */
   copyText(e) {
-    const sel = getSelection();
     if (e.target.closest?.(".nsh-field")) return;
-    if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return;
-    const range = sel.getRangeAt(0);
+    const out = this.selectedText();
+    if (out === null) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", out);
+  }
+
+  /** The selected text as {@link copyText} copies it, or null when nothing
+   * selectable in this player is selected; within `only` (an element)
+   * when given, of `given` (a range) instead of the selection when given. */
+  selectedText(only = null, given = null) {
+    let range = given;
+    if (!range) {
+      const sel = getSelection();
+      if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return null;
+      range = sel.getRangeAt(0);
+    }
     let out = "";
     let last = null;
     let lastArea = null;
     let lastBox = null;
     let found = false;
-    for (const run of this.root.querySelectorAll(".nsh-run")) {
+    for (const run of (only ?? this.root).querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
       // A link's characters are in a span inside the run.
@@ -6623,17 +6782,58 @@ class Player {
       out += area ? part.replaceAll("\uFFFC", "") : part;
       if (to === text.length && run._after) out += run._after;
     }
-    if (!found) return;
-    e.preventDefault();
-    e.clipboardData.setData("text/plain", out.replace(/\s+$/, ""));
+    if (!found) return null;
+    return given ? out : out.replace(/\s+$/, "");
+  }
+
+  /** Where the selection starts in the copy of all of `area` (UTF-16
+   * units): what maps it back to the document the area shows. */
+  selectionStart(area) {
+    const sel = getSelection();
+    if (!sel?.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    if (!area.contains(range.startContainer)) return 0;
+    const before = document.createRange();
+    before.setStart(area, 0);
+    before.setEnd(range.startContainer, range.startOffset);
+    if (before.collapsed) return 0;
+    return (this.selectedText(area, before) ?? "").length;
+  }
+
+  /** The document's selection changed: the selectable view it is in (the
+   * outermost) hears its text (`onSelectionChange`), and one it left hears
+   * "" (nothing selected), each only when its text changed. */
+  areaSelectionChanged() {
+    const sel = getSelection();
+    const anchor = sel?.rangeCount ? sel.anchorNode : null;
+    const inRoot = anchor && this.root.contains(anchor);
+    const area = inRoot ? this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement) : null;
+    const last = this._selectedArea;
+    if (last && last !== area) {
+      this._selectedArea = null;
+      if (last._selectedText && last._events?.has("onSelectionChange") && last.isConnected) {
+        this.event(last._id, "onSelectionChange", { text: "", start: 0 });
+      }
+      last._selectedText = "";
+    }
+    if (!area) return;
+    this._selectedArea = area;
+    if (!area._events?.has("onSelectionChange")) return;
+    const text = this.selectedText(area) ?? "";
+    if (text === (area._selectedText ?? "")) return;
+    area._selectedText = text;
+    this.event(area._id, "onSelectionChange", { text, start: text ? this.selectionStart(area) : 0 });
   }
 
   /** Select all and Escape in selectable text with a selection: within it. */
   selectionKey(e) {
     const sel = getSelection();
     const anchor = sel?.anchorNode;
+    const el = anchor?.nodeType === 1 ? anchor : anchor?.parentElement;
+    // After select all in a selectable view the selection starts at the
+    // view itself, outside its texts.
     const text = sel?.rangeCount && !sel.isCollapsed && anchor && this.root.contains(anchor)
-      ? this.selectableText(anchor.nodeType === 1 ? anchor : anchor.parentElement)
+      ? this.selectableText(el) ?? this.areaOf(el)
       : null;
     if (!text) return false;
     if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -6778,10 +6978,27 @@ class Player {
       };
       a.frame = requestAnimationFrame(step);
     }
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there.
+    const watch = () => {
+      if (!a.frame || el._glide !== a) return;
+      if (performance.now() - a.last < 200) {
+        a.watch = setTimeout(watch, 200);
+        return;
+      }
+      cancelAnimationFrame(a.frame);
+      a.frame = 0;
+      a.at = [a.x, a.y];
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      settle();
+    };
     clearTimeout(a.timer);
     a.timer = setTimeout(() => {
       a.timer = 0;
-      settle();
+      clearTimeout(a.watch);
+      if (a.frame) watch();
+      else settle();
     }, 200);
   }
 
@@ -6796,6 +7013,7 @@ class Player {
     if (!a) return;
     cancelAnimationFrame(a.frame);
     clearTimeout(a.timer);
+    clearTimeout(a.watch);
     el._glide = null;
     this.drive(el, -1);
     // Browsers clamp the offsets of scrolls.

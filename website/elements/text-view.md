@@ -111,7 +111,11 @@ quotes, tables, code blocks, disclosures, footnotes), streaming, styles by part,
 The content is one of three props, read in this order:
 
 - **`markdown`**: CommonMark with GitHub's additions (tables, task lists, strikethrough, autolinks, footnotes, alerts),
-  formulas (`$…$` and `$$…$$`) and HTML inside the Markdown.
+  formulas (`$…$` and `$$…$$`) and HTML inside the Markdown. Emphasis beside Chinese, Japanese and Korean text
+  reads as the CJK-friendly amendment to CommonMark reads it, so `**涨幅：**5%` is bold up to the colon, and a bare
+  URL ends where CJK text or a curly quote starts: `https://example.com。下一句` links `https://example.com`. A URL
+  written in angle brackets (`<https://zh.wikipedia.org/wiki/中文>`) or as a link keeps every character.
+  A tag that names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through; scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
@@ -597,7 +601,7 @@ same fields (`MarkdownOptions { streaming: true, ..Default::default() }`):
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `math` | `boolean` | `true` | Formulas: `$…$` in text, `$$…$$` blocks. |
+| `math` | `boolean` | `true` | Formulas: `$…$` and `\(…\)` in text, `$$…$$` and `\[…\]` blocks. Escaped brackets around a reference number or CJK words (`\[1\]\[3\]`, `\[注\]`) show as text. |
 | `html` | `boolean` | `true` | HTML inside the Markdown is read as the `html` prop reads it; `false` shows it as text. |
 | `alerts` | `boolean` | `true` | GitHub's alerts: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`. |
 | `frontmatter` | `boolean` | `false` | YAML front matter (`---` … `---` first) becomes a custom node `frontmatter` whose `text` is the YAML. |
@@ -812,6 +816,15 @@ parts with [`TextViewParts`](#typed-part-styles).
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | The selection of a `selectable` `TextView` changed: `{ text, start }`, the selected text as Copy takes it, `""` once nothing is selected ([Reading the selection](./text-selection.md#reading-the-selection)). Inside a selectable view the outer view reports instead. |
+
+## Methods
+
+`ref` gives `TextViewRef` (`TextViewApi` in Rust, through `component_ref::<TextView>()`). Methods return a `Promise` in JS.
+
+| Method | Rust | Description |
+|---|---|---|
+| `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | The selection of a `selectable` view: `format` `"plain"` (default, as Copy takes it), `"markdown"` or `"html"`, the selected nodes rebuilt; the source as written when all of it is selected ([As Markdown or HTML](./text-selection.md#as-markdown-or-html)). `""` when nothing is selected. |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | An image not in a link was pressed: `{ image }`, for the app to show it larger (a zoomable viewer of its own). |
 
 ## Accessibility

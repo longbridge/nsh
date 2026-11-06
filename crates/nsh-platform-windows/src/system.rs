@@ -171,6 +171,16 @@ pub(crate) fn system_dark() -> bool {
     ) == Some(0)
 }
 
+/// True when the taskbar is dark (Settings > Personalization > Colors,
+/// "Windows mode"), which the tray's template icons are painted for.
+pub(crate) fn taskbar_dark() -> bool {
+    reg_dword(
+        HKEY_CURRENT_USER,
+        w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+        w!("SystemUsesLightTheme"),
+    ) != Some(1)
+}
+
 /// True when the surface draws in its dark appearance. The environment is
 /// kept current by this module, so drawing never reads the registry.
 pub(crate) fn dark(surface: &Surface) -> bool {
@@ -179,7 +189,9 @@ pub(crate) fn dark(surface: &Surface) -> bool {
 
 /// The color behind the app's views (the default theme's background).
 pub(crate) fn window_background(surface: &Surface) -> Color {
-    if dark(surface) {
+    if surface.transparent() {
+        Color::TRANSPARENT
+    } else if dark(surface) {
         Color(0x0a0a_0aff)
     } else {
         Color(0xffff_ffff)
@@ -199,6 +211,8 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
 pub(crate) fn settings_changed(surface: &Rc<Surface>) {
     refresh_accent();
     update(surface, settings());
+    // The taskbar's colors may have changed: a template tray icon follows.
+    crate::tray::refresh(surface.hwnd());
     // The accent may have changed without the environment.
     surface.invalidate();
 }
@@ -557,6 +571,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             clipboard::files_answer(*id, &clipboard_files()),
         ),
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
+        Command::PickFiles { id, request } => {
+            crate::file_requests::pick_files(surface, *id, request);
+        }
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
@@ -792,7 +809,7 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     };
     let from = kind.opacity().get();
     let mut start = None;
-    surface.on_frame(move |surface, now| {
+    surface.on_draw_frame(move |surface, now| {
         let Some((_, kind)) = find(serial) else {
             return false;
         };

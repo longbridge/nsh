@@ -8,7 +8,7 @@ group: platforms
 # Packaging
 
 `nsh package` turns an app into something you can install: a `.app` for the iOS simulator, a signed `.ipa` for iOS
-devices, a signed `.apk` for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory and `.zip` for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
+devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory and `.zip` for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
 
 - **A Rust app** (`nsh.json` names its `"root"`) is packaged from its directory. `nsh` builds the target's runner in
   release mode with your crate compiled in and the root mounted, with no QuickJS: Cargo, the Rust target of the
@@ -62,8 +62,10 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
-`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)) and `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)); [Project structure](./project-structure.md#nshjson) lists
+`theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+of their packages, [below](#infoplist-keys-and-entitlements)) and `updater`, which makes desktop packages update themselves
+(see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
 every key. Unknown keys are an error.
 
 Every key above can be overridden on the command line, which is handy in CI:
@@ -89,6 +91,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
 | `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
+| `--format <apk \| aab>` | Android: an APK (default), installed directly, or an Android App Bundle for Google Play ([below](#google-play-app-bundles)). |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
 
 ## iOS simulator
@@ -112,7 +115,8 @@ Writes `.nsh/out/<Name>.ipa`, ready for TestFlight, App Store upload tools or di
 profile). What happens:
 
 - The provisioning profile is copied into the app as `embedded.mobileprovision`.
-- The entitlements come from the profile. NSH checks that the profile's application identifier covers the app's `id`
+- The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
+  ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`
   (wildcard profiles such as `TEAMID.*` or `TEAMID.com.example.*` work) and stops with an error otherwise.
 - The app is signed with `codesign` using the identity, then zipped into an `.ipa` (`Payload/<Name>.app`).
 
@@ -143,7 +147,8 @@ without Gradle. Requirements:
 - For a Rust app, the Android NDK (`sdkmanager "ndk;<version>"`, or `ANDROID_NDK_HOME`), which builds its
   `libnsh.so`.
 
-The app targets API 35 and needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
+The app targets API 35 (`targetSdkVersion`, what Google Play requires) unless `nsh.json` names another level, and
+needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
 `arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
 yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
 
@@ -164,6 +169,32 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android \
 ```
 
 Prefer the environment variable over `--keystore-password` so the password does not end up in your shell history.
+
+### Target API level
+
+`android.targetSdk` in `nsh.json` sets the API level the app targets (default 35, at least 28). The app also compiles
+against that level, so the SDK needs its platform (`sdkmanager "platforms;android-36"`):
+
+```json
+{
+  "android": { "targetSdk": 36 }
+}
+```
+
+### Google Play: App Bundles
+
+Google Play takes Android App Bundles, not APKs. `--format aab` writes `.nsh/out/<Name>.aab` instead of the APK, from
+the same app, without Gradle or bundletool; Google Play builds from it the APKs each device installs (one per ABI). The
+bundle is signed with `jarsigner` from the JDK, with the same `--keystore` options: that key is the upload key you
+register in Play App Signing.
+
+```sh
+NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
+  --keystore release.jks --key-alias upload
+```
+
+`--run` installs APKs, so it does not take `--format aab`; to try a bundle on a device, use
+[bundletool](https://github.com/google/bundletool) (`build-apks`, then `install-apks`).
 
 ## macOS
 
@@ -211,6 +242,63 @@ and `nsh.<digest>.wasm` (a Rust app's engine and crate; for a TSX app the runtim
 so hosts can cache them for good. Deploy the directory to any web server or CDN; `--run` serves it on
 `http://127.0.0.1:4173/` for you to open. Cache headers and embedding: [Web](./web.md#publish-an-app).
 
+## Info.plist keys and entitlements
+
+NSH writes the `Info.plist` of iOS and macOS packages, and signs them. An app adds keys of its own, such as export
+compliance, an App Store category or App Transport Security exceptions, and entitlements, such as associated domains,
+under `ios` and `macos` in `nsh.json`:
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "ITSAppUsesNonExemptEncryption": false,
+      "LSApplicationCategoryType": "public.app-category.finance",
+      "NSAppTransportSecurity": {
+        "NSExceptionDomains": { "example.com": { "NSIncludesSubdomains": true } }
+      }
+    },
+    "entitlements": {
+      "com.apple.developer.associated-domains": ["applinks:example.com"]
+    }
+  },
+  "macos": {
+    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" },
+    "entitlements": { "com.apple.security.network.client": true }
+  }
+}
+```
+
+Values are written as property list values: strings, numbers (integers or reals), booleans, arrays and objects
+(dictionaries); `null` is an error. A key the app sets replaces NSH's default, so an app may also reword the usage
+descriptions NSH adds or narrow the orientations.
+
+NSH keeps the keys it sets from other `nsh.json` keys or that the packaged app depends on. Setting one is an error that
+says what to set instead:
+
+| Keys | Set from |
+|---|---|
+| `CFBundleIdentifier` | `id` |
+| `CFBundleName`, `CFBundleDisplayName` | `name` |
+| `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
+| `CFBundleURLTypes` | `schemes` |
+| iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
+| iOS: `UIUserInterfaceStyle` | `appearance` |
+| iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
+| `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `MinimumOSVersion`, `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `LSMinimumSystemVersion`, `NSPrincipalClass` | the package itself |
+| Entitlements: `application-identifier`, `com.apple.application-identifier`, `com.apple.developer.team-identifier` | `id` and the provisioning profile |
+
+Entitlements:
+
+- **iOS devices** are signed with the entitlements the provisioning profile grants, each of the app's in place of the
+  profile's value. Every entitlement the app names must be one the profile grants, with a value it covers (a profile
+  grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
+  entitlement, so enable its capability for the app's identifier and download the profile again.
+- **The iOS simulator** is signed with the app's entitlements as they are.
+- **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
+  `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
+  `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+
 ## Icons
 
 Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or with `--icon`:
@@ -221,7 +309,9 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 - **macOS:** converted by `sips` to `AppIcon.icns`.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
 - **Windows:** resized to 16 to 64 pixels and 256 pixels and embedded in the executable as its icon, which the window,
-  Explorer and the taskbar show.
+  Explorer and the taskbar show, and written beside the bundle as `nsh\icon.ico`, which notifications show. Packaged on
+  macOS or Linux, the executable keeps the default icon in Explorer, and the window and the taskbar show `icon.ico`.
+  `nsh run --target windows` and `nsh test --target windows` show it too.
 - **Web:** resized to 32 pixels (the favicon), 180 (`apple-touch-icon`), 192 and 512 (the web app manifest).
 
 Without an icon, the system shows its default.
@@ -229,8 +319,9 @@ Without an icon, the system shows its default.
 ## Camera, Bluetooth and other hardware
 
 NSH has no API for the camera, video recording, Bluetooth or location, and `nsh package` cannot make an app that uses
-them: NSH writes the app's `Info.plist` and Android manifest, `nsh.json` has no key that adds to them, and a packaged
-Android app cannot add Java code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
+them: NSH's runtime has no code that reaches this hardware, `nsh.json` adds keys to `Info.plist`
+([above](#infoplist-keys-and-entitlements)) but none to the Android manifest, and a packaged Android app cannot add Java
+code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
 protected hardware without a usage description in `Info.plist`, and the Android manifest of a packaged app declares
 only `INTERNET`.
 
@@ -270,6 +361,51 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 ## See also
 
 - [CLI](./cli.md): every command
+- [App Updates](./app-updates.md): packaged apps that update themselves
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app
+
+## Upload to TestFlight
+
+`nsh publish ios <IPA>` uploads an App Store-signed IPA to App Store Connect using its
+[build uploads API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads).
+It runs on macOS and uses the IPA produced by `nsh package`, for Rust, Rust + TSX and TSX apps alike.
+
+Create the app record in App Store Connect first. Use an Apple Distribution signing identity and an
+App Store provisioning profile for that bundle identifier. Set `version` and increment `build` in
+`nsh.json` before packaging. Create a **team API key** in App Store Connect with permission to upload
+builds (Developer, App Manager or Admin), and keep its `.p8` file outside the repository. Supply
+credentials from your shell or CI secret environment; keep them out of `nsh.json` and version control.
+
+```sh
+nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
+  --profile /secure/AppStore.mobileprovision
+
+export NSH_APP_STORE_APP_ID=1234567890
+export NSH_APP_STORE_ISSUER_ID=your-issuer-id
+export NSH_APP_STORE_KEY_ID=your-key-id
+export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
+nsh publish ios .nsh/out/MyApp.ipa
+```
+
+| Flag | Environment variable | Meaning |
+|---|---|---|
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | Numeric Apple ID of the existing App Store Connect app. |
+| `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | Team API key issuer ID. |
+| `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API key ID. |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | Path to the `.p8` private key. |
+
+All four values are required; flags override environment variables. The CLI reads the bundle ID,
+version and build number from the IPA and checks that the bundle ID matches the App Store Connect
+app. It signs short-lived ES256 tokens, streams the IPA in the requested parts, and commits its
+SHA-256 checksum. The final message includes the upload ID and the app's TestFlight link.
+
+A successful command means Apple accepted the upload for processing. Follow processing status,
+export compliance, tester groups and any beta review in App Store Connect. App Store review submission
+and production release remain manual. If an upload is interrupted, check its printed upload ID in
+App Store Connect before retrying; each invocation starts a new upload. Apple validates signing
+and provisioning while processing the build.
+
+`nsh publish <ENTRY> --key … --cert …` continues to produce a signed `.nshpkg` for embedding.
+Use `./ios` to name a local entry directory called `ios`.

@@ -1598,7 +1598,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // let the user pick several (false: one)
+  limit?: number; // at most this many when multiple (up to 100)
+  filters?: { name: string; extensions: string[] }[]; // the types offered (none: any file)
+}
+
+interface PickedFile {
+  file: File; // name, type, size in bytes and the bytes, as they are
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // let the user pick several (false: one)
@@ -1623,6 +1634,8 @@ interface PickedImage {
 | `format` | `request.format = PickFormat::Current` |
 | `image.file.name`, `.type`, `.size` | `file.name`, `file.mime`, `file.data.len()` |
 | `image.size` | `file.size` (`Size<DevicePixels>`) |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
+| `filters` | `FilePickRequest::new(multiple, limit).filter(FileFilter::new("Documents", ["pdf"]))` |
 
 ### Picker.pickImages
 
@@ -1726,13 +1739,50 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+Shows the system's picker for files of any type and resolves with what the user picked, or `[]` when the user cancels.
+It rejects as `pickImages` does: a `RangeError` for options out of range (`limit: 0`, a filter without extensions) and
+`ERR_ACCESS_DENIED` without the `picker` capability. Rust: `pick_files(request)`.
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "Documents", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| Platform | Picker | Filters |
+|---|---|---|
+| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
+| Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
+| iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
+| Android | `ACTION_OPEN_DOCUMENT` | By media type; an extension Android knows no type of offers any file |
+| Web | `<input type=file>` | All the extensions at once |
+| GPUI | GPUI's open dialog, which offers any file | Files that do not pass are left out afterwards |
+
+None needs a permission. Files come as they are: nothing is converted, and each keeps its name. A file's whole bytes are
+read into memory, so a file larger than 512 MiB is left out of the answer and logged. A filter is what the picker
+offers, not a promise: check what you get.
+
 ### Embedding apps
 
 An app that embeds NSH and has a picker of its own (one with the app's own albums, say) answers the picks itself: in
 Rust, a `PickerBackend` (`nsh_core::picker`) given to the engine (`EngineConfig::picker`, or `AppView::set_picker` in
 GPUI and GPUI Kit apps) receives every pick's `PickRequest` and returns the files, and the system's picker is not
 shown. The files it returns are completed as the platform's are: cut to the request's limit, their sizes, types and
-extensions read from their bytes.
+extensions read from their bytes. `pick_files` answers `pickFiles` the same way; a backend that does not implement it
+cancels those picks, and the system's picker is still not shown.
 
 ### Tests
 
@@ -1741,8 +1791,8 @@ and without a handler a pick is cancelled. See [Testing](../docs/testing-and-tra
 
 > [!NOTE]
 > When your app declares `capabilities` in `nsh.json`, the picker must be granted with `"picker": true`. Without it
-> `pickImages` shows nothing and rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
-> `"picker"` and `resource` `""`. In Rust, `pick_images` answers no files and the refusal is logged. See
+> `pickImages` and `pickFiles` show nothing and reject with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
+> `"picker"` and `resource` `""`. In Rust, `pick_images` and `pick_files` answer no files and the refusal is logged. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ## Notifications
@@ -1767,10 +1817,10 @@ Rust code calls `request_notification_permission`, `show_notification`, `close_n
 
 | Platform | Notifications | Badge |
 | --- | --- | --- |
-| macOS | The notification center, in a signed app bundle; `unavailable` in `nsh run`'s unbundled host | The Dock, without a permission |
+| macOS | The notification center, in a signed app bundle; `unavailable` in `nsh run`'s unbundled host and in an app embedded without `AppOptions::notifications` | The Dock, without a permission |
 | iOS | The notification center | The home screen, with the permission |
 | Android | The system's, with `POST_NOTIFICATIONS` on Android 13 (`nsh package` declares it for apps granted `notifications`) | No count to set: launchers mark an app that has notifications showing, and the count goes with those shown after it |
-| Windows | A toast, shown unless the user turned the app's notifications off in Settings, which is `denied`. Windows has no prompt, so `requestPermission` asks nothing. A surface embedded in another app is `unavailable` | The count on the taskbar button, up to `99+`; not shown when the taskbar uses small buttons |
+| Windows | A toast, shown unless the user turned the app's notifications off in Settings, which is `denied`. Windows has no prompt, so `requestPermission` asks nothing. An app embedded without `AppOptions::notifications` is `unavailable` | The count on the taskbar button, up to `99+`; not shown when the taskbar uses small buttons |
 | Linux | The desktop's notification daemon (`org.freedesktop.Notifications`): `granted` while one runs, with no prompt, `unavailable` otherwise | The Unity launcher API, on docks that read it (Plasma, Ubuntu's, Dash to Dock); elsewhere nothing shows |
 | Web | `Notification`, where the browser shows them from a page (not on Android) | The Badging API, in an installed app |
 | Terminal, GPUI | `unavailable` | None |
@@ -1793,6 +1843,52 @@ only the running app: one left on screen after the app exits does nothing.
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
 `"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
+
+## UrlScheme
+
+`UrlScheme` reports the links that open the app: URLs of the schemes the app claims in `nsh.json`, such as
+`myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app claims its
+schemes once, and `nsh package` declares them to the system:
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
+listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
+when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
+`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`).
+
+A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
+link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
+lets through links of the app's own schemes, at most 16 KB long, and never navigates on its own: what a link opens is
+the app's.
+
+A scheme is a letter followed by letters, digits, `+`, `-` or `.`, compared in lower case. The schemes of the web,
+files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ...) are refused when the app is built.
+
+| Platform | How the app claims its schemes |
+| --- | --- |
+| macOS | `CFBundleURLTypes` in the app's `Info.plist`; the system opens the app, or hands the link to the one that runs |
+| iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
+| Android | An `ACTION_VIEW` intent filter in the manifest `nsh package` writes; the activity runs as `singleTask`, so a link reaches the running app |
+| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
+| Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
+
+`nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
+`app.openWithUrl(url)` opens one while it runs, both headless.
+
+An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
 ## Speech
 

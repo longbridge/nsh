@@ -28,11 +28,14 @@ pub mod dev;
 mod file_drop;
 mod file_requests;
 mod fps;
+mod global_shortcut;
 #[cfg(test)]
 mod gtk_test;
 mod image;
 mod input;
+mod key_focus;
 mod keymap;
+mod links;
 mod menu_style;
 mod mount;
 mod native;
@@ -48,7 +51,9 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
+mod window;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};
@@ -61,5 +66,6 @@ pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, run_app, set_components, set_ui_sets},
     image::AssetBase,
+    links::set_exec_args,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };

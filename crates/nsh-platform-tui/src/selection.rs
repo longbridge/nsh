@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use nsh_core::{
-    Bounds, NodeId, Point, Points,
+    Bounds, EventKind, NodeId, Point, Points,
     selection::{SelectionModel, SelectionTexts},
 };
 use ratatui_core::{
@@ -46,6 +46,9 @@ pub(crate) struct Selection {
     next: Option<Instant>,
     /// The scroll moved under the drag: extend it at `point` once laid out again.
     follow: bool,
+    /// The selectable view and selected text last reported to its
+    /// `onSelectionChange` (kept when the selection clears).
+    reported: Option<(NodeId, String)>,
 }
 
 /// How often a drag held past a scroll view's edge scrolls it, by as many
@@ -152,7 +155,49 @@ impl Selection {
     }
 
     pub(crate) fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            reported: self.reported.take(),
+            ..Self::default()
+        };
+    }
+
+    /// The `onSelectionChange` events due since the last call: the selected
+    /// text of the selectable view with the selection when it changed, and
+    /// `""` for one that lost a non-empty selection (unless it is gone).
+    /// `geometry` is the last frame's.
+    pub(crate) fn changes(
+        &mut self,
+        tree: &Mounter,
+        geometry: &[Geometry],
+    ) -> Vec<(NodeId, String, u32)> {
+        let mut out = Vec::new();
+        let current = self.root.filter(|&root| {
+            tree.get(root).is_some_and(|view| {
+                view.props.selectable_view && view.events.contains(EventKind::SelectionChange)
+            })
+        });
+        if let Some((id, text)) = &self.reported
+            && Some(*id) != current
+        {
+            if !text.is_empty() && tree.get(*id).is_some() {
+                out.push((*id, String::new(), 0));
+            }
+            self.reported = None;
+        }
+        if let Some(root) = current {
+            let (text, start) = if self.model.is_empty() {
+                (String::new(), 0)
+            } else {
+                let texts = Texts::new(tree, geometry, root);
+                (self.model.text(&texts), self.model.start_offset(&texts))
+            };
+            let last = self.reported.as_ref().map_or("", |(_, t)| t.as_str());
+            if text != last {
+                out.push((root, text.clone(), start));
+            }
+            self.reported = Some((root, text));
+        }
+        out
     }
 
     pub(crate) fn handle(&mut self, mouse: MouseInput, scene: Scene<'_>, clicks: u32) -> bool {

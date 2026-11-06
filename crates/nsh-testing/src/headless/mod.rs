@@ -189,7 +189,7 @@ pub enum DialogAnswer {
 /// Answers a pick: the files the user picks for the request (none: the
 /// picker cancelled).
 type PickHandler =
-    Box<dyn FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile> + Send>;
+    Box<dyn FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile> + Send>;
 
 /// Who answers the picks a step asks for.
 enum Picks {
@@ -494,6 +494,29 @@ impl Headless {
         self.done()
     }
 
+    /// The step `openWithUrl(<url>)`: the system hands the app `url`, a
+    /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
+    /// gets it when the app claims its scheme); then waits until the app
+    /// is quiet.
+    pub fn open_with_url(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("openWithUrl({url})"));
+        self.send_url_scheme(url);
+        self.done()
+    }
+
+    /// Reports `url` as a link the system handed the app, without a step:
+    /// the one that launches it.
+    pub fn send_url_scheme(&self, url: &str) {
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![(
+                nsh_core::url_scheme::URL,
+                PayloadValue::Str(url.to_owned()),
+            )]),
+        );
+    }
+
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
     /// rotation, a resized window), as a platform reports it.
     pub fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String> {
@@ -567,11 +590,11 @@ impl Headless {
         self.done()
     }
 
-    /// Answers the picks steps ask for (`Picker.pickImages`) with
+    /// Answers the picks steps ask for (`Picker.pickImages`, `Picker.pickFiles`) with
     /// `handler`, the files the user picks, instead of cancelling them.
     pub fn on_pick(
         &mut self,
-        handler: impl FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile>
+        handler: impl FnMut(&nsh_core::picker::Pick) -> Vec<nsh_core::picker::PickedFile>
         + Send
         + 'static,
     ) {
@@ -613,12 +636,12 @@ impl Headless {
     }
 
     /// The oldest pick asked and not answered yet.
-    pub fn pending_pick(&self) -> Option<nsh_core::picker::PickRequest> {
+    pub fn pending_pick(&self) -> Option<nsh_core::picker::Pick> {
         self.screen.pending_pick().map(|(_, request)| request)
     }
 
     /// The picks the app asked for so far, in order.
-    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+    pub fn picks(&self) -> Vec<nsh_core::picker::Pick> {
         self.screen.picks()
     }
 

@@ -85,6 +85,12 @@ pub(crate) enum Action {
         crate::picker::PickRequest,
         AnswerSlot<Vec<crate::picker::PickedFile>>,
     ),
+    /// Shows the system's picker for files of any type; the files picked
+    /// (none when cancelled) resolve the slot.
+    PickFiles(
+        crate::picker::FilePickRequest,
+        AnswerSlot<Vec<crate::picker::PickedFile>>,
+    ),
     /// Calls function `name` of the embedding app (`nsh/host`); its
     /// value, or why it failed, resolves the slot.
     HostCall {
@@ -106,6 +112,9 @@ pub(crate) enum Action {
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
+    /// The next link the system hands the app ([`crate::url_scheme`])
+    /// resolves the slot, those that came before first.
+    NextUrlSchemeOpen(AnswerSlot<String>),
     /// Whether a web view's ref gives its page trusted input here
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.

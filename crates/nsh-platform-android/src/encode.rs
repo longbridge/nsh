@@ -571,6 +571,17 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(9);
                         e.string(data);
                     }
+                    // `WebBox.load`: the URL, then the headers' count and
+                    // each name and value.
+                    Command::Load(load) => {
+                        e.int(46);
+                        e.string(load.src);
+                        e.int(load.headers.len() as i32);
+                        for (name, value) in load.headers {
+                            e.string(name);
+                            e.string(value);
+                        }
+                    }
                     Command::Seek(seconds) => {
                         e.int(10);
                         e.float(seconds as f32);
@@ -668,6 +679,16 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(request.max_dimension.map_or(0, |d| d.0.max(1)));
                         e.float(request.quality.map_or(-1.0, |q| q.0));
                         e.bool(request.format == nsh_core::picker::PickFormat::Current);
+                    }
+                    // `Picker.java`: the request, the limit, the extensions
+                    // offered (comma-separated; empty: any file) and the
+                    // largest file read.
+                    Command::PickFiles { id, request } => {
+                        e.int(45);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
+                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
                     }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
@@ -1056,6 +1077,7 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             e.opt_string(w.user_agent.as_deref());
             e.bool(w.scrollable);
             e.bool(w.javascript_enabled);
+            e.bool(w.incognito);
         }
         NativeProps::Video(v) => {
             e.int(4);
