@@ -504,6 +504,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
         Command::Desktop(command) => crate::chrome::command(surface, command),
+        Command::PerfMonitor(show) => {
+            if let Some(toggle) = &*surface.perf_toggle.borrow() {
+                toggle(*show);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
             surface.root.ns(),
             text,

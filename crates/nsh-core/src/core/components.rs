@@ -999,6 +999,12 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
+    /// Whether the platform's performance monitor measures
+    /// (`fpsEnabled()`): what read it runs again.
+    pub fn set_perf_monitor(&mut self, enabled: bool) {
+        self.components.runtime.set_perf_monitor(enabled);
+    }
+
     /// The displays components read ([`crate::element::desktop::displays`]),
     /// as the platform reports them: what read them runs again.
     pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {

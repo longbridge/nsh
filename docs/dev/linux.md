@@ -208,7 +208,7 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
 
 ## Performance: `--fps`, the renderer
 
-`nsh-linux-host --fps` (`nsh run --target linux --fps`, `nsh test --target linux --fps`; `AppOptions::fps`) logs one
+`nsh-linux-host --fps` (`nsh run --target linux --fps`, `nsh test --target linux --fps`; `AppOptions::fps`, `NSH_FPS=1`, the app's `setFpsEnabled`) logs one
 `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`): frames GTK drew over the display's rate,
 the main thread's time per drawn frame from the frame clock's `before-paint` to `after-paint` and its phases
 (`update`, `layout`, `paint`, and within `paint` NSH's `snapshot` and the canvases' rasterizing), batches applied per

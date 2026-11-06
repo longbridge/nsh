@@ -208,7 +208,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 ## Frame statistics: `--fps`
 
-`nsh-gpui-host --fps` (`AppOptions::fps`, `AppView::set_fps_monitor` for embedders) logs one `nsh::perf` line a
+`nsh-gpui-host --fps` (`AppOptions::fps`, `NSH_FPS=1`, `AppView::set_fps_monitor` for embedders, the app's `setFpsEnabled`) logs one `nsh::perf` line a
 second (`stats.rs`): `fps 145 active 0/145 gap … tick … paint … canvas 0.04 paths 26.0 raf 145 notifies 0`. Frames
 drawn and how many of them GPUI counted active (unfocused windows run at 30 fps unless `inactive_frame_interval` is
 `None`), the gaps between frames, the animation tick (prepaint) and the tree's paint (milliseconds as

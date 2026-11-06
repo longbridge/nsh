@@ -301,6 +301,13 @@ impl Surface {
         *self.fps.borrow_mut() = Some(fps);
     }
 
+    /// Stops measuring ([`Surface::enable_fps`]).
+    pub(crate) fn disable_fps(&self) {
+        if self.fps.take().is_some() {
+            self.control(|c| c.set_perf_monitor(None));
+        }
+    }
+
     /// Its key ([`Surface::by_key`]).
     #[cfg(feature = "dev")]
     pub(crate) fn key(&self) -> u64 {

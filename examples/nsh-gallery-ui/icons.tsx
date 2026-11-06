@@ -91,7 +91,8 @@ export type IconName =
   | "folder"
   | "folder-open"
   | "file"
-  | "tree";
+  | "tree"
+  | "activity";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -202,6 +203,8 @@ const glyphs: Record<IconName, Draw> = {
     rect(c, 2.5, 8, 15, 4, 2);
     line(c, [4.5, 10, 10.5, 10]);
   },
+  // A pulse: flat, a spike up and down, flat again.
+  activity: (c) => line(c, [2.5, 10, 6, 10, 8, 4, 12, 16, 14, 10, 17.5, 10]),
   chart: (c) => {
     line(c, [3, 3, 3, 17, 17, 17]);
     line(c, [6, 13, 9, 9, 12, 11, 16, 5]);

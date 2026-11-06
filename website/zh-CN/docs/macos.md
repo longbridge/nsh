@@ -55,7 +55,9 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 ### 性能监视器
 
 `--fps`（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`，嵌入时用 `AppView::set_fps_monitor(true)`，
-以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`）会在应用右上角显示一个每秒刷新两次的面板：
+以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`、环境变量
+`NSH_FPS=1`，或应用自己调用 `setFpsEnabled(true)`）会在应用右上角显示一个每秒刷新两次的面板。从 Dock 或访达打开的打包应用从
+`Info.plist` 的 `LSEnvironment` 取得 `NSH_FPS`，用 `nsh.json` 的 `macos.infoPlist` 添加（见[打包](./packaging.md#infoplist-键与-entitlements)）：
 
 | 行 | 测量内容 |
 |---|---|

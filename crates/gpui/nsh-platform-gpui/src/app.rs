@@ -280,8 +280,8 @@ impl AppView {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
-        if options.fps {
-            *surface.stats.borrow_mut() = Some(Default::default());
+        if options.fps || nsh_engine::perf::enabled_by_env() {
+            surface.set_stats(true);
         }
         surface.entity.set(Some(cx.entity_id()));
         *surface.text_system.borrow_mut() = Some(cx.text_system().clone());
@@ -541,7 +541,7 @@ impl AppView {
     /// …`: frames drawn, their gaps, the main thread's tick and paint, what
     /// made GPUI draw), or stops.
     pub fn set_fps_monitor(&self, on: bool) {
-        *self.surface.stats.borrow_mut() = on.then(Default::default);
+        self.surface.set_stats(on);
     }
 
     /// Calls `f` with the text (the message and the stack) of every error

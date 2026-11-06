@@ -1,6 +1,6 @@
 import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { platform, windowSize } from "nsh";
+import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
 import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
@@ -571,10 +571,24 @@ function Sidebar() {
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
             <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
           </View>
+          <FpsToggle />
           <Toggles />
         </View>
       </View>
     </View>
+  );
+}
+
+/** Shows or hides the platform's performance monitor (`setFpsEnabled`). */
+function FpsToggle() {
+  return (
+    <ToolButton
+      icon="activity"
+      label={fpsEnabled() ? "Hide the performance monitor" : "Show the performance monitor"}
+      title="FPS"
+      on={fpsEnabled()}
+      onPress={() => setFpsEnabled(!fpsEnabled())}
+    />
   );
 }
 

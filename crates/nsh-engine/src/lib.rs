@@ -3319,6 +3319,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Perf(monitor) => {
+            state.core.set_perf_monitor(monitor.is_some());
+            if let Some(script) = script {
+                script.set_fps_enabled(monitor.is_some());
+            }
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();
         }

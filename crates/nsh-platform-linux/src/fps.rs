@@ -82,6 +82,12 @@ pub(crate) struct Fps {
     logged: Cell<Instant>,
 }
 
+impl Drop for Fps {
+    fn drop(&mut self) {
+        MEASURING.set(false);
+    }
+}
+
 impl Fps {
     pub(crate) fn new() -> Fps {
         MEASURING.set(true);

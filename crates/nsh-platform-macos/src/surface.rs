@@ -243,6 +243,10 @@ pub(crate) struct Surface {
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
     perf_on: Arc<AtomicBool>,
+    /// Shows or hides the view's performance monitor
+    /// (`setFpsEnabled`): set by its [`crate::AppView`],
+    /// which owns the panel.
+    pub(crate) perf_toggle: RefCell<Option<Box<dyn Fn(bool)>>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
@@ -340,6 +344,7 @@ impl Surface {
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
+            perf_toggle: RefCell::new(None),
             last_tick: Cell::new(0.0),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),

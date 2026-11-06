@@ -255,7 +255,7 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
-        if view.options.borrow().fps {
+        if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.surface.enable_fps();
         }
         view

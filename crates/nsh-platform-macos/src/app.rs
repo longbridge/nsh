@@ -310,7 +310,13 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
-        if view.options.borrow().fps {
+        let weak = Rc::downgrade(&view);
+        *view.surface.perf_toggle.borrow_mut() = Some(Box::new(move |show| {
+            if let Some(view) = weak.upgrade() {
+                view.set_fps_monitor(show);
+            }
+        }));
+        if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.set_fps_monitor(true);
         }
         view
