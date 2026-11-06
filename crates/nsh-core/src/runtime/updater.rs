@@ -85,10 +85,11 @@ impl Updater {
         Later::new(native::download(sys, on_progress))
     }
 
-    /// Replaces the installed app with the downloaded update and starts it;
-    /// this run then exits, so the promise settles only on failure. Rejects
-    /// when nothing was downloaded, or when the app cannot be replaced,
-    /// which leaves it as it was.
+    /// Replaces the installed app with the downloaded update and restarts
+    /// it as `Application.restart()` does: this run quits, and the new
+    /// version starts once it has exited, so the promise settles only on
+    /// failure. Rejects when nothing was downloaded, or when the app cannot
+    /// be replaced, which leaves it as it was.
     pub(crate) fn install_and_restart(sys: System) -> Later<()> {
         Later::new(native::install(sys))
     }
@@ -334,16 +335,16 @@ mod native {
         })?;
         let installation = pending.installation.clone();
         blocking(move || {
-            // Let the writer settle before the new process reads storage.
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            installation
-                .install_and_launch(&archive)
-                .map_err(|e| e.to_string())?;
+            installation.install(&archive).map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&archive);
             Ok(())
         })
         .await?;
-        std::process::exit(0);
+        // As `Application.restart()`: the app quits as the user's quit does
+        // (storage written, windows closed), and the new version starts
+        // once this process has exited (`crate::restart`).
+        crate::element::desktop::restart();
+        std::future::pending().await
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]

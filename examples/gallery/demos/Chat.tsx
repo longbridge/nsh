@@ -7,6 +7,7 @@ import { Input } from "nsh/base";
 import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
+import { play as sound } from "../../nsh-gallery-ui/sound";
 import { localReply, type Provider } from "./chat/local";
 import { Glyph } from "./chat/glyphs";
 import { Markdown } from "./chat/markdown";
@@ -156,6 +157,8 @@ export function Chat() {
       error,
     };
     run = null;
+    // A finished reply is a result arriving, said quietly.
+    if (status === "done") sound("ready", { volume: 0.35 });
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
       messages.set(messages().map((m) => (m.id === r.id ? final : m)));
@@ -261,6 +264,7 @@ export function Chat() {
     const offline = !native && s.steps.find((step) => "offline" in step) as { offline: number } | undefined;
     const user: User = { kind: "user", id: nextId(), text, image, file, waiting: !!offline };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    sound("tap");
     batch(() => {
       const start: Msg[] = messages().length ? [] : [{ kind: "date", id: nextId(), label: "Today" }];
       messages.set([...messages(), ...start, user]);

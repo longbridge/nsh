@@ -1427,7 +1427,9 @@ class Player {
     }
     if (pending.length > 1) return;
     const settle = () => {
-      const waiting = this.fontsPending;
+      // A copy: faces registered while these load join `fontsPending`, and
+      // must be found there when these are done.
+      const waiting = [...this.fontsPending];
       Promise.all(waiting).then(() => {
         if (this.fontsPending.length > waiting.length) {
           this.fontsPending = this.fontsPending.slice(waiting.length);

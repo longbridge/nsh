@@ -4,6 +4,7 @@ import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor, toneTint } from "../ui";
+import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -984,6 +985,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             checked={all()}
             indeterminate={mark() === "dash"}
             onChange={({ checked: on }) => {
+              sound("toggle", { rate: on ? 1 : 0.9 });
               shown.set(on ? KINDS.map((k) => k.name) : []);
               last.set(`Select all: ${on}`);
             }}
@@ -1003,6 +1005,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               <Checkbox
                 checked={has(kind().name)}
                 onChange={({ checked: on }) => {
+                  sound("toggle", { rate: on ? 1 : 0.9 });
                   shown.set(on ? KINDS.map((k) => k.name).filter((n) => n === kind().name || has(n)) : shown().filter((n) => n !== kind().name));
                   last.set(`${kind().name}: ${on}`);
                 }}
@@ -1039,6 +1042,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
         <Checkbox
           checked={has(props.task)}
           onChange={({ checked: on }) => {
+            sound("toggle", { rate: on ? 1 : 0.9 });
             done.set(on ? [...done(), props.task] : done().filter((t) => t !== props.task));
             last.set(`${props.task}: ${on ? "done" : "to do"}`);
           }}
@@ -1093,6 +1097,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 checked={c().required || has(c().name)}
                 disabled={c().required}
                 onChange={({ checked }) => {
+                  sound("toggle", { rate: checked ? 1 : 0.9 });
                   set(checked ? [...allowed(), c().name] : allowed().filter((n) => n !== c().name));
                   last.set(`${c().name}: ${checked}`);
                 }}
@@ -1156,6 +1161,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 checked={has(c().name)}
                 disabled={c().disabled}
                 onChange={({ checked }) => {
+                  sound("toggle", { rate: checked ? 1 : 0.9 });
                   on.set(checked ? [...on(), c().name] : on().filter((n) => n !== c().name));
                   last.set(`${c().name}: ${checked}`);
                 }}
@@ -1192,7 +1198,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           checked={props.mark === "check"}
           indeterminate={props.mark === "dash"}
           disabled={props.disabled}
-          onChange={({ checked }) => props.onChange?.(checked)}
+          onChange={({ checked }) => {
+            sound("toggle", { rate: checked ? 1 : 0.9 });
+            props.onChange?.(checked);
+          }}
           class="group"
           style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
           activeStyle={pressed}
@@ -1247,6 +1256,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 checked={plan() === p().name}
                 disabled={p().disabled}
                 onChange={() => {
+                  sound("select");
                   plan.set(p().name);
                   last.set(`Plan: ${p().name}`);
                 }}
@@ -1288,6 +1298,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 checked={speed() === d().name}
                 disabled={d().disabled}
                 onChange={() => {
+                  sound("select");
                   speed.set(d().name);
                   last.set(`Delivery: ${d().name}`);
                 }}
@@ -1325,6 +1336,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 checked={choice() === t().name}
                 disabled={t().disabled}
                 onChange={() => {
+                  sound("select");
                   choice.set(t().name);
                   last.set(`Text size: ${t().name}`);
                 }}
@@ -2819,6 +2831,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                   checked={slot() === s()}
                   disabled={!day() || slotTaken(day()!, i())}
                   onChange={() => {
+                    sound("select");
                     slot.set(s());
                     last.set(`Slot: ${day()} ${s()}`);
                   }}

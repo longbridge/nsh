@@ -2,13 +2,17 @@
 //! into memory by GStreamer, played from there by one mixing pipeline per
 //! engine.
 //!
-//! - **Decoding** ([`decode`]) runs a pipeline of its own off the main
-//!   thread: the encoded bytes through `decodebin` (whatever GStreamer's
-//!   plug-ins read) into 32-bit float, stereo, 48 kHz samples, stopped at
-//!   the length the core allows. The samples are the sound: nothing is read
-//!   or decoded again at a play.
+//! - **Decoding** ([`decode`]) runs off the main thread into 32-bit float,
+//!   stereo, 48 kHz samples, stopped at the length the core allows. A PCM
+//!   WAV file, the format sounds ship in, is read here ([`wav`]): it plays
+//!   with GStreamer's base plug-ins alone (`wavparse` is a "good" one).
+//!   Anything else goes through a pipeline of its own, `decodebin`
+//!   (whatever GStreamer's plug-ins read). The samples are the sound:
+//!   nothing is read or decoded again at a play.
 //! - **Playing** ([`Mixer`]): one live pipeline, a silent source into an
-//!   `audiomixer` into the default output (`autoaudiosink`), made at the
+//!   `audiomixer` into the default output (`autoaudiosink`, a "good"
+//!   plug-in; without it the first of PipeWire's, PulseAudio's and ALSA's
+//!   sinks installed: [`OUTPUTS`]), made at the
 //!   first play and kept. Each play is a voice: an `appsrc` holding the
 //!   samples (shared, not copied, at the recorded rate; resampled once at
 //!   another rate, the pitch with it, as on the other platforms), linked to
@@ -19,7 +23,7 @@
 //!   [`MAX_VOICES`] the oldest stops.
 //! - An output that cannot start, or that fails later (an error on the
 //!   bus), makes sounds silence: the mixer is made again at the next play.
-//! - A sound whose format no installed plug-in decodes (WAV and FLAC need
+//! - A sound whose format no installed plug-in decodes (FLAC and MP3 need
 //!   gst-plugins-good) fails as [`Failure::Unsupported`], naming the format,
 //!   so the app sees `not-supported` rather than bytes it cannot read.
 //!
@@ -49,6 +53,10 @@ const SILENCE_SAMPLES: i32 = 480;
 const DECODE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Voices at once (`nsh_core::audio::MAX_VOICES`).
 const MAX_VOICES: usize = 32;
+/// The outputs a mixer plays into, the first installed: the system's
+/// default, then PipeWire, PulseAudio and ALSA directly (`alsasink` is a
+/// base plug-in).
+const OUTPUTS: &[&str] = &["autoaudiosink", "pipewiresink", "pulsesink", "alsasink"];
 
 /// A decoded sound: interleaved 32-bit float frames, little-endian, at
 /// [`RATE`]. Cloning shares the samples.
@@ -123,7 +131,7 @@ impl From<&str> for Failure {
 fn unsupported(format: Option<&str>) -> Failure {
     let format = format.map_or("its format".to_owned(), |f| format!("`{f}`"));
     Failure::Unsupported(format!(
-        "no installed GStreamer plug-in decodes {format}: WAV, FLAC and MP3 need \
+        "no installed GStreamer plug-in decodes {format}: FLAC and MP3 need \
          gst-plugins-good, AAC and most others gst-libav"
     ))
 }
@@ -142,6 +150,24 @@ fn duration_of(frames: usize) -> Duration {
 /// Decodes `bytes` into memory, at most `max` of them. Blocks: off the main
 /// thread.
 pub(crate) fn decode(bytes: Vec<u8>, max: Duration) -> Result<Decoded, Failure> {
+    if let Some(samples) = wav::read(&bytes) {
+        let samples = samples?;
+        let limit = (max.as_secs_f64() * f64::from(RATE)).ceil() as usize;
+        let truncated = samples.len() / CHANNELS > limit;
+        let mut out = Vec::with_capacity(samples.len().min(limit * CHANNELS) * 4);
+        for v in samples.iter().take(limit * CHANNELS) {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        if out.is_empty() {
+            return Err("the sound has no samples".into());
+        }
+        let pcm = Pcm(out.into());
+        return Ok(Decoded {
+            duration: duration_of(pcm.frames()),
+            pcm,
+            truncated,
+        });
+    }
     init()?;
     let pipeline = gst::Pipeline::new();
     let src = gst_app::AppSrc::builder()
@@ -320,7 +346,12 @@ impl Mixer {
     /// Makes the pipeline, playing into the default output, its failures
     /// watched on the main loop. On the main thread.
     pub(crate) fn new() -> Result<Mixer, String> {
-        let mut mixer = Self::with_sink("autoaudiosink")?;
+        init()?;
+        let output = OUTPUTS
+            .iter()
+            .find(|factory| gst::ElementFactory::find(factory).is_some())
+            .ok_or("no GStreamer audio output is installed")?;
+        let mut mixer = Self::with_sink(output)?;
         let flag = mixer.broken.clone();
         mixer._bus = mixer.pipeline.bus().and_then(|bus| {
             bus.add_watch_local(move |_, message| {
@@ -487,6 +518,112 @@ impl Drop for Mixer {
     }
 }
 
+/// PCM WAV files, read without GStreamer.
+mod wav {
+    use super::{CHANNELS, RATE};
+
+    /// The samples of `bytes` as [`RATE`] stereo floats, interleaved:
+    /// `None` when they are not a WAV file, an error when it is one this
+    /// cannot read (compressed, damaged).
+    pub(super) fn read(bytes: &[u8]) -> Option<Result<Vec<f32>, String>> {
+        if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return None;
+        }
+        Some(samples(bytes))
+    }
+
+    fn u16_at(b: &[u8], at: usize) -> u16 {
+        u16::from_le_bytes([b[at], b[at + 1]])
+    }
+
+    fn u32_at(b: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
+    }
+
+    fn samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
+        // (format, channels, rate, bits)
+        let mut format = None;
+        let mut data = None;
+        let mut at = 12;
+        while at + 8 <= bytes.len() {
+            let size = u32_at(bytes, at + 4) as usize;
+            let body = at + 8;
+            let end = body.saturating_add(size).min(bytes.len());
+            match &bytes[at..at + 4] {
+                b"fmt " if end - body >= 16 => {
+                    let mut tag = u16_at(bytes, body);
+                    // WAVE_FORMAT_EXTENSIBLE: the format is its sub-format's.
+                    if tag == 0xfffe && end - body >= 26 {
+                        tag = u16_at(bytes, body + 24);
+                    }
+                    format = Some((
+                        tag,
+                        usize::from(u16_at(bytes, body + 2)),
+                        u32_at(bytes, body + 4),
+                        u16_at(bytes, body + 14),
+                    ));
+                }
+                b"data" => data = Some(&bytes[body..end]),
+                _ => {}
+            }
+            // Chunks are padded to an even size.
+            at = body.saturating_add(size).saturating_add(size & 1);
+        }
+        let (tag, channels, rate, bits) = format.ok_or("the WAV file has no format")?;
+        let data = data.ok_or("the WAV file has no data")?;
+        if channels == 0 || rate == 0 {
+            return Err("the WAV file has no channels".into());
+        }
+        let read: fn(&[u8]) -> f32 = match (tag, bits) {
+            (1, 8) => |s| (f32::from(s[0]) - 128.0) / 128.0,
+            (1, 16) => |s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32_768.0,
+            (1, 24) => |s| (i32::from_le_bytes([0, s[0], s[1], s[2]]) >> 8) as f32 / 8_388_608.0,
+            (1, 32) => |s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f32 / 2_147_483_648.0,
+            (3, 32) => |s| f32::from_le_bytes([s[0], s[1], s[2], s[3]]),
+            _ => {
+                return Err(format!(
+                    "WAV files of format {tag} at {bits} bits are not read here"
+                ));
+            }
+        };
+        let width = usize::from(bits / 8);
+        let frame = width * channels;
+        let frames = data.len() / frame;
+        // The first two channels; a mono sound on both sides.
+        let source: Vec<[f32; CHANNELS]> = (0..frames)
+            .map(|i| {
+                let f = &data[i * frame..];
+                let left = read(f);
+                let right = if channels > 1 {
+                    read(&f[width..])
+                } else {
+                    left
+                };
+                [left, right]
+            })
+            .collect();
+        // Linear resampling to [`RATE`]: sounds are short, and their
+        // highs are far below where it would fold them back.
+        let step = f64::from(rate) / f64::from(RATE);
+        let count = if rate == RATE {
+            frames
+        } else {
+            (frames as f64 / step).floor() as usize
+        };
+        let mut out = Vec::with_capacity(count * CHANNELS);
+        for i in 0..count {
+            let at = i as f64 * step;
+            let from = (at.floor() as usize).min(frames.saturating_sub(1));
+            let to = (from + 1).min(frames.saturating_sub(1));
+            let t = (at - from as f64) as f32;
+            for (a, b) in source[from].iter().zip(source[to]) {
+                out.push(a + (b - a) * t);
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +670,44 @@ mod tests {
             decoded.pcm.bytes() as usize,
             decoded.pcm.frames() * FRAME_BYTES
         );
+    }
+
+    /// A float WAV in stereo at 44.1 kHz, `ms` long, of `value` on the left
+    /// and silence on the right.
+    fn stereo_float(ms: u32, value: f32) -> Vec<u8> {
+        let frames = 44_100 * ms / 1000;
+        let data = frames * 8;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&3u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&44_100u32.to_le_bytes());
+        wav.extend_from_slice(&(44_100u32 * 8).to_le_bytes());
+        wav.extend_from_slice(&8u16.to_le_bytes());
+        wav.extend_from_slice(&32u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data.to_le_bytes());
+        for _ in 0..frames {
+            wav.extend_from_slice(&value.to_le_bytes());
+            wav.extend_from_slice(&0f32.to_le_bytes());
+        }
+        wav
+    }
+
+    #[test]
+    fn reads_a_wav_file_without_gstreamer() {
+        let samples = wav::read(&stereo_float(200, 0.5)).unwrap().unwrap();
+        // Resampled to 48 kHz, its channels kept apart.
+        assert_eq!(samples.len() / CHANNELS, 9600);
+        assert!(
+            samples
+                .chunks(2)
+                .all(|f| (f[0] - 0.5).abs() < 1e-6 && f[1] == 0.0)
+        );
+        assert!(wav::read(b"not a sound at all").is_none());
     }
 
     #[test]

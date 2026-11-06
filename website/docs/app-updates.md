@@ -59,7 +59,8 @@ if (update?.canInstall) {
 the app is installed where the user cannot write, such as by a system package. In a development run `checkForUpdate`
 resolves `null`.
 
-`installAndRestart` exits this run, so save what you need first. If it fails, the app stays as it was. The
+`installAndRestart` restarts the app as `Application.restart()` does: this run quits as when the user quits it, and
+the new version starts once it has exited. If it fails, the app stays as it was. The
 [nsh/updater reference](../modules/nsh-updater.md) has every function, its errors and the `nsh.json` keys.
 
 ## Publish a release
@@ -99,11 +100,10 @@ before `nsh update-manifest`.
 
 A native Rust app uses `nsh-updater` directly and supplies its own HTTP transport.
 Use `Config::check` to verify the manifest and `Download` to verify the archive.
-Then call `Installation::install_and_launch` and exit only if it succeeds; this
-keeps the old installation until the new process can be launched and rolls back
-on launch failure. Calling `install` followed by `launch` separately does not
-provide that rollback. This detects launch errors, not a crash after a process
-has already started.
+Then call `Installation::install` and, when it succeeds,
+`nsh_core::element::desktop::restart()`: the app quits as `Application.restart()`
+makes it, and the new version starts once this process has exited. If `install`
+fails, the app stays as it was.
 
 The `Config`, `Manifest`, `Asset` and `Available` records are non-exhaustive.
 Construct them with `Default::default()` and assign the fields you need.
