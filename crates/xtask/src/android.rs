@@ -240,7 +240,8 @@ fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
         .env(
             format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"),
             format!(
-                "--sysroot=\"{}\"",
+                "--target={}{MIN_SDK} --sysroot=\"{}\"",
+                clang_target(triple),
                 toolchain
                     .join("sysroot")
                     .display()
