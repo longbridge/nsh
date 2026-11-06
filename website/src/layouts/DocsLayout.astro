@@ -38,7 +38,7 @@ const langHref = counterpart?.href ?? otherSection?.href;
 // Every language of this page, for the language menu and hreflang.
 const languages = [
   { code: 'en', name: 'English', page: english },
-  { code: 'zh-CN', name: '中文', page: await same('zh-CN') },
+  { code: 'zh-CN', name: '简体中文', page: await same('zh-CN') },
   ...(await Promise.all(machineLocales.map(async ({ code, name }) => ({ code, name, page: await same(code) })))),
 ];
 const alternates = Object.fromEntries(languages.filter((l) => l.page?.translated).map((l) => [l.code, l.page!.route]));

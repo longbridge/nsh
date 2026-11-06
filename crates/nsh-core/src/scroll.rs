@@ -36,7 +36,7 @@ use std::f32::consts::PI;
 use crate::{
     Bounds, Command, EventKind, EventPayload, NodeId, Point, Points, ScrollBehavior, Size,
     StickyCell,
-    geometry::{Percentage, Radians, point},
+    geometry::{Axis, Percentage, Radians, point},
 };
 
 /// Below this release speed (points per ms) a drag does not glide.
@@ -368,6 +368,31 @@ pub fn spokes(progress: Percentage, spin: Radians) -> impl Iterator<Item = (Radi
         };
         (Radians(i as f32 * step), fade)
     })
+}
+
+// The reading order.
+
+/// Orders a view's children as they are on screen, the order Tab and
+/// screen readers go through a scroll view's content (and a list's cells,
+/// [`crate::ViewProps::screen_order`]) in: along `axis`, then across it. A
+/// list recycles its cells, so in the view tree they stay in the order
+/// they were made, not their rows'. `origin` is a child's frame origin;
+/// the sort is stable.
+pub fn reading_order<T>(axis: Axis, children: &mut [T], origin: impl Fn(&T) -> Point<Points>) {
+    if children.len() < 2 {
+        return;
+    }
+    let key = |child: &T| {
+        let at = origin(child);
+        match axis {
+            Axis::Horizontal => (at.x.0, at.y.0),
+            Axis::Vertical => (at.y.0, at.x.0),
+        }
+    };
+    children.sort_by(|a, b| {
+        let (a, b) = (key(a), key(b));
+        a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+    });
 }
 
 // The state.
@@ -1006,11 +1031,12 @@ pub fn config(
 ) {
     let changed = host.scroll_mut(|s, _| {
         s.horizontal = horizontal;
-        // A horizontal view keeps its indicator: it is the mouse's scroll
-        // bar, and a mouse without a horizontal wheel has no other way
-        // to move it (mouse drags do not scroll); a built-in bar of the
-        // app's (`replaced`) is the mouse's then.
-        s.indicator = indicator || (horizontal && !replaced);
+        // The view shows its indicator only when it asks to, on either
+        // axis: a mouse without a horizontal wheel still moves a
+        // horizontal view with Shift + wheel, with the vertical wheel
+        // where nothing around scrolls vertically, and with the keys. A
+        // built-in bar of the app's (`replaced`) takes its place.
+        s.indicator = indicator && !replaced;
         if !indicator {
             s.live.alpha = 0.0;
         }
@@ -1574,6 +1600,32 @@ mod tests {
     use super::*;
     use crate::EdgeInsets;
 
+    #[test]
+    fn content_is_read_in_the_order_it_is_on_screen() {
+        // Recycled cells: made for rows 0 to 3, rows 0 and 1 scrolled
+        // away and their cells bound to rows 4 and 5.
+        let cells = [(0, 160.0), (1, 200.0), (2, 80.0), (3, 120.0)];
+        let mut vertical = cells;
+        reading_order(Axis::Vertical, &mut vertical, |c| {
+            point(Points(0.0), Points(c.1))
+        });
+        assert_eq!(vertical.map(|c| c.0), [2, 3, 0, 1]);
+        // Two columns read row by row; a horizontal list column by column.
+        let grid = [
+            (0, (50.0, 0.0)),
+            (1, (0.0, 40.0)),
+            (2, (0.0, 0.0)),
+            (3, (50.0, 40.0)),
+        ];
+        let at = |c: &(i32, (f32, f32))| point(Points(c.1.0), Points(c.1.1));
+        let mut rows = grid;
+        reading_order(Axis::Vertical, &mut rows, at);
+        assert_eq!(rows.map(|c| c.0), [2, 0, 1, 3]);
+        let mut columns = grid;
+        reading_order(Axis::Horizontal, &mut columns, at);
+        assert_eq!(columns.map(|c| c.0), [2, 1, 0, 3]);
+    }
+
     fn scroll_state(content: (f32, f32), horizontal: bool) -> ScrollState {
         ScrollState {
             content: sz(content.0, content.1),
@@ -2036,6 +2088,24 @@ mod tests {
                 ),
                 _ => assert_eq!(y, 400.0),
             }
+        }
+    }
+
+    #[test]
+    fn indicator_follows_the_view_on_either_axis() {
+        let host = TestHost {
+            state: std::cell::RefCell::new(scroll_state((300.0, 1000.0), false)),
+            redraws: std::cell::Cell::new(0),
+        };
+        for horizontal in [false, true] {
+            config(&host, horizontal, true, false, false);
+            assert!(host.state.borrow().indicator);
+            // `scrollbar={false}` hides it, a horizontal view's too.
+            config(&host, horizontal, false, false, false);
+            assert!(!host.state.borrow().indicator);
+            // A built-in bar of the app's takes its place.
+            config(&host, horizontal, true, true, false);
+            assert!(!host.state.borrow().indicator);
         }
     }
 

@@ -2301,8 +2301,7 @@ pub enum Prop {
     Scroll(ScrollProp),
     /// `scrollbar`: the scroll indicator shows (default true), or the
     /// app's built-in bar of a theme (an object, `nsh/base`'s
-    /// `ScrollbarTheme`). On the desktop a horizontal view keeps it: it is
-    /// the mouse's scroll bar. A multiline input's is its text's.
+    /// `ScrollbarTheme`). A multiline input's is its text's.
     #[prop(js = "scrollbar", with = crate::js::host_values::scrollbar, reset = Prop::Scrollbar(ScrollbarSetting::Shown), ts = "boolean | import(\"nsh/base\").ScrollbarTheme", on = SCROLL | LIST | INPUT)]
     Scrollbar(ScrollbarSetting),
     /// `refreshing`: the pull-to-refresh spinner shows.

@@ -94,8 +94,9 @@ pub fn init_logging() {
 
 /// What the session's task handles, in the order it was sent.
 enum Msg {
-    /// From the dev client.
-    Event(DevEvent),
+    /// From the dev client (boxed: a test's setup is far larger than the
+    /// other messages).
+    Event(Box<DevEvent>),
     /// An error of the app.
     RuntimeError(AppError),
     /// The engine could not apply a hot update in place.
@@ -286,7 +287,7 @@ pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
             DevEvent::Disconnected => CONNECTED.store(false, Ordering::Relaxed),
             _ => {}
         }
-        let _ = events.unbounded_send(Msg::Event(event));
+        let _ = events.unbounded_send(Msg::Event(Box::new(event)));
     });
     match started {
         Ok(client) => {
@@ -390,7 +391,7 @@ fn handle(view: &AppView, msg: Msg) {
     let mut dev = view.dev.borrow_mut();
     let Some(session) = dev.as_mut() else { return };
     let load = match msg {
-        Msg::Event(event) => on_event(view, session, event),
+        Msg::Event(event) => on_event(view, session, *event),
         Msg::RuntimeError(error) => {
             session.show_error(error_title(&error), &error.to_string(), false);
             None
