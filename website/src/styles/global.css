@@ -84,16 +84,18 @@
   /* Code: Shiki emits the allsum-light colours (src/light.theme.json, the
      palette of TextView's built-in highlighting); the rules below map them
      onto these, so every snippet shares one palette. */
+  /* The theme's own palette: keywords in the citrus accent, names in the
+     ink's blue, strings a quiet sea green, numbers amber, comments gray. */
   --code-bg: #0a0c10;
-  --code-fg: #d6d9dd;
-  --code-keyword: #c4a7ff;
-  --code-string: #9fd68a;
-  --code-comment: #7d7a72;
-  --code-fn: #82b8ff;
-  --code-type: #6fd3d8;
-  --code-number: #f5b27a;
+  --code-fg: #d3d7de;
+  --code-keyword: #c8f26d;
+  --code-string: #93cdbf;
+  --code-comment: #6b717c;
+  --code-fn: #8fb2f5;
+  --code-type: #b6c8f0;
+  --code-number: #e9b872;
   --code-constant: var(--code-number);
-  --code-property: #f0c674;
+  --code-property: #d9c9a3;
   --code-variable: var(--code-property);
   --code-deletion: #f87171;
   --code-link: var(--doc-link);
@@ -186,15 +188,15 @@ html.light {
   --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(16 20 30 / 5%);
   --accent-border: #a7cf3f;
 
-  --code-bg: #f7f7f8;
-  --code-fg: #24262a;
-  --code-keyword: #8250df;
-  --code-string: #116329;
-  --code-comment: #6e7781;
-  --code-fn: #0550ae;
-  --code-type: #0a7285;
-  --code-number: #953800;
-  --code-property: #7d4e00;
+  --code-bg: #f7f8fa;
+  --code-fg: #1d2129;
+  --code-keyword: #4a7d06;
+  --code-string: #2a7166;
+  --code-comment: #8a909a;
+  --code-fn: #2c53a8;
+  --code-type: #3c5f9e;
+  --code-number: #a35f00;
+  --code-property: #5b4a2a;
   --code-deletion: #cf222e;
 
   --grid-line: rgb(21 22 26 / 5%);

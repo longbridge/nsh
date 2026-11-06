@@ -1011,14 +1011,16 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
   .flow li.flow__device::before, :global(html.light) .flow li.flow__device::before { top: 0; left: 1.25rem; translate: 0 -50%; width: 2.2rem; height: 2.2rem; background: radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 40%), radial-gradient(circle at 50% 42%, #d9f77a, #a6d832 58%, #5f8c10); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.5), inset 0 -3px 5px rgba(46, 76, 0, 0.45), 0 0 14px rgba(196, 238, 82, 0.35), 0 4px 10px rgba(0, 0, 0, 0.3); color: #1d2a00; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
   .flow__trust { position: absolute; top: 0; left: 3.95rem; translate: 0 -50%; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.65rem 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; background: var(--band-tinted); color: var(--citrus); font-size: 0.75rem; font-weight: 500; line-height: 1.2; }
   .flow__trust svg { width: 0.8rem; height: 0.8rem; }
-  :global(html.light) .flow__device { border-color: #d3e1c1; background: linear-gradient(180deg, #f4f9ec, #ffffff 72%); box-shadow: 0 1px 2px rgb(63 102 6 / 6%), 0 12px 32px -18px rgb(63 102 6 / 22%); }
-  :global(html.light) .flow__trust { border-color: #d3e1c1; background: #f4f9ec; }
+  :global(html.light) .flow__device { border-color: #e2e4e9; background: #ffffff; box-shadow: 0 1px 2px rgb(16 20 30 / 5%), 0 12px 32px -18px rgb(16 20 30 / 16%); }
+  :global(html.light) .flow__trust { border-color: #e2e4e9; background: #ffffff; }
 
   .ways__head { margin: 5rem 0 1.5rem; font-size: 1.5rem; font-weight: 500; letter-spacing: -0.015em; }
-  .ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2rem; }
-  .ways article { display: flex; flex-direction: column; min-width: 0; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+  /* Each column's heading, text, code and link share a row with the
+     others', so the code blocks line up and match in height. */
+  .ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 2rem; }
+  .ways article { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; min-width: 0; padding-top: 1.25rem; border-top: 1px solid var(--border); }
   .ways h4 { margin: 0; font-size: 1.1rem; font-weight: 600; }
-  .ways p { flex: 1; margin: 0.5rem 0 1rem; color: var(--muted-foreground); font-size: 0.92rem; line-height: 1.6; }
+  .ways p { margin: 0.5rem 0 1rem; color: var(--muted-foreground); font-size: 0.92rem; line-height: 1.6; }
   .ways pre { padding: 0.9rem 1rem; font: 0.72rem/1.65 var(--font-mono); }
   .ways a { margin-top: 0.9rem; font-size: 0.9rem; font-weight: 500; }
 
@@ -1062,6 +1064,7 @@ perf commit: <b>10 ops, 7 mount items</b>, 24 nodes</code></pre>
     .flow li:nth-last-child(2)::after { right: 0.6rem; background: var(--border); }
     .flow__device { grid-column: 1 / -1; margin: 1.5rem 0 0; }
     .ways, .found { grid-template-columns: minmax(0, 1fr); gap: 2.25rem; }
+    .ways article { grid-row: auto; grid-template-rows: none; }
   }
   @media (max-width: 640px) {
     /* Two even rows: a separator would open the second line. */
