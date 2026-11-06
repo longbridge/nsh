@@ -2,7 +2,7 @@
 //! standalone app ([`run_app`]: one `AppView` filling a window).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -502,6 +502,9 @@ thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Links that came before the app's engine started.
     static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The app asked to start again when its run ends
+    /// ([`DesktopCommand::Relaunch`](nsh_core::desktop::DesktopCommand)).
+    static RELAUNCH: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Hands `url`, a link the system opened the app with, to the running
@@ -663,6 +666,20 @@ pub fn quit_app() {
         if RUNNING.with(|running| running.borrow().is_some())
             && let Some(mtm) = MainThreadMarker::new()
         {
+            finish_running(&NSApplication::sharedApplication(mtm));
+        }
+    });
+}
+
+/// Quits the standalone runner as [`quit_app`] does, and starts the app
+/// again once this process has exited ([`nsh_core::relaunch`]). With no
+/// standalone runner this has no effect.
+pub(crate) fn relaunch_app() {
+    dispatch2::DispatchQueue::main().exec_async(|| {
+        if RUNNING.with(|running| running.borrow().is_some())
+            && let Some(mtm) = MainThreadMarker::new()
+        {
+            RELAUNCH.set(true);
             finish_running(&NSApplication::sharedApplication(mtm));
         }
     });
@@ -830,6 +847,13 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     stop_running();
     app.setDelegate(None);
     drop(delegate);
+    // The new process waits for this one to exit, so the caller's cleanup
+    // after `run_app` returns still comes first.
+    if RELAUNCH.take()
+        && let Err(err) = nsh_core::relaunch::spawn_after_exit()
+    {
+        log::error!("cannot relaunch the app: {err}");
+    }
     std::process::ExitCode::SUCCESS
 }
 

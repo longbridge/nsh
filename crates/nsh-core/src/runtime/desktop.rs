@@ -161,4 +161,14 @@ impl Application {
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
     }
+
+    /// Restarts the app: it quits as `quit` does, and once the app has
+    /// exited it starts again with the arguments it was started with. For a
+    /// setting that takes effect at the next start (the app's language, say):
+    /// ask the user first, then call it. Standalone apps on macOS, Windows
+    /// and Linux; a view embedded in another app leaves the app's lifecycle
+    /// to that app.
+    pub(crate) fn relaunch(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::Relaunch);
+    }
 }

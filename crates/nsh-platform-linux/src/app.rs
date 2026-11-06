@@ -430,6 +430,18 @@ thread_local! {
     /// The standalone app's application ([`run_app`]): what [`quit`] ends.
     static STANDALONE: RefCell<Option<glib::WeakRef<gtk::Application>>> =
         const { RefCell::new(None) };
+    /// The app asked to start again when its run ends.
+    static RELAUNCH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Quits the standalone app as [`quit`] does, and starts it again once
+/// this process has exited ([`nsh_core::relaunch`]). A view embedded in
+/// another app leaves the app's lifecycle to that app: nothing happens
+/// there.
+pub(crate) fn relaunch() {
+    if quit() {
+        RELAUNCH.set(true);
+    }
 }
 
 /// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
@@ -525,7 +537,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     });
     // GTK must not parse the host's own arguments: only the URL the app
     // was opened with goes to it (`open`).
-    app.run_with_args(&args)
+    let code = app.run_with_args(&args);
+    // The new process waits for this one to exit.
+    if RELAUNCH.take()
+        && let Err(err) = nsh_core::relaunch::spawn_after_exit()
+    {
+        log::error!("cannot relaunch the app: {err}");
+    }
+    code
 }
 
 /// Draws with GSK's GL renderer instead of its Vulkan one (GTK's default

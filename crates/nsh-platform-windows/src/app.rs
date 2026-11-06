@@ -3,7 +3,7 @@
 //! loop).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -460,6 +460,7 @@ fn initial_environment() -> Environment {
 /// after the graphics DLLs and their driver threads are gone, and the
 /// process would end with a stray exit code.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+    wait_for_replaced_process();
     options.notifications = true;
     /// The app, moved to the UI thread.
     struct Job(AppSource, AppOptions);
@@ -488,8 +489,53 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     }
 }
 
+thread_local! {
+    /// The standalone app's UI thread ([`run_app`]): what may relaunch.
+    static STANDALONE: Cell<bool> = const { Cell::new(false) };
+    /// The app asked to start again when its run ends.
+    static RELAUNCH: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the standalone app ([`run_app`]) to start again once its run has
+/// ended ([`nsh_core::relaunch`]); the caller then quits it. A view embedded
+/// in another app leaves the app's lifecycle to that app: false there, with
+/// nothing marked.
+pub(crate) fn request_relaunch() -> bool {
+    STANDALONE.get() && {
+        RELAUNCH.set(true);
+        true
+    }
+}
+
+/// Waits, at most [`nsh_core::relaunch::WAIT_LIMIT`], for the process this
+/// one replaces when the app relaunched ([`nsh_core::relaunch::WAIT_FOR_ENV`]),
+/// so that the two never run side by side.
+fn wait_for_replaced_process() {
+    use windows::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+    let Some(pid) = nsh_core::relaunch::wait_for_pid() else {
+        return;
+    };
+    // Programs the app starts must not wait for it too.
+    // SAFETY: Windows guards the process environment with a lock of its
+    // own, so changing it while other threads read it is sound there.
+    unsafe { std::env::remove_var(nsh_core::relaunch::WAIT_FOR_ENV) };
+    // SAFETY: plain calls; the handle is closed once waited on. A process
+    // that has exited already cannot be opened, and nothing waits.
+    unsafe {
+        if let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            let limit = nsh_core::relaunch::WAIT_LIMIT.as_millis() as u32;
+            let _ = WaitForSingleObject(process, limit);
+            let _ = CloseHandle(process);
+        }
+    }
+}
+
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    STANDALONE.set(true);
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
@@ -525,6 +571,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     // SAFETY: pairs the `OleInitialize` above; nothing on this thread uses
     // OLE afterwards.
     unsafe { windows::Win32::System::Ole::OleUninitialize() };
+    STANDALONE.set(false);
+    // The new process waits for this one to exit ([`wait_for_replaced_process`]).
+    if RELAUNCH.take()
+        && let Err(err) = nsh_core::relaunch::spawn_after_exit()
+    {
+        log::error!("cannot relaunch the app: {err}");
+    }
     if code == 0 {
         std::process::ExitCode::SUCCESS
     } else {

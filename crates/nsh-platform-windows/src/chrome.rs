@@ -355,6 +355,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::Quit => quit(hwnd),
+        // Quits as above, then the runner starts the app again; an
+        // embedding app's window is its own.
+        DesktopCommand::Relaunch => {
+            if crate::app::request_relaunch() {
+                quit(hwnd);
+            }
+        }
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);

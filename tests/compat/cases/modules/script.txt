@@ -126,7 +126,7 @@ tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
-expect Calls: application done, quit function
+expect Calls: application done, quit function, relaunch function
 tap id:toggles
 expect Calls: toggles done
 covers [nsh/desktop] isAvailable

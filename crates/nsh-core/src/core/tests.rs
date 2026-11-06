@@ -17709,7 +17709,7 @@ mod rust_desktop {
         desktop::{DesktopCommand, TitleBarStyle},
         element::{
             Root,
-            desktop::{close_window, quit, set_title_bar, title_bar},
+            desktop::{close_window, quit, relaunch, set_title_bar, title_bar},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -17738,6 +17738,7 @@ mod rust_desktop {
                     .on_press(|_: &()| close_window()),
             )
             .child(text("Quit").on_press(|_: &()| quit()))
+            .child(text("Relaunch").on_press(|_: &()| relaunch()))
     }
 
     #[test]
@@ -17778,6 +17779,14 @@ mod rust_desktop {
             .iter()
             .find_map(|item| match item {
                 MountItem::Text { id, text, .. } if text.text == "Quit" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let relaunch_button = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Relaunch" => Some(*id),
                 _ => None,
             })
             .unwrap();
@@ -17859,6 +17868,10 @@ mod rust_desktop {
             })
             .collect();
         assert_eq!(sent, [&DesktopCommand::Quit]);
+        // Relaunching too: the platform quits, then starts the app again.
+        assert!(c.component_event(relaunch_button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::Relaunch)));
     }
 }
 

@@ -44,6 +44,7 @@ pub mod platform;
 pub mod prelude;
 mod props;
 pub mod reactive;
+pub mod relaunch;
 pub mod resource;
 pub mod runtime;
 pub mod runtime_data;
