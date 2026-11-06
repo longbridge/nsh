@@ -206,7 +206,11 @@ fn js_string(s: &str) -> String {
 /// A web view: a `NshView` placed by the core, holding the WKWebView.
 pub(crate) struct WebHost {
     pub(crate) view: Retained<NshView>,
+    /// The WKWebView, made with the first props (`incognito` picks its
+    /// website data store).
     web: Option<Retained<AnyObject>>,
+    /// [`Self::make`] ran.
+    made: bool,
     handler: Retained<WebHandler>,
     props: WebProps,
 }
@@ -220,26 +224,10 @@ impl WebHost {
     ) -> Self {
         let view = NshView::new(mtm);
         let handler = WebHandler::new(mtm, id, control, access);
-        let web = webkit().then(|| {
-            // SAFETY: WebKit's documented API, sent dynamically; the handler
-            // is unregistered when the host is dropped.
-            unsafe {
-                let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration"), new];
-                let content: Retained<AnyObject> = msg_send![&config, userContentController];
-                let _: () = msg_send![&content, addScriptMessageHandler: &*handler, name: &*NSString::from_str("nsh")];
-                let alloc: Allocated<AnyObject> = msg_send![class(c"WKWebView"), alloc];
-                let web: Retained<AnyObject> = msg_send![alloc, initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO), configuration: &*config];
-                let _: () = msg_send![&web, setNavigationDelegate: &*handler];
-                let ui: &UIView = &*(Retained::as_ptr(&web) as *const UIView);
-                ui.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
-                ui.setFrame(view.bounds());
-                view.addSubview(ui);
-                web
-            }
-        });
         Self {
             view,
-            web,
+            web: None,
+            made: false,
             handler,
             props: WebProps {
                 // Forces the first `configure` to load.
@@ -249,7 +237,44 @@ impl WebHost {
         }
     }
 
+    /// Makes the WKWebView, keeping its website data in memory only (a
+    /// store of its own) when `incognito`.
+    fn make(&mut self, incognito: bool) {
+        self.made = true;
+        if !webkit() {
+            return;
+        }
+        let handler = &self.handler;
+        // SAFETY: WebKit's documented API, sent dynamically; the handler
+        // is unregistered when the host is dropped.
+        let web = unsafe {
+            let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration"), new];
+            if incognito {
+                let store: Retained<AnyObject> =
+                    msg_send![class(c"WKWebsiteDataStore"), nonPersistentDataStore];
+                let _: () = msg_send![&config, setWebsiteDataStore: &*store];
+            }
+            let content: Retained<AnyObject> = msg_send![&config, userContentController];
+            let _: () = msg_send![&content, addScriptMessageHandler: &**handler, name: &*NSString::from_str("nsh")];
+            let alloc: Allocated<AnyObject> = msg_send![class(c"WKWebView"), alloc];
+            let web: Retained<AnyObject> = msg_send![alloc, initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO), configuration: &*config];
+            let _: () = msg_send![&web, setNavigationDelegate: &**handler];
+            let ui: &UIView = &*(Retained::as_ptr(&web) as *const UIView);
+            ui.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            ui.setFrame(self.view.bounds());
+            self.view.addSubview(ui);
+            web
+        };
+        self.web = Some(web);
+    }
+
     pub(crate) fn configure(&mut self, p: WebProps) {
+        if !self.made {
+            // The core keeps `incognito` from changing once it is made.
+            self.make(p.incognito);
+        }
         let Some(web) = &self.web else { return };
         // SAFETY: WebKit's documented API.
         unsafe {

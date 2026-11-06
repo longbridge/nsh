@@ -60,6 +60,7 @@ mount(Browser);
 | `userAgent` | `string` | platform's | The user agent string. |
 | `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
+| `incognito` | `boolean` | `false` | The pages' website data (cookies, storage, the cache) lives only as long as the web view, apart from the app's; on Android the web view loads without the HTTP cache and saves no form data ([website data](../docs/web-view-and-video.md#website-data)). Read when the web view is made. |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | iOS only: swipe from the edges to go back and forward. |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS: two-finger trackpad swipes go back and forward; Windows: touchscreen swipes; Linux: touchpad swipes. |
 

@@ -64,6 +64,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `userAgent` | `.user_agent(..)` | `string` | | The browser's user agent string. |
 | `javaScriptEnabled` | `.java_script_enabled(..)` | `boolean` | `true` | Pages run scripts. |
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll the page. |
+| `incognito` | `.incognito(bool)` | `boolean` | `false` | The pages' website data (cookies, storage, the cache) lives only as long as the web view, apart from the app's; on Android the web view loads without the HTTP cache and saves no form data ([website data](../docs/web-view-and-video.md#website-data)). Read when the web view is made. |
 
 | `ios` key | Rust | Type | Description |
 |---|---|---|---|
