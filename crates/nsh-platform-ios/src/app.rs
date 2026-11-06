@@ -6,7 +6,7 @@ use objc2::{
     runtime::AnyObject,
 };
 use objc2_core_foundation::CGSize;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSSet, NSString, NSURL};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIResponder, UIScene, UISceneConfiguration,
     UISceneConnectionOptions, UISceneDelegate, UISceneSession, UIViewController, UIWindow,
@@ -77,7 +77,7 @@ static LAUNCH: Mutex<Option<(AppSource, AppOptions)>> = Mutex::new(None);
 /// Main-thread state of the standalone app.
 struct AppState {
     _window: Retained<UIWindow>,
-    _view: AppView,
+    view: AppView,
 }
 
 thread_local! {
@@ -145,16 +145,17 @@ define_class!(
                 return;
             };
             connect(self.mtm(), scene);
-            // The URL that launched the app; it waits for the engine.
-            // SAFETY: a documented property, an `NSSet<UIOpenURLContext>`.
-            let contexts: Retained<AnyObject> = unsafe { msg_send![options, URLContexts] };
-            open_url_contexts(&contexts);
+            // The link that launched the app, if one did.
+            // SAFETY: a documented property, a set of `UIOpenURLContext`.
+            let contexts: Retained<NSSet<AnyObject>> = unsafe { msg_send![options, URLContexts] };
+            url_schemes(&contexts);
         }
 
-        // URLs of the app's schemes (`CFBundleURLTypes`) while it runs.
+        // Links of the schemes the app claims (`CFBundleURLTypes`) while it
+        // runs.
         #[unsafe(method(scene:openURLContexts:))]
-        fn open_url_contexts(&self, _scene: &UIScene, contexts: &AnyObject) {
-            open_url_contexts(contexts);
+        fn open_url_contexts(&self, _scene: &UIScene, contexts: &NSSet<AnyObject>) {
+            url_schemes(contexts);
         }
     }
 
@@ -192,20 +193,18 @@ impl RootController {
     }
 }
 
-/// Hands the URLs of `contexts`, an `NSSet<UIOpenURLContext>`, to the app.
-fn open_url_contexts(contexts: &AnyObject) {
-    // SAFETY: documented methods of `NSSet`, `UIOpenURLContext` and `NSURL`.
-    let urls: Vec<String> = unsafe {
-        let all: Retained<objc2_foundation::NSArray<AnyObject>> = msg_send![contexts, allObjects];
-        all.iter()
-            .filter_map(|context| {
-                let url: Retained<objc2_foundation::NSURL> = msg_send![&*context, URL];
-                url.absoluteString().map(|s| s.to_string())
-            })
-            .collect()
-    };
-    for url in urls {
-        crate::linking::open(url);
+/// Hands the URLs of `contexts` (`UIOpenURLContext`s) to the app.
+fn url_schemes(contexts: &NSSet<AnyObject>) {
+    for context in contexts.iter() {
+        // SAFETY: `UIOpenURLContext`'s documented `URL` property.
+        let url: Retained<NSURL> = unsafe { msg_send![&*context, URL] };
+        let Some(url) = url.absoluteString() else {
+            continue;
+        };
+        APP.with(|app| match &*app.borrow() {
+            Some(app) => app.view.url_scheme(url.to_string()),
+            None => log::warn!("link dropped: no app runs"),
+        });
     }
 }
 
@@ -254,7 +253,7 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
     APP.with(|app| {
         *app.borrow_mut() = Some(AppState {
             _window: window,
-            _view: view,
+            view,
         })
     });
 }

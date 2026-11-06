@@ -1846,31 +1846,49 @@ only the running app: one left on screen after the app exits does nothing.
 
 ## UrlScheme
 
-`UrlScheme` hears the URLs the system opens the app with. List the app's URL schemes in `nsh.json`, and a link such as
-`myapp://chat/42`, pressed in the browser or opened by another app, opens the app and reaches it:
+`UrlScheme` reports the links that open the app: URLs of the schemes the app claims in `nsh.json`, such as
+`myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app claims its
+schemes once, and `nsh package` declares them to the system:
 
 ```json
-{ "id": "com.example.app", "schemes": ["myapp"] }
+{ "schemes": ["myapp"] }
 ```
 
 ```tsx
 import { UrlScheme } from "nsh";
 
-UrlScheme.on("open", ({ url }) => openRoute(new URL(url)));
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
 ```
 
-A link can start the app: the URL waits for the first listener, so listen when the app starts. A link opened while the
-app runs brings its window to the front. Rust code awaits `next_url_scheme_open` of `nsh_core::prelude`.
+`open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
+listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
+when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
+`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`).
 
-| Platform | Registered by |
+A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
+link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
+lets through links of the app's own schemes, at most 16 KB long, and never navigates on its own: what a link opens is
+the app's.
+
+A scheme is a letter followed by letters, digits, `+`, `-` or `.`, compared in lower case. The schemes of the web,
+files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ...) are refused when the app is built.
+
+| Platform | How the app claims its schemes |
 | --- | --- |
-| macOS, iOS | `CFBundleURLTypes` in the Info.plist `nsh package` writes |
+| macOS | `CFBundleURLTypes` in the app's `Info.plist`; the system opens the app, or hands the link to the one that runs |
+| iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
 | Android | An `ACTION_VIEW` intent filter in the manifest `nsh package` writes; the activity runs as `singleTask`, so a link reaches the running app |
-| Windows | The app, under `HKEY_CURRENT_USER\Software\Classes`, each time it starts; a second launch hands its URL to the running app |
+| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
 | Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
-An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, macOS, Windows),
-`NshAppView.openURL` (iOS), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
+`nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
+`app.openWithUrl(url)` opens one while it runs, both headless.
+
+An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
 ## Speech
 

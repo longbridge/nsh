@@ -1,9 +1,6 @@
-//! `nsh`'s `UrlScheme`: URLs the system opens the app with, of the schemes
-//! the app registers in nsh.json (`"schemes": ["myapp"]` makes
-//! `myapp://...` open the app). The platforms register the schemes when
-//! they package or run the app and report each URL as
-//! [`crate::EventKind::UrlScheme`] on the root; the one that started the app
-//! waits for the first listener.
+//! `nsh`'s `UrlScheme`: the links that open the app ([`crate::url_scheme`]),
+//! URLs of the schemes it claims in `nsh.json`. Needs no capability: the
+//! app's own claim is what lets them in.
 
 use std::{
     cell::{Cell, RefCell},
@@ -12,20 +9,23 @@ use std::{
 
 use crate::element::{Callback, JsError, JsObject, Local, PropEnum, Stop, System, module};
 
-/// The URLs the system opens the app with.
+/// The links that open the app.
 #[module]
 pub(crate) struct UrlScheme;
 
 #[module]
 impl UrlScheme {
-    /// Listens to `event`. `url`: the system opened the app with a URL of a
-    /// scheme nsh.json's `schemes` registers (a link pressed in the browser,
-    /// another app's `openUrl`), the one that started the app included,
-    /// which waits for the first listener. Returns a function that stops
-    /// listening.
+    /// Listens to `event`. `open`: the system handed the app a link of a
+    /// scheme it claims (`nsh.json` `"schemes": [...]`),
+    /// at launch or while it runs; links that came while nothing listened,
+    /// the one that launched the app included, go to the next listener (at
+    /// most 16, the oldest dropped). Nothing navigates on its own: what a
+    /// link opens is the app's. Anyone can make a link of the app's scheme,
+    /// so its URL is untrusted input: check it before acting on it.
+    /// Returns a function that stops listening.
     pub(crate) fn on(
         event: UrlSchemeEvent,
-        #[args(url)] listener: Callback<UrlSchemeOpen>,
+        #[args(open)] listener: Callback<UrlSchemeOpen>,
         sys: System,
         cx: crate::element::CallCx<'_>,
     ) -> Result<Stop, JsError> {
@@ -52,27 +52,27 @@ impl UrlScheme {
 /// `UrlScheme.on`'s events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub(crate) enum UrlSchemeEvent {
-    /// The system opened the app with a URL.
+    /// The system handed the app a link.
     #[default]
     Open,
 }
 
-/// A URL the system opened the app with (the `open` event).
+/// A link that opened the app (the `open` event).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub(crate) struct UrlSchemeOpen {
-    /// The whole URL, its scheme one of nsh.json's `schemes`.
+    /// The URL, as the system handed it.
     url: String,
 }
 
-/// The VM's `url` listeners.
+/// The VM's `open` listeners.
 #[derive(Default)]
 struct Links {
     listeners: RefCell<Vec<(u32, Callback<UrlSchemeOpen>)>>,
     next: Cell<u32>,
-    /// The task waiting for the core's URLs started; it lasts as the VM
+    /// The task waiting for the core's links started; it lasts as the VM
     /// does.
     started: Cell<bool>,
-    /// URLs that came with no listener, for the next one.
+    /// Links that came while no listener was left, for the next one.
     unheard: RefCell<Vec<String>>,
 }
 
@@ -82,7 +82,7 @@ impl Local for Links {
     }
 }
 
-/// Posts the core's URLs to the listeners, while the VM lasts.
+/// Posts the core's links to the listeners, while the VM lasts.
 async fn deliver(links: Weak<Links>) {
     loop {
         let url = crate::prelude::next_url_scheme_open().await;
@@ -91,7 +91,11 @@ async fn deliver(links: Weak<Links>) {
         };
         let listeners = links.listeners.borrow();
         if listeners.is_empty() {
-            links.unheard.borrow_mut().push(url);
+            let mut unheard = links.unheard.borrow_mut();
+            if unheard.len() == crate::url_scheme::MAX_PENDING {
+                unheard.remove(0);
+            }
+            unheard.push(url);
             continue;
         }
         for (_, listener) in &*listeners {

@@ -139,7 +139,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `schemes` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
 ```text
 error building App.tsx failed

@@ -533,7 +533,10 @@ unsafe extern "C" fn gc_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs::J
         return;
     }
     let (id, generation) = unpack(p);
-    if g.live(id, generation, GENERATION_MASK) {
+    // Only what the object owns: the value of a live memo is its node's,
+    // which its owner keeps after the object goes. Marked as the object's,
+    // a cycle through the object would free it under the graph.
+    if g.live(id, generation, GENERATION_MASK) && g.held_by_handle(id) {
         unsafe { qjs::JS_MarkValue(rt, *g.value(id), mark) };
         if let Some(f) = g.custom_equals(id) {
             unsafe { qjs::JS_MarkValue(rt, *f, mark) };
@@ -1471,6 +1474,37 @@ mod tests {
         });
         assert!(slots < 5000, "{slots} nodes for 5000 signals");
         assert_eq!(after, before, "every signal collected");
+    }
+
+    #[test]
+    fn a_live_memo_keeps_its_value_when_its_object_is_collected() {
+        // The memo's object goes, but its root does not: the node (and the
+        // value it holds) lives on in the graph. A cycle through the value
+        // must not let the collector free the value under the graph, which
+        // frees it again when the memo runs again or the graph goes.
+        let rt = rquickjs::Runtime::new().unwrap();
+        let cx = rquickjs::Context::full(&rt).unwrap();
+        cx.with(|cx| {
+            crate::state::install(&cx, std::rc::Rc::default(), &[], Default::default());
+            super::install_globals(&cx);
+            let _: () = cx
+                .eval(
+                    r#"
+                    const R = globalThis.__nsh_reactive;
+                    R.createRoot(() => {
+                        const m = R.createMemo(() => ({ n: 1 }));
+                        // A cycle: the value holds the memo's object.
+                        m().memo = m;
+                        globalThis.weak = new WeakRef(m());
+                    });
+                    "#,
+                )
+                .unwrap();
+        });
+        rt.run_gc();
+        let kept: bool = cx.with(|cx| cx.eval("globalThis.weak.deref()?.n === 1").unwrap());
+        assert!(kept, "the live memo's value was collected");
+        cx.with(|cx| crate::state::uninstall(&cx));
     }
 
     #[test]

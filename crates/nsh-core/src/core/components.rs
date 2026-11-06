@@ -474,9 +474,6 @@ struct PendingFetch {
     answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
 }
 
-/// The URLs the system opened the app with that wait for a listener
-/// (`UrlScheme.on("open", ...)`): the oldest go first.
-const MAX_UNHEARD_URLS: usize = 16;
 /// What notifications wait for ([`crate::notifications`]).
 #[derive(Default)]
 struct Notifications {
@@ -492,6 +489,17 @@ struct Notifications {
     presses: std::collections::VecDeque<String>,
     /// The listener waiting for a press.
     next_press: Option<AnswerSlot<String>>,
+}
+
+/// The links that open the app ([`crate::url_scheme`]).
+#[derive(Default)]
+struct UrlScheme {
+    /// The schemes the app claims (lower case).
+    schemes: Vec<String>,
+    /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
+    pending: std::collections::VecDeque<String>,
+    /// The listener waiting for a link.
+    next: Option<AnswerSlot<String>>,
 }
 
 /// The speech recognition session running ([`crate::speech`]).
@@ -580,10 +588,8 @@ pub(super) struct Components {
     speech: Option<SpeechSession>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
-    /// URLs the system opened the app with, no listener took yet.
-    links: std::collections::VecDeque<String>,
-    /// The listener waiting for a URL.
-    next_url_scheme_open: Option<AnswerSlot<String>>,
+    /// The links that open the app ([`crate::url_scheme`]).
+    url_schemes: UrlScheme,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -705,8 +711,7 @@ impl Default for Components {
             next_pick: 1,
             speech: None,
             notifications: Notifications::default(),
-            links: Default::default(),
-            next_url_scheme_open: None,
+            url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -4933,6 +4938,38 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
+    /// Hands `url`, a link the system gave the app, to the listener, or
+    /// keeps it for the next; drops it when the app does not claim it.
+    fn url_scheme(&mut self, url: String) {
+        let links = &mut self.components.url_schemes;
+        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+            log::warn!("link dropped: {dropped}");
+            return;
+        }
+        if let Some(answer) = links.next.take() {
+            answer.borrow_mut().deliver(url);
+            return;
+        }
+        if links.pending.len() == crate::url_scheme::MAX_PENDING {
+            log::warn!(
+                "link dropped: {} came while nothing listened",
+                crate::url_scheme::MAX_PENDING
+            );
+            links.pending.pop_front();
+        }
+        links.pending.push_back(url);
+    }
+
+    /// The schemes the app claims (`nsh.json` `schemes`,
+    /// [`crate::url_scheme`]), from the app's own resources: the links the
+    /// platform reports of other schemes are dropped. None by default.
+    pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
+        self.components.url_schemes.schemes = schemes
+            .into_iter()
+            .map(|s| s.into().to_ascii_lowercase())
+            .collect();
+    }
+
     /// Answers what waits for the platform's [`EventKind::Notification`].
     fn notification_event(&mut self, payload: &EventPayload) {
         use crate::notifications::{NotificationEvent as Field, NotificationPermission};
@@ -5268,10 +5305,13 @@ impl<M: TextEngine> Core<M> {
             }
             Action::Speech(action) => self.speech_action(action),
             Action::Notification(action) => self.notification_action(action),
-            Action::NextLink(answer) => match self.components.links.pop_front() {
-                Some(url) => answer.borrow_mut().deliver(url),
-                None => self.components.next_url_scheme_open = Some(answer),
-            },
+            Action::NextUrlSchemeOpen(answer) => {
+                let links = &mut self.components.url_schemes;
+                match links.pending.pop_front() {
+                    Some(url) => answer.borrow_mut().deliver(url),
+                    None => links.next = Some(answer),
+                }
+            }
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5632,29 +5672,14 @@ impl<M: TextEngine> Core<M> {
                 let EventPayload::Map(entries) = payload else {
                     return false;
                 };
-                let Some(url) = entries.iter().find_map(|(k, v)| match v {
-                    crate::PayloadValue::Str(url) if *k == "url" => Some(url.clone()),
+                let url = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(url) if *k == crate::url_scheme::URL => Some(url),
                     _ => None,
-                }) else {
+                });
+                let Some(url) = url else {
                     return false;
                 };
-                // Anyone can make a link of the app's scheme: the app gets
-                // only well-formed ones, as `openUrl` checks what it opens.
-                if let Err(why) = crate::open_url::check_url(&url) {
-                    log::warn!("nsh: dropped a URL the app was opened with: {why}");
-                    return true;
-                }
-                match self.components.next_url_scheme_open.take() {
-                    Some(answer) => answer.borrow_mut().deliver(url),
-                    None => {
-                        // Links that come while nothing listens wait for the
-                        // next listener, the newest few.
-                        if self.components.links.len() == MAX_UNHEARD_URLS {
-                            self.components.links.pop_front();
-                        }
-                        self.components.links.push_back(url);
-                    }
-                }
+                self.url_scheme(url.clone());
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

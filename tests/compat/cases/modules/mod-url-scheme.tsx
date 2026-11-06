@@ -1,16 +1,24 @@
 // A case of the API's test suite (docs/dev/compatibility.md):
-// `UrlScheme` on the headless runtime, where the system opens the app with no
-// URL: `on("url", …)` returns a function that stops listening and hears
-// nothing. Its script checks it.
+// `UrlScheme` with the schemes the domain's nsh.json claims: `on("open")`
+// returns a function that stops listening, and nothing arrives while no
+// link opens the app. Its script checks both.
 import { UrlScheme, Text, View, signal } from "nsh";
 
 function App() {
-  const heard = signal("none");
-  const stop = UrlScheme.on("open", ({ url }) => heard.set(url));
+  const links = signal("none");
+  const stops = signal("listening");
+  const stop = UrlScheme.on("open", ({ url }) => links.set(url));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
-      <Text>{`Link: ${heard()}`}</Text>
-      <View testID="stop" onPress={() => (stop(), heard.set(`stopped ${typeof stop}`))}>
+      <Text>{`Links: ${links()}`}</Text>
+      <Text>{`Listener: ${stops()}`}</Text>
+      <View
+        testID="stop-links"
+        onPress={() => {
+          stop();
+          stops.set(typeof stop === "function" ? "stopped" : "no function");
+        }}
+      >
         <Text>Stop</Text>
       </View>
     </View>

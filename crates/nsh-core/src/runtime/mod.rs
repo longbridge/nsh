@@ -1,7 +1,7 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
-//! `Speech` and `nsh/storage`,
+//! `Speech`, `UrlScheme` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made

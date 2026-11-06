@@ -92,6 +92,12 @@ impl AppView {
         Inner::load(&self.inner, App::Rust(root));
     }
 
+    /// Hands `url`, a link the system opened the standalone app with, to
+    /// the running app (`UrlScheme`).
+    pub(crate) fn url_scheme(&self, url: String) {
+        self.inner.url_scheme(url);
+    }
+
     /// Sets where `asset:/…` files (images, fonts) are read from. A change
     /// applies from the next [`AppView::load`].
     pub fn set_asset_base(&self, base: Option<crate::AssetBase>) {
@@ -133,11 +139,7 @@ impl AppView {
     /// the system opening it would (`UrlScheme.on("open")`, `nsh`); before an
     /// app runs, the next one loaded gets it. On the main thread.
     pub fn open_url(&self, url: &str) {
-        let mut state = self.inner.state.borrow_mut();
-        match &state.surface {
-            Some(surface) => surface.open_url(url),
-            None => state.urls.push(url.to_owned()),
-        }
+        self.inner.url_scheme(url.to_owned());
     }
 
     /// The channel with the apps this view runs (`nsh/host`): their
@@ -207,9 +209,6 @@ impl AppView {
         state.host_tokens = tokens;
         if let Some(surface) = &state.surface {
             surface.set_host_tokens(state.host_tokens.clone());
-            for url in std::mem::take(&mut state.urls) {
-                surface.open_url(&url);
-            }
         }
         Ok(())
     }
@@ -302,7 +301,21 @@ impl Inner {
         }
         // Below development overlays.
         this.container.insertSubview_atIndex(surface.view(), 0);
+        for url in std::mem::take(&mut state.urls) {
+            surface.url_scheme(url);
+        }
         state.surface = Some(surface);
+    }
+
+    /// Hands `url`, a link the system opened the app with, to the running
+    /// app ([`Surface::url_scheme`]); before an app runs, the next one
+    /// loaded gets it.
+    pub(crate) fn url_scheme(&self, url: String) {
+        let mut state = self.state.borrow_mut();
+        match &state.surface {
+            Some(surface) => surface.url_scheme(url),
+            None => state.urls.push(url),
+        }
     }
 
     /// Applies a development update in place; false when no app runs.

@@ -724,12 +724,13 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
-/// The next URL the system opens the app with, of a scheme nsh.json's
-/// `schemes` registers (TS: `UrlScheme.on("open", ...)`), the one that started
-/// the app first. To await in a task.
+/// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
+/// URL of a scheme the app claims (`nsh.json` `schemes`), those
+/// that came before anything listened first, the one that launched the app
+/// included ([`crate::url_scheme`]). To await in a task.
 pub fn next_url_scheme_open() -> Answer<String> {
     let (answer, slot) = Answer::new();
-    act(Action::NextLink(slot));
+    act(Action::NextUrlSchemeOpen(slot));
     answer
 }
 

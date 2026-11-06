@@ -138,7 +138,7 @@ mount(App);
 
 `nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。
 
-`tailwind`、`theme`、`appearance`、`statusBar`、`capabilities` 和 `resolve` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
+`tailwind`、`theme`、`appearance`、`statusBar`、`capabilities`、`schemes` 和 `resolve` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
 
 ```text
 error building App.tsx failed

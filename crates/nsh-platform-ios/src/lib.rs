@@ -45,8 +45,6 @@ mod shader;
 #[path = "../../nsh-platform-macos/src/speech.rs"]
 mod speech;
 // The notification center, shared with macOS.
-#[path = "../../nsh-platform-macos/src/linking.rs"]
-mod linking;
 #[path = "../../nsh-platform-macos/src/notifications.rs"]
 mod notifications;
 mod surface;

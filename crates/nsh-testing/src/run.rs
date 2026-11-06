@@ -576,6 +576,10 @@ impl Session {
         app.answer_dialogs_myself();
         app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
+        // The link that launched it, there before the app listens.
+        if let Some(url) = &launch.url_scheme {
+            app.send_url_scheme(url);
+        }
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(app))));
@@ -763,6 +767,12 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
         return unsupported(
             "host.handlers",
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
+        );
+    }
+    if launch.url_scheme.is_some() {
+        return unsupported(
+            "url",
+            "the system hands links to packaged apps: run the test without --target",
         );
     }
     let Some(target) = target else {
@@ -1138,6 +1148,7 @@ mod tests {
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
+            url_scheme: None,
         }
     }
 
@@ -1164,6 +1175,16 @@ mod tests {
         plain.reduced_motion = Some(true);
         assert_eq!(check(&plain, &ios), Ok(()));
         assert_eq!(check(&plain, &macos), Ok(()));
+
+        // A launching link: only headless runs hand one over.
+        let mut linked = launch();
+        linked.url_scheme = Some("myapp://item/42".into());
+        let error = check(&linked, &macos).unwrap_err();
+        assert!(
+            error.contains("`url` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
 
         // A size: a desktop's window takes it, a device's screen does not.
         let mut sized = launch();
