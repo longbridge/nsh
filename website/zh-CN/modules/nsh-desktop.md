@@ -37,6 +37,8 @@ const isAvailable: boolean;
 
 ```ts
 const Window: {
+  setCloseOnPress(close: boolean): void;
+  on(event: "closePress", listener: () => void): () => void;
   setTitle(title: string): void;
   setTitleBar(options: { style: "default" | "hidden"; height?: number }): void;
   setMenuBar(mode: "shown" | "autoHide"): void;
@@ -60,6 +62,8 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 
 | 成员 | Rust | 说明 |
 |---|---|---|
+| `setCloseOnPress(close)` | `set_close_on_press(close)` | 用户关闭操作是否关闭主窗口，默认 `true`。设为 `false` 后可以先保存或确认，再调用 `close()`。 |
+| `on("closePress", listener)` | `on_close_press(listener)` | 监听用户关闭主窗口的操作，无论关闭开关是否允许关闭都会通知。JS 返回取消监听函数；JS 和 Rust 监听也随 owner 销毁自动清理，JS 监听还随模块热更新清理。 |
 | `setTitle(title)` | `set_title(title)` | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
 | `setTitleBar({ style, height? })` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `style: "hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`style: "default"` 恢复系统标题栏（Rust：`set_title_bar(TitleBarStyle::Default, None)`）。 |
 | `setMenuBar(mode)` | `set_menu_bar_visibility(mode)` | 在 GPUI 应用的 Windows 和 Linux 上，窗口把应用菜单绘制成应用上方的菜单栏：`"shown"`（默认）始终显示；`"autoHide"` 在单独按下并松开 Alt 后显示，再次单独按 Alt 时隐藏，与 Windows 和 GNOME 应用一致。两种模式下 F10 和 Alt 加菜单首字母都会打开菜单，菜单打开期间菜单栏显示。macOS 的菜单栏是系统的。 |
@@ -76,6 +80,25 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。在 GPUI 应用中，`setFrame` 设置窗口尺寸，窗口位置由平台决定；GPUI 窗口的位置和层级由宿主在创建窗口时配置。
 
 使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
+
+### 处理主窗口关闭
+
+关闭按钮、Alt+F4 和窗口菜单的关闭操作都会报告 `"closePress"`。添加监听只观察操作，`setCloseOnPress` 提前决定
+是否关闭。默认 `true` 时，能及时响应的引擎会先收到通知；引擎忙碌时，后端在原生宽限期结束后关闭窗口。
+框架不等待异步监听函数。需要异步保存或询问确认时，先保留窗口：
+
+```ts
+Window.setCloseOnPress(false);
+const stop = Window.on("closePress", async () => {
+  await saveWindowSettings();
+  Window.close();
+});
+```
+
+`Window.close()` 明确关闭主窗口，即使 `closeOnPress` 为 `false` 也会关闭，且不再报告一次 `"closePress"`。
+macOS、Windows、Linux 和 GPUI 拥有的窗口支持这一流程。macOS 宿主配置了关闭后继续运行时，仍保留隐藏窗口的行为。
+嵌入的 surface 将宿主窗口留给宿主控制；GPUI 安装了原生 `on_close_request` 回调时，
+仍由该回调决定关闭或退出。`AppWindow` 保持自己的 `focus`、`hide`、`close` 操作。
 
 ### Window.open
 

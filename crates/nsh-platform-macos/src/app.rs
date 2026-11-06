@@ -628,16 +628,19 @@ define_class!(
     unsafe impl NSWindowDelegate for Delegate {
         #[unsafe(method(windowShouldClose:))]
         fn should_close(&self, window: &NSWindow) -> bool {
-            let keep_alive = RUNNING.with(|running| {
+            let surface = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .is_some_and(|running| running.keep_alive_on_close)
+                    .filter(|running| std::ptr::eq(&*running.window, window))
+                    .map(|running| running.view.surface().clone())
             });
-            if keep_alive {
-                window.orderOut(None);
+            if let Some(surface) = surface {
+                crate::window_close::press(&surface);
+                false
+            } else {
+                true
             }
-            !keep_alive
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -653,6 +656,27 @@ define_class!(
         }
     }
 );
+
+/// Performs the standalone window's close action without asking the app's flag
+/// again. The native host's keep-alive option retains its hide-on-close behavior.
+pub(crate) fn close_main_window(key: u64) -> bool {
+    let target = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .filter(|running| running.view.surface().key() == key)
+            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+    });
+    let Some((window, keep_alive)) = target else {
+        return false;
+    };
+    if keep_alive {
+        window.orderOut(None);
+    } else {
+        window.close();
+    }
+    true
+}
 
 /// Quits the standalone runner, including a retained hidden window.
 /// Stops its engine and returns from [`run_app`]. May be called from any thread;

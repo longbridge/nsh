@@ -136,6 +136,13 @@ covers [nsh/desktop] displays
 covers [nsh/desktop] Window
 covers [nsh/desktop] Menu
 covers [nsh/desktop] Application
+# Registration and removal are available without a native main window.
+# Actual close notification and shutdown are checked by the Windows tests.
+tap id:case-mod-window-close
+expect Window close calls: not called
+tap id:window-close-policy
+expect Window close calls: done, stop=function, refused=2
+covers [nsh/desktop] Window
 # mod-device
 tap id:case-mod-device
 # iOS phone at 1 pixel per point, in the light scheme.

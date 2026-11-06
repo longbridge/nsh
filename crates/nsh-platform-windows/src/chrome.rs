@@ -335,6 +335,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         DesktopCommand::ToggleMaximize => toggle_maximize(surface),
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
+        DesktopCommand::SetCloseOnPress(close) => surface.window_close.set_close_on_press(*close),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
         // Not on this backend yet.
         DesktopCommand::SetBounds(_) => {}
@@ -353,7 +354,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
-        DesktopCommand::Close => close(hwnd),
+        DesktopCommand::Close => crate::window::close(hwnd),
         DesktopCommand::Quit => quit(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
@@ -598,13 +599,13 @@ fn close(hwnd: HWND) {
     let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
 }
 
-/// Quits the app, as its `quit` role: the window closes as [`close`] closes
-/// it, then the message loop ends, also while a window or a tray icon
+/// Quits the app, as its `quit` role: the window closes explicitly,
+/// then the message loop ends, also while a window or a tray icon
 /// would keep it running.
 fn quit(hwnd: HWND) {
-    close(hwnd);
+    crate::window::close(hwnd);
     // SAFETY: a plain call. The loop gets `WM_QUIT` only after the posted
-    // `WM_CLOSE`: the window closes first.
+    // private close message: the window closes first.
     unsafe { PostQuitMessage(0) };
 }
 

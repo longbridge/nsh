@@ -17708,8 +17708,10 @@ mod rust_desktop {
     use crate::{
         desktop::{DesktopCommand, TitleBarStyle},
         element::{
-            Root,
-            desktop::{close_window, quit, set_title_bar, title_bar},
+            Root, create_root,
+            desktop::{
+                close_window, on_close_press, quit, set_close_on_press, set_title_bar, title_bar,
+            },
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -17738,6 +17740,72 @@ mod rust_desktop {
                     .on_press(|_: &()| close_window()),
             )
             .child(text("Quit").on_press(|_: &()| quit()))
+    }
+
+    #[component]
+    fn CloseObservers() -> impl IntoElement {
+        set_close_on_press(false);
+        let count = signal(0);
+        on_close_press(move || count.update(|n| *n += 1));
+        let (second, ()) = create_root(|| {
+            on_close_press(move || count.update(|n| *n += 10));
+        });
+        cleanup(move || second.dispose());
+        view()
+            .child(text(move || format!("close:{count}", count = count.get())))
+            .child(text("Dispose observer").on_press(move |_: &()| second.dispose()))
+    }
+
+    #[test]
+    fn rust_close_press_listeners_follow_their_owners_and_leave_the_event_for_js() {
+        let mut c = core();
+        c.mount_root(&Root::of::<CloseObservers>());
+        let initial = c.commit().unwrap();
+        let root = initial
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child,
+                    ..
+                } => Some(*child),
+                _ => None,
+            })
+            .unwrap();
+        let dispose = initial
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Dispose observer" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        assert!(initial.items.iter().any(|item| matches!(item,
+            MountItem::Command { command: Command::Desktop(command), .. }
+                if **command == DesktopCommand::SetCloseOnPress(false)
+        )));
+        assert!(!c.component_event(ROOT_ID, EventKind::WindowClosePress, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item,
+            MountItem::Text { text, .. } if text.text == "close:11"
+        )));
+        assert!(c.component_event(dispose, EventKind::Press, &EventPayload::None));
+        let _ = c.commit();
+        assert!(!c.component_event(ROOT_ID, EventKind::WindowClosePress, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item,
+            MountItem::Text { text, .. } if text.text == "close:12"
+        )));
+        c.apply(Op::Remove {
+            parent: ROOT_ID,
+            child: root,
+        })
+        .unwrap();
+        c.apply(Op::Release { id: root }).unwrap();
+        let _ = (c.commit(), c.commit());
+        assert!(c.components.executor.close_press.borrow().ids().is_empty());
+        assert!(!c.component_event(ROOT_ID, EventKind::WindowClosePress, &EventPayload::None));
     }
 
     #[test]

@@ -1,5 +1,14 @@
 # JS modules
 
+The desktop main window's `Window.setCloseOnPress` command is the registry's (`nsh-core/src/runtime/desktop.rs`).
+`Window.on("closePress", listener)` owns its listeners as `keymap.bind` does and handles the root's
+`WindowClosePress` event. Rust's `element::desktop::on_close_press` owns its listeners with their reactive owner;
+the core calls them before leaving the same event for JS. The native flag controls closing independently of
+observation, with a bounded native fallback for the default close when the engine is busy. AppKit, GTK, Win32 and
+GPUI's owned windows implement the same contract; embedded surfaces keep their native host's closing policy.
+Before delivering a close press, the engine publishes a pending window-state snapshot immediately, so save
+handlers see the last move even within the normal move-settling interval.
+
 NSH ships two layers of modules. `nsh` holds the primitives every UI is made of, the environment and the
 capabilities, with `nsh/mobile` and `nsh/desktop` for what only mobile platforms or only the desktops have. `nsh/base` (the crate `nsh-base`) is the unstyled foundation every app's UI builds on: navigation stacks and
 pages (and their status bar), dialogs, safe areas, the system's alert dialog and the software keyboard. NSH provides no styled

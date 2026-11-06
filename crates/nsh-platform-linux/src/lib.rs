@@ -56,6 +56,7 @@ mod transition;
 mod tray;
 mod view;
 mod window;
+mod window_close;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};

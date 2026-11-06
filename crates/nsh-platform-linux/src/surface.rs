@@ -177,6 +177,7 @@ pub(crate) struct Surface {
     pub(crate) keymap: crate::keymap::KeymapState,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    pub(crate) window_close: crate::window_close::State,
     /// Selections across the texts of selectable views
     /// ([`crate::selectable_view`]).
     pub(crate) selection: crate::selectable_view::State,
@@ -264,6 +265,7 @@ impl Surface {
             native: Default::default(),
             keymap: Default::default(),
             chrome: Default::default(),
+            window_close: Default::default(),
             selection: Default::default(),
             fps: RefCell::new(None),
         });
@@ -302,13 +304,11 @@ impl Surface {
     }
 
     /// Its key ([`Surface::by_key`]).
-    #[cfg(feature = "dev")]
     pub(crate) fn key(&self) -> u64 {
         self.key
     }
 
     /// The surface `key` names, while it exists.
-    #[cfg(feature = "dev")]
     pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
     }
@@ -388,6 +388,7 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        self.window_close.reset();
         crate::global_shortcut::clear(self);
         crate::tray::clear(self);
         // Dropping the engine joins its thread.

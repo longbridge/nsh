@@ -538,6 +538,15 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Windows, Win32
 
+- **Default window closing cannot depend on a JS turn finishing.** Standalone hosts allow unbounded JS. A loop
+  can prevent the close event's flush acknowledgment, so `window_close.rs` bounds the sampled true policy with a
+  native timer. The false policy has no forced-close deadline. Reload cancels timers; request serials reject stale
+  timer messages and acknowledgments (`window_close::tests::closing` includes busy-JS regressions).
+
+- **A window's private message ids share one namespace**, including the shell's tray notifications. Allocate them
+  together in `nsh-platform-windows/src/window.rs`; reusing a tray id for a close message makes a shell notification
+  destroy the window (`window_close::tests::tray_notification_keeps_main_window_open`).
+
 - **Git checks files out with CRLF** (`core.autocrlf=true`, Git for Windows' default), and `.rustfmt.toml`'s
   `newline_style = "unix"` then makes `cargo +nightly fmt --all` rewrite every line of every file it touches. The
   repository's `.gitattributes` forces LF; a checkout made before it needs `git add --renormalize .` (or a fresh

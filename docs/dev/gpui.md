@@ -106,6 +106,13 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 ## Architecture
 
+Owned windows report user closing through the shared `WindowClosePress` event (`window_close.rs`): native close
+controls, drawn controls, the Close menu role and the unbound close shortcut use the sampled
+`Window.setCloseOnPress` policy. An engine acknowledgment or a bounded native timer completes an allowed close;
+reload invalidates old completions. Explicit close and quit bypass this policy. Completing a close uses the app
+queue rather than waiting for a rendered frame, including while minimized. A native host's `on_close_request`
+handler retains its existing authority over close and quit.
+
 - **One element per surface.** A surface (`surface.rs`) is drawn by one GPUI element, `render::SurfaceElement`, which
   fills the space its parent gives it, reports that size to the engine, takes the pointer and keys over it
   (`events.rs`) and paints the whole tree in its `paint` (`render::draw_view`): shadows and background (`decor.rs`),

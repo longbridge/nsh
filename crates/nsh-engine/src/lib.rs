@@ -2087,10 +2087,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             .window_state
             .settles
             .is_some_and(|due| due <= nsh_core::time::now())
-            && let Some(env) = state.window_state.reported
+            && let Some(env) = state.window_state.settle()
         {
-            state.window_state.settles = None;
-            state.window_state.shown = env.window_state;
             apply_environment(script, state, env);
         }
         let turn_start = state.trace.then(Instant::now);
@@ -3067,6 +3065,14 @@ struct WindowStateReport {
 }
 
 impl WindowStateReport {
+    /// Closing must expose the latest saved bounds, even during a move burst.
+    fn settle(&mut self) -> Option<Environment> {
+        let env = self.reported.take()?;
+        self.settles = None;
+        self.shown = env.window_state;
+        Some(env)
+    }
+
     /// The environment the app gets of `env`, the platform's at `now`: its
     /// window state held back while it moves.
     fn report(&mut self, mut env: Environment, now: Instant) -> Environment {
@@ -3127,6 +3133,12 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
     match message {
         Message::Event(id, event, mut payload) => {
             state.events_handled += 1;
+            if id == nsh_core::ROOT_ID
+                && event == EventKind::WindowClosePress
+                && let Some(env) = state.window_state.settle()
+            {
+                apply_environment(script, state, env);
+            }
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }

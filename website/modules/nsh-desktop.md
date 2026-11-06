@@ -37,6 +37,8 @@ const isAvailable: boolean;
 
 ```ts
 const Window: {
+  setCloseOnPress(close: boolean): void;
+  on(event: "closePress", listener: () => void): () => void;
   setTitle(title: string): void;
   setTitleBar(options: { style: "default" | "hidden"; height?: number }): void;
   setMenuBar(mode: "shown" | "autoHide"): void;
@@ -61,6 +63,8 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 
 | Member | Rust | Description |
 |---|---|---|
+| `setCloseOnPress(close)` | `set_close_on_press(close)` | Whether a user close action closes the main window; `true` by default. Set `false` to save or confirm first, then call `close()`. |
+| `on("closePress", listener)` | `on_close_press(listener)` | Observes a user close action on the main window, whether the flag allows closing or keeps it open. JS returns a stop function; JS and Rust listeners also end with their owner. JS listeners end with their hot-reloaded module too. |
 | `setTitle(title)` | `set_title(title)` | The window's title: the title bar, the taskbar or Dock, the window switcher. |
 | `setTitleBar({ style, height? })` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `style: "hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `style: "default"` brings the system's title bar back (Rust: `set_title_bar(TitleBarStyle::Default, None)`). |
 | `setMenuBar(mode)` | `set_menu_bar_visibility(mode)` | On Windows and Linux in GPUI apps, where the window draws the application menu as a bar above the app: `"shown"` (the default) shows it always; `"autoHide"` shows it after Alt is pressed and released alone, until Alt alone hides it again, as in Windows and GNOME apps. F10 and Alt with a menu's initial open a menu either way, and the bar shows while it is open. macOS's menu bar is the system's. |
@@ -77,6 +81,27 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. In GPUI apps, `setFrame` sets the window's size and the platform places it; GPUI's host chooses its position and level when opening the window.
 
 When sizing a window from content measured with `onLayout`, allow room for window decorations on macOS and Windows. `width` and `height` accept positive finite numbers; `x` and `y` accept finite numbers. Invalid fields keep their previous values.
+
+### Closing the main window
+
+The close button, Alt+F4 and the window menu's Close action report `"closePress"`. Adding a listener observes the
+action; `setCloseOnPress` determines behavior ahead of time. With the default `true`, a responsive engine gets a
+turn to report the action before closing; the backend closes after a bounded native grace period when the engine is
+busy. Async listeners are not awaited. To save asynchronously or ask for confirmation, keep it open first:
+
+```ts
+Window.setCloseOnPress(false);
+const stop = Window.on("closePress", async () => {
+  await saveWindowSettings();
+  Window.close();
+});
+```
+
+`Window.close()` explicitly closes the main window, including while `closeOnPress` is false, and does not report
+another `"closePress"`. macOS, Windows, Linux and GPUI's owned windows support this flow. On macOS, a host configured
+to keep running on close retains that hide-on-close behavior. Embedded
+surfaces leave their host's window under the host's control; GPUI's native `on_close_request` handler retains its
+authority when installed. `AppWindow` keeps its own `focus`, `hide` and `close` operations.
 
 ### Window.open
 

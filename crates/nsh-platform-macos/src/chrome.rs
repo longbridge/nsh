@@ -369,6 +369,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // Windows of the app's own (`Window.open`) are not on this backend yet:
         // the runtime does not send these here.
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
+        DesktopCommand::SetCloseOnPress(close) => surface.window_close.close_on_press.set(*close),
         DesktopCommand::Close => {
             // Close after the batch, as Windows posts WM_CLOSE and GTK
             // waits for idle: performClose runs windowWillClose: at once,
@@ -378,6 +379,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             DispatchQueue::main().exec_async(move || {
                 if let Some(surface) = Surface::with_key(key)
                     && let Some(window) = window(&surface)
+                    && !crate::app::close_main_window(key)
                 {
                     window.performClose(None);
                 }

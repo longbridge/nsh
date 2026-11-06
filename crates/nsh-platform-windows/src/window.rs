@@ -71,6 +71,32 @@ pub(crate) const WM_NSH_MENU: u32 = WM_APP + 4;
 /// restored ([`observe_root`]).
 const WM_NSH_ROOT: u32 = WM_APP + 5;
 
+/// A system-tray notification; keep WM_APP allocations together.
+pub(crate) const WM_NSH_TRAY: u32 = WM_APP + 6;
+/// An explicit close, after the current batch or close notification.
+const WM_NSH_CLOSE: u32 = WM_APP + 7;
+/// The engine handled a user close; `wparam` identifies the native request.
+const WM_NSH_CLOSE_PRESS_HANDLED: u32 = WM_APP + 8;
+
+/// Acknowledges a close action from the engine thread to its own window.
+pub(crate) fn close_press_handled(hwnd: isize, serial: usize) {
+    // SAFETY: PostMessage is thread-safe; no pointer crosses the queue.
+    let _ = unsafe {
+        PostMessageW(
+            Some(HWND(hwnd as *mut _)),
+            WM_NSH_CLOSE_PRESS_HANDLED,
+            WPARAM(serial),
+            LPARAM(0),
+        )
+    };
+}
+
+/// Posts a close that bypasses user-close policy and notification.
+pub(crate) fn close(hwnd: HWND) {
+    // SAFETY: posting to a live window, destroyed after the current call.
+    let _ = unsafe { PostMessageW(Some(hwnd), WM_NSH_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
 /// How often the ticker asks for the compositor again while nothing
 /// composes ([`Ticker`]): frames resume within this once it does.
 const COMPOSITION_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
@@ -778,6 +804,22 @@ fn handle(
         WM_NSH_WAKE => surface.drain(),
         WM_NSH_TICK => surface.tick(),
         WM_NSH_MENU => crate::chrome::show_popup(surface),
+        WM_NSH_CLOSE if data.top_level => {
+            // SAFETY: this main window belongs to the current thread.
+            let _ = unsafe { DestroyWindow(hwnd) };
+            return Some(LRESULT(0));
+        }
+        WM_NSH_CLOSE_PRESS_HANDLED if data.top_level => {
+            crate::window_close::handled(surface, wparam.0);
+            return Some(LRESULT(0));
+        }
+        WM_TIMER if data.top_level && crate::window_close::timed_out(surface, wparam.0) => {
+            return Some(LRESULT(0));
+        }
+        WM_CLOSE if data.top_level => {
+            crate::window_close::close_press(surface);
+            return Some(LRESULT(0));
+        }
         crate::tray::WM_NSH_TRAY => {
             crate::tray::message(surface, hwnd, wparam, lparam);
             return Some(LRESULT(0));

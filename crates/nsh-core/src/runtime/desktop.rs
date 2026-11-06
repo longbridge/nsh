@@ -31,6 +31,13 @@ pub(crate) struct TitleBarOptions {
 
 #[module]
 impl Window {
+    /// Whether a user's close action closes the desktop main window (true
+    /// by default). `on("closePress", ...)` hears the action either
+    /// way. Set false to save or confirm, then call `close()` explicitly.
+    pub(crate) fn set_close_on_press(close: bool, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetCloseOnPress(close));
+    }
+
     /// Sets the window's title (the title bar, the taskbar / Dock, the
     /// window switcher).
     pub(crate) fn set_title(title: String, cx: &mut ModuleCx) {
@@ -140,7 +147,8 @@ impl Window {
         desktop(cx, DesktopCommand::OrderFront);
     }
 
-    /// Closes the window; the app ends with it.
+    /// Closes the window. On Windows, bypasses close-on-press policy and
+    /// notification, so the app can close after saving in a close listener.
     pub(crate) fn close(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Close);
     }

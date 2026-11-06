@@ -5692,6 +5692,22 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            EventKind::WindowClosePress if id == crate::ROOT_ID => {
+                let listeners = self.components.executor.close_press.clone();
+                let ids = listeners.borrow().ids();
+                for id in ids {
+                    let handler = listeners.borrow().handler(id);
+                    if let Some(handler) = handler {
+                        let result = caught(|| handler());
+                        self.apply_actions();
+                        if let Err(message) = result {
+                            log::error!(target: "js", "a window close listener failed: {message}");
+                        }
+                    }
+                }
+                // A mixed Rust/TSX app's JS listeners observe the same action.
+                false
+            }
             EventKind::BackPress if id == crate::ROOT_ID => {
                 // The top overlay listening takes it first.
                 if self.overlay_cancel() {

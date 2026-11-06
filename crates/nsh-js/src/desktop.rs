@@ -56,6 +56,9 @@ pub(crate) struct Menus {
     next: Cell<u32>,
     /// The windows `Window.open` opened, oldest first.
     windows: RefCell<Vec<AppWindow>>,
+    /// Listeners of the main window's user close action.
+    close_listeners: RefCell<Vec<(u32, crate::web::js::V)>>,
+    close_listening: Cell<bool>,
 }
 
 /// A window of the app's own (`Window.open`): a dialog root the platform
@@ -84,6 +87,8 @@ impl Default for Menus {
             listening: Cell::new(false),
             next: Cell::new(0),
             windows: RefCell::default(),
+            close_listeners: RefCell::default(),
+            close_listening: Cell::new(false),
         }
     }
 }
@@ -139,6 +144,7 @@ fn settle(cx: *mut JsContext, resolve: JsValue, value: bool) {
 impl Menus {
     /// Frees the values held (the state is unregistered).
     pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
+        self.close_listeners.get_mut().clear();
         for g in self.globals.get_mut().drain(..) {
             // SAFETY: owned values; no JS runs from here on.
             unsafe {
@@ -1078,7 +1084,64 @@ fn window_module(cx: *mut JsContext) -> JsValue {
     let open = reactive::new_function(cx, c"open", open_window, 2);
     // SAFETY: the object takes the function.
     unsafe { qjs::JS_SetPropertyStr(cx, window, c"open".as_ptr(), open) };
+    // SAFETY: the object takes the listener-registration function.
+    unsafe {
+        let on = reactive::new_function(cx, c"on", window_on, 2);
+        qjs::JS_SetPropertyStr(cx, window, c"on".as_ptr(), on);
+    }
     window
+}
+
+crate::web::js::native! {
+    /// Registers a close listener; listening never changes close policy.
+    fn window_on(cx, _this, args) {
+        use crate::web::js::{self, V, closure, type_error};
+        if !unsafe { qjs::JS_IsString(args.get(0)) }
+            || js::to_string(cx, args.get(0))? != "closePress"
+        {
+            return Err(type_error(cx, "Window.on: expected \"closePress\""));
+        }
+        if !js::is_function(cx, args.get(1)) {
+            return Err(type_error(cx, "Window.on: the listener is not a function"));
+        }
+        if !menus(cx).close_listening.get() {
+            let on = js::function(cx, c"onWindowClosePress", on_window_close_press, 0)?;
+            dom::set_handler(cx, ROOT_ID, EventKind::WindowClosePress, on.raw())
+                .map_err(|_| js::Throw)?;
+            menus(cx).close_listening.set(true);
+        }
+        let id = next_id(cx);
+        menus(cx).close_listeners.borrow_mut().push((id, V::dup(cx, args.get(1))));
+        let stop = closure(cx, Vec::new(), move |cx, _, _| {
+            menus(cx).close_listeners.borrow_mut().retain(|(i, _)| *i != id);
+            Ok(V::undefined())
+        })?;
+        crate::keymap::undo_with_owner(cx, &stop);
+        Ok(stop)
+    }
+}
+
+crate::web::js::native! {
+    /// Listeners may remove themselves or their neighbors. New listeners
+    /// wait for the next event; an exception leaves the others called.
+    fn on_window_close_press(cx, _this, _args) {
+        use crate::web::js::{self, V};
+        let ids: Vec<_> = menus(cx).close_listeners.borrow().iter().map(|(id, _)| *id).collect();
+        let mut first_error = None;
+        for id in ids {
+            let f = menus(cx).close_listeners.borrow().iter()
+                .find(|(i, _)| *i == id).map(|(_, f)| f.clone_ref());
+            if let Some(f) = f
+                && js::call(cx, f.raw(), UNDEFINED, &[]).is_err()
+            {
+                // SAFETY: the call left the exception in this context.
+                let error = V::own(cx, unsafe { qjs::JS_GetException(cx) });
+                if first_error.is_none() { first_error = Some(error); }
+            }
+        }
+        if let Some(error) = first_error { return Err(js::throw(cx, error)); }
+        Ok(V::undefined())
+    }
 }
 
 /// The hand-written exports of `nsh/desktop` (with the registry's `Window`).
@@ -1126,7 +1189,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         Export::Value(window_module),
         Ts::value(
             "The window: the registry's functions on the main window (`setTitle`,\n`setFrame`, ...) and `open`, which opens windows of the app's own.",
-            "WindowModule & WindowOpener",
+            "WindowModule & WindowOpener & MainWindowCloseEvents",
         ),
     ),
     (
@@ -1156,7 +1219,18 @@ pub(crate) const EXPORTS: &[Item] = &[
 ];
 
 /// `nsh/desktop`'s types (with the registry's).
-pub(crate) const TYPES: &str = r#"/** `Window.open`'s options. */
+pub(crate) const TYPES: &str = r#"/** User closing of the desktop main window. */
+export interface MainWindowCloseEvents {
+  /** Hears the user's close action, whether or not closeOnPress lets it close.
+   * Listening does not change that flag. The returned function stops listening;
+   * listeners also stop with their owner or hot-reloaded module. With the default
+   * true policy, the backend bounds the notification grace period when the engine is
+   * busy. Async handlers are not awaited: setCloseOnPress(false), then close()
+   * after saving. */
+  on(event: "closePress", listener: () => void): () => void;
+}
+
+/** `Window.open`'s options. */
 export interface WindowOpenOptions {
   /** The window's id: opening the same id again returns the open window. */
   id: string;
@@ -1368,6 +1442,67 @@ export interface GlobalShortcutModule {
 #[cfg(test)]
 mod tests {
     use nsh_core::{desktop::MenuRole, element::JsValue as _};
+
+    #[test]
+    fn close_press_listeners_can_unsubscribe_and_end_with_their_owner() {
+        let host = crate::Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { Window } from 'nsh/desktop';
+            import { mount } from 'nsh';
+            globalThis.calls = [];
+            let later;
+            globalThis.off = Window.on('closePress', () => { calls.push('first'); later(); });
+            later = Window.on('closePress', () => calls.push('removed'));
+            globalThis.dispose = mount(() => {
+                Window.on('closePress', () => calls.push('owned'));
+                return null;
+            });
+        "#,
+        )
+        .unwrap();
+        host.dispatch_event(
+            nsh_core::ROOT_ID,
+            nsh_core::EventKind::WindowClosePress,
+            &nsh_core::EventPayload::None,
+        );
+        host.eval_source(
+            "if (calls.join() !== 'first,owned') throw Error(calls); off(); off(); dispose();",
+        )
+        .unwrap();
+        host.dispatch_event(
+            nsh_core::ROOT_ID,
+            nsh_core::EventKind::WindowClosePress,
+            &nsh_core::EventPayload::None,
+        );
+        host.eval_source("if (calls.join() !== 'first,owned') throw Error('listener leaked');")
+            .unwrap();
+        assert!(
+            host.eval_source(
+                "import { Window } from 'nsh/desktop'; Window.on('closed', () => {});"
+            )
+            .is_err()
+        );
+        assert!(
+            host.eval_source("import { Window } from 'nsh/desktop'; Window.on('closePress', 1);")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn main_window_close_policy_and_events_are_declared() {
+        let host = crate::Host::new().unwrap();
+        host.eval_source("import { Window } from 'nsh/desktop'; Window.setCloseOnPress(false); Window.setCloseOnPress(true);").unwrap();
+        let declarations = crate::type_definitions(&[]);
+        let desktop = &declarations
+            .iter()
+            .find(|(path, _)| path == "nsh/desktop.d.ts")
+            .unwrap()
+            .1;
+        assert!(desktop.contains("setCloseOnPress"));
+        assert!(desktop.contains("MainWindowCloseEvents"));
+        assert!(desktop.contains("on(event: \"closePress\", listener: () => void): () => void"));
+    }
 
     /// `MenuRole`'s declaration (written here, with the docs of each role)
     /// names the roles the Rust type reads.

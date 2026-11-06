@@ -449,7 +449,8 @@ impl AppView {
         let surface = Rc::downgrade(&self.surface);
         window.on_window_should_close(cx, move |window, cx| {
             surface.upgrade().is_none_or(|surface| {
-                !crate::chrome::ask_to_close(&surface, CloseRequest::Close, window, cx)
+                crate::chrome::user_close(&surface, window, cx);
+                false
             })
         });
     }

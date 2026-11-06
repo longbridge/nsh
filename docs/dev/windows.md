@@ -48,6 +48,15 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 
 ## Architecture
 
+`SetCloseOnPress` is a root desktop command. `window_close.rs` holds the native flag (default true).
+A user `WM_CLOSE` samples it and reports `WindowClosePress`. With the sampled flag true, an engine acknowledgment
+closes the window after notification; a native timer bounds that grace period if the engine cannot acknowledge.
+The sampled false policy keeps the window open. Reload cancels timers and invalidates pending acknowledgments;
+each request has a unique serial so queued replies or timers cannot affect a replacement. Explicit `Window.close()` and `Application.quit()`
+post a private close message, bypassing user-close policy and notification. Private window-message ids, including
+the tray callback, are allocated together in `window.rs`. Verify with
+`cargo test -p nsh-platform-windows window_close -- --test-threads=1`.
+
 - **One retained view per node, one window per surface.** Each node is an `NshView` (`view.rs`): an `Rc` node with
   its `ViewState` (frame, style, animated values, content), its children in drawing order and a weak parent. A
   surface's window draws its tree with Direct2D into a flip-model swap chain (`render.rs`); NSH content needs

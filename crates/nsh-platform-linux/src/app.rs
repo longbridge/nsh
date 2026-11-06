@@ -433,7 +433,7 @@ thread_local! {
 }
 
 /// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
-/// its windows close as the user closing them would, then its run ends,
+/// its owned windows close explicitly, then its run ends,
 /// also while something else holds the application (a tray icon). A view
 /// embedded in another app leaves the app's lifecycle to that app: false
 /// there, with nothing done.
@@ -451,7 +451,7 @@ pub(crate) fn quit() -> bool {
 /// ends its run.
 fn quit_application(app: &gtk::Application) {
     for window in app.windows() {
-        window.close();
+        window.destroy();
     }
     app.quit();
 }
@@ -511,6 +511,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             .build();
         let view = AppView::new(options.clone());
         window.set_child(Some(&view.widget()));
+        crate::window_close::attach(view.surface(), window.upcast_ref());
         match source {
             AppSource::Rust(root) => view.load(App::Rust(root)),
             AppSource::Bundle(bundle) => view.load(App::Js(bundle)),

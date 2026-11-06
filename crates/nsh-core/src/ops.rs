@@ -255,6 +255,7 @@ events! {
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
+    WindowClosePress = "onWindowClosePress": "The user tried to close the main window (desktop root only). Its close-on-press flag decides whether it closes.",
 
 }
 

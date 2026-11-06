@@ -801,6 +801,8 @@ pub enum DesktopCommand {
     ToggleMaximize,
     /// Enters or leaves full screen.
     ToggleFullScreen,
+    /// Whether a user close action closes the desktop main window (true by default).
+    SetCloseOnPress(bool),
     /// Moves and sizes the window (screen coordinates, points; a field
     /// left out keeps its value).
     SetFrame(WindowFrame),

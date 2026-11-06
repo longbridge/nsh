@@ -64,6 +64,7 @@ mod transition;
 mod tray;
 mod view;
 mod window;
+mod window_close;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

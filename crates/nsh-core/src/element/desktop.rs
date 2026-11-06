@@ -48,6 +48,63 @@ use crate::{
     platform::Os,
 };
 
+/// Whether a user's close action closes the desktop main window (true
+/// by default). An explicit [`close_window`] bypasses this flag.
+pub fn set_close_on_press(close: bool) {
+    super::desktop_command(DesktopCommand::SetCloseOnPress(close));
+}
+
+/// Observes the user's close action on the desktop main window while the
+/// current owner lives (TS: `Window.on("closePress", f)`). The native policy
+/// set by [`set_close_on_press`] decides whether the window closes; the
+/// listener does not veto it. An explicit [`close_window`] does not notify.
+pub fn on_close_press(f: impl Fn() + 'static) {
+    let owner = Owner::current();
+    let listeners = super::ambient::executor().close_press.clone();
+    let id = listeners.borrow_mut().add(Rc::new(move || owner.run(&f)));
+    let listeners = Rc::downgrade(&listeners);
+    cleanup(move || {
+        if let Some(listeners) = listeners.upgrade() {
+            let removed = listeners.borrow_mut().remove(id);
+            // A captured value may itself remove another listener.
+            drop(removed);
+        }
+    });
+}
+
+type ClosePressHandler = Rc<dyn Fn()>;
+
+/// The Rust listeners of the main window's close action.
+#[derive(Default)]
+pub(crate) struct ClosePressListeners {
+    next: u64,
+    list: Vec<(u64, ClosePressHandler)>,
+}
+
+impl ClosePressListeners {
+    fn add(&mut self, handler: ClosePressHandler) -> u64 {
+        self.next += 1;
+        self.list.push((self.next, handler));
+        self.next
+    }
+
+    fn remove(&mut self, id: u64) -> Option<ClosePressHandler> {
+        let i = self.list.iter().position(|(key, _)| *key == id)?;
+        Some(self.list.remove(i).1)
+    }
+
+    pub(crate) fn ids(&self) -> Vec<u64> {
+        self.list.iter().map(|(id, _)| *id).collect()
+    }
+
+    pub(crate) fn handler(&self, id: u64) -> Option<ClosePressHandler> {
+        self.list
+            .iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, f)| f.clone())
+    }
+}
+
 /// Hides the system title text so the app can draw its own title bar, or
 /// restores the system bar. `height` is the custom bar's height in points:
 /// native window controls are centered in it. Positive finite heights are
@@ -174,7 +231,8 @@ pub fn order_front() {
     super::desktop_command(DesktopCommand::OrderFront);
 }
 
-/// Closes the app's window using the platform's normal close behavior.
+/// Closes the app's window. On Windows, explicitly closes the main window
+/// without applying close-on-press policy or reporting another close press.
 /// The embedding host decides whether closing the last window exits.
 /// On platforms without desktop windows this has no effect.
 pub fn close_window() {

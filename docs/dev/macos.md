@@ -25,6 +25,12 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 ## Architecture
 
+The standalone delegate's `windowShouldClose:` reports the shared `WindowClosePress` event and samples
+`Window.setCloseOnPress` (`window_close.rs`). An engine acknowledgment or a bounded main-queue deadline completes
+an allowed close; a false policy keeps the window open. Reload invalidates queued completions. Closing retains
+`keep_alive_on_close`'s hide behavior; explicit `Window.close()` bypasses the app's flag and `Application.quit()`
+ends the standalone run. Embedded hosts retain their own delegates and closing policy.
+
 Web view downloads (`native.rs`) are opt-in through `onDownload`. Response policy uses WebKit's MIME support
 flag when it does not select a download, preserving the default cancellation of unshowable types. A response
 converted into a download suppresses only its own `WebKitErrorDomain` 102 navigation failure. Downloads are

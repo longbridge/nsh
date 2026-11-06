@@ -141,6 +141,8 @@ pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
 /// One engine and its views.
 pub(crate) struct Surface {
+    /// The main window's native close policy.
+    pub(crate) window_close: crate::window_close::State,
     key: u64,
     /// The root view (node [`ROOT_ID`]): fills the window.
     pub(crate) root: NshView,
@@ -319,6 +321,7 @@ impl Surface {
             windows: RefCell::default(),
             input_root: RefCell::default(),
             chrome: Default::default(),
+            window_close: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -462,6 +465,7 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        self.window_close.reset(self.hwnd());
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();

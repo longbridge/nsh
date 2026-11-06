@@ -268,6 +268,7 @@ pub(crate) struct Surface {
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    pub(crate) window_close: crate::window_close::State,
     /// The window observed for its bounds ([`crate::window_state`]).
     pub(crate) window: crate::window_state::Watch,
     /// Videos, web views and registered native components.
@@ -355,6 +356,7 @@ impl Surface {
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            window_close: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
         });
@@ -434,6 +436,7 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        self.window_close.reset();
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();

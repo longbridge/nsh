@@ -59,6 +59,7 @@ mod text;
 mod text_input;
 mod transition;
 mod view;
+mod window_close;
 
 // Windows of GPUI's test platform, which `shot` turns on.
 #[cfg(all(test, feature = "shot"))]

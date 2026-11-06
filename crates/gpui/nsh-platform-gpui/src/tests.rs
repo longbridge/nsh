@@ -197,6 +197,8 @@ fn windows(cx: &mut TestAppContext) {
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
     an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx);
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
+    user_close_notifies_and_explicit_close_bypasses_the_policy(cx);
+    a_busy_js_engine_cannot_block_default_window_close(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
@@ -1071,6 +1073,12 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
         view.on_close_request(move |request, _, _| log.borrow_mut().push(request))
     });
     app_height(&view, cx);
+    view.update(cx, |view, _| {
+        crate::chrome::command(
+            view.surface(),
+            &nsh_core::desktop::DesktopCommand::SetCloseOnPress(false),
+        );
+    });
     let primary = if cfg!(target_os = "macos") {
         "cmd"
     } else {
@@ -1101,6 +1109,85 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
     let height = app_height(&view, cx);
     cx.simulate_keystrokes(&format!("shift-{primary}-n"));
     wait_for(&view, cx, &format!("h {height} new"));
+}
+
+fn user_close_notifies_and_explicit_close_bypasses_the_policy(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal } from "nsh";
+        import { Input } from "nsh/base";
+        import { Menu, Window } from "nsh/desktop";
+        function App() {
+            const count = signal(0);
+            Window.setCloseOnPress(false);
+            Window.on("closePress", () => count.set(count() + 1));
+            Menu.setApplicationMenu([{ label: "Window", submenu: [
+                { label: "Close", role: "close", shortcut: "mod+shift+w" },
+            ] }]);
+            return <Input autoFocus value={`close:${count()}`} onSubmit={() => Window.close()} />;
+        }
+        mount(App);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (view, cx) = owned_view(cx, code, |_| {});
+    wait_for(&view, cx, "close:0");
+    assert!(!cx.simulate_close());
+    wait_for(&view, cx, "close:1");
+    let primary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    cx.simulate_keystrokes(&format!("{primary}-w"));
+    wait_for(&view, cx, "close:2");
+    cx.simulate_keystrokes(&format!("shift-{primary}-w"));
+    wait_for(&view, cx, "close:3");
+    let handle = cx.update(|window, _| window.window_handle());
+    cx.simulate_keystrokes("enter");
+    wait_until_window(cx, "explicit close bypasses the false policy", |cx| {
+        !cx.windows().contains(&handle)
+    });
+}
+
+fn a_busy_js_engine_cannot_block_default_window_close(cx: &mut TestAppContext) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount } from "nsh";
+        import { Input } from "nsh/base";
+        setTimeout(() => { while (true) {} }, 100);
+        mount(() => <Input autoFocus value="ready" />);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (view, cx) = owned_view(cx, code, |view| {
+        view.set_limits(nsh_engine::Limits::standalone())
+    });
+    wait_for(&view, cx, "ready");
+    std::thread::sleep(Duration::from_millis(200));
+    let acknowledged = Arc::new(AtomicBool::new(false));
+    let reply = acknowledged.clone();
+    view.read_with(cx, |view, _| {
+        view.surface().control(|c| {
+            c.flush(move |_| reply.store(true, Ordering::SeqCst));
+        })
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(!acknowledged.load(Ordering::SeqCst));
+    let handle = cx.update(|window, _| window.window_handle());
+    assert!(!cx.simulate_close());
+    cx.executor().advance_clock(Duration::from_millis(300));
+    wait_until_window(cx, "native deadline closes busy JS", |cx| {
+        !cx.windows().contains(&handle)
+    });
 }
 
 /// The app's height under an auto-hidden menu bar (and ` new` once File

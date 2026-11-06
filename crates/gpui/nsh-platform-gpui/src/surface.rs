@@ -244,6 +244,7 @@ pub(crate) struct Surface {
     placed: RefCell<Vec<Rc<dyn Hosted>>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    pub(crate) window_close: crate::window_close::State,
     /// Called after the surface is resized (development overlays).
     pub(crate) on_resized: RefCell<Vec<ResizeHandler>>,
     /// Keys the window takes before anything focused sees them (the
@@ -327,6 +328,7 @@ impl Surface {
             events_sent: Cell::new(0),
             events_handled: Cell::new(0),
             chrome: Default::default(),
+            window_close: Default::default(),
             host_theme: RefCell::new(None),
             transparent: Cell::new(false),
             host_dark: Cell::new(None),
@@ -436,6 +438,7 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        self.window_close.reset();
         self.generation.set(self.generation.get() + 1);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();

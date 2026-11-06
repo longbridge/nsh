@@ -207,6 +207,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => {
             crate::app::quit();
         }
+        DesktopCommand::SetCloseOnPress(close) => surface.window_close.close_on_press.set(*close),
         DesktopCommand::Hide => {
             if let Some(window) = window(surface) {
                 window.set_visible(false);
@@ -249,6 +250,14 @@ fn toggle_fullscreen(surface: &Surface) {
 /// Closes the window: not while the surface applies a batch (closing
 /// destroys the window, whose handler stops the surface).
 fn close(surface: &Surface) {
+    if crate::window_close::close_explicitly(surface) {
+        return;
+    }
+    request_close(surface);
+}
+
+/// A user's Close action follows the window's close-request signal.
+fn request_close(surface: &Surface) {
     if let Some(window) = window(surface) {
         glib::idle_add_local_once(move || window.close());
     }
@@ -850,7 +859,8 @@ pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     match role {
         Some(MenuRole::Quit) if crate::app::quit() => {}
         // A view embedded in another app closes its window, as before.
-        Some(MenuRole::Quit | MenuRole::Close) => close(surface),
+        Some(MenuRole::Quit) => close(surface),
+        Some(MenuRole::Close) => request_close(surface),
         Some(MenuRole::Minimize) => {
             if let Some(window) = window(surface) {
                 window.minimize();

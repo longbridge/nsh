@@ -46,6 +46,12 @@ works and its runner only needs GTK.
 
 ## Architecture
 
+The standalone main window's GTK `close-request` signal reports `WindowClosePress` and samples
+`Window.setCloseOnPress` (`window_close.rs`). The engine acknowledges on the GTK main loop; a bounded GLib timer
+completes an allowed close when the engine is busy. A false policy keeps the window open, and reload invalidates
+pending completions. Explicit `Window.close()` and `Application.quit()` destroy the owned windows without
+re-entering the user-close signal. Embedded windows keep their host's signal handlers.
+
 - **One widget per node.** Each node is an `NshView` (`view.rs`, a `gtk::Widget` subclass). The core lays everything
   out, so a view never measures itself: its parent places it in `size_allocate` at the core's frame (origin, scroll
   offset, sticky shift and transform in one `gsk::Transform`, the offset at whole points as GTK places its own widgets);
