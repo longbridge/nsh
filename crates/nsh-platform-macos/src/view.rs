@@ -847,6 +847,12 @@ define_class!(
             if let Some(surface) = self.surface() {
                 self.install_tracking();
                 crate::system::window_changed(&surface);
+                // What was mounted before the view was in a window was put
+                // off: a host app may insert the view after its app's first
+                // batches, and an idle surface has no frame to revisit at.
+                if self.window().is_some() {
+                    surface.revisit();
+                }
             }
         }
 
@@ -864,6 +870,12 @@ define_class!(
             crate::sight::moved();
             // SAFETY: NSView's own handling.
             unsafe { msg_send![super(self), viewDidUnhide] }
+            // What changed while it was hidden (a host app hides a view
+            // scrolled out of sight) was put off; an idle surface has no
+            // frame to revisit at.
+            if let Some(surface) = self.surface() {
+                surface.revisit();
+            }
         }
 
         #[unsafe(method(viewDidChangeEffectiveAppearance))]
