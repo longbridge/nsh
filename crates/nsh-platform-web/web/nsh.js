@@ -1918,6 +1918,16 @@ class Player {
     box.replaceChildren(copy, message);
   }
 
+  /** Loads `img` from `src`, the address of `uri`: an app's asset from
+   * another origin (a packaged site's `--asset-url`) as a CORS image, so a
+   * canvas and a transition's snapshot may still draw it. */
+  setImageSource(img, uri, src) {
+    const asset = uri?.startsWith("asset:/") && new URL(src, location.href).origin !== location.origin;
+    if (asset) img.crossOrigin = "anonymous";
+    else img.removeAttribute("crossorigin");
+    img.src = src;
+  }
+
   asset(uri) {
     if (!uri) return uri;
     if (uri.startsWith("asset:/")) {
@@ -2737,7 +2747,7 @@ class Player {
     if (el._ph) {
       el._ph.className = el._imgClass + (el._ph.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
       if (ph) {
-        if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
+        if (el._ph.getAttribute("src") !== ph) this.setImageSource(el._ph, placeholder, ph);
       } else {
         el._ph.remove();
         el._ph = null;
@@ -2757,7 +2767,7 @@ class Player {
     // Shown when it loaded: faded in over the placeholder, or at once.
     img.style.transition = "";
     img.style.opacity = fade > 0 ? "0" : "";
-    img.src = src;
+    this.setImageSource(img, uri, src);
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
@@ -4552,7 +4562,7 @@ class Player {
         entry.ready = true;
         for (const w of entry.waiting) this.drawSoon(w);
       };
-      img.src = src;
+      this.setImageSource(img, uri, src);
       this.images.set(src, entry);
     }
     if (!entry.ready) entry.waiting.add(el);
@@ -6374,7 +6384,7 @@ class Player {
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
     img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ error: `failed to load ${uri}` });
-    img.src = this.asset(uri);
+    this.setImageSource(img, uri, this.asset(uri));
   }
 
   // Network -------------------------------------------------------------

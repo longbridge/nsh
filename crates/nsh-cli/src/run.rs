@@ -508,6 +508,7 @@ fn package_for_run(
         abis,
         format: crate::android::Format::Apk,
         run: false,
+        asset_url: None,
     })
 }
 
