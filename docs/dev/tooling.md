@@ -557,6 +557,10 @@ for a Command key the window's own key equivalents, and for any key the main men
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
 key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
 the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+Presses go to the app's views as in the key window: AppKit gives a left press in a window that is not key only to a
+view that accepts the first mouse, and a hidden title bar's toolbar view, over the content's top, does not, so the
+host's window (`NshWindow`) hands a press the title bar would only take to make the window key to the content's view
+under it, with its drags and release.
 An item is not checked for being enabled (AppKit validates against the key window's responders:
 with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
 checks of this are `crates/nsh-platform-macos/tests/host`
