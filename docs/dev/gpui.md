@@ -114,11 +114,7 @@ import -window root -display :170 whole.png        # the display, if the window'
   `xvfb-run -a cargo test --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-platform-gpui --features dev screenshot_keeps_obscured_pixels_and_follows_resize -- --ignored`.
 - GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
 
-The gallery below is unchanged by a fully covering window: left is `noop visual shot`, middle is the covered display,
-and right is `app.screenshot` while covered (byte-identical to its unobscured capture). The real-window crop differs
-only at the X server cursor, which is not part of the app screenshot.
-
-![Real window, covered display, and the captured gallery](images/gpui-linux-capture.png)
+A fully covering window does not change the gallery capture by a fully covering window: `app.screenshot` while covered is byte-identical to its unobscured capture.
 
 ## Architecture
 
