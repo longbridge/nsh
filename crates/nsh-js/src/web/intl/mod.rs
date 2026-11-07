@@ -30,8 +30,8 @@
 //! Not there: `Collator`, `PluralRules`, `RelativeTimeFormat`,
 //! `ListFormat`, `DisplayNames`, `Segmenter`, `Intl.Locale`; time zones
 //! other than the device's, UTC and fixed offsets (no zone database);
-//! calendars other than the Gregorian; a numbering system the locale's own
-//! (`fa-u-nu-latn` still writes `arabext`); `currencySign:
+//! calendars other than the Gregorian; a numbering system other than the
+//! locale's own (`fa-u-nu-latn` still writes `arabext`); `currencySign:
 //! "accounting"` (written as `standard`) and currency names (written as
 //! codes); unit names are English everywhere. The constructors need `new`.
 
