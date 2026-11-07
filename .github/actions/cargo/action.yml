@@ -1,0 +1,64 @@
+name: Cargo
+description: >
+  Installs huacnlee/cargo (AGENTS.md "Commands") in place of rustup's cargo
+  and restores its dependency builds. Main's runs save them, pull requests
+  only restore them. Runs after the Rust toolchain is set up.
+
+inputs:
+  cache:
+    description: >
+      The cache's name, one per job (and matrix entry) that builds a different
+      set of dependencies, so jobs never overwrite each other's caches.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Pinned, as every action is; raise it with the fork's releases.
+    - name: Install huacnlee/cargo
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh -s -- --version 0.102.0-9
+        cargo -V | grep -q huacnlee/cargo
+    - name: Install huacnlee/cargo
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        & ([scriptblock]::Create((irm https://huacnlee.github.io/cargo/install.ps1))) -Version 0.102.0-9
+        if (-not ((cargo -V) -match 'huacnlee/cargo')) { throw 'cargo is not huacnlee/cargo' }
+
+    # The dependency builds are rustc's: a new compiler starts a new cache.
+    - name: Name the cache
+      id: key
+      shell: bash
+      run: |
+        echo "cargo -V: $(cargo -V)"
+        rustc=$(rustc -vV | sha256sum 2>/dev/null || rustc -vV | shasum -a 256)
+        echo "prefix=cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache }}-${rustc:0:12}-" >> "$GITHUB_OUTPUT"
+
+    # The registry's index and downloaded crates, and the fork's builds of
+    # them (`~/.cargo/targets/shared-deps`, shared by every workspace on the
+    # machine). The workspace's own crates are built on each run.
+    - name: Cache dependencies
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.cargo/targets/shared-deps/
+        key: ${{ steps.key.outputs.prefix }}${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+    - name: Restore dependencies
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.cargo/targets/shared-deps/
+        key: ${{ steps.key.outputs.prefix }}${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: ${{ steps.key.outputs.prefix }}

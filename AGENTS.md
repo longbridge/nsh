@@ -616,10 +616,11 @@ the pull request's number, or the ref for pushes and queue runs (`github.event.p
 a merged pull request's `closed` event carries the base branch as its ref, so a group of the ref alone would cancel
 `main`'s run of the merge commit. Groups cancel in progress (Website's pushes to `main` queue instead: each one
 deploys).
-CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
-restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
-release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
-`files` in `paths.py`.
+CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` installs a pinned release after the toolchain
+and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
+`main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
+file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
 
 ## Parallel agents
 
