@@ -234,6 +234,9 @@ pub(crate) fn report(surface: &Surface, target: Target) {
 /// The main window changed: the environment gets its state. Its title
 /// bar's controls go back where the app put them.
 pub(crate) fn changed(surface: &Surface) {
+    // Full screen, another screen or a resize: AppKit laid out the title
+    // bar again, and its area may have changed.
+    crate::chrome::update_area(surface);
     let state = read(surface);
     crate::window::main_changed(surface, state.as_ref());
     let mut env = surface.environment.get();
