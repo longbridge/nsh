@@ -172,6 +172,12 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
   field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`, select
   all selects the field's text;
 - a scroll is smooth wheel events of at most 20 points, a frame apart;
+- the agent's pointer is the test window's only one (as on macOS): while a test model is set (`Surface::testing`),
+  the root's capture-phase controller stops every real pointer event (motion, buttons, crossings, wheels, touchpad
+  gestures, touches: `input::real_pointer`) before nsh or a hosted widget sees it, and the motion controller's leave is
+  ignored, so the user's mouse moving over the window or resting on it never changes what a test hovers or presses;
+  `input::simulate` records where the agent's pointer is (`last_pointer`), and the keyboard scrolls the view under it,
+  not under the real one. Keys still reach the app;
 - back is Escape (`navigation::key_pressed`), twice when a field has the focus (the first only leaves it);
 - a dialog's button is the `GtkButton` with that label, clicked; closing it without one is its dismissal (a click
   outside the card);
@@ -187,6 +193,10 @@ xvfb-run -a ./target/debug/nsh test examples/gallery --target linux
 echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' \
   | xvfb-run -a ./target/debug/nsh test examples/gallery/App.tsx --target linux   # steps from stdin
 ```
+
+To check that the real pointer stays out of a test, sweep it over the virtual screen with XTest while a test waits
+with a menu of the menu bar open (`role:button[Menu]`, `File`, `app.wait(15000)`, then expect `New document` and no
+`Undo`): it passes; before, the sweep opened other menus or kept the demo from opening.
 
 The agent's keys are the field's signals rather than key events (GTK 4 cannot make one). For real key events
 (modifiers, input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a

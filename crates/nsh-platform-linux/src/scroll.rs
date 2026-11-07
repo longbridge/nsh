@@ -598,8 +598,14 @@ fn key_pressed(surface: &Rc<Surface>, key: gdk::Key, modifiers: gdk::ModifierTyp
     let target = from_focus
         .and_then(|v| key_scroll_view(&v, horizontal, dx, dy))
         .or_else(|| {
-            let (x, y) = pointer(root)
-                .unwrap_or_else(|| (root.width() as f32 / 2.0, root.height() as f32 / 2.0));
+            // Under a test, the agent's pointer, not the user's.
+            let at = if surface.testing() {
+                crate::input::last_pointer(surface)
+            } else {
+                pointer(root)
+            };
+            let (x, y) =
+                at.unwrap_or_else(|| (root.width() as f32 / 2.0, root.height() as f32 / 2.0));
             let widget = root.pick(x as f64, y as f64, gtk::PickFlags::DEFAULT)?;
             key_scroll_view(&nearest_view(&widget)?, horizontal, dx, dy)
         });
