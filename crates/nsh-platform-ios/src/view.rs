@@ -221,11 +221,13 @@ impl AppView {
     /// `fontFamily` without bundling the file. A font registered before a
     /// load is in that app's first frame; one registered while an app runs
     /// is used from the next layout. Fails, registering nothing, when
-    /// `data` is not a font.
+    /// `data` is not a font; a file registered again is kept once.
     pub fn register_font(&self, data: &[u8]) -> Result<(), String> {
-        nsh_core::font_data(data).map(|_| ())?;
+        nsh_core::font_family(data)?;
         let mut state = self.inner.state.borrow_mut();
-        state.fonts.push(data.to_vec());
+        if !nsh_core::keep_font(&mut state.fonts, data) {
+            return Ok(());
+        }
         if let Some(surface) = &state.surface {
             surface.add_font(data.to_vec());
         }

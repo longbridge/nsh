@@ -139,8 +139,11 @@ impl Host {
     /// running app and every app loaded later. The family name is the one
     /// in the file.
     fn register_font(&self, data: Vec<u8>) -> Result<(), String> {
-        nsh_core::font_data(&data).map(|_| ())?;
-        self.fonts.lock().expect("fonts").push(data.clone());
+        nsh_core::font_family(&data)?;
+        let mut fonts = self.fonts.lock().expect("fonts");
+        if !nsh_core::keep_font(&mut fonts, &data) {
+            return Ok(());
+        }
         if let Some(control) = self.control() {
             control.register_font(data);
         }
