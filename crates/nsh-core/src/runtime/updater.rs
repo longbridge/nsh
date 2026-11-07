@@ -5,6 +5,12 @@
 //!
 //! Needs no capability: the developer named the source in `nsh.json`, and a
 //! module running inside another app has no installation to replace.
+//!
+//! Packages (`checkForPackage`, `downloadPackage`, `restartToPackage`,
+//! `runningPackage`): a newer build of the app's code, signed and verified
+//! against the roots in `nsh.json`, which the app's launcher runs at its
+//! next start (`nsh_engine::updates`). They update the code on every
+//! platform with a launcher that runs them, iOS and Android included.
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{
@@ -29,6 +35,41 @@ pub trait UpdaterHost: Send + Sync + 'static {
     /// Gets `url`, following redirects, handing each piece of the body and
     /// the total size if known to `sink`, until it fails or the body ends.
     fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String>;
+
+    /// The signed package this run's code came from; `None` (the default):
+    /// the bundle the app shipped with.
+    fn running_package(&self) -> Option<PackageVersion> {
+        None
+    }
+
+    /// Verifies the package downloaded to `file` as the app's launcher
+    /// will before running it: signed by a release key one of `roots`
+    /// certifies, for app `app_id`, its build newer than `newer_than` and
+    /// than the builds accepted in the trust state under `updates` (the
+    /// app's updates directory), for this runtime. Records nothing. The
+    /// default refuses: the host runs no packages.
+    fn verify_package(
+        &self,
+        file: &std::path::Path,
+        updates: &std::path::Path,
+        app_id: &str,
+        roots: &[String],
+        newer_than: u64,
+    ) -> Result<PackageVersion, String> {
+        let _ = (file, updates, app_id, roots, newer_than);
+        Err("this host runs no packages".into())
+    }
+}
+
+/// A signed package of the app's code: its version and build
+/// ([`UpdaterHost::running_package`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PackageVersion {
+    /// Its version string (`nsh.json` `"version"`).
+    pub version: String,
+    /// Its build number.
+    pub build: u64,
 }
 
 /// Bytes downloaded, as `downloadUpdate`'s callback gets them.
@@ -56,6 +97,30 @@ pub(crate) struct AppUpdate {
     /// on the desktop, installed where the user can write. False on iOS and
     /// Android, and under a directory only the system writes.
     pub(crate) can_install: bool,
+}
+
+/// A newer build of the app's code, as a signed package.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub(crate) struct PackageUpdate {
+    /// Its version (`nsh.json` `"version"`).
+    pub(crate) version: String,
+    /// Its build number, newer than the running one.
+    pub(crate) build: f64,
+    /// What changed, as the manifest says it.
+    pub(crate) notes: Option<String>,
+    /// Its size in bytes, when the manifest says it.
+    pub(crate) size: Option<f64>,
+}
+
+/// The signed package this run's code came from.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub(crate) struct RunningPackage {
+    /// Its version (`nsh.json` `"version"`).
+    pub(crate) version: String,
+    /// Its build number.
+    pub(crate) build: f64,
 }
 
 /// Checking for a newer version of the app and installing it.
@@ -93,6 +158,58 @@ impl Updater {
     pub(crate) fn install_and_restart(sys: System) -> Later<()> {
         Later::new(native::install(sys))
     }
+
+    /// Asks the source in `nsh.json`'s `"updater"` for a newer build of the
+    /// app's code: a signed package newer than the running build (the
+    /// running package's, else the one the app shipped with) that this
+    /// runtime runs. Resolves with it, or `null` when there is none, the
+    /// app trusts no package roots (`"updater": { "packages": { "roots" } }`)
+    /// or runs where apps do not update (the web, a development run).
+    /// Rejects as `checkForUpdate` does.
+    pub(crate) fn check_for_package(sys: System) -> Later<Option<PackageUpdate>> {
+        Later::new(native::check_package(sys))
+    }
+
+    /// Downloads the package the last `checkForPackage` found, checks it
+    /// against the manifest and verifies it as the app's next start will:
+    /// signed by a release key a trusted root certifies, for this app, newer
+    /// than the running build, for this runtime. It then runs from the
+    /// app's next start (`restartToPackage`). Calls `onProgress` as bytes
+    /// arrive. Rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the
+    /// check found none, and when the download fails or is refused, which
+    /// leaves nothing behind.
+    pub(crate) fn download_package(
+        #[args(progress)] on_progress: Option<Callback<UpdateProgress>>,
+        sys: System,
+    ) -> Later<()> {
+        Later::new(native::download_package(sys, on_progress))
+    }
+
+    /// Restarts the app into the downloaded package as
+    /// `Application.restart()` does: this run quits and the app starts
+    /// again, so the promise settles only on failure. Rejects when nothing
+    /// was downloaded, and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where
+    /// an app cannot restart itself (iOS, Android): the package runs from
+    /// the app's next start there.
+    pub(crate) fn restart_to_package(sys: System) -> Later<()> {
+        Later::new(native::restart_to_package(sys))
+    }
+
+    /// The signed package this run's code came from: its version and build;
+    /// `null` for the code the app shipped with.
+    pub(crate) fn running_package(sys: System) -> Option<RunningPackage> {
+        let running = sys.updater.as_ref()?.running_package()?;
+        Some(RunningPackage {
+            version: running.version,
+            build: running.build as f64,
+        })
+    }
+}
+
+/// Why no package can be downloaded.
+fn no_package() -> JsError {
+    JsError::Error("no package to download: checkForPackage found none".into())
+        .with_code(codes::UNAVAILABLE)
 }
 
 /// Why nothing can be downloaded or installed.
@@ -111,9 +228,26 @@ mod native {
 
     use super::*;
 
-    /// What the VM's last check found and its download left.
+    /// What the VM's last check found and its download left, whether an
+    /// operation is in progress, and the package the last package check
+    /// found.
     #[derive(Default)]
-    struct Found(RefCell<Option<Rc<Pending>>>, Cell<bool>);
+    struct Found(
+        RefCell<Option<Rc<Pending>>>,
+        Cell<bool>,
+        RefCell<Option<Arc<PendingPackage>>>,
+    );
+
+    /// A package the last `checkForPackage` found.
+    struct PendingPackage {
+        host: Arc<dyn UpdaterHost>,
+        available: nsh_updater::AvailablePackage,
+        /// The app's updates directory.
+        dir: PathBuf,
+        app_id: String,
+        roots: Vec<String>,
+        running_build: u64,
+    }
 
     struct Operation<'a>(&'a Cell<bool>);
 
@@ -325,6 +459,164 @@ mod native {
         Ok(())
     }
 
+    /// The app's updates directory, as `nsh_engine::updates` has it.
+    const UPDATES: &str = "updates";
+    /// The downloaded package the app's next start runs.
+    const NEXT: &str = "next.nshpkg";
+
+    pub(super) async fn check_package(sys: System) -> Result<Option<PackageUpdate>, JsError> {
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
+        let (Some(host), Some(data_dir)) = (sys.updater.clone(), sys.data_dir.clone()) else {
+            *found.2.borrow_mut() = None;
+            return Ok(None);
+        };
+        let worker = host.clone();
+        let checked = blocking(move || {
+            let Some(bytes) = worker.config() else {
+                return Ok(None);
+            };
+            let config = Config::parse(&bytes).map_err(|e| e.to_string())?;
+            if config.package_roots().is_empty() {
+                return Ok(None);
+            }
+            let running_build = worker
+                .running_package()
+                .map(|running| running.build)
+                .unwrap_or(config.build.unwrap_or(1));
+            let manifest = get_all(&*worker, &config.manifest_url())?;
+            let signature = match config.signature_url() {
+                Some(url) => Some(get_all(&*worker, &url)?),
+                None => None,
+            };
+            let available = config
+                .check_package(
+                    &manifest,
+                    signature.as_deref(),
+                    running_build,
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(available.map(|available| (config, available, running_build)))
+        })
+        .await?;
+        let Some((config, available, running_build)) = checked else {
+            *found.2.borrow_mut() = None;
+            return Ok(None);
+        };
+        let update = PackageUpdate {
+            version: available.version.clone(),
+            build: available.build as f64,
+            notes: available.notes.clone(),
+            size: available.size.map(|size| size as f64),
+        };
+        *found.2.borrow_mut() = Some(Arc::new(PendingPackage {
+            host,
+            available,
+            dir: data_dir.join(UPDATES),
+            roots: config.package_roots().to_vec(),
+            app_id: config.id,
+            running_build,
+        }));
+        Ok(Some(update))
+    }
+
+    pub(super) async fn download_package(
+        sys: System,
+        on_progress: Option<Callback<UpdateProgress>>,
+    ) -> Result<(), JsError> {
+        use std::io::Write as _;
+
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
+        let pending = found.2.borrow().clone().ok_or_else(no_package)?;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut work = std::pin::pin!(blocking(move || {
+            let pending = &*pending;
+            let dir = &pending.dir;
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            let part = dir.join(format!("{NEXT}.part"));
+            // A download that stopped half way (the app quit) starts again.
+            let _ = std::fs::remove_file(&part);
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&part)
+                .map_err(|e| e.to_string())?;
+            let available = &pending.available;
+            let mut check = Download::new(&available.sha256, available.size);
+            let result = pending
+                .host
+                .get(&available.url, &mut |chunk, total| {
+                    let received = check.update(chunk).map_err(|e| e.to_string())?;
+                    file.write_all(chunk).map_err(|e| e.to_string())?;
+                    let _ = tx.send((received, available.size.or(total)));
+                    Ok(())
+                })
+                .and_then(|()| file.sync_all().map_err(|e| e.to_string()))
+                .and_then(|()| check.finish().map_err(|e| e.to_string()))
+                .and_then(|()| {
+                    pending.host.verify_package(
+                        &part,
+                        dir,
+                        &pending.app_id,
+                        &pending.roots,
+                        pending.running_build,
+                    )
+                })
+                .and_then(|_| std::fs::rename(&part, dir.join(NEXT)).map_err(|e| e.to_string()));
+            if let Err(e) = result {
+                let _ = std::fs::remove_file(&part);
+                return Err(format!("package refused: {e}"));
+            }
+            Ok(())
+        }));
+        loop {
+            tokio::select! {
+                result = &mut work => break result,
+                Some((received, total)) = rx.recv() => {
+                    if let Some(callback) = &on_progress {
+                        callback.post(UpdateProgress {
+                            received: received as f64,
+                            total: total.map(|t: u64| t as f64),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) async fn restart_to_package(sys: System) -> Result<(), JsError> {
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
+        let downloaded = sys
+            .data_dir
+            .as_ref()
+            .is_some_and(|dir| dir.join(UPDATES).join(NEXT).exists());
+        if !downloaded {
+            return Err(JsError::Error(
+                "nothing is downloaded: call downloadPackage first".into(),
+            ));
+        }
+        restart_into_package().await
+    }
+
+    /// As `Application.restart()`: the app's launcher runs the package
+    /// when it starts again.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    async fn restart_into_package() -> Result<(), JsError> {
+        crate::element::desktop::restart();
+        std::future::pending().await
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    async fn restart_into_package() -> Result<(), JsError> {
+        Err(JsError::Error(
+            "an app cannot restart itself here: the package runs from the app's next start".into(),
+        )
+        .with_code(codes::UNAVAILABLE))
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     pub(super) async fn install(sys: System) -> Result<(), JsError> {
         let found = sys.locals.get::<Found>();
@@ -387,5 +679,20 @@ mod native {
 
     pub(super) async fn install(_: System) -> Result<(), JsError> {
         Err(unavailable())
+    }
+
+    pub(super) async fn check_package(_: System) -> Result<Option<PackageUpdate>, JsError> {
+        Ok(None)
+    }
+
+    pub(super) async fn download_package(
+        _: System,
+        _: Option<Callback<UpdateProgress>>,
+    ) -> Result<(), JsError> {
+        Err(no_package())
+    }
+
+    pub(super) async fn restart_to_package(_: System) -> Result<(), JsError> {
+        Err(no_package())
     }
 }
