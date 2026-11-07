@@ -382,6 +382,44 @@ pub struct Capabilities {
     /// The URLs the app may open outside it (`openUrl` of `nsh/device`);
     /// `None`: none.
     pub open_url: Option<OpenUrlGrant>,
+    /// The windows the app may open and what they may do (`nsh/desktop`'s
+    /// `Window`); `None`: none besides its main one.
+    pub windows: Option<WindowsGrant>,
+}
+
+/// The windows an app may open (`capabilities.windows`). Overlays,
+/// click-through windows and capture protection, which can pass for the
+/// system's UI over other apps, are granted only when declared.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct WindowsGrant {
+    /// The kinds it may open; empty: every kind but `overlay`, which needs
+    /// [`Self::overlay`] as well.
+    pub kinds: Vec<crate::desktop::WindowKind>,
+    /// The levels its windows may float at; empty: every level.
+    pub levels: Vec<crate::desktop::WindowLevel>,
+    /// How many windows it may have open at once besides the main one;
+    /// `None`: any number.
+    pub max: Option<u32>,
+    /// Overlays and click-through windows (`pointerEvents: "none"`).
+    pub overlay: bool,
+    /// Windows left out of screenshots and screen sharing
+    /// (`contentProtected`).
+    pub content_protected: bool,
+}
+
+impl WindowsGrant {
+    fn allows_kind(&self, kind: crate::desktop::WindowKind) -> bool {
+        use crate::desktop::WindowKind;
+        if kind == WindowKind::Overlay && !self.overlay {
+            return false;
+        }
+        self.kinds.is_empty() || self.kinds.contains(&kind)
+    }
+
+    fn allows_level(&self, level: crate::desktop::WindowLevel) -> bool {
+        self.levels.is_empty() || self.levels.contains(&level)
+    }
 }
 
 /// Which URLs an app may open outside it (`capabilities.openUrl`).
@@ -478,6 +516,8 @@ impl Capabilities {
             notifications: true,
             audio: true,
             open_url: Some(OpenUrlGrant::default()),
+            // Every kind and level, but no overlays or capture protection.
+            windows: Some(WindowsGrant::default()),
             // The host's functions are never granted without a declaration.
             ..Self::default()
         }
@@ -529,7 +569,8 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 12] = [
+        const KNOWN: [&str; 13] = [
+            "windows",
             "network",
             "webview",
             "statusBar",
@@ -765,6 +806,27 @@ impl Capabilities {
                 }
             }
         }
+        if let Some(windows) = obj.get("windows") {
+            match windows {
+                Value::Bool(granted) => caps.windows = granted.then(WindowsGrant::default),
+                Value::Object(grant) => {
+                    if check(
+                        grant,
+                        "capabilities.windows",
+                        &["kinds", "levels", "max", "overlay", "contentProtected"],
+                        "capabilities.windows",
+                    )? {
+                        caps.windows = Some(windows_grant(grant)?);
+                    }
+                }
+                _ => {
+                    return Err(
+                        "capabilities.windows must be a boolean or an object of `kinds`, `levels`, `max`, `overlay` and `contentProtected`"
+                            .into(),
+                    );
+                }
+            }
+        }
         if let Some(host) = obj.get("host") {
             caps.host = match host {
                 Value::Bool(all) => {
@@ -797,6 +859,45 @@ impl Capabilities {
 
     /// The JSON form [`Capabilities::from_json`] reads.
     pub fn to_json(&self) -> Value {
+        let mut obj = self.to_json_without_windows();
+        // Only when granted: older runtimes read what newer signers write.
+        if let (Value::Object(obj), Some(w)) = (&mut obj, &self.windows) {
+            let mut o = Map::new();
+            if !w.kinds.is_empty() {
+                o.insert(
+                    "kinds".into(),
+                    w.kinds
+                        .iter()
+                        .map(|k| window_kind_name(*k))
+                        .collect::<Vec<_>>()
+                        .into(),
+                );
+            }
+            if !w.levels.is_empty() {
+                o.insert(
+                    "levels".into(),
+                    w.levels
+                        .iter()
+                        .map(|l| window_level_name(*l))
+                        .collect::<Vec<_>>()
+                        .into(),
+                );
+            }
+            if let Some(max) = w.max {
+                o.insert("max".into(), max.into());
+            }
+            if w.overlay {
+                o.insert("overlay".into(), true.into());
+            }
+            if w.content_protected {
+                o.insert("contentProtected".into(), true.into());
+            }
+            obj.insert("windows".into(), Value::Object(o));
+        }
+        obj
+    }
+
+    fn to_json_without_windows(&self) -> Value {
         let list =
             |l: &[HostPattern]| Value::from(l.iter().map(|p| p.0.clone()).collect::<Vec<_>>());
         let mut network = Map::new();
@@ -1079,6 +1180,78 @@ fn object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, St
     value
         .as_object()
         .ok_or_else(|| format!("{what} must be an object"))
+}
+
+const WINDOW_KINDS: [(&str, crate::desktop::WindowKind); 5] = [
+    ("normal", crate::desktop::WindowKind::Normal),
+    ("dialog", crate::desktop::WindowKind::Dialog),
+    ("panel", crate::desktop::WindowKind::Panel),
+    ("popup", crate::desktop::WindowKind::Popup),
+    ("overlay", crate::desktop::WindowKind::Overlay),
+];
+
+const WINDOW_LEVELS: [(&str, crate::desktop::WindowLevel); 4] = [
+    ("normal", crate::desktop::WindowLevel::Normal),
+    ("floating", crate::desktop::WindowLevel::Floating),
+    ("aboveDock", crate::desktop::WindowLevel::AboveDock),
+    ("desktopIcon", crate::desktop::WindowLevel::DesktopIcon),
+];
+
+fn window_kind_name(kind: crate::desktop::WindowKind) -> &'static str {
+    WINDOW_KINDS
+        .iter()
+        .find(|(_, k)| *k == kind)
+        .map_or("normal", |(n, _)| n)
+}
+
+fn window_level_name(level: crate::desktop::WindowLevel) -> &'static str {
+    WINDOW_LEVELS
+        .iter()
+        .find(|(_, l)| *l == level)
+        .map_or("normal", |(n, _)| n)
+}
+
+/// `capabilities.windows` as an object.
+fn windows_grant(grant: &Map<String, Value>) -> Result<WindowsGrant, String> {
+    let mut out = WindowsGrant::default();
+    if let Some(kinds) = grant.get("kinds") {
+        for name in strings(kinds, "capabilities.windows.kinds")? {
+            let Some((_, kind)) = WINDOW_KINDS.iter().find(|(n, _)| *n == name) else {
+                return Err(format!(
+                    "capabilities.windows.kinds: unknown kind `{name}` (normal, dialog, panel, popup or overlay)"
+                ));
+            };
+            out.kinds.push(*kind);
+        }
+    }
+    if let Some(levels) = grant.get("levels") {
+        for name in strings(levels, "capabilities.windows.levels")? {
+            let Some((_, level)) = WINDOW_LEVELS.iter().find(|(n, _)| *n == name) else {
+                return Err(format!(
+                    "capabilities.windows.levels: unknown level `{name}` (normal, floating, aboveDock or desktopIcon)"
+                ));
+            };
+            out.levels.push(*level);
+        }
+    }
+    if let Some(max) = grant.get("max") {
+        out.max = Some(
+            max.as_u64()
+                .and_then(|m| u32::try_from(m).ok())
+                .ok_or("capabilities.windows.max must be a whole number")?,
+        );
+    }
+    for (key, target) in [
+        ("overlay", &mut out.overlay),
+        ("contentProtected", &mut out.content_protected),
+    ] {
+        if let Some(v) = grant.get(key) {
+            *target = v
+                .as_bool()
+                .ok_or_else(|| format!("capabilities.windows.{key} must be a boolean"))?;
+        }
+    }
+    Ok(out)
 }
 
 fn unknown_key(what: &str, key: &str, known: &[&str]) -> String {
@@ -1392,6 +1565,92 @@ impl Access {
         self.each(|c| c.webview.is_some() && c.webview_input)
     }
 
+    /// Whether the app may open a window of `kind` with `attributes` (its
+    /// own, before its kind's defaults) while `open` windows besides the
+    /// main one are open; the message of the refusal otherwise (the call
+    /// fails with `ERR_ACCESS_DENIED`, permission `windows`).
+    pub fn check_window(
+        &self,
+        kind: crate::desktop::WindowKind,
+        attributes: &crate::desktop::WindowAttributes,
+        open: usize,
+    ) -> Result<(), String> {
+        if !self.each(|c| c.windows.is_some()) {
+            return Err("windows of the app's own are not granted by capabilities.windows".into());
+        }
+        if !self.each(|c| c.windows.as_ref().is_some_and(|w| w.allows_kind(kind))) {
+            return Err(format!(
+                "a window of kind `{}` is not granted by capabilities.windows{}",
+                window_kind_name(kind),
+                if kind == crate::desktop::WindowKind::Overlay {
+                    " (overlays need `overlay: true`)"
+                } else {
+                    ""
+                }
+            ));
+        }
+        if !self.each(|c| {
+            c.windows
+                .as_ref()
+                .is_some_and(|w| w.max.is_none_or(|max| open < max as usize))
+        }) {
+            return Err("capabilities.windows.max windows are open already".into());
+        }
+        let mut own = attributes.clone();
+        // The kind's own level is granted with the kind.
+        let level = own.level.take();
+        let denied = self.deny_window_attributes(&mut own);
+        if let Some(name) = denied.first() {
+            return Err(format!(
+                "the window attribute `{name}` is not granted by capabilities.windows"
+            ));
+        }
+        if let Some(level) = level
+            && !self.each(|c| c.windows.as_ref().is_some_and(|w| w.allows_level(level)))
+        {
+            return Err(format!(
+                "the window level `{}` is not granted by capabilities.windows.levels",
+                window_level_name(level)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Leaves out of `attributes` what the app's capabilities do not grant
+    /// a window (an ungranted level, click-through without `overlay`,
+    /// capture protection without `contentProtected`) and returns their
+    /// names, for a warning. The main window needs no `windows` grant for
+    /// the rest.
+    pub fn deny_window_attributes(
+        &self,
+        attributes: &mut crate::desktop::WindowAttributes,
+    ) -> Vec<&'static str> {
+        let mut denied = Vec::new();
+        let grant = |f: &dyn Fn(&WindowsGrant) -> bool| {
+            self.each(|c| match &c.windows {
+                Some(w) => f(w),
+                // Without windows the main window keeps the safe defaults.
+                None => false,
+            })
+        };
+        if let Some(level) = attributes.level
+            && level != crate::desktop::WindowLevel::Normal
+            && !grant(&|w| w.allows_level(level))
+        {
+            attributes.level = None;
+            denied.push("level");
+        }
+        if attributes.passes_pointer() && !grant(&|w| w.overlay) {
+            attributes.pointer_events = None;
+            denied.push("pointerEvents");
+        }
+        if attributes.content_protected == Some(true) && !grant(&|w| w.content_protected) {
+            attributes.content_protected = None;
+            denied.push("contentProtected");
+        }
+        denied
+    }
+
     /// Whether the app may set the status bar.
     pub fn allows_status_bar(&self) -> bool {
         self.each(|c| c.status_bar)
@@ -1530,6 +1789,75 @@ mod tests {
 
     fn caps(json: &str) -> Capabilities {
         Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn windows_are_granted_by_kind_level_and_count() {
+        use crate::desktop::{WindowAttributes, WindowKind, WindowLevel, WindowPointerEvents};
+        let none = WindowAttributes::default();
+        // Without a declaration: every kind but overlays, no click-through,
+        // no capture protection.
+        let all = Access::all();
+        assert!(all.check_window(WindowKind::Panel, &none, 10).is_ok());
+        assert!(all.check_window(WindowKind::Overlay, &none, 0).is_err());
+        let click_through = WindowAttributes {
+            pointer_events: Some(WindowPointerEvents::None),
+            ..Default::default()
+        };
+        assert!(
+            all.check_window(WindowKind::Normal, &click_through, 0)
+                .is_err()
+        );
+        let protected = WindowAttributes {
+            content_protected: Some(true),
+            ..Default::default()
+        };
+        assert!(all.check_window(WindowKind::Normal, &protected, 0).is_err());
+        // Declared without `windows`: none.
+        let declared = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        assert!(
+            declared(r#"{"process":{"exit":true}}"#)
+                .check_window(WindowKind::Normal, &none, 0)
+                .is_err()
+        );
+        let limited = declared(
+            r#"{"windows":{"kinds":["normal","dialog"],"levels":["normal","floating"],"max":2}}"#,
+        );
+        assert!(limited.check_window(WindowKind::Dialog, &none, 1).is_ok());
+        assert!(limited.check_window(WindowKind::Popup, &none, 0).is_err());
+        assert!(limited.check_window(WindowKind::Normal, &none, 2).is_err());
+        let above = WindowAttributes {
+            level: Some(WindowLevel::AboveDock),
+            ..Default::default()
+        };
+        assert!(limited.check_window(WindowKind::Normal, &above, 0).is_err());
+        let overlay = declared(r#"{"windows":{"overlay":true,"contentProtected":true}}"#);
+        assert!(
+            overlay
+                .check_window(WindowKind::Overlay, &click_through, 0)
+                .is_ok()
+        );
+        assert!(
+            overlay
+                .check_window(WindowKind::Normal, &protected, 0)
+                .is_ok()
+        );
+        // `set()` keeps what is granted and leaves out the rest.
+        let mut asked = WindowAttributes {
+            title: Some("Notes".into()),
+            level: Some(WindowLevel::AboveDock),
+            content_protected: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            limited.deny_window_attributes(&mut asked),
+            ["level", "contentProtected"]
+        );
+        assert_eq!(asked.title.as_deref(), Some("Notes"));
+        assert_eq!(asked.level, None);
     }
 
     #[test]

@@ -139,6 +139,7 @@ pub fn package_to_run(
 fn as_shipped(mut bundle: Bundle, shipped: &Bundle, trial: Option<Arc<dyn Trial>>) -> Bundle {
     bundle.url_schemes = shipped.url_schemes.clone();
     bundle.system_paths = shipped.system_paths.clone();
+    bundle.main_window = shipped.main_window.clone();
     bundle.updater_config = shipped.updater_config.clone();
     // The package's declaration, granted at most what the shipped app
     // declares: an update reaches nothing the installed app could not.
@@ -650,15 +651,18 @@ mod tests {
         let shipped = Bundle::source("1".into())
             .with_app_id(Some(ID))
             .with_url_schemes(["example"])
+            .with_main_window(Some(r#"{"defaultSize":{"width":900,"height":640}}"#))
             .with_policy(crate::Policy {
                 declared: Some(declared),
                 ..Default::default()
             });
 
+        assert!(shipped.main_window.is_some());
         let launched = launch(shipped.clone(), &resources, Some(&data));
         assert_eq!(launched.package.as_ref().map(|a| a.build), Some(2));
         let bundle = &launched.bundle;
         assert_eq!(bundle.url_schemes, ["example"]);
+        assert_eq!(bundle.main_window, shipped.main_window);
         assert!(bundle.updater_config.is_some() && bundle.trial.is_some());
         // The package declares the clipboard; the app did not.
         assert!(!bundle.policy.access().allows_clipboard());

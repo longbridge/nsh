@@ -164,7 +164,7 @@ reopening from the Dock shows that same window and engine. For an explicit Exit
 or update restart, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while
-`nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
+`current_window().close()` (`nsh_core::element::desktop`) follows the chosen window-close policy.
 `nsh_core::element::desktop::restart()` (TS: `Application.restart()`) quits the same way, and once the process has
 exited `run_app`'s runner starts the app again with the same arguments: inside an `.app` bundle through Launch Services
 (`open -n`), as when the user opens it.
