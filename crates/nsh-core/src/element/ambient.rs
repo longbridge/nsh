@@ -961,6 +961,11 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     answer
 }
 
+/// Asks for the app to show in `locale` ([`crate::i18n::set_locale`]).
+pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
+    act(Action::Locale(locale));
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {

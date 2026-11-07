@@ -7,11 +7,14 @@
 //! and the locale-aware `toLocaleString` of numbers, BigInts and dates.
 //! QuickJS has no `Intl`; this one formats natively, in Rust.
 //!
-//! The locale data is a hand-written table of the common languages
-//! (`locale.rs`), not CLDR: ICU4X's data for numbers and dates in every
-//! locale would add megabytes to every app, these tables add a few
-//! kilobytes. A locale without data resolves to the next requested one,
-//! then the device's (`Environment::locale`), then `en-US`. Local time is
+//! The language data (`locale.rs`) is not CLDR: ICU4X's data for numbers
+//! and dates in every locale would add megabytes to every app, a language
+//! here is a JSON file of a few kilobytes. English is built in; the others
+//! are the languages the app ships (nsh.json `locales`, the files of
+//! `nsh-i18n`'s `data/`), which the bundle registers before the app runs
+//! (`nsh:rt`'s `i18n`, [`add_languages`]). A locale without data resolves
+//! to the next requested one, then the device's (`Environment::locale`),
+//! then `en-US`. Local time is
 //! `Date`'s, and is named as the zone it is computed in: as the C library
 //! computing it reads that zone (`TZ`, `/etc/localtime`; the browser's on
 //! the web), or where that is out of its sight (Windows, Android) as the
@@ -38,6 +41,7 @@ mod number;
 
 use std::ffi::c_int;
 
+pub(crate) use locale::Languages;
 use locale::Locale;
 #[cfg(not(target_arch = "wasm32"))]
 use nsh_core::platform::TimeZone;
@@ -108,7 +112,15 @@ fn requested(cx: Ctx, locales: Raw) -> R<Vec<String>> {
 
 fn resolve(cx: Ctx, locales: Raw) -> R<Locale> {
     let requested = requested(cx, locales)?;
-    Ok(locale::resolve(&requested, crate::env::locale(cx).as_str()))
+    let default = crate::env::locale(cx);
+    Ok(super::web(cx)
+        .languages
+        .resolve(&requested, default.as_str()))
+}
+
+/// Registers the language data the app ships, by language (`"de"`).
+pub(crate) fn add_languages(cx: Ctx, languages: serde_json::Map<String, serde_json::Value>) {
+    super::web(cx).languages.add(languages);
 }
 
 /// The options object (`undefined`: none).
@@ -402,7 +414,7 @@ impl Object for NumberFormat {}
 fn format_number(cx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
     let (locale, format) = {
         let nf = data::<NumberFormat>(cx, this, "NumberFormat")?;
-        (nf.locale, nf.format.clone())
+        (nf.locale.clone(), nf.format.clone())
     };
     let value = number_value(cx, value)?;
     Ok(number::format(
@@ -447,7 +459,7 @@ native!(
         use number::{CurrencyDisplay, Grouping, Notation, Rounding, SignDisplay, Style, UnitDisplay};
         let (locale, f) = {
             let nf = data::<NumberFormat>(cx, this, "NumberFormat")?;
-            (nf.locale, nf.format.clone())
+            (nf.locale.clone(), nf.format.clone())
         };
         let o = js::new_object(cx)?;
         let set = |key: &str, value: V| js::define(cx, o.raw(), key, value, true);
@@ -532,7 +544,11 @@ native!(
     fn supported_locales_of(cx, this, args) {
         let tags = requested(cx, args.get(0))?;
         let mut items = Vec::new();
-        for tag in tags.iter().filter(|t| locale::supported(t)) {
+        let tags: Vec<String> = {
+            let languages = &super::web(cx).languages;
+            tags.into_iter().filter(|t| languages.supported(t)).collect()
+        };
+        for tag in &tags {
             items.push(js::string(cx, tag)?);
         }
         js::new_array(cx, items)
@@ -958,7 +974,7 @@ fn format_date(
 fn format_with(cx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
     let (locale, format, zone) = {
         let d = data::<DateTimeFormat>(cx, this, "DateTimeFormat")?;
-        (d.locale, d.format, d.zone)
+        (d.locale.clone(), d.format, d.zone)
     };
     let ms = time_value(cx, value)?;
     format_date(cx, &locale, &format, zone, ms)
@@ -1001,7 +1017,7 @@ native!(
         use date::{Month, Num, Text, Zone};
         let (locale, f, zone, styles) = {
             let d = data::<DateTimeFormat>(cx, this, "DateTimeFormat")?;
-            (d.locale, d.format, d.zone, d.styles)
+            (d.locale.clone(), d.format, d.zone, d.styles)
         };
         let o = js::new_object(cx)?;
         let set = |key: &str, value: V| js::define(cx, o.raw(), key, value, true);

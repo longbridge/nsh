@@ -55,6 +55,28 @@ expect Calls: 5 promises
 wait 300
 expect Failed: none
 covers [nsh] Clipboard
+# mod-i18n
+tap id:case-mod-i18n
+# en-US shows English; a missing key reads as its locale and key; German
+# formats with the data nsh.json lists, French (not listed) as English.
+expect Shown: en-US
+expect Hello: Hello
+expect Greet: Hello, Ada!
+expect Missing: en-US.missing
+expect Asked: 你好
+expect Locales: en zh zh-CN
+expect German: 1.234,5
+expect French: 1,234.5
+tap id:chinese
+expect Shown: zh-CN
+expect Hello: 你好
+expect Greet: 你好，Ada！
+tap id:device
+expect Shown: en-US
+expect Hello: Hello
+covers [nsh/i18n] t
+covers [nsh/i18n] setLocale
+covers [nsh/i18n] availableLocales
 # mod-picker
 tap id:case-mod-picker
 # a pick is a promise that never throws: options out of range reject it with

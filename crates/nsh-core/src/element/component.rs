@@ -541,6 +541,7 @@ pub struct Root {
     url_schemes: Vec<String>,
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
+    translations: Option<crate::i18n::Translations>,
 }
 
 impl Root {
@@ -555,7 +556,33 @@ impl Root {
             url_schemes: Vec::new(),
             status_bar: None,
             main_window: None,
+            translations: None,
         }
+    }
+
+    /// The app's translations (its `locales/` files, which nsh's generated
+    /// code compiles in): what [`t!`](crate::t) reads.
+    pub fn translations(mut self, translations: crate::i18n::Translations) -> Self {
+        self.translations = Some(translations);
+        self
+    }
+
+    /// [`Root::translations`] from the JSON the build writes of the app's
+    /// `locales/` files. A wrong one is logged and left out.
+    #[doc(hidden)]
+    pub fn translations_json(self, json: &str) -> Self {
+        match crate::i18n::Translations::from_json(json) {
+            Ok(translations) => self.translations(translations),
+            Err(e) => {
+                log::warn!("locales: {e}");
+                self
+            }
+        }
+    }
+
+    /// The app's translations ([`Root::translations`]).
+    pub fn translations_ref(&self) -> Option<&crate::i18n::Translations> {
+        self.translations.as_ref()
     }
 
     /// The app's id (`nsh.json` `"id"`, which nsh's generated code sets):

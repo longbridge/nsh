@@ -66,6 +66,7 @@ jobs:
               - "crates/nsh-core/**"
               - "crates/nsh-dev/**"
               - "crates/nsh-engine/**"
+              - "crates/nsh-i18n/**"
               - "crates/nsh-js/**"
               - "crates/nsh-macros/**"
               - "crates/nsh-package/**"

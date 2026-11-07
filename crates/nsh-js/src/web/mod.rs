@@ -185,6 +185,16 @@ pub(crate) struct Function {
     pub(crate) signature: &'static str,
 }
 
+/// Registers the language data the app ships (`nsh:rt`'s `i18n`: nsh.json
+/// `locales`), by language (`"de"`): what `Intl` formats those languages
+/// with. English is built in.
+pub(crate) fn add_languages(
+    cx: *mut qjs::JSContext,
+    languages: serde_json::Map<String, serde_json::Value>,
+) {
+    intl::add_languages(cx, languages);
+}
+
 /// Global functions (not classes).
 pub(crate) fn functions() -> impl Iterator<Item = &'static Function> {
     fetch::FUNCTIONS.iter()
@@ -238,6 +248,8 @@ pub(crate) struct Web {
     pub(crate) date: V,
     /// When `performance.now()` is 0 under a manual clock.
     pub(crate) clock_origin: Option<nsh_core::time::Instant>,
+    /// The language data `Intl` formats with: English and the app's.
+    pub(crate) languages: intl::Languages,
 }
 
 impl Web {

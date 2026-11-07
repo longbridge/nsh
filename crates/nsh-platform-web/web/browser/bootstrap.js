@@ -3336,6 +3336,7 @@
 	const PLATFORM_PROPS = /* @__PURE__ */ new Set([
 		"ios",
 		"android",
+		"macos",
 		"desktop",
 		"web"
 	]);
@@ -5227,6 +5228,10 @@
 				token(name) {
 					tokens();
 					return invoke(402, [name, fields.colorScheme() === "dark"]);
+				},
+				setTheme(theme) {
+					invoke(406, [theme]);
+					tokens.update((value) => value + 1);
 				}
 			},
 			insets,
@@ -5254,6 +5259,9 @@
 			changedTokens() {
 				tokens.update((value) => value + 1);
 			},
+			showLocale(tag) {
+				fields.locale.set(tag);
+			},
 			setup(tailwind, theme, scheme, statusBar) {
 				if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
 				if (typeof theme === "string") {
@@ -5267,6 +5275,67 @@
 					"system"
 				].includes(scheme)) setColorScheme(scheme);
 				if (typeof statusBar === "string") invoke(405, [statusBar]);
+			}
+		};
+	}
+
+//#endregion
+//#region ../nsh-platform-web/web/browser/i18n.js
+/** `nsh/i18n` in the browser, as nsh-js's (`src/i18n.rs`): the bundle's
+	* translations (`nsh:rt`'s `i18n`, run before the app's modules), `t`
+	* looking a key up as rust-i18n does, and `setLocale`. The engine gets
+	* both too (ops 407 and 408), for the core's components and the language
+	* it reports. The browser's own `Intl` formats every language, so the
+	* bundle's language data stays unused here. */
+	function createI18n(reactive, invoke, env) {
+		let translations = {};
+		const version = reactive.signal(0);
+		/** `key`'s text in `locale`, each shorter tag, then English. */
+		const lookup = (locale, key) => {
+			for (let tag = locale; tag; tag = tag.includes("-") ? tag.slice(0, tag.lastIndexOf("-")) : "") {
+				const text = translations[tag]?.[key];
+				if (typeof text === "string") return text;
+			}
+			return locale === "en" ? void 0 : translations.en?.[key];
+		};
+		return {
+			api: {
+				t(key, options) {
+					key = String(key);
+					version();
+					const { locale = env.api.locale(), ...args } = options && typeof options === "object" ? options : {};
+					const text = lookup(String(locale), key);
+					if (text === void 0) return `${locale}.${key}`;
+					return text.replace(/%\{(\w+)\}/g, (pattern, name) => Object.hasOwn(args, name) ? String(args[name]) : pattern);
+				},
+				setLocale(locale) {
+					if (locale == null) {
+						invoke(408, [null]);
+						return;
+					}
+					let tag;
+					try {
+						[tag] = Intl.getCanonicalLocales(locale);
+					} catch {
+						tag = void 0;
+					}
+					if (typeof locale !== "string" || !tag) throw new RangeError("setLocale: expected a BCP 47 language tag (\"zh-CN\") or null");
+					env.showLocale(tag);
+					invoke(408, [tag]);
+				},
+				availableLocales: () => {
+					version();
+					return Object.keys(translations).sort();
+				}
+			},
+			setup(json) {
+				try {
+					translations = JSON.parse(json).translations ?? {};
+				} catch {
+					return;
+				}
+				version.update((value) => value + 1);
+				invoke(407, [json]);
 			}
 		};
 	}
@@ -5935,6 +6004,7 @@
 		createGestures: () => createGestures,
 		createHost: () => createHost,
 		createHot: () => createHot,
+		createI18n: () => createI18n,
 		createKeymap: () => createKeymap,
 		createLists: () => createLists,
 		createModules: () => createModules,

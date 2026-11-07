@@ -3550,6 +3550,11 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("merge", Export::Function(merge, 2), Ts::Internal),
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
     ("setup", Export::Function(setup, 4), Ts::Internal),
+    (
+        "i18n",
+        Export::Function(crate::i18n::setup, 1),
+        Ts::Internal,
+    ),
     ("font", Export::Function(font, 2), Ts::Internal),
     ("metaUrl", Export::Function(meta_url, 1), Ts::Internal),
     ("ref", Export::Function(ref_, 3), Ts::Internal),

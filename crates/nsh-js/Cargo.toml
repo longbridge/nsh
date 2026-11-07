@@ -21,6 +21,7 @@ crypto = ["quickjs-jit-stdlib/crypto"]
 
 [dependencies]
 serde_json.workspace = true
+serde.workspace = true
 log.workspace = true
 nsh-core.workspace = true
 rustc-hash.workspace = true
@@ -45,6 +46,8 @@ rquickjs.workspace = true
 getrandom-stdlib.workspace = true
 
 [dev-dependencies]
+# The language data the Intl tests register.
+nsh-i18n.workspace = true
 # The declarations tests read the specs' text (nsh-core `declarations`).
 nsh-core = { workspace = true, features = ["declarations"] }
 brotli.workspace = true

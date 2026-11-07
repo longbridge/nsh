@@ -2325,6 +2325,15 @@ const report = (v) => text(String(v));
     #[test]
     fn intl_formats_numbers_and_dates() {
         let host = Host::new().unwrap();
+        // What a bundle listing these languages registers (`nsh:rt`'s
+        // `i18n`): the runtime has English only.
+        let mut languages = serde_json::Map::new();
+        for lang in ["de", "fr", "ja", "ko"] {
+            let data = nsh_i18n::language_data(lang).unwrap();
+            languages.insert(lang.into(), serde_json::from_str(data).unwrap());
+        }
+        host.cx
+            .with(|cx| crate::web::add_languages(cx.as_raw().as_ptr(), languages));
         host.eval_source(&format!(
             r#"{REPORT}
             report((1234567.891).toLocaleString());
