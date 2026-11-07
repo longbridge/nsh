@@ -124,8 +124,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
 - Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
-  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
-  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` and `nsh dev` bind to
+  loopback, with `--target ios`, `android` or `web` and `nsh dev --server-only` to every address, for other machines
+  (`dev::Listen`, `run::Target::uses_network`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
@@ -150,6 +151,13 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
+- What the dev server serves to others (`crates/nsh-dev/src/server.rs`): `/assets/<path>` is the files a build
+  imported and the UI sets' crates ship (`DevServer::serve_files`, by name, any type), and from the app's directory only
+  media files (images, fonts, audio, video by extension) outside hidden directories, `.nsh`, `node_modules` and
+  `target`, also after following links (`asset_in_root`); sources, `nsh.json`, `.env`, JSON and other files return
+  404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
+  `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
+  browser, even on loopback or under a name rebound to this machine, gets 403.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK
@@ -569,7 +577,9 @@ the gesture; it lands at the scroll view's middle, and after a gesture that move
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
 it has the most room, then a quarter of the way from the other; between gestures it waits only for the view to stop
 moving, `Agent::stopped`, and once it is in view for the app to settle, so a page that is never quiet, a ticking
-timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`, where
+the view is drawn: its transforms included, a thumb centered with `translate(-50%)` pressed on its middle, as the
+platform's hit testing finds it; macOS maps through the views' layer transforms, which AppKit's conversions leave out; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
 text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input
@@ -948,7 +958,15 @@ names carry no version, so `releases/latest/download/<asset>` always resolves; t
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
 workflow by hand without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to
-check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`). Pull
+check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`).
+
+Every night (18:00 UTC) the same workflow builds the latest `main` and publishes it as the release `nightly`, a
+prerelease never marked latest, so `releases/latest` and the package managers keep the stable release. A night
+whose `main` the nightly already has builds nothing (the `plan` job compares the commits). There is one `nightly`
+tag: each build deletes the previous nightly release and its tag and creates them again at the new commit (moving
+the tag through the refs API would need the `workflows` permission when the commits change workflows), so tags do
+not pile up. Running the workflow by hand with *nightly* publishes one at once. `install.sh --nightly` installs
+it; the CLI keeps the workspace version, and `-V` shows the commit. Pull
 requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
@@ -970,6 +988,7 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
+- `install.sh --nightly` installs the `nightly` release the same way (`NSH_VERSION=nightly` does too).
 - `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
   Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
   are preserved and rejected. The checkout stays available for on-demand native runtime builds.
