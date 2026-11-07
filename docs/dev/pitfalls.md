@@ -572,8 +572,10 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **A screen origin is not a window-local length.** On mixed-DPI desktops, dividing an absolute screen origin by
   the window's DPI loses the monitor's offset. `window_state/screens.rs` maps each monitor's local pixels to DIPs
-  relative to its laid-out desktop origin. Reporting and restoring share the mapping; tests cover the 100% primary /
-  200% right-display case, fractional DPI ratios, negative monitor positions and taskbar offsets.
+  relative to its laid-out desktop origin. Monitor regions must also stay disjoint: dividing two stacked siblings'
+  origins by their parent's DPI can overlap their DIP regions and make restoration select the wrong sibling.
+  Reporting and restoring share an edge-interval layout; tests cover two- and three-monitor DPI combinations,
+  negative monitor positions, enumeration order and taskbar offsets.
 
 - **Full-screen restoration must preserve the original window style** as well as its placement. Adding
   `WS_OVERLAPPEDWINDOW` unconditionally on exit gives a transparent, borderless window a system frame

@@ -54,7 +54,9 @@ refresh the environment; the engine settles moves and resizes. Display geometry 
 component renders and refreshes with display, work-area and DPI changes. The backend hashes the monitor's device
 interface name for its stable display id, with the Win32 display name as a fallback.
 
-`window_state/screens.rs` lays out touching monitors from the primary display in DIPs. Each transform scales the
+`window_state/screens.rs` lays out monitors in disjoint DIP regions from the primary display. Shared axis intervals
+preserve native edge ordering and provide enough space for each monitor's own DIP size, including differently
+scaled monitors stacked beside one primary display. Each transform scales the
 monitor-local offset and size, keeping its desktop origin separate from its DPI. Both state reporting and saved
 bounds restoration use that layout, so a fresh window's DPI does not affect where saved bounds land. Partial
 `setFrame` calls use the same screen-position transform and keep their existing current-window sizing units.

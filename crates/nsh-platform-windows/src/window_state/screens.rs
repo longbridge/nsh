@@ -1,10 +1,10 @@
 //! Monitor-local pixel/DIP transforms in one desktop coordinate space.
-//! Lay out touching monitors from the primary display, in DIPs. Scaling an
+//! Lay out disjoint monitor regions from the primary display, in DIPs. Scaling an
 //! absolute screen origin by a window's DPI loses the monitor's offset.
 
 use nsh_core::{
     desktop::{Display, DisplayId},
-    geometry::{Bounds, Point, Points, point, size},
+    geometry::{Bounds, Points, point, size},
 };
 use windows::{
     Win32::{
@@ -147,41 +147,16 @@ impl Screens {
         let Some(primary) = screens.first().copied() else {
             return Self(screens);
         };
-        for screen in &mut screens {
+        let x = axis_origins(&screens, primary, true);
+        let y = axis_origins(&screens, primary, false);
+        for (i, screen) in screens.iter_mut().enumerate() {
             screen.display.bounds = Bounds::new(
-                point(
-                    Points(screen.native.left as f32 / primary.scale),
-                    Points(screen.native.top as f32 / primary.scale),
-                ),
+                point(x[i], y[i]),
                 size(
                     Points((screen.native.right - screen.native.left) as f32 / screen.scale),
                     Points((screen.native.bottom - screen.native.top) as f32 / screen.scale),
                 ),
             );
-        }
-        let mut placed = vec![false; screens.len()];
-        placed[0] = true;
-        loop {
-            let mut changed = false;
-            for child in 1..screens.len() {
-                if placed[child] {
-                    continue;
-                }
-                for parent in 0..screens.len() {
-                    if !placed[parent] {
-                        continue;
-                    }
-                    if let Some(origin) = adjacent(screens[parent], screens[child]) {
-                        screens[child].display.bounds.origin = origin;
-                        placed[child] = true;
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
         }
         for screen in &mut screens {
             screen.display.visible_bounds = screen.bounds(screen.work);
@@ -241,30 +216,46 @@ impl Screens {
     }
 }
 
-fn adjacent(parent: Screen, child: Screen) -> Option<Point<Points>> {
-    let p = parent.native;
-    let c = child.native;
-    let origin = parent.display.bounds.origin;
-    let extent = parent.display.bounds.size;
-    let y = origin.y + Points((c.top - p.top) as f32 / parent.scale);
-    let x = origin.x + Points((c.left - p.left) as f32 / parent.scale);
-    if p.top.max(c.top) <= p.bottom.min(c.bottom) {
-        if c.left == p.right {
-            return Some(point(origin.x + extent.width, y));
+/// Keeps native edge ordering in points. Each interval uses the smallest DPI
+/// scale of the monitors spanning it, giving every monitor at least the space
+/// its own DIP size needs. Disjoint native rectangles then stay disjoint in
+/// points, including siblings beside a differently scaled primary monitor.
+fn axis_origins(screens: &[Screen], primary: Screen, horizontal: bool) -> Vec<Points> {
+    let range = |screen: &Screen| {
+        let r = screen.native;
+        if horizontal {
+            (r.left, r.right)
+        } else {
+            (r.top, r.bottom)
         }
-        if c.right == p.left {
-            return Some(point(origin.x - child.display.bounds.size.width, y));
-        }
+    };
+    let mut edges: Vec<_> = screens
+        .iter()
+        .flat_map(|s| {
+            let (start, end) = range(s);
+            [start, end]
+        })
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    let mut positions = vec![(edges[0], Points::ZERO)];
+    for edge in edges.windows(2) {
+        let scale = screens
+            .iter()
+            .filter(|s| {
+                let (start, end) = range(s);
+                start <= edge[0] && end >= edge[1]
+            })
+            .map(|s| s.scale)
+            .min_by(f32::total_cmp)
+            .unwrap_or(primary.scale);
+        let offset =
+            positions.last().unwrap().1 + Points((edge[1] as f32 - edge[0] as f32) / scale);
+        positions.push((edge[1], offset));
     }
-    if p.left.max(c.left) <= p.right.min(c.right) {
-        if c.top == p.bottom {
-            return Some(point(x, origin.y + extent.height));
-        }
-        if c.bottom == p.top {
-            return Some(point(x, origin.y - child.display.bounds.size.height));
-        }
-    }
-    None
+    let at = |edge| positions[positions.binary_search_by_key(&edge, |p| p.0).unwrap()].1;
+    let anchor = at(range(&primary).0);
+    screens.iter().map(|s| at(range(s).0) - anchor).collect()
 }
 
 #[cfg(test)]
@@ -428,5 +419,206 @@ mod tests {
             right.native_bounds(right.display.visible_bounds),
             right.work
         );
+    }
+
+    fn assert_disjoint(screens: &Screens) {
+        for (i, a) in screens.0.iter().enumerate() {
+            for b in &screens.0[i + 1..] {
+                let a = a.display.bounds;
+                let b = b.display.bounds;
+                assert!(
+                    a.origin.x + a.size.width <= b.origin.x
+                        || b.origin.x + b.size.width <= a.origin.x
+                        || a.origin.y + a.size.height <= b.origin.y
+                        || b.origin.y + b.size.height <= a.origin.y,
+                    "logical monitor regions overlap: {a:?}, {b:?}"
+                );
+            }
+        }
+    }
+
+    fn assert_saved_round_trip(screens: &Screens, source: Screen, native: RECT) {
+        let bounds = source.bounds(native);
+        for saved in [
+            WindowBounds::Windowed(bounds),
+            WindowBounds::Maximized(bounds),
+            WindowBounds::Fullscreen(bounds),
+        ] {
+            let json = serde_json::to_string(&saved).unwrap();
+            let saved: WindowBounds = serde_json::from_str(&json).unwrap();
+            let target = screens.logical_screen(saved.get_bounds()).unwrap();
+            assert_eq!(target.display.id, source.display.id, "{json}");
+            assert_eq!(target.native_bounds(saved.get_bounds()), native, "{json}");
+        }
+    }
+
+    #[test]
+    fn stacked_displays_beside_a_high_dpi_primary_restore_to_the_saved_display() {
+        let screens = Screens::layout(vec![
+            screen(
+                1,
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: 3840,
+                    bottom: 2160,
+                },
+                2.0,
+                true,
+            ),
+            screen(
+                2,
+                RECT {
+                    left: 3840,
+                    top: 0,
+                    right: 5760,
+                    bottom: 1080,
+                },
+                1.0,
+                false,
+            ),
+            screen(
+                3,
+                RECT {
+                    left: 3840,
+                    top: 1080,
+                    right: 5760,
+                    bottom: 2160,
+                },
+                1.0,
+                false,
+            ),
+        ]);
+        assert_eq!(
+            screens.0[1].display.bounds.origin,
+            point(Points(1920.0), Points::ZERO)
+        );
+        assert_eq!(
+            screens.0[2].display.bounds.origin,
+            point(Points(1920.0), Points(1080.0))
+        );
+        assert_disjoint(&screens);
+        // The review's exact rectangle used to choose the lower display and
+        // restore at y=1240 instead of y=700.
+        assert_saved_round_trip(
+            &screens,
+            screens.0[1],
+            RECT {
+                left: 4000,
+                top: 700,
+                right: 4400,
+                bottom: 1000,
+            },
+        );
+        assert_saved_round_trip(
+            &screens,
+            screens.0[2],
+            RECT {
+                left: 4000,
+                top: 1280,
+                right: 4400,
+                bottom: 1580,
+            },
+        );
+    }
+
+    #[test]
+    fn three_monitor_layouts_remain_disjoint_and_round_trip_across_dpis_and_orders() {
+        let primary = RECT {
+            left: 0,
+            top: 0,
+            right: 3840,
+            bottom: 2160,
+        };
+        for children in [
+            [
+                RECT {
+                    left: 3840,
+                    top: 0,
+                    right: 5760,
+                    bottom: 1080,
+                },
+                RECT {
+                    left: 3840,
+                    top: 1080,
+                    right: 5760,
+                    bottom: 2160,
+                },
+            ],
+            [
+                RECT {
+                    left: -1920,
+                    top: 0,
+                    right: 0,
+                    bottom: 1080,
+                },
+                RECT {
+                    left: -1920,
+                    top: 1080,
+                    right: 0,
+                    bottom: 2160,
+                },
+            ],
+            [
+                RECT {
+                    left: 0,
+                    top: 2160,
+                    right: 1920,
+                    bottom: 3240,
+                },
+                RECT {
+                    left: 1920,
+                    top: 2160,
+                    right: 3840,
+                    bottom: 3240,
+                },
+            ],
+            [
+                RECT {
+                    left: 0,
+                    top: -1080,
+                    right: 1920,
+                    bottom: 0,
+                },
+                RECT {
+                    left: 1920,
+                    top: -1080,
+                    right: 3840,
+                    bottom: 0,
+                },
+            ],
+        ] {
+            for a in [1.0, 1.25, 1.5, 2.0] {
+                for b in [1.0, 1.25, 1.5, 2.0] {
+                    for c in [1.0, 1.25, 1.5, 2.0] {
+                        let mut input = vec![
+                            screen(3, children[1], c, false),
+                            screen(1, primary, a, true),
+                            screen(2, children[0], b, false),
+                        ];
+                        let screens = Screens::layout(input.clone());
+                        input.reverse();
+                        assert_eq!(screens.displays(), Screens::layout(input).displays());
+                        assert_disjoint(&screens);
+                        for source in &screens.0 {
+                            assert_saved_round_trip(
+                                &screens,
+                                *source,
+                                RECT {
+                                    left: source.native.left + 160,
+                                    top: source.native.top + 60,
+                                    right: source.native.left + 560,
+                                    bottom: source.native.top + 360,
+                                },
+                            );
+                            assert_eq!(
+                                source.native_bounds(source.display.visible_bounds),
+                                source.work
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

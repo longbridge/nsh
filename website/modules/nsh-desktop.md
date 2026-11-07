@@ -290,7 +290,8 @@ effect(() => {
 });
 ```
 
-macOS and Windows report the window's state and the displays. On Windows, saved bounds restore using the target
+macOS and Windows report the window's state and the displays. Windows arranges displays as disjoint screen-point
+regions, keeping each display's own size in points; mixed scales can leave gaps between regions. Saved bounds restore using the target
 display's scale, including when the new window starts on a display with a different DPI. Full screen retains the
 ordinary bounds and restores the window's original decorations on exit. On iOS, Android and the web, `windowState()` is `null`, `displays()` is empty and `setBounds` does nothing.
 
