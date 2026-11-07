@@ -6,15 +6,15 @@
 //!
 //! libX11 and libXtst are loaded when the agent first types (`dlopen`), and
 //! GDK's X11 functions looked up in the GTK already loaded, so the crate
-//! links nothing more and runs where neither exists (Wayland, a build
-//! without GDK's X11 backend): [`Xtest::get`] is `None` there, and the
+//! links no X11 libraries and runs where neither exists (Wayland, a build
+//! without GDK's X11 backend): [`Xtest::with`] is `None` there, and the
 //! agent keeps to the widgets' signals ([`crate::synth`]).
 //!
 //! Everything here runs on the GTK main thread, on GDK's own connection.
 
 use std::{
-    cell::OnceCell,
-    ffi::{CStr, c_int, c_uint, c_ulong, c_void},
+    cell::{Cell, OnceCell},
+    ffi::{CStr, c_char, c_int, c_uint, c_ulong, c_void},
 };
 
 use gtk4::{self as gtk, prelude::*};
@@ -25,6 +25,13 @@ type XWindow = c_ulong;
 
 /// `RevertToParent`.
 const REVERT_TO_PARENT: c_int = 2;
+const RTLD_NOW: c_int = 2;
+
+#[link(name = "dl")]
+unsafe extern "C" {
+    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
 
 /// The X functions the agent calls, resolved once.
 pub(crate) struct Xtest {
@@ -40,9 +47,11 @@ pub(crate) struct Xtest {
     get_input_focus: unsafe extern "C" fn(*mut Display, *mut XWindow, *mut c_int) -> c_int,
     sync: unsafe extern "C" fn(*mut Display, c_int) -> c_int,
     fake_key: unsafe extern "C" fn(*mut Display, c_uint, c_int, c_ulong) -> c_int,
+    query_keymap: unsafe extern "C" fn(*mut Display, *mut c_char) -> c_int,
     surface_xid: unsafe extern "C" fn(*mut c_void) -> XWindow,
     /// A keycode no key uses, for characters the layout has no key for.
     spare: Option<u8>,
+    remapped: Cell<bool>,
 }
 
 thread_local! {
@@ -53,14 +62,14 @@ thread_local! {
 unsafe fn sym<T: Copy>(lib: *mut c_void, name: &CStr) -> Option<T> {
     // SAFETY: the caller names a function of type `T`.
     unsafe {
-        let p = libc::dlsym(lib, name.as_ptr());
+        let p = dlsym(lib, name.as_ptr());
         (!p.is_null()).then(|| std::mem::transmute_copy::<*mut c_void, T>(&p))
     }
 }
 
 fn open(name: &CStr) -> Option<*mut c_void> {
     // SAFETY: a plain dlopen; the library stays loaded.
-    let lib = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+    let lib = unsafe { dlopen(name.as_ptr(), RTLD_NOW) };
     (!lib.is_null()).then_some(lib)
 }
 
@@ -110,8 +119,10 @@ impl Xtest {
                 get_input_focus: sym(x11, c"XGetInputFocus")?,
                 sync: sym(x11, c"XSync")?,
                 fake_key: sym(xtst, c"XTestFakeKeyEvent")?,
+                query_keymap: sym(x11, c"XQueryKeymap")?,
                 surface_xid: sym(std::ptr::null_mut(), c"gdk_x11_surface_get_xid")?,
                 spare: None,
+                remapped: Cell::new(false),
             };
             x.spare = x.find_spare();
             // The X pointer to the screen's corner, off the window: Xvfb
@@ -238,6 +249,7 @@ impl Xtest {
                         1,
                     );
                 }
+                self.remapped.set(true);
                 (spare, false)
             }
         };
@@ -248,6 +260,12 @@ impl Xtest {
         if shift && !modifiers.contains(&SHIFT_L) {
             held.extend(self.keycode(SHIFT_L).map(|(c, _)| c));
         }
+        // A modifier held by keyboard.down (or the real keyboard) belongs
+        // to that caller. Do not release it at the end of this stroke.
+        let mut state = [0_u8; 32];
+        // SAFETY: XQueryKeymap writes exactly 32 bytes, on GDK's thread.
+        unsafe { (self.query_keymap)(self.display, state.as_mut_ptr().cast()) };
+        held.retain(|&code| state[usize::from(code / 8)] & (1 << (code % 8)) == 0);
         for &m in &held {
             self.fake(m, true);
         }
@@ -258,6 +276,27 @@ impl Xtest {
         }
         self.flush();
         true
+    }
+
+    /// Restore the unused key after GTK has consumed its events. Restoring
+    /// it before then would make GDK translate those events as NoSymbol.
+    pub(crate) fn restore_mapping(&self) {
+        if self.remapped.replace(false)
+            && let Some(spare) = self.spare
+        {
+            let syms = [0, 0];
+            // SAFETY: this key had no symbols before the agent borrowed it.
+            unsafe {
+                (self.change_keyboard_mapping)(
+                    self.display,
+                    c_int::from(spare),
+                    2,
+                    syms.as_ptr(),
+                    1,
+                );
+            }
+            self.flush();
+        }
     }
 
     /// Waits for the server to have sent the events (they come back to GDK
@@ -319,4 +358,72 @@ pub(crate) fn modifier_keysym(name: &str) -> Option<KeySym> {
         "meta" | "cmd" | "command" | "super" => SUPER_L,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use super::*;
+    use crate::gtk_test::{run, wait_until};
+
+    #[test]
+    fn real_keys_reach_gtk_shortcuts_editing_and_held_modifiers() {
+        run(|| {
+            if gtk::gdk::Display::default().unwrap().type_().name() != "GdkX11Display" {
+                return;
+            }
+            Xtest::with(|x| {
+                let field = gtk::Text::new();
+                let window = gtk::Window::new();
+                window.set_child(Some(&field));
+                window.present();
+                assert!(wait_until(|| window.is_mapped()));
+                x.focus(&window);
+                field.grab_focus_without_selecting();
+                assert!(wait_until(|| window.is_active()));
+
+                let fired = Rc::new(Cell::new(0));
+                let count = fired.clone();
+                let shortcuts = gtk::ShortcutController::new();
+                shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
+                shortcuts.add_shortcut(gtk::Shortcut::new(
+                    gtk::ShortcutTrigger::parse_string("<Control><Shift>k"),
+                    Some(gtk::CallbackAction::new(move |_, _| {
+                        count.set(count.get() + 1);
+                        gtk::glib::Propagation::Stop
+                    })),
+                ));
+                window.add_controller(shortcuts);
+
+                for c in "abc".chars() {
+                    assert!(x.stroke(&[], char_keysym(c)));
+                    assert!(wait_until(|| field.text().ends_with(c)));
+                }
+                assert!(x.stroke(&[CONTROL_L, SHIFT_L], char_keysym('k')));
+                assert!(wait_until(|| fired.get() == 1));
+                assert_eq!(field.text(), "abc");
+                assert!(x.stroke(&[CONTROL_L], char_keysym('a')));
+                assert!(wait_until(|| field.selection_bounds() == Some((0, 3))));
+                assert!(x.stroke(&[], char_keysym('x')));
+                assert!(wait_until(|| field.text() == "x"));
+
+                assert!(x.key(SHIFT_L, true));
+                assert!(x.stroke(&[], char_keysym('B')));
+                assert!(wait_until(|| field.text() == "xB"));
+                assert!(x.stroke(&[], char_keysym('c')));
+                let held = wait_until(|| field.text() == "xBC");
+                x.key(SHIFT_L, false);
+                assert!(held, "a stroke must leave keyboard.down modifiers held");
+                assert!(x.stroke(&[], char_keysym('d')));
+                assert!(wait_until(|| field.text() == "xBCd"));
+                assert!(x.stroke(&[], char_keysym('中')));
+                assert!(wait_until(|| field.text() == "xBCd中"));
+                x.restore_mapping();
+                assert_eq!(x.keycode(char_keysym('中')), None);
+                window.close();
+            })
+            .expect("X11 tests require the XTest extension and libXtst");
+        });
+    }
 }

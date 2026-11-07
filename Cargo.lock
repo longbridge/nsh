@@ -3861,7 +3861,6 @@ dependencies = [
  "gstreamer-audio",
  "gtk4",
  "image",
- "libc",
  "log",
  "nsh-base",
  "nsh-core",

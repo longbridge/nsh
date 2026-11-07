@@ -98,7 +98,7 @@ impl LinuxNative {
         let typed = self.on_main(move |_| Xtest::with(f)).flatten()?;
         // The events come back through GDK's source on the main loop.
         std::thread::sleep(KEY_SETTLE);
-        self.on_main(|_| ());
+        self.on_main(|_| Xtest::with(Xtest::restore_mapping));
         Some(typed)
     }
 

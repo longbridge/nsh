@@ -174,9 +174,10 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
     keys on GDK's own connection, so GTK's whole key path runs on them as on a keyboard's: the window's shortcut
     controllers (the app's `nsh/keymap` shortcuts, the menu bar's), the focused widget's key bindings (Tab, arrows,
     Shift+arrows, Ctrl+A) and the input method. A character needing Shift is typed with it; one the layout has no
-    key for is put on a spare keycode first (`XChangeKeyboardMapping`, as `xdotool` does). `keyboard.down` holds the
-    modifier keys down for real too, so the keys typed meanwhile carry them. libX11 and libXtst are loaded when the
-    agent first types (`dlopen`) and GDK's X11 functions looked up in the loaded GTK, so nothing more is linked.
+    key for is put on a spare keycode first (`XChangeKeyboardMapping`, as `xdotool` does), restored after GTK handles
+    it. `keyboard.down` holds modifier keys down for real too, and individual strokes leave them held until
+    `keyboard.up`, so the keys typed meanwhile carry them. libX11 and libXtst are loaded when the
+    agent first types (`dlopen`) and GDK's X11 functions looked up in the loaded GTK, so no X11 libraries are linked.
     Loading them moves the X pointer to the screen's corner: Xvfb starts it in the middle, over the window, and the
     view under it would take its hover back whenever a key comes (an open list's highlight), while the agent's
     pointer is simulated. The press that focuses a field keeps its text unselected
