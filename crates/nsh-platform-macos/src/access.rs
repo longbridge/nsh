@@ -24,6 +24,9 @@
 //!   VoiceOver does not see);
 //! - its `testID` as its accessibility identifier (what UI tests find).
 //!
+//! Its screen frame follows the layer tree, including ancestor transforms
+//! and scroll containers, rather than AppKit's untransformed view frames.
+//!
 //! Live regions are emulated by announcing a changed label or text
 //! (`NSAccessibilityAnnouncementRequestedNotification`);
 //! `AXPress` presses a view that takes presses, as Return does when it
@@ -40,16 +43,35 @@ use nsh_core::{
     Accessibility, AccessibilityRole as Role, AttributedText, Checked, EventKind, EventMask,
     LiveRegion, MountBatch, ViewKind, ViewStyle,
 };
-use objc2::{MainThreadOnly, rc::Retained, runtime::AnyObject};
+use objc2::{MainThreadOnly, Message, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{
     NSAccessibility, NSAccessibilityAnnouncementKey,
     NSAccessibilityAnnouncementRequestedNotification, NSAccessibilityLayoutChangedNotification,
     NSAccessibilityPostNotificationWithUserInfo, NSAccessibilityPriorityKey,
     NSAccessibilityPriorityLevel, NSAccessibilityUIElementsKey, NSView,
 };
-use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSRect, NSString};
 
-use crate::view::{NshView, ViewState};
+use crate::view::{NshView, ViewState, superview};
+
+/// The drawn bounds in AppKit screen coordinates. Convert through the
+/// layer tree first: NSView's conversions omit layer transforms. The
+/// outermost layer-backed view bridges back to window coordinates, also
+/// when the surface is embedded in another view.
+pub(crate) fn frame(view: &NSView) -> Option<NSRect> {
+    let window = view.window()?;
+    let layer = view.layer()?;
+    let mut outer = view.retain();
+    let mut parent = superview(view);
+    while let Some(view) = parent {
+        parent = superview(&view);
+        if view.layer().is_some() {
+            outer = view;
+        }
+    }
+    let bounds = layer.convertRect_toLayer(layer.bounds(), outer.layer().as_deref());
+    Some(window.convertRectToScreen(outer.convertRect_toView(bounds, None)))
+}
 
 /// What was last given to AppKit for one view.
 #[derive(Debug, Default)]
