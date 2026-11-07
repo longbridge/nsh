@@ -20,7 +20,10 @@ runs:
       shell: bash
       run: |
         curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh -s -- --version 0.102.0-9
-        cargo -V | grep -q huacnlee/cargo
+        command -v cargo
+        version=$(cargo -V)
+        echo "$version"
+        case "$version" in *huacnlee/cargo*) ;; *) echo "::error::cargo is not huacnlee/cargo"; exit 1 ;; esac
     - name: Install huacnlee/cargo
       if: runner.os == 'Windows'
       shell: pwsh
