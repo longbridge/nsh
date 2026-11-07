@@ -170,7 +170,8 @@ Type checks the app. An app with Rust crates of its own (`nsh.json` `"rust"`) ha
 
 NSH-generated files stay under `.nsh/`: declarations, runner sources, and default build/package outputs in
 `.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior; NSH does not
-add Cargo configuration to relocate it. `--out` still overrides the output location.
+add Cargo configuration to relocate it. `--out` still overrides the output location. With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we
+recommend, the builds live under `~/.cargo/targets/` and the binaries still land in `target/`.
 
 ## nsh build
 

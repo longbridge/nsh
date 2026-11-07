@@ -4,5 +4,6 @@
 //! not ship with it).
 #![cfg(any(target_os = "macos", target_os = "ios"))]
 
+pub mod audio;
 pub mod notifications;
 pub mod speech;
