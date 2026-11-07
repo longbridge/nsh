@@ -102,6 +102,7 @@ fn start_in(
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

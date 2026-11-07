@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, View, windowSize } from "nsh";
+import { type JSX, mount, signal, Text, token, View, windowSize } from "nsh";
 import { type CalendarEntry, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentEntry } from "nsh/base";
 import { button, desktop, Icon, Log, Panel, Segmented, size, Split, ui, wide } from "./palette";
 
@@ -48,7 +48,7 @@ const surface = () =>
     ? { ...ui().card, borderRadius: 12, padding: 8 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 14, paddingBottom: 30 };
 
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+const backdrop = () => ({ backgroundColor: token("scrim") });
 
 /** The popup's layout: presets in a column beside the calendar with a pointer, a row of chips above it on a phone. */
 const content = desktop ? { flexDirection: "row" as const, gap: 10 } : { gap: 12 };
@@ -299,7 +299,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               contentStyle={content}
               presetsStyle={presets()}
               presetStyle={preset()}
@@ -333,7 +333,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               contentStyle={content}
               presetsStyle={presets()}
               presetStyle={preset()}
@@ -361,7 +361,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               calendarStyle={calendar}
               headerStyle={{ marginBottom: 4 }}
               itemClass={itemClass}

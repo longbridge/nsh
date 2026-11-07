@@ -127,6 +127,11 @@ pub(crate) fn announce(message: String) -> Action {
     Action::Command(ROOT_ID, Command::Announce(message))
 }
 
+/// Turns the performance monitor on or off.
+pub(crate) fn perf_monitor(enabled: bool) -> Action {
+    Action::Command(ROOT_ID, Command::PerfMonitor(enabled))
+}
+
 /// Puts `text` on the system clipboard.
 pub(crate) fn set_clipboard(text: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboard(text))

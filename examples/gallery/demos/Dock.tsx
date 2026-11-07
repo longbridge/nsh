@@ -260,7 +260,7 @@ export function Dock() {
             dropIndicatorClass="rounded-lg border-2 border-brand bg-brand-tint"
             drawerClass="border-r border-border bg-card"
             sheetClass="rounded-t-2xl border-t border-border bg-card"
-            backdropClass="bg-black/40"
+            backdropClass="bg-scrim"
             renderTab={(tab) => {
               groups.set(tab.panel, tab.group);
               return (

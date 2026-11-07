@@ -8,7 +8,9 @@
 //!
 //! - The icon is sent as pixels (`IconPixmap`, ARGB32 in network byte
 //!   order) at a few sizes, so no icon theme is needed. It loads through the
-//!   image pipeline, off the main thread: the item shows once it has.
+//!   image pipeline, off the main thread: the item shows once it has. An
+//!   SVG is a template, as on macOS and Windows: painted white when the
+//!   system is dark, black when light (panels don't say their color).
 //! - A primary click is `Activate`: the app's `onClick`, or, without one,
 //!   `ItemIsMenu` asks the panel to open the menu instead. The menu's items
 //!   are chosen through `Event(id, "clicked")` and reported as the menu bar's
@@ -340,15 +342,15 @@ fn load_icon(surface: &std::rc::Rc<Surface>, tray: &Tray, generation: u64) {
         let loaded = loaded.clone();
         let source_uri = source.uri.clone();
         crate::image::load_icon(surface, source, side, move |result| {
-            let texture = match result {
-                Ok(texture) => texture,
+            let (texture, template) = match result {
+                Ok(loaded) => loaded,
                 Err(e) => {
                     log::warn!("nsh: the tray's icon {source_uri} did not load: {e}");
                     return;
                 }
             };
             let mut loaded = loaded.borrow_mut();
-            loaded.push(pixmap(&texture, side));
+            loaded.push(pixmap(&texture, template, side));
             if loaded.len() < SIDES.len() {
                 return;
             }
@@ -374,7 +376,7 @@ fn load_icon(surface: &std::rc::Rc<Surface>, tray: &Tray, generation: u64) {
 /// `texture` as an `IconPixmap` entry of `side` × `side` pixels (the
 /// image fitted and centered, as menu icons are): ARGB32, unpremultiplied,
 /// in network byte order.
-fn pixmap(texture: &gdk::Texture, side: u32) -> (i32, i32, Vec<u8>) {
+fn pixmap(texture: &gdk::Texture, template: bool, side: u32) -> (i32, i32, Vec<u8>) {
     let mut downloader = gdk::TextureDownloader::new(texture);
     downloader.set_format(gdk::MemoryFormat::B8g8r8a8Premultiplied);
     let (bytes, stride) = downloader.download_bytes();
@@ -383,7 +385,16 @@ fn pixmap(texture: &gdk::Texture, side: u32) -> (i32, i32, Vec<u8>) {
     for y in 0..height {
         packed.extend_from_slice(&bytes[y * stride..y * stride + width * 4]);
     }
-    let square = nsh_core::desktop::menu_icon::canvas(&packed, width as u32, height as u32, side);
+    let mut square =
+        nsh_core::desktop::menu_icon::canvas(&packed, width as u32, height as u32, side);
+    if template {
+        let color = if crate::system::system_dark() {
+            nsh_core::Color::rgba(255, 255, 255, 255)
+        } else {
+            nsh_core::Color::rgba(0, 0, 0, 255)
+        };
+        nsh_core::desktop::menu_icon::tint(&mut square, color);
+    }
     let mut data = Vec::with_capacity(square.len());
     for &[b, g, r, a] in square.as_chunks::<4>().0 {
         let un = |c: u8| match a {
@@ -728,5 +739,25 @@ mod tests {
         let shallow = layout(&entries, 0, 1);
         let sub = shallow.child_value(2).child_value(2).as_variant().unwrap();
         assert_eq!(sub.child_value(2).n_children(), 0);
+    }
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    /// A 1×1 opaque red pixel, as an SVG template's stroke renders.
+    fn red() -> gdk::Texture {
+        let bytes = glib::Bytes::from_static(&[0, 0, 255, 255]);
+        gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, 4)
+            .upcast()
+    }
+
+    #[test]
+    fn template_is_painted_bitmap_kept() {
+        let painted = pixmap(&red(), true, 1).2;
+        let expected = if crate::system::system_dark() { 255 } else { 0 };
+        assert_eq!(painted, vec![255, expected, expected, expected]);
+        assert_eq!(pixmap(&red(), false, 1).2, vec![255, 255, 0, 0]);
     }
 }

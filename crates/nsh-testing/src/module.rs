@@ -1661,6 +1661,59 @@ impl Clock {
     }
 }
 
+/// A window of an app (`app.window(id)`), on a desktop: what the platform
+/// reports of it, and its close button. Headless, the driver plays the
+/// platform's windows: one display, and windows whose content fills them.
+#[class]
+pub struct AppWindow {
+    steps: Steps,
+    id: String,
+}
+
+#[class]
+impl AppWindow {
+    /// The app's id for the window (`"main"`: the main window).
+    #[getter]
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    /// Its state as the platform reports it to the app now (its mode,
+    /// whether it is minimized, shown and focused, its bounds and content
+    /// bounds in screen points, its display); `null` while it is not open.
+    pub fn state(&self) -> Result<Option<nsh_core::desktop::WindowState>, JsError> {
+        let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(app) = app.as_deref_mut() else {
+            return Err(JsError::Error(CLOSED.to_owned()));
+        };
+        app.window_state(&self.id).map_err(step_error)
+    }
+
+    /// Presses its close button as the user does: the window reports the
+    /// press (`onClosePress`, reason `"closeButton"`) and closes when its
+    /// `closeOnPress` lets it (the default); resolves once the app is quiet.
+    /// Rejects when it is not open or has no close button (`closable:
+    /// false`).
+    pub async fn press_close(this: Instance<Self>) -> Result<(), JsError> {
+        let (steps, id) = this.with(|w| (w.steps.clone(), w.id.clone()));
+        steps.run(move |app| app.press_window_close(&id)).await
+    }
+
+    /// A picture of the window as `app.screenshot` takes of the main one:
+    /// PNG bytes of its content, also saved at `path` (relative to the
+    /// current directory, on this machine) when given. A real platform's
+    /// (`nsh test --target`), which draws the window; a headless run draws
+    /// nothing. Rejects when the window is not open.
+    pub async fn screenshot(this: Instance<Self>, path: Option<String>) -> Result<Vec<u8>, String> {
+        let (app, id) = this.with(|w| (w.steps.app.clone(), w.id.clone()));
+        let bytes = on_app(&app, move |a| a.window_screenshot(&id)).await?;
+        if let Some(path) = path {
+            save_screenshot(path, bytes.clone()).await?;
+        }
+        Ok(bytes)
+    }
+}
+
 /// The keyboard of an app (`app.keyboard`), as Playwright's
 /// `page.keyboard`: a hardware keyboard's keys.
 #[class]
@@ -2093,6 +2146,16 @@ impl App {
         })
     }
 
+    /// The app's window `id` (`"main"`, or the id the app opened one
+    /// with), on a desktop: its state as the platform reports it, and its
+    /// close button. The window need not be open yet.
+    pub fn window(&self, id: String) -> AppWindow {
+        AppWindow {
+            steps: self.steps.clone(),
+            id,
+        }
+    }
+
     /// The app's keyboard, whose keys the test presses.
     #[getter]
     pub fn keyboard(&self) -> Keyboard {
@@ -2147,12 +2210,7 @@ impl App {
         let app = this.with(|a| a.steps.app.clone());
         let bytes = on_app(&app, |a| a.screenshot()).await?;
         if let Some(path) = path {
-            let saved = bytes.clone();
-            blocking(move || {
-                std::fs::write(&path, saved).map_err(|e| format!("screenshot({path:?}): {e}"))
-            })
-            .await
-            .map_err(|e| e.to_string())??;
+            save_screenshot(path, bytes.clone()).await?;
         }
         Ok(bytes)
     }
@@ -2301,6 +2359,13 @@ impl Steps {
             .await??;
         }
     }
+}
+
+/// Saves a screenshot's `bytes` at `path`, on a blocking thread.
+async fn save_screenshot(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    blocking(move || std::fs::write(&path, bytes).map_err(|e| format!("screenshot({path:?}): {e}")))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// `f` with the app `app`, on a blocking thread.

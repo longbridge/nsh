@@ -115,7 +115,7 @@ function App() {
             dropIndicatorClass="rounded-(--radius) border-2 border-primary bg-primary/10"
             drawerClass="bg-background border-r border-border"
             sheetClass="rounded-t-(--radius-lg) bg-background"
-            backdropClass="bg-black/30"
+            backdropClass="bg-scrim"
             renderTab={(tab) => (
               // One view inside the tab: a row holding the title and the close button.
               <View class="flex-row items-center gap-1.5">

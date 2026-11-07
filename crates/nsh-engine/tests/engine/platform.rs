@@ -1,7 +1,7 @@
 //! The OS the platform reports decides `platform` and which platform-only
-//! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
-//! apply; on the web, the idiom decides between mobile and desktop, and
-//! the terminal idiom behaves as a desktop. `platform.desktop`, the
+//! props (`ios={{…}}`, `android={{…}}`, `macos={{…}}`, `desktop={{…}}`,
+//! `web={{…}}`) apply; on the web, the idiom decides between mobile and
+//! desktop, and the terminal idiom behaves as a desktop. `platform.desktop`, the
 //! `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow the
 //! one definition of desktop (`Environment::desktop`), whatever idiom the
 //! platform set.
@@ -30,16 +30,16 @@ mount(
 );
 "#;
 
-/// The first frame's texts and accessibility labels and hints on `os`.
-fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
+/// The first frame of `app` on `os`.
+fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> {
     let dir = std::env::temp_dir().join(format!(
-        "nsh-platform-{}-{}-{idiom:?}",
+        "nsh-platform-{}-{tag}-{}-{idiom:?}",
         std::process::id(),
         os.name()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
-    std::fs::write(&entry, APP).unwrap();
+    std::fs::write(&entry, app).unwrap();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
@@ -77,14 +77,19 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    let batch = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("first frame");
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("first frame")
+        .items
+}
+
+/// The first frame's texts and accessibility labels and hints on `os`.
+fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
     let mut texts = Vec::new();
     let mut labels = Vec::new();
-    for item in &batch.items {
+    for item in first_frame_of(APP, "platform", os, idiom) {
         match item {
             MountItem::Text { text, .. } => texts.push(text.text.clone()),
             MountItem::ViewProps { props, .. } => {
@@ -162,9 +167,9 @@ fn platform_props_and_select_follow_the_os() {
 const WINDOW_APP: &str = r#"import { mount, Text } from "nsh";
 import { Window, displays, windowState } from "nsh/desktop";
 
-// Bounds saved on a display that is gone, given back before the first
-// render: NSH fits them on the display there is.
-Window.setBounds({
+// A placement saved on a display that is gone, given back before the
+// first render: NSH fits it on the display there is.
+Window.get("main")!.setPlacement({
   mode: "maximized",
   bounds: { origin: { x: -3000, y: 0 }, size: { width: 800, height: 600 } },
 });
@@ -174,7 +179,7 @@ Window.setBounds({
 const shown = () => {
   const state = windowState();
   return state
-    ? `${state.windowBounds.mode} ${state.bounds.origin.x} ${state.minimized} ${state.hidden} ${state.display?.id}`
+    ? `${state.placement.mode} ${state.bounds.origin.x} ${state.minimized} ${!state.visible} ${state.display?.id}`
     : "none";
 };
 const listed = () =>
@@ -189,7 +194,10 @@ mount(() => <Text>{`${shown()} | ${listed()}`}</Text>);
 fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     use nsh_core::{
         Command,
-        desktop::{DesktopCommand, Display, DisplayId, WindowBounds, WindowState},
+        desktop::{
+            DesktopCommand, Display, DisplayId, WindowMode, WindowPlacement, WindowRequest,
+            WindowState,
+        },
         geometry::{Bounds, point, size},
     };
     let dir = std::env::temp_dir().join(format!("nsh-window-state-{}", std::process::id()));
@@ -211,8 +219,8 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
         true,
     );
     let window = rect(100.0, 800.0, 600.0);
-    let mut state = WindowState::new(window, WindowBounds::Windowed(window));
-    state.display = Some(display);
+    let mut state = WindowState::new(window, WindowPlacement::new(WindowMode::Normal, window));
+    state.display = Some(display.id);
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         environment: Environment {
@@ -228,14 +236,14 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
         || ApproxTextEngine,
         ChannelSink(tx),
         |control| {
-            control.set_displays(vec![display]);
+            control.set_displays(vec![display.clone()]);
         },
     )
     .unwrap();
     // The last text starting with `until`, and the bounds the app gave the
     // window until then.
     let mut texts = Vec::new();
-    let mut read = |until: &str| -> (String, Vec<WindowBounds>) {
+    let mut read = |until: &str| -> (String, Vec<WindowPlacement>) {
         let mut restored = Vec::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while let Ok(batch) = rx.recv_deadline(deadline) {
@@ -246,8 +254,8 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
                         command: Command::Desktop(command),
                         ..
                     } => {
-                        if let DesktopCommand::SetBounds(bounds) = *command {
-                            restored.push(bounds);
+                        if let DesktopCommand::Request(WindowRequest::SetPlacement(p)) = *command {
+                            restored.push(p);
                         }
                     }
                     _ => {}
@@ -262,21 +270,22 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     // The bounds are fitted on the display there is (centered, the mode
     // kept), and the window and displays are there as the app first
     // renders.
-    let (text, restored) = read("windowed 100 false false 00000000000000ab");
+    let (text, restored) = read("normal 100 false false 00000000000000ab");
     assert_eq!(
         text,
-        "windowed 100 false false 00000000000000ab | 00000000000000ab true 1440"
+        "normal 100 false false 00000000000000ab | 00000000000000ab true 1440"
     );
     assert_eq!(
         restored,
-        vec![WindowBounds::Maximized(Bounds::new(
-            point(px(320.0), px(137.5)),
-            size(px(800.0), px(600.0))
-        ))]
+        vec![WindowPlacement::new(
+            WindowMode::Maximized,
+            Bounds::new(point(px(320.0), px(137.5)), size(px(800.0), px(600.0)))
+        )]
     );
     // Maximized: at once.
-    let mut maximized = state;
-    maximized.window_bounds = WindowBounds::Maximized(window);
+    let mut maximized =
+        WindowState::new(window, WindowPlacement::new(WindowMode::Maximized, window));
+    maximized.display = Some(display.id);
     engine.control().set_environment(Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
@@ -292,4 +301,366 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     });
     engine.control().set_displays(Vec::new());
     read("none | no displays");
+}
+
+const FPS_APP: &str = r#"import { fpsEnabled, mount, setFpsEnabled, Text } from "nsh";
+
+mount(() => <Text onPress={() => setFpsEnabled(true)}>{`fps ${fpsEnabled()}`}</Text>);
+"#;
+
+#[test]
+fn js_turns_the_performance_monitor_on_and_follows_it() {
+    use nsh_core::{Command, EventKind, EventPayload, ROOT_ID};
+    let dir = std::env::temp_dir().join(format!("nsh-fps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, FPS_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)));
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    // The text's node and what it shows, and whether the app asked for the
+    // monitor, until it shows `until`.
+    let node = std::cell::Cell::new(None);
+    let read = |until: &str| -> bool {
+        let mut asked = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while let Ok(batch) = rx.recv_deadline(deadline) {
+            let mut shown = false;
+            for item in batch.items {
+                match item {
+                    MountItem::Text { id, text, .. } => {
+                        node.set(Some(id));
+                        shown |= text.text == until;
+                    }
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::PerfMonitor(true),
+                    } => asked = true,
+                    _ => {}
+                }
+            }
+            if shown || (until.is_empty() && asked) {
+                return asked;
+            }
+        }
+        panic!("never showed {until:?}");
+    };
+    read("fps false");
+    engine
+        .control()
+        .dispatch_event(node.get().unwrap(), EventKind::Press, EventPayload::None);
+    assert!(read(""), "the press asks the platform for the monitor");
+    // The platform installs it, and removes it.
+    engine.control().set_perf_monitor(Some(std::sync::Arc::new(
+        nsh_engine::perf::PerfMonitor::new(),
+    )));
+    read("fps true");
+    engine.control().set_perf_monitor(None);
+    read("fps false");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const WINDOWS_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Window, currentWindow, titleBar, type WindowRef } from "nsh/desktop";
+
+const open = signal(true);
+const closed = signal("open");
+// `ref` gives the window's `WindowRef`.
+const win = signal<WindowRef | null>(null);
+
+function Inspector() {
+  const w = currentWindow();
+  return (
+    <Text>{`${w.id} ${titleBar().height} ${w.titleBar().height} ${w.state()?.focused ?? "unknown"}`}</Text>
+  );
+}
+
+mount(() => (
+  <View>
+    <Text>{`main ${closed()}`}</Text>
+    <Text>{`ref ${win()?.id ?? "none"} ${win()?.main}`}</Text>
+    <Window
+      ref={win}
+      id="inspector"
+      kind="panel"
+      title="Inspector"
+      open={open()}
+      onOpenChange={(e) => {
+        closed.set(`${e.open} ${e.reason}`);
+        open.set(e.open);
+      }}
+    >
+      <Inspector />
+    </Window>
+  </View>
+));
+"#;
+
+#[test]
+fn js_windows_open_with_their_kinds_defaults_and_report_back() {
+    use nsh_core::{
+        Command, EventKind, EventPayload, NodeId,
+        desktop::{
+            DesktopCommand, WindowCloseCause, WindowEvent, WindowKind, WindowLevel, WindowMode,
+            WindowPlacement, WindowState,
+        },
+        geometry::{Bounds, Edges, point, size},
+    };
+    let dir = std::env::temp_dir().join(format!("nsh-windows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, WINDOWS_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let engine = Engine::start_with(config, || ApproxTextEngine, ChannelSink(tx), |_| {}).unwrap();
+    let mut texts = Vec::new();
+    let mut opened: Vec<(NodeId, Box<nsh_core::desktop::OpenWindow>)> = Vec::new();
+    let mut removed: Vec<NodeId> = Vec::new();
+    let mut read = |until: &str, opened: &mut Vec<_>, removed: &mut Vec<NodeId>| {
+        // Shown already, in a batch an earlier read took.
+        if texts.iter().any(|t| t == until) {
+            return;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while let Ok(batch) = rx.recv_deadline(deadline) {
+            for item in batch.items {
+                match item {
+                    MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                    MountItem::Command {
+                        id,
+                        command: Command::Desktop(command),
+                    } => {
+                        if let DesktopCommand::OpenWindow(open) = *command {
+                            opened.push((id, open));
+                        }
+                    }
+                    MountItem::Remove { id } => removed.push(id),
+                    _ => {}
+                }
+            }
+            if texts.iter().any(|t| t == until) {
+                return;
+            }
+        }
+        panic!("no text {until:?} in {texts:?}");
+    };
+    // It opens resolved: the panel's defaults, the app's title over them;
+    // `currentWindow()` in it is the window, with no title bar reported
+    // yet and no state.
+    read("inspector 0 0 unknown", &mut opened, &mut removed);
+    read("ref inspector false", &mut opened, &mut removed);
+    let [(id, open)] = &opened[..] else {
+        panic!("one window opens: {opened:?}");
+    };
+    let id = *id;
+    assert_eq!(open.options.id, "inspector");
+    assert_eq!(open.options.kind, WindowKind::Panel);
+    let a = &open.options.attributes;
+    assert_eq!(a.title.as_deref(), Some("Inspector"));
+    assert_eq!(a.level, Some(WindowLevel::Floating));
+    assert_eq!(a.taskbar, Some(false));
+    assert_eq!(a.activate, Some(false));
+    // The platform reports its title bar and state: `titleBar()` in it
+    // and `currentWindow()`'s follow.
+    let control = engine.control();
+    control.dispatch_event(
+        id,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::TitleBar(Edges {
+            top: px(28.0),
+            left: px(72.0),
+            ..Default::default()
+        }))),
+    );
+    let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(300.0), px(200.0)));
+    let mut state = WindowState::new(bounds, WindowPlacement::new(WindowMode::Normal, bounds));
+    state.focused = true;
+    control.dispatch_event(
+        id,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::State(Box::new(state)))),
+    );
+    read("inspector 28 28 true", &mut opened, &mut removed);
+    // Escape closed it (its policy): the app hears why, and its root goes.
+    control.dispatch_event(
+        id,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::Closed {
+            cause: WindowCloseCause::Escape,
+        })),
+    );
+    read("main false escape", &mut opened, &mut removed);
+    assert!(removed.contains(&id), "{removed:?}");
+}
+
+const WINDOW_POPOVER_APP: &str = r#"import { mount, Overlay, signal, Text, View, type ViewRef } from "nsh";
+import { Window } from "nsh/desktop";
+
+const placed = signal("not placed");
+let anchor: ViewRef | undefined;
+
+mount(() => (
+  <View>
+    <View style={{ height: 500 }} />
+    <Text>{placed()}</Text>
+    <Window id="tools" defaultSize={{ width: 300, height: 100 }}>
+      <View style={{ paddingLeft: 20, paddingTop: 50 }}>
+        <View ref={anchor} style={{ width: 60, height: 30 }} />
+        <Overlay
+          anchor={anchor}
+          placement="bottom"
+          align="start"
+          onPosition={(e) =>
+            placed.set(`${e.placement} ${e.bounds.origin.x} ${e.bounds.origin.y}`)
+          }
+        >
+          <View style={{ width: 80, height: 40 }} />
+        </Overlay>
+      </View>
+    </Window>
+  </View>
+));
+"#;
+
+/// A popover in a window of the app's own is placed in that window: in its
+/// coordinates and within its size, not the main window's.
+#[test]
+fn js_popovers_in_a_window_are_placed_in_it() {
+    use nsh_core::{Command, NodeId, desktop::DesktopCommand};
+    let dir = std::env::temp_dir().join(format!("nsh-window-popover-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, WINDOW_POPOVER_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let _engine = Engine::start_with(config, || ApproxTextEngine, ChannelSink(tx), |_| {}).unwrap();
+    let mut texts = Vec::new();
+    let mut window: Option<NodeId> = None;
+    let mut inserted: Vec<(NodeId, NodeId)> = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        for item in batch.items {
+            match item {
+                MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                MountItem::Insert { parent, child, .. } => inserted.push((parent, child)),
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } if matches!(*command, DesktopCommand::OpenWindow(_)) => window = Some(id),
+                _ => {}
+            }
+        }
+        if texts
+            .iter()
+            .any(|t| t.starts_with("top") || t.starts_with("bottom"))
+        {
+            break;
+        }
+    }
+    let window = window.expect("the window opens");
+    // Above the button: the window is 100 points tall, with no room below
+    // it; 20 points in, as the window's content has it, whatever is above
+    // the window's node in the main window.
+    assert_eq!(
+        texts
+            .iter()
+            .rev()
+            .find(|t| t.starts_with("top") || t.starts_with("bottom")),
+        Some(&"top 20 10".to_owned()),
+        "{texts:?}"
+    );
+    // Its view is in the window's root view.
+    assert!(
+        inserted.iter().filter(|(p, _)| *p == window).count() >= 2,
+        "{inserted:?}"
+    );
+}
+
+const MATERIAL_APP: &str = r##"import { mount, View } from "nsh";
+
+mount(
+  () => (
+    <View
+      macos={{ backdrop: { material: "sidebar", blending: "behindWindow", state: "inactive" } }}
+      style={{ backdropFilter: "blur(20px)", glassEffect: "regular", glassTintColor: "#ff0000" }}
+    >
+      <View macos={{ backdrop: { material: "popover" } }} />
+    </View>
+  ),
+);
+"##;
+
+#[test]
+fn macos_props_apply_on_macos_through_the_mount() {
+    use nsh_core::{
+        Color, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState,
+    };
+    let styles = |os| {
+        first_frame_of(MATERIAL_APP, "macos-props", os, Idiom::Desktop)
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::ViewStyle { style, .. } => Some(*style),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let macos = styles(Os::MacOs);
+    let mut backdrop = MacOsBackdrop::default();
+    backdrop.material = MacOsBackdropMaterial::Sidebar;
+    backdrop.blending = MacOsBackdropBlending::BehindWindow;
+    backdrop.state = MacOsBackdropState::Inactive;
+    let backdrops = macos
+        .iter()
+        .filter_map(|style| style.macos_backdrop)
+        .collect::<Vec<_>>();
+    // The JS values, in the API's camel case, reach the platform.
+    assert!(backdrops.contains(&backdrop));
+    // Fields left out (blending and state here) keep their defaults.
+    assert!(backdrops.contains(&MacOsBackdrop::default()));
+    assert_eq!(
+        macos.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
+    );
+    // Another platform ignores `macos={{…}}`; the style itself is the same.
+    let linux = styles(Os::Linux);
+    assert!(linux.iter().all(|style| style.macos_backdrop.is_none()));
+    assert_eq!(
+        linux.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
+    );
 }

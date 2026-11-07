@@ -1,10 +1,10 @@
 import { mount, signal, Text, View } from "nsh";
 import { type OpenChangeReason, Tooltip } from "nsh/base";
-import { button, buttonText, createPresence, desktop, iconButtonGlyph, iconButtonLook, Inspector, Log, Panel, Stage, ui, wide } from "./palette";
+import { button, buttonText, createPresence, desktop, Icon, iconButtonGlyph, type IconName, iconButtonLook, Inspector, Log, Panel, Stage, tooltipLook, tooltipText, ui, wide } from "./palette";
 
 /** An icon button with a hint of the app's look, above or below it. */
 function Tool(props: {
-  icon: string;
+  icon: IconName;
   label: string;
   hint: string;
   placement: "top" | "bottom";
@@ -36,13 +36,13 @@ function Tool(props: {
             onOpen={presence.show}
             onClose={presence.hide}
           >
-            <View style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6, ...presence.style }}>
-              <Text style={{ fontSize: 13, color: ui().page }}>{props.hint}</Text>
+            <View class={tooltipLook().class} style={presence.style}>
+              <Text class={tooltipText}>{props.hint}</Text>
             </View>
           </Tooltip>
         }
       >
-        <Text style={{ fontSize: glyph.size, color: glyph.tint }}>{props.icon}</Text>
+        <Icon name={props.icon} {...glyph} />
       </View>
       <Text style={{ fontSize: 11, color: ui().faint }}>{props.placement}</Text>
     </View>
@@ -57,17 +57,17 @@ function App() {
     events.set([`${name} ${open ? "shown" : "hidden"} · ${reason}`, ...events()].slice(0, 6));
   const tools = () => (
     <>
-      <Tool icon="★" label="Star" hint="Add to favorites" placement="top" pinned={pinned()} onPress={() => pressed.set("Star")} onOpenChange={log("Star")} />
-      <Tool icon="↗" label="Share" hint="Share with your team" placement="bottom" pinned={pinned()} onPress={() => pressed.set("Share")} onOpenChange={log("Share")} />
-      <Tool icon="✕" label="Delete" hint="Move to the trash" placement="top" pinned={pinned()} onPress={() => pressed.set("Delete")} onOpenChange={log("Delete")} />
+      <Tool icon="star" label="Star" hint="Add to favorites" placement="top" pinned={pinned()} onPress={() => pressed.set("Star")} onOpenChange={log("Star")} />
+      <Tool icon="share" label="Share" hint="Share with your team" placement="bottom" pinned={pinned()} onPress={() => pressed.set("Share")} onOpenChange={log("Share")} />
+      <Tool icon="trash" label="Delete" hint="Move to the trash" placement="top" pinned={pinned()} onPress={() => pressed.set("Delete")} onOpenChange={log("Delete")} />
     </>
   );
   // The `tooltip` prop of any element: a `Tooltip` with the app's look.
   const pin = () => (
     <View
       tooltip={
-        <Tooltip style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 }}>
-          <Text style={{ fontSize: 13, color: ui().page }}>Shows every tooltip without a pointer</Text>
+        <Tooltip class={tooltipLook().class}>
+          <Text class={tooltipText}>Shows every tooltip without a pointer</Text>
         </Tooltip>
       }
       onPress={() => pinned.set(!pinned())}
