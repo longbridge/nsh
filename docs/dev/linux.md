@@ -176,7 +176,11 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
     Shift+arrows, Ctrl+A) and the input method. A character needing Shift is typed with it; one the layout has no
     key for is put on a spare keycode first (`XChangeKeyboardMapping`, as `xdotool` does). `keyboard.down` holds the
     modifier keys down for real too, so the keys typed meanwhile carry them. libX11 and libXtst are loaded when the
-    agent first types (`dlopen`) and GDK's X11 functions looked up in the loaded GTK, so nothing more is linked;
+    agent first types (`dlopen`) and GDK's X11 functions looked up in the loaded GTK, so nothing more is linked.
+    Loading them moves the X pointer to the screen's corner: Xvfb starts it in the middle, over the window, and the
+    view under it would take its hover back whenever a key comes (an open list's highlight), while the agent's
+    pointer is simulated. The press that focuses a field keeps its text unselected
+    (`grab_focus_without_selecting`), as a click does, so real keys typed next do not replace it;
   - **elsewhere** (Wayland, a GTK without the X11 backend, a server without XTest), they are the widgets' signals:
     typing inserts each character into the focused `GtkText` / `GtkTextView` at its caret (`insert_text`, so the
     field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`,

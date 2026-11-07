@@ -86,14 +86,16 @@ impl LinuxNative {
     /// `None` where there is no XTest (Wayland), and the agent keeps to the
     /// widgets' signals; else what `f` says (false: it typed nothing).
     fn real_keys(&self, f: impl FnOnce(&Xtest) -> bool + Send + 'static) -> Option<bool> {
-        let typed = self
-            .with_window(move |_, w| {
-                Xtest::with(|x| {
-                    x.focus(w);
-                    f(x)
-                })
-            })
+        // The focus first, handled before the keys come: GTK drops a key
+        // that comes with the window's focus-in.
+        let moved = self
+            .with_window(|_, w| Xtest::with(|x| x.focus(w)))
             .flatten()?;
+        if moved {
+            std::thread::sleep(KEY_SETTLE);
+            self.on_main(|_| ());
+        }
+        let typed = self.on_main(move |_| Xtest::with(f)).flatten()?;
         // The events come back through GDK's source on the main loop.
         std::thread::sleep(KEY_SETTLE);
         self.on_main(|_| ());

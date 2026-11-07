@@ -37,6 +37,7 @@ pub(crate) struct Xtest {
     display_keycodes: unsafe extern "C" fn(*mut Display, *mut c_int, *mut c_int) -> c_int,
     free: unsafe extern "C" fn(*mut c_void) -> c_int,
     set_input_focus: unsafe extern "C" fn(*mut Display, XWindow, c_int, c_ulong) -> c_int,
+    get_input_focus: unsafe extern "C" fn(*mut Display, *mut XWindow, *mut c_int) -> c_int,
     sync: unsafe extern "C" fn(*mut Display, c_int) -> c_int,
     fake_key: unsafe extern "C" fn(*mut Display, c_uint, c_int, c_ulong) -> c_int,
     surface_xid: unsafe extern "C" fn(*mut c_void) -> XWindow,
@@ -106,12 +107,38 @@ impl Xtest {
                 display_keycodes: sym(x11, c"XDisplayKeycodes")?,
                 free: sym(x11, c"XFree")?,
                 set_input_focus: sym(x11, c"XSetInputFocus")?,
+                get_input_focus: sym(x11, c"XGetInputFocus")?,
                 sync: sym(x11, c"XSync")?,
                 fake_key: sym(xtst, c"XTestFakeKeyEvent")?,
                 surface_xid: sym(std::ptr::null_mut(), c"gdk_x11_surface_get_xid")?,
                 spare: None,
             };
             x.spare = x.find_spare();
+            // The X pointer to the screen's corner, off the window: Xvfb
+            // starts it in the middle, where the window's views would get
+            // its hover whenever a key comes (a list's highlight moved back
+            // under it), while the agent's pointer is simulated.
+            let root: unsafe extern "C" fn(*mut Display) -> XWindow =
+                sym(x11, c"XDefaultRootWindow")?;
+            let screen: unsafe extern "C" fn(*mut Display) -> c_int = sym(x11, c"XDefaultScreen")?;
+            let width: unsafe extern "C" fn(*mut Display, c_int) -> c_int =
+                sym(x11, c"XDisplayWidth")?;
+            let height: unsafe extern "C" fn(*mut Display, c_int) -> c_int =
+                sym(x11, c"XDisplayHeight")?;
+            let warp: unsafe extern "C" fn(
+                *mut Display,
+                XWindow,
+                XWindow,
+                c_int,
+                c_int,
+                c_uint,
+                c_uint,
+                c_int,
+                c_int,
+            ) -> c_int = sym(x11, c"XWarpPointer")?;
+            let n = screen(display);
+            let (w, h) = (width(display, n), height(display, n));
+            warp(display, 0, root(display), 0, 0, 0, 0, w - 1, h - 1);
             Some(x)
         }
     }
@@ -137,15 +164,22 @@ impl Xtest {
     }
 
     /// Gives `window` the X input focus, as a click on it would, so the
-    /// keys go to it.
-    pub(crate) fn focus(&self, window: &gtk::Window) {
+    /// keys go to it; whether it did not have it.
+    pub(crate) fn focus(&self, window: &gtk::Window) -> bool {
         let Some(surface) = window.surface() else {
-            return;
+            return false;
         };
         // SAFETY: GDK's X11 surface; Xlib calls on its display.
         unsafe {
             let xid = (self.surface_xid)(surface.as_ptr().cast());
+            let (mut now, mut revert) = (0, 0);
+            (self.get_input_focus)(self.display, &mut now, &mut revert);
+            if now == xid {
+                return false;
+            }
             (self.set_input_focus)(self.display, xid, REVERT_TO_PARENT, 0);
+            self.flush();
+            true
         }
     }
 
