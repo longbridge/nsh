@@ -55,7 +55,7 @@ WORKFLOWS = {
             "nsh-cli", "nsh-dev", "xtask",
         ],
         # `nsh test --target` runs the examples' tests.
-        "files": ["examples/counter/**", "examples/gallery/**"],
+        "files": ["crates/gpui/**", "examples/counter/**", "examples/gallery/**"],
     },
     "windows.yml": {
         "packages": [
