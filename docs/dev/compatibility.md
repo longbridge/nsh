@@ -173,7 +173,7 @@ screen, `absent <text>` checks one is gone, `tap id:<testID>` / `label:<label>` 
 nearest pressable ancestor; `span:<text>` the link or pressable span where `<text>` starts; `parent:<selector>` the
 view around the one it names, a component's popup by the app's content in it, and `below:<selector>` its sibling
 below it, a popup's backdrop), `wait <ms>` runs timers, and `viewport <w> <h>` and `platform <os>` (first) size the
-screen and pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}` props apply, and
+screen and pick the platform whose `ios={{…}}` / `android={{…}}` / `macos={{…}}` / `desktop={{…}}` / `web={{…}}` props apply, and
 `fontscale <scale>` sets the user's text size. What a view looks like is checked as the platform receives it:
 `frame <selector> <x> <y> <width> <height>` (its layout, in points relative to its parent), `prop` / `noprop` (a host
 prop), `style` / `nostyle` (a paint or text style key), `drawing` / `nodrawing` (an operation of a canvas's latest

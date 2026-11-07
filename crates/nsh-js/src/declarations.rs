@@ -39,6 +39,8 @@ export interface CommonProps<S = ViewStyle, R = ViewRef> extends TouchProps, Hos
   ios?: IOSProps;
   /** Android-only props (ignored elsewhere). */
   android?: AndroidProps;
+  /** macOS-only props (`macos={{…}}`; ignored elsewhere). */
+  macos?: MacOSProps;
   /** Desktop-only props (macOS, Windows, Linux and desktop browsers;
    * ignored on mobile). */
   desktop?: DesktopProps;
@@ -92,6 +94,9 @@ export interface WebProps {}
 
 /** Android-only props of every element (`android={{…}}`). */
 export interface AndroidProps extends AndroidHostProps {}
+
+/** macOS-only props of every element (`macos={{…}}`); elements add their own. */
+export interface MacOSProps extends MacOSHostProps {}
 
 /** `<View>` */
 export interface ViewProps extends CommonProps, ViewHostProps {
@@ -1066,6 +1071,7 @@ declare const text: "export default ignored";
         }
         assert!(unused.is_empty(), "declared but used nowhere: {unused:?}");
         assert!(all.contains("export interface IOSProps extends IOSHostProps {}"));
+        assert!(all.contains("export interface MacOSProps extends MacOSHostProps {}"));
         assert!(all.contains("export interface DesktopProps extends DesktopHostProps {}"));
     }
 

@@ -197,6 +197,22 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// A see-through window: [`run_app`] opens its window nonopaque with a
+    /// clear background, and the surface draws no background under the app's
+    /// root, so what the app leaves unpainted shows what is behind the
+    /// window (desktop widgets, panels with rounded or irregular outlines,
+    /// a `macos={{ backdrop }}` material blending behind the window). False
+    /// by default.
+    ///
+    /// A custom host's initial default: explicit main-window attributes
+    /// and later `WindowHandle::set` calls take precedence. Standard hosts
+    /// leave this false but can request transparency through their window
+    /// configuration. A view's `behindWindow` material never enables it.
+    ///
+    /// An embedded [`AppView`] draws no background over its host's content
+    /// too, but never changes the host's window: the embedding app makes its
+    /// window nonopaque and clear itself where it wants that.
+    pub transparent: bool,
 }
 
 impl Default for AppOptions {
@@ -221,6 +237,7 @@ impl Default for AppOptions {
             storage: None,
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            transparent: false,
         }
     }
 }
@@ -279,6 +296,7 @@ impl AppView {
     pub fn new(mtm: MainThreadMarker, options: AppOptions) -> Rc<AppView> {
         let surface = Surface::new(mtm, initial_environment());
         surface.appearance.set(options.appearance);
+        surface.transparent.set(options.transparent);
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(options.size.0 as f64, options.size.1 as f64),
@@ -801,11 +819,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
         #[cfg(feature = "dev")]
         AppSource::DevServer(_) => None,
     };
-    let launch = loaded
+    let mut launch = loaded
         .as_ref()
         .and_then(App::main_window)
         .cloned()
         .unwrap_or_default();
+    if options.transparent {
+        launch.attributes.transparent.get_or_insert(true);
+    }
     // With `restoreBounds`, where it was last (the engine keeps it in the
     // app's storage as the window changes), fitted on the displays there
     // are now.
@@ -840,6 +861,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
     view.surface().standalone.set(true);
+    // The standalone window's attributes own its live transparency state;
+    // the surface-only flag remains for embedded AppViews.
+    view.surface().transparent.set(false);
     window.setContentView(Some(&view.view()));
     // Nothing is focused until the user or the app focuses it: the root
     // holds the keyboard, so becoming key never lets AppKit pick the first

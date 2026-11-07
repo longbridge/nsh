@@ -2621,6 +2621,10 @@ pub enum Prop {
     /// The system material of a backdrop blur (iOS, default `ultraThin`).
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
+    /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
+    /// (default `popover` / `withinWindow` / `active`; `None`: none).
+    #[prop(macos = "backdrop")]
+    MacOsBackdrop(Option<crate::MacOsBackdrop>),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),
