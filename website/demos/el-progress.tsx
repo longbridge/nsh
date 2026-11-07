@@ -1,7 +1,7 @@
 import { cleanup, mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { Button, Progress, Switch } from "nsh/base";
-import { button, buttonText, desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
+import { button, buttonText, desktop, focusRing, hoverFill, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // The parts: geometry and motion in classes, colors from the palette. The
 // label row comes first (`flex-col-reverse`: the children follow the track),
@@ -51,7 +51,7 @@ function Action(props: { label: string; disabled?: boolean; onPress: () => void 
     <Button
       onPress={props.onPress}
       disabled={props.disabled}
-      {...button("secondary", { style: desktop ? {} : { flex: 1 } })}
+      {...button("secondary", { disabled: () => !!props.disabled, style: desktop ? {} : { flex: 1 } })}
     >
       <Text style={buttonText()}>{props.label}</Text>
     </Button>
@@ -124,10 +124,7 @@ function App() {
                 class={`-mx-2 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={unknown() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={unknown() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => unknown())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Size unknown</Text>
               </Switch>

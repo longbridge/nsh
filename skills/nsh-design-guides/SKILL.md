@@ -52,6 +52,7 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Interaction states                    | Hover, focus, pressed, selected, disabled, loading, validation, danger |
 | Feedback and overlays                 | Dialog, sheet, popover, menu, notification, tooltip, dismissal, focus  |
 | Motion                                | Any animation or transition                                            |
+| Sound                                 | Any sound effect: which sound for which job, when to stay silent       |
 | Designing data-heavy interfaces       | Tables, lists, trees, dashboards, dense inspectors                     |
 | Interface language                    | Any user-facing text: labels, buttons, titles, errors, empty states    |
 | Internationalization and platform fit | Multi-locale copy, Chinese terminology, platform conventions           |

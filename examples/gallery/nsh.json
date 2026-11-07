@@ -8,6 +8,13 @@
   ],
   "icon": "icon.png",
   "appearance": "system",
+  "window": {
+    "title": "Gallery",
+    "titleBar": {
+      "style": "hidden",
+      "height": 44
+    }
+  },
   "theme": "../nsh-gallery-ui/theme.json",
   "capabilities": {
     "network": {
@@ -31,6 +38,9 @@
       "execute": [
         "echo",
         "cat",
+        "sh",
+        "bash",
+        "zsh",
         "cmd.exe",
         "claude",
         "codex"
@@ -55,6 +65,15 @@
     },
     "picker": true,
     "speech": true,
-    "notifications": true
+    "notifications": true,
+    "audio": true,
+    "windows": {
+      "kinds": [
+        "normal",
+        "dialog",
+        "panel",
+        "popup"
+      ]
+    }
   }
 }

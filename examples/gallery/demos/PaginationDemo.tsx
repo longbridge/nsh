@@ -1,6 +1,6 @@
 import { platform, signal, Text, View } from "nsh";
 import { Menu, MenuItem, Pagination, type PaginationItemState } from "nsh/base";
-import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, PopIn, popupSurface, Segmented, terminal, Toggle } from "../ui";
+import { Appear, backdrop, Button, Caption, Card, colors, DemoPage, density, Icon, menuItemLabel, menuItemLook, menuSheet, mono, PopIn, popupSurface, Segmented, terminal, Toggle } from "../ui";
 
 // `nsh/base`'s `Pagination` owns which pages show (the first and the last,
 // the current one's neighbours, ellipses for the rest), the presses,
@@ -32,22 +32,14 @@ function hiddenPages(start: number, end: number, current: number) {
   return Array.from({ length: to - from }, (_, i) => from + i);
 }
 
-const sheet = pointer
-  ? undefined
-  : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34 };
-
 /** An ellipsis that opens a menu of the pages it hides (`gpui-component`'s dropdown). */
 function JumpMenu(props: { start: number; end: number; current: number; onPick: (page: number) => void }) {
   const pages = () => hiddenPages(props.start, props.end, props.current);
   const list = (
     <Each of={pages()}>
       {(page) => (
-        <MenuItem
-          onSelect={() => props.onPick(page())}
-          hoverStyle={{ backgroundColor: colors.inset }}
-          style={{ height: pointer ? 28 : 44, paddingHorizontal: 10, justifyContent: "center", borderRadius: 6 }}
-        >
-          <Text style={{ fontSize: density.body, color: colors.text, fontVariant: ["tabular-nums"] }}>{grouped(page())}</Text>
+        <MenuItem onSelect={() => props.onPick(page())} {...menuItemLook()}>
+          <Text style={{ ...menuItemLabel(), fontVariant: ["tabular-nums"] }}>{grouped(page())}</Text>
         </MenuItem>
       )}
     </Each>
@@ -56,8 +48,8 @@ function JumpMenu(props: { start: number; end: number; current: number; onPick: 
     <Menu
       offset={4}
       margin={8}
-      popupStyle={sheet}
-      backdropStyle={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+      popupStyle={menuSheet()}
+      backdropStyle={backdrop()}
       trigger={
         <View
           accessibilityLabel={`Pages ${grouped(props.start)} to ${grouped(props.end - 1)}`}

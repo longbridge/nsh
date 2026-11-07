@@ -236,8 +236,12 @@ fn show(center: &AnyObject, control: EngineControl, id: u32, notification: &Noti
         let content: Retained<AnyObject> = msg_send![content, new];
         let () = msg_send![&*content, setTitle: &*NSString::from_str(&notification.title)];
         let () = msg_send![&*content, setBody: &*NSString::from_str(&notification.body)];
-        let sound: Retained<AnyObject> = msg_send![sound, defaultSound];
-        let () = msg_send![&*content, setSound: &*sound];
+        // A content without a sound plays none (nor vibrates an iPhone),
+        // though `PRESENTATION` lets sounds play.
+        if !notification.silent {
+            let sound: Retained<AnyObject> = msg_send![sound, defaultSound];
+            let () = msg_send![&*content, setSound: &*sound];
+        }
         let trigger: Option<&AnyObject> = None;
         let request: Retained<AnyObject> = msg_send![
             request,

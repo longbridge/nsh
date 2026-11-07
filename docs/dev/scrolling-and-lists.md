@@ -15,17 +15,18 @@
   the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
   indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). On Linux, Windows and desktop Web, the indicator shows while scrolling or when the pointer reaches its draggable thumb;
   moving over content leaves its visibility and fade timer unchanged. macOS follows the system's scroll-bar
-  visibility preference (`WhenScrolling` suppresses content-hover reveal). Horizontal
-  views keep theirs with `scrollbar={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
-  desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
+  visibility preference (`WhenScrolling` suppresses content-hover reveal). `scrollbar={false}` hides the
+  indicator on either axis (the platforms' `scroll::config`; on the web `barShown`, in the desktop idiom): a mouse
+  without a horizontal wheel moves a horizontal view with Shift + wheel, with the vertical wheel where nothing
+  around it scrolls vertically (`scroll_target`), and with the keys. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
 - **Scroll bars of the app's own** (`nsh/base`'s `Scrollbar`, `docs/dev/components.md` "Scroll bars"): a view the
   app places that names a scroll view or a list (`scroll={ref}`), with its look (`class`, `thumbClass`) and `mode`;
   the target's own indicator off with `scrollbar={false}`. It follows the target through the core
   (`element::watch_scroll`: the offset every platform reports, the content size the layout sends), so it
   works on every backend, and scrolls it with `ScrollTo`. With an app theme (`Scrollbar.setTheme`) or a view's own
-  (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`,
-  which also hides the horizontal views' kept indicator on the desktops); `docs/dev/components.md` "Scroll bars".
+  (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`);
+  `docs/dev/components.md` "Scroll bars".
 - **Carousels** (`nsh/base`'s `Carousel`, `docs/dev/components.md` "Carousels"): a horizontal or vertical scroll view
   whose `snapToOffsets` are its slides' laid-out starts, with `disableIntervalMomentum`; the slide is read where the
   scroll comes to rest (`onScrollEnd`) and discrete changes are `ScrollTo`s.
@@ -47,7 +48,7 @@
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
   below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `alignment` (`bottom`, GPUI's `ListAlignment::Bottom`: rows in reading order, opens at the end with no scroll command to pin, follows it within `follow_end` or a point's rounding, `ListState::anchor_end`; it waits for an appended last row's measurement the window will reach, so one scroll lands on its real size; short content lies at the bottom, `ListState::leading`), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
-  `footer` / `empty` / `separator` (a component or an element), `contentStyle`
+  `footer` / `empty` / `separator` (a component, called once and untracked, or an element; a signal or memo, as `<If>` and `<Each>` are, is the slot's insert's to track: `slot` in `nsh-js` `list.rs`, `web/browser/list.js`), `contentStyle`
   (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
   `onLoadMoreAtStart` + `loadMoreAtStartThreshold` (below), `onViewableItemsChange` +
   `viewabilityConfig` (`itemVisibleThreshold` / `viewAreaCoverageThreshold` / `minimumViewTime`), `keyExtractor`,
@@ -79,6 +80,11 @@
 - **Spare list cells** (recycled cells without an item) keep their last row. The core hides them (`Core::set_spare`:
   `visibility: hidden` and `accessibilityElementsHidden`) when they lie in the render window, were never placed or
   the items changed, and shows them as it places them; the few the window leaves behind while scrolling stay shown.
+  A row coming back into the window takes back the spare cell that still shows it (the window shrank and grew back
+  as a panel showed and went), so it is not made again; spare cells follow their rows through splices.
+- **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
+  a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
+  (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
@@ -95,7 +101,9 @@
   `refreshing`, `refreshIndicator`, `pullValue`, paging and snapping, `contentInset`, `scrollbar`, `scrollable`,
   `keyboardDismissMode`) and what needs a scroll view of the list's own (`inverted`,
   `maintainVisibleContentPosition`) are ignored there, each warned of once; a zoomable scroll view around it is not
-  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Lists of their
+  supported. Sticky rows stick to the view's viewport, as CSS `position: sticky` in its container. Its props carry
+  `ViewProps::screen_order` (its axis): the platforms read its cells in the order they are on screen, as they read a
+  scroll view's content, since recycled cells are not in their rows' order in the tree. Lists of their
   own pay nothing (`crates/nsh-core/src/core/parent_viewport.rs`).
 - **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`.
 - **Paced binding** (the runtime's lists): what shows binds in the commit that assigns it (the viewport, sticky items,

@@ -71,6 +71,8 @@ pub struct Notification {
     pub title: String,
     /// Its text, `""` for none.
     pub body: String,
+    /// Shows it without a sound or vibration, as the web's `silent` does.
+    pub silent: bool,
 }
 
 impl Notification {
@@ -80,7 +82,14 @@ impl Notification {
             id: id.into(),
             title: title.into(),
             body: body.into(),
+            silent: false,
         }
+    }
+
+    /// Shows it without a sound or vibration ([`Self::silent`]).
+    pub fn silent(mut self, silent: bool) -> Self {
+        self.silent = silent;
+        self
     }
 }
 

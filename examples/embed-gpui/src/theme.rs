@@ -104,11 +104,9 @@ mod tests {
 
     #[test]
     fn the_current_modes_resolved_colors_are_shadcns_tokens() {
-        let mut theme = Theme {
-            mode: ThemeMode::Dark,
-            radius: gpui_kit::px(6.0),
-            ..Default::default()
-        };
+        let mut theme = Theme::default();
+        theme.mode = ThemeMode::Dark;
+        theme.radius = gpui_kit::px(6.0);
         theme.colors.primary = gpui_kit::rgb(0x7c3aed).into();
         let nsh = nsh_theme(&theme);
         assert_eq!(Color::from(nsh.primary.dark), Color(0x7c3aedff));

@@ -41,6 +41,9 @@ mod picker;
 mod press;
 mod selectable_view;
 mod shader;
+// Sound (`Sound`, `AudioPlayer`), shared with macOS.
+#[path = "../../nsh-platform-macos/src/audio.rs"]
+mod audio;
 // The Speech framework's recognizer and the notification center, shared with macOS.
 use nsh_platform_apple::{notifications, speech};
 mod surface;

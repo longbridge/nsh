@@ -559,6 +559,11 @@ impl Host {
                     }
                     return;
                 }
+                // Windows: their handles and listeners are native.
+                if let (EventKind::Window, EventPayload::Window(window)) = (event, payload) {
+                    crate::window::platform_event(cx.as_raw().as_ptr(), id, window);
+                    return;
+                }
                 let payload = match (event, payload) {
                     // `onChange({ value })`: the text, in one object as every
                     // event (`api-naming.md` "Payloads").
@@ -1027,6 +1032,40 @@ impl Host {
         });
     }
 
+    /// Publishes the displays to JS (`nsh/desktop`'s `displays()`). Call
+    /// before evaluating the bundle where there are displays, then on every
+    /// change; without a call they are none.
+    pub fn set_displays(&self, displays: &[nsh_core::desktop::Display]) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_displays(raw, displays) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
+    /// Publishes whether the platform's performance monitor measures to JS
+    /// (`nsh`'s `fpsEnabled()`). Call on every change; without a call it is
+    /// off.
+    pub fn set_fps_enabled(&self, enabled: bool) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_fps_enabled(raw, enabled) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1261,6 +1300,10 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         // And speech sessions' events (`Speech`'s listeners get them).
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
+        // And sounds' and players' events (their objects' listeners).
+        EventPayload::Audio { id, .. } => obj.set("id", *id)?,
+        // Handled natively (`crate::window`).
+        EventPayload::Window(_) => return Ok(Value::new_undefined(cx.clone())),
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
@@ -2242,6 +2285,41 @@ const report = (v) => text(String(v));
         assert_eq!(style.view.opacity, 0.5);
     }
 
+    /// `Intl` names local time by the zone it formats it in, whichever the
+    /// environment reports (a test's, which moves no local time): the
+    /// zone `resolvedOptions()` gives formats as local time does, at any
+    /// instant. On a machine outside UTC the reported `UTC` is not local
+    /// time; on one in UTC, `+08:00` is not. It holds under any `TZ`:
+    /// `Asia/Singapore` (+07:30 at epoch 0), `JST-9`, and
+    /// `CET-1CEST,M3.5.0,M10.5.0/3`, whose summer instant shows a zone
+    /// named by one offset.
+    #[test]
+    fn intl_names_the_zone_it_formats_local_time_in() {
+        let host = Host::new().unwrap();
+        let script = format!(
+            r#"{REPORT}
+            const options = {{
+              year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+            }};
+            const local = new Intl.DateTimeFormat("en-US", options);
+            const zone = local.resolvedOptions().timeZone;
+            const named = new Intl.DateTimeFormat("en-US", {{ ...options, timeZone: zone }});
+            // 1970 (Singapore at +07:30), a northern summer and winter.
+            const instants = [0, 1720000000000, 1736000000000];
+            const differ = instants.filter((t) => named.format(t) !== local.format(t));
+            report(differ.length === 0 ? "agrees" : `${{zone}}: ${{differ.map((t) => named.format(t) + " vs " + local.format(t))}}`);
+            "#
+        );
+        for zone in ["UTC", "+08:00", "Asia/Tokyo"] {
+            let mut env = Environment::default();
+            env.locale_settings.time_zone = nsh_core::platform::TimeZone::parse(zone).unwrap();
+            host.set_environment(&env);
+            host.eval_source(&script).unwrap();
+        }
+        assert_eq!(reported(&host), ["agrees", "agrees", "agrees"]);
+    }
+
     /// `Intl` and the `toLocaleString`s format natively, in the device's
     /// locale by default.
     #[test]
@@ -2407,6 +2485,61 @@ const report = (v) => text(String(v));
             .filter(|op| matches!(op, Op::Create { .. }))
             .count();
         assert_eq!(created, 1);
+        assert!(host.fatal().is_none());
+    }
+
+    #[test]
+    fn an_interrupt_inside_find_keeps_the_elements_alive() {
+        // An interrupt inside QuickJS's `find` family must not free the
+        // arrays' elements (quickjs-ng #1826), or a later call crashes the
+        // VM. `views[0]` and the second, offset run of each method make the
+        // interrupt land in the method itself.
+        let mut host = sandboxed(Limits {
+            call_budget: Duration::ZERO,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            const methods = ["find", "findIndex", "findLast", "findLastIndex"];
+            globalThis.kept = methods.map(() => ({}));
+            globalThis.weak = kept.map((element) => new WeakRef(element));
+            globalThis.items = kept.map((element) => new Array(100000).fill(element));
+            const press = (handler) => {
+                const view = element("view");
+                prop(view, "onPress", handler);
+                return view;
+            };
+            const nothing = () => {};
+            globalThis.views = [press(() => { for (;;) {} })];
+            methods.forEach((method, i) => {
+                views.push(press(() => items[i][method](() => false)));
+                views.push(press(() => (nothing(), items[i][method](() => false))));
+            });"#,
+        )
+        .unwrap();
+        ops(&host);
+        // Views 2 (the loop), then 4 to 18: two per method.
+        for view in (4..=18).step_by(2) {
+            host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+            host.dispatch_event(view, EventKind::Press, &EventPayload::None);
+        }
+        let errors = errors.borrow().clone();
+        assert_eq!(errors.len(), 16, "{errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("budget of 0 ms")),
+            "{errors:?}"
+        );
+        // The arrays let their elements go; `kept` still holds them.
+        host.eval_source("items = null;").unwrap();
+        host.collect_garbage();
+        host.eval_source(&format!(
+            "{REPORT}report(weak.map((w, i) => w.deref() === kept[i]).join());"
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["true,true,true,true"]);
         assert!(host.fatal().is_none());
     }
 

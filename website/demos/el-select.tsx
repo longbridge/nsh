@@ -1,6 +1,6 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { type JSX, mount, signal, Text, token, View } from "nsh";
 import { Button, type OpenChangeReason, Select, type SelectEntry, type SelectGroup, Switch } from "nsh/base";
-import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, ui } from "./palette";
+import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // Two selects in a settings card: a plain one (typeahead jumps by letter)
 // and a searchable one with sections, a disabled item and an empty state.
@@ -52,24 +52,26 @@ const surface = () =>
     ? { ...ui().card, borderRadius: 12, padding: 4 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30, maxHeight: "70%" as const };
 
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+const backdrop = () => ({ backgroundColor: token("scrim") });
 
 /** The trigger: the shared button's look, the chosen title at the start and a chevron in a lane as wide as it. */
 function Trigger(props: { title?: string; placeholder: string; open: boolean; disabled?: boolean; clearable?: boolean }) {
   const look = button("secondary", {
+    disabled: () => !!props.disabled,
     style: () => ({
       flexDirection: "row",
       justifyContent: "space-between",
       gap: 8,
       ...(desktop ? { width: 260 } : {}),
-      // Open: the border stays lit while the list is up; disabled, dimmed.
+      // Open: the border stays lit while the list is up. Disabled, dimmed
+      // here: the select is disabled, not this view, so its `disabledStyle`
+      // does not apply.
       ...(props.open ? { borderColor: ui().faint } : {}),
       ...(props.disabled ? { opacity: 0.4 } : {}),
     }),
   });
   return (
-    // No hover while disabled.
-    <View {...look} hoverStyle={props.disabled ? undefined : look.hoverStyle}>
+    <View {...look}>
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: props.title ? ui().text : ui().muted }}>
         {props.title ?? props.placeholder}
       </Text>
@@ -172,7 +174,7 @@ function App() {
               <Button
                 disabled={region() === null}
                 onPress={() => region.set(null)}
-                {...button("secondary", { size: "sm", style: { marginTop: 6 } })}
+                {...button("secondary", { size: "sm", disabled: () => region() === null, style: { marginTop: 6 } })}
               >
                 <Text style={buttonText("secondary", { size: "sm" })}>Clear region</Text>
               </Button>
@@ -182,10 +184,7 @@ function App() {
                 class={`-mx-2 mt-1 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={locked() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={locked() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => locked())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Region disabled</Text>
               </Switch>
@@ -208,7 +207,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               trigger={<Trigger title={titleOf(LANGUAGES, language())} placeholder="Choose a language" open={languageOpen()} />}
               renderItem={(item) => <Row item={item} />}
@@ -235,7 +234,7 @@ function App() {
               margin={8}
               // Wider than the trigger on the desktops: the titles and their codes side by side.
               popupStyle={desktop ? { ...surface(), width: 340 } : surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               // As wide as the trigger, so the clear button lands over its end.
               style={desktop ? { width: 260 } : undefined}

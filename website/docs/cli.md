@@ -170,7 +170,8 @@ Type checks the app. An app with Rust crates of its own (`nsh.json` `"rust"`) ha
 
 NSH-generated files stay under `.nsh/`: declarations, runner sources, and default build/package outputs in
 `.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior; NSH does not
-add Cargo configuration to relocate it. `--out` still overrides the output location.
+add Cargo configuration to relocate it. `--out` still overrides the output location. With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we
+recommend, the builds live under `~/.cargo/targets/` and the binaries still land in `target/`.
 
 ## nsh build
 
@@ -222,6 +223,7 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--format <FORMAT>` | Android: `apk` (default) or `aab`, an Android App Bundle for Google Play, signed with `jarsigner`. Not with `--run`. |
 | `--abi <ABI>` | Android: the ABIs of the APK (`arm64-v8a`, `armeabi-v7a`, `x86_64`), repeated or separated by commas. Default: `arm64-v8a` and `armeabi-v7a`, plus the device's with `--run`. |
 | `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux` and `windows` launch it; `web` serves the site on this machine at the address it prints. |
+| `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
 ```sh
 nsh package my-app --target ios-simulator --run
@@ -250,10 +252,12 @@ Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen 
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
 ```
 
-Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform: see [App Updates](/docs/app-updates).
+Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
+with `--package`, a signed package of the app's code (`nsh publish`'s), which it checks against the app's id and
+`updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 
 ### nsh certify
 

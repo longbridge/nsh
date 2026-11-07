@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { homeCopy } from '../lib/home';
 import { machineLocales } from '../lib/locales';
 import { pages } from '../lib/sections';
 import { getShowcaseApps } from '../lib/showcases';
@@ -24,6 +25,7 @@ export const GET: APIRoute = async () => {
 
   // Machine translations are listed bare; a page without one is not indexed.
   for (const { code } of machineLocales) {
+    if (homeCopy(code).translated) entries.push({ href: url(code) });
     for (const page of await pages(code)) if (page.translated) entries.push({ href: page.href });
   }
 

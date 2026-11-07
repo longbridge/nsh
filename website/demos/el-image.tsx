@@ -1,6 +1,7 @@
 import { Image, mount, signal, Text, View } from "nsh";
 import { windowSize } from "nsh";
-import { button, buttonText, focusRing, ui } from "./palette";
+import { Toggle } from "nsh/base";
+import { focusRing, toggleLabel, toggleLook, ui } from "./palette";
 
 // The pictures are SVG `data:` URIs, so the demo needs no network. An app
 // would import a file next to it (`import hills from "./hills.png"`) or pass
@@ -105,9 +106,9 @@ function App() {
           <Text style={{ color: ui().muted }}>objectFit</Text>
           <Segments options={modes} value={mode()} onChange={(m) => mode.set(m)} />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View onPress={() => blur.set(!blur())} {...button("secondary", { on: blur })}>
-              <Text style={buttonText("secondary", { on: blur })}>blurRadius {blur() ? 12 : 0}</Text>
-            </View>
+            <Toggle pressed={blur()} onChange={({ pressed }) => blur.set(pressed)} {...toggleLook({ variant: "outline", text: true })}>
+              <Text style={toggleLabel(blur, { text: true })}>blurRadius {blur() ? 12 : 0}</Text>
+            </Toggle>
             <Text style={{ color: ui().muted }}>tintColor</Text>
             <Image src={star} style={{ width: 24, height: 24, tintColor: ui().accent }} />
             <Image src={star} style={{ width: 24, height: 24, tintColor: ui().info }} />

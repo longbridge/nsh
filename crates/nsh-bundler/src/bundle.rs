@@ -148,11 +148,21 @@ pub fn capabilities(
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    // Read as packages are on devices: what this NSH does not know is not
+    // granted (a capability of a newer NSH, or a typo), and the build goes
+    // on with a warning.
     config
         .get("capabilities")
         .map(|c| {
-            nsh_core::access::Capabilities::from_json(c)
-                .map_err(|e| BundleError::other(format!("nsh.json: {e}")))
+            let (capabilities, dropped) = nsh_core::access::Capabilities::from_json_lenient(c)
+                .map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+            for what in dropped {
+                log::warn!(
+                    target: "nsh::build",
+                    "nsh.json: {what}, not granted (one of a newer NSH, or a typo)"
+                );
+            }
+            Ok(capabilities)
         })
         .transpose()
 }
@@ -165,11 +175,12 @@ pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
-    match config.get("schemes") {
-        None => Ok(Vec::new()),
-        Some(value) => nsh_core::url_scheme::schemes_from_json(value)
-            .map_err(|e| BundleError::other(format!("nsh.json: {e}"))),
-    }
+    // What it cannot claim is left out (the CLI's `read_config` warns of
+    // it).
+    Ok(config
+        .get("schemes")
+        .map(nsh_core::url_scheme::schemes_from_json)
+        .unwrap_or_default())
 }
 
 /// How bare imports resolve: the `"resolve"` of the `nsh.json` next to the
@@ -193,24 +204,30 @@ impl ResolveSetup {
         let Some(resolve) = config.get("resolve") else {
             return Ok(Self::default());
         };
-        let error = |m: &str| BundleError::other(format!("nsh.json: resolve: {m}"));
-        let resolve = resolve
-            .as_object()
-            .ok_or_else(|| error("expected an object"))?;
+        // What this NSH cannot read (a newer NSH's, or a typo) is left
+        // out, the rest applies.
+        let mut ignored = Vec::new();
         let mut setup = Self::default();
+        let Some(resolve) = resolve.as_object() else {
+            warn_ignored("resolve", &["expected an object".to_owned()]);
+            return Ok(setup);
+        };
         for (key, value) in resolve {
             match key.as_str() {
                 "conditions" => {
-                    let list = value
+                    match value
                         .as_array()
                         .and_then(|a| a.iter().map(|c| c.as_str().map(str::to_owned)).collect())
-                        .ok_or_else(|| error("conditions: expected an array of strings"))?;
-                    setup.conditions = Some(list);
+                    {
+                        Some(list) => setup.conditions = Some(list),
+                        None => ignored.push("conditions: expected an array of strings".into()),
+                    }
                 }
                 "alias" => {
-                    let map = value
-                        .as_object()
-                        .ok_or_else(|| error("alias: expected an object"))?;
+                    let Some(map) = value.as_object() else {
+                        ignored.push("alias: expected an object".into());
+                        continue;
+                    };
                     for (from, to) in map {
                         let to = match to {
                             serde_json::Value::Bool(false) => None,
@@ -222,17 +239,19 @@ impl ResolveSetup {
                             }
                             serde_json::Value::String(to) => Some(to.clone()),
                             _ => {
-                                return Err(error(&format!(
+                                ignored.push(format!(
                                     "alias: `{from}`: expected a path, a module or false"
-                                )));
+                                ));
+                                continue;
                             }
                         };
                         setup.alias.push((from.clone(), vec![to]));
                     }
                 }
-                other => return Err(error(&format!("unknown key `{other}`"))),
+                other => ignored.push(format!("unknown key `{other}`")),
             }
         }
+        warn_ignored("resolve", &ignored);
         Ok(setup)
     }
 
@@ -336,14 +355,17 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
-        setup.theme = nsh_core::tailwind::Theme::from_json(&json)
+        let ignored;
+        (setup.theme, ignored) = nsh_core::tailwind::Theme::from_json_lenient(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: tailwind: {e}")))?;
+        warn_ignored("tailwind", &ignored);
         setup.json = Some(json);
     }
     if let Some(json) = theme_json(dir, &config)? {
-        tokens = nsh_base::Theme::from_json(&json)
-            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
-            .into_tokens();
+        let (theme, ignored) = nsh_base::Theme::from_json_lenient(&json)
+            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
+        warn_ignored("theme", &ignored);
+        tokens = theme.into_tokens();
         setup.ui = Some(json);
     }
     setup.theme.set_tokens(&tokens);
@@ -352,19 +374,35 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
             Some("light") => Some("light"),
             Some("dark") => Some("dark"),
             Some("system") => None,
+            // A newer NSH's (or a typo): the system's.
             _ => {
-                return Err(BundleError::other(
-                    "nsh.json: appearance: expected \"light\", \"dark\" or \"system\"",
-                ));
+                warn_ignored(
+                    "appearance",
+                    &[format!(
+                        "{appearance} is not \"light\", \"dark\" or \"system\""
+                    )],
+                );
+                None
             }
         };
     }
     if let Some(status_bar) = config.get("statusBar") {
-        nsh_core::StatusBarSetting::from_json(status_bar)
-            .map_err(|e| BundleError::other(format!("nsh.json: statusBar: {e}")))?;
+        let (_, ignored) = nsh_core::StatusBarSetting::from_json_lenient(status_bar);
+        warn_ignored("statusBar", &ignored);
         setup.status_bar = Some(status_bar.to_string());
     }
     Ok(Arc::new(setup))
+}
+
+/// Warns of what this NSH left out of `nsh.json`'s `section` (an unknown
+/// key, a value of a form it does not know).
+fn warn_ignored(section: &str, ignored: &[String]) {
+    for what in ignored {
+        log::warn!(
+            target: "nsh::build",
+            "nsh.json: {section}: {what}, ignored (one of a newer NSH, or a typo)"
+        );
+    }
 }
 
 /// Bundles an app, blocking the current thread.
@@ -1322,32 +1360,60 @@ mod tests {
     }
 
     #[test]
-    fn resolve_options_are_checked() {
-        for (resolve, message) in [
-            (
-                r#"{ "conditionz": [] }"#,
-                "nsh.json: resolve: unknown key `conditionz`",
-            ),
-            (
-                r#"{ "conditions": "worker" }"#,
-                "nsh.json: resolve: conditions: expected an array of strings",
-            ),
-            (
-                r#"{ "alias": { "a": 1 } }"#,
-                "nsh.json: resolve: alias: `a`: expected a path, a module or false",
-            ),
-        ] {
-            let dir = resolving_app("checked", Some(resolve));
-            let error = bundle(&BundleOptions {
-                entry: dir.join("App.tsx"),
-                minify: true,
-                split: false,
-                ui_sets: Vec::new(),
-            })
-            .unwrap_err();
-            assert_eq!(error.plain, message);
-            let _ = std::fs::remove_dir_all(dir);
-        }
+    fn resolve_options_it_cannot_read_are_left_out() {
+        let dir = resolving_app(
+            "lenient",
+            Some(r#"{ "conditions": "worker", "alias": { "a": 1, "b": false }, "x": 1 }"#),
+        );
+        let setup = ResolveSetup::read(&dir).unwrap();
+        assert_eq!(setup.conditions, None);
+        assert_eq!(setup.alias, [("b".to_owned(), vec![None])]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn nsh_json_keys_of_a_newer_nsh_are_ignored() {
+        let dir = std::env::temp_dir().join(format!("nsh-newer-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r##"{
+                "futureKey": true,
+                "appearance": "auto",
+                "schemes": ["myapp", { "scheme": "other", "role": "viewer" }],
+                "resolve": { "futureResolveKey": [] },
+                "tailwind": {
+                    "colors": { "brand": "#7c3aed", "accent": { "light": "#000", "dark": "#fff" } },
+                    "futureThemeKey": {}
+                },
+                "theme": { "cssVars": { "light": { "primary": "#e11d48" }, "dark": "same" } },
+                "statusBar": { "foreground": "light", "hidden": "on-scroll", "futureStatusBarKey": 1 },
+                "capabilities": {
+                    "network": { "hosts": ["api.example.com"] },
+                    "clipboard": "ask",
+                    "statusBar": true,
+                    "futureCapability": true
+                }
+            }"##,
+        )
+        .unwrap();
+        assert!(ResolveSetup::read(&dir).is_ok());
+        let setup = tailwind_setup(&dir).unwrap();
+        assert!(setup.theme.color("brand").is_some());
+        assert_ne!(
+            theme_tokens(&dir).unwrap().color("primary"),
+            nsh_base::Theme::default().into_tokens().color("primary")
+        );
+        assert_eq!(setup.appearance, None);
+        assert!(setup.status_bar.is_some());
+        assert_eq!(url_schemes(&dir).unwrap(), ["myapp"]);
+        let caps = capabilities(&dir).unwrap().unwrap();
+        assert_eq!(caps.network.hosts.len(), 1);
+        assert!(caps.status_bar);
+        // A value of a form this NSH does not know grants nothing.
+        assert!(!caps.clipboard);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// An app whose entry is `code`.

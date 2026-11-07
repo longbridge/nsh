@@ -26,6 +26,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod audio;
 mod blur;
 mod canvas;
 mod chrome;
@@ -62,6 +63,8 @@ mod transition;
 mod tray;
 mod view;
 mod visual;
+mod window;
+mod window_state;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

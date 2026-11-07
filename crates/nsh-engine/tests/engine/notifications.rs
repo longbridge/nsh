@@ -25,6 +25,7 @@ function App() {
     await Notifications.show({ id: "", title: "T" }).catch((e) => say(e.name));
     say(await Notifications.requestPermission());
     say(`shown:${await Notifications.show({ id: "a", title: "T", body: "B" })}`);
+    say(`silent:${await Notifications.show({ id: "b", title: "T", silent: true })}`);
   })();
   return <Text>{said()}</Text>;
 }
@@ -147,12 +148,13 @@ fn config(bundle: Bundle) -> EngineConfig {
 fn the_platform_answers_the_app() {
     let mut config = config(bundle(APP, "app"));
     config.environment.notifications = true;
-    let (text, commands) = play(config, "pressed:a");
+    let (text, commands) = play(config, "silent:true");
     assert!(
         text.contains("RangeError RangeError RangeError granted"),
         "{text}"
     );
     assert!(text.contains("shown:true"), "{text}");
+    assert!(text.contains("pressed:a"), "{text}");
     assert!(commands.contains(&N::SetBadge(4)));
     assert!(commands.contains(&N::Close("old".into())));
     assert!(commands.contains(&N::Listen));
@@ -160,6 +162,10 @@ fn the_platform_answers_the_app() {
     assert!(commands.contains(&N::Show {
         id: 1,
         notification: Notification::new("a", "T", "B"),
+    }));
+    assert!(commands.contains(&N::Show {
+        id: 2,
+        notification: Notification::new("b", "T", "").silent(true),
     }));
 }
 

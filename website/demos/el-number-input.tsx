@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { NumberInput, Switch } from "nsh/base";
-import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // The parts: geometry and states in classes, colors from the theme's
 // tokens. The input is one recessed well (a stronger border under the
@@ -99,10 +99,7 @@ function App() {
                 class={`-mx-2 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={disabled() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={disabled() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => disabled())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Disabled</Text>
               </Switch>

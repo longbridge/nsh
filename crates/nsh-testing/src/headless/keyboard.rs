@@ -79,6 +79,16 @@ impl Headless {
         }
         let m = stroke.modifiers;
         let plain = !(m.ctrl || m.alt || m.cmd);
+        // The key goes to the focused window: Escape closes one of the app's
+        // own that says so (`closeOnEscape`), natively.
+        if stroke.key == Key::Escape
+            && plain
+            && !m.shift
+            && self.windows.as_mut().is_some_and(|w| w.escape())
+        {
+            self.report_windows();
+            return self.done();
+        }
         // Shift+F10 asks the focused view for its context menu where views
         // take the keyboard focus and the key is the platform's: the web
         // and Linux (macOS has no such key; Windows focuses fields only). The

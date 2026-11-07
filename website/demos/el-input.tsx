@@ -44,7 +44,7 @@ function App() {
     />
   );
   const signInButton = () => (
-    <View onPress={signIn} disabled={password().length === 0} {...button("primary", { style: { marginTop: 4 } })}>
+    <View onPress={signIn} disabled={password().length === 0} {...button("primary", { disabled: () => password().length === 0, style: { marginTop: 4 } })}>
       <Text style={buttonText("primary")}>Sign in</Text>
     </View>
   );

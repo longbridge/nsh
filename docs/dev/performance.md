@@ -440,6 +440,26 @@ draw a panel.
   ~30% less CPU time over 40 s. The gallery's tour is unchanged in frame time and CPU; peak memory on the pages with
   canvases drops (Canvas scrolling ~383 → ~310 MB, Animations ~290 → ~232, Gestures ~279 → ~221).
 
+  Small canvas animation surfaces (M2 Max, macOS 26.6.2, release, 120 Hz, 1200×800 pt Stocks; against
+  `f7afd23f`, the same unmodified gallery bytecode, four interleaved 20 s runs per version after 5 s warmup,
+  fresh data directories). Run the hosts with `--bundle <gallery.nshc> --window-size 1200x800 --fps --trace
+  --data-dir <fresh>`. Median process CPU (100% is one core) 38.34 → 23.63%, physical footprint 152.7 →
+  133.1 MB, main-thread p50 1.93 → 0.83 ms and p95 4.40 → 2.60 ms; both 119–120 fps. These are medians
+  across runs; each run's frame figures are medians of the HUD's rolling 120-frame percentiles, not pooled
+  frame percentiles. Live market updates seed themselves from wall-clock time, so each run has a different
+  quote sequence. Short drawings can retain their background while a small source-over animated suffix
+  redraws in a separate layer. Complex suffixes and long prefixes keep the existing path.
+
+  Controls (two interleaved 12 s runs per version, same warmup): Canvas demo CPU 2.93–3.56 → 3.41–3.49%;
+  a 10,000-point static path with an animated dot, CPU 7.42–8.41 → 8.39–8.99%, main p50 0.47–0.63 →
+  0.61–0.67 ms. The control medians are slightly higher; these small samples do not establish a speedup
+  or rule out overhead. The long-path guard preserves the existing prefix cache; an unrestricted split
+  had increased geometry-scanning work.
+  Fixed-clock headless `nsh test --trace` (three 1 s runs each): initial 4412 ops / 3708 mount items /
+  1249 nodes; 180 update commits per version, median 124 ops / 85 items / 1249 nodes, unchanged.
+  Initial commit times 4.9–6.4 → 4.9–6.9 ms, update medians 220 → 230.5 µs; the optimization is in the
+  platform's painting, and these engine timings establish unchanged work rather than an engine speedup.
+
   List binds while scrolling (release host, 120 Hz MacBook Pro; the list scrolled by chained native
   `scrollToOffset({ animated: true })` every 300 ms, no input; each display link refresh logged with its link
   timestamp and main-thread time; three runs each, refreshes missed = link gaps of two periods or more). Before =

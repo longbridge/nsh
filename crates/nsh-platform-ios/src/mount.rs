@@ -567,6 +567,8 @@ pub(crate) struct Mounter {
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
+    /// The engine's sounds and players ([`crate::audio`]).
+    audio: crate::audio::Speaker,
     /// What the app may reach (web view navigations check it).
     access: std::sync::Arc<nsh_engine::Access>,
     control: EngineControl,
@@ -696,6 +698,7 @@ impl Mounter {
                 },
                 access.clone(),
             ),
+            audio: Default::default(),
             control,
             access,
             shared,
@@ -744,9 +747,19 @@ impl Mounter {
     /// Measures the surface's frames and commits with a performance
     /// monitor ([`crate::fps`]) from now on.
     pub(crate) fn measure(&mut self) {
+        if self.fps.is_some() {
+            return;
+        }
         let fps = crate::fps::Fps::start(self.mtm);
         self.control.set_perf_monitor(Some(fps.monitor.clone()));
         self.fps = Some(fps);
+    }
+
+    /// Stops measuring ([`Mounter::measure`]).
+    fn stop_measuring(&mut self) {
+        if self.fps.take().is_some() {
+            self.control.set_perf_monitor(None);
+        }
     }
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
@@ -1725,12 +1738,22 @@ impl Mounter {
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
             }
+            (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
+                use nsh_core::image::loader::AssetBase as Base;
+                let base = self.images.asset_base().map(|base| match base {
+                    crate::image::AssetBase::Http(url) => Base::Http(url.clone()),
+                    crate::image::AssetBase::Directory(dir) => Base::Directory(dir.clone()),
+                });
+                crate::audio::command(&self.audio, &self.control, &command, base.as_ref());
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
+            (Command::PerfMonitor(true), _) => self.measure(),
+            (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),

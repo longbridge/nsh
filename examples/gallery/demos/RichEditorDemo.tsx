@@ -189,8 +189,11 @@ function Toolbar(props: { editor: RichEditorSession; revision: number; link: Lin
         value={wraps()}
         onToggle={(value) => run(command(WRAP_COMMANDS[value]))}
       />
-      <IconButton icon="list-indent-decrease" label="Outdent" disabled={!can(outdent)} onPress={() => run(outdent)} />
-      <IconButton icon="list-indent-increase" label="Indent" disabled={!can(indent)} onPress={() => run(indent)} />
+      {/* The pair wraps as one, so a narrow bar never splits outdent from indent. */}
+      <View style={{ flexDirection: "row", columnGap: Math.max(TOOL_GAP, 4) }}>
+        <IconButton icon="list-indent-decrease" label="Outdent" disabled={!can(outdent)} onPress={() => run(outdent)} />
+        <IconButton icon="list-indent-increase" label="Indent" disabled={!can(indent)} onPress={() => run(indent)} />
+      </View>
       <IconButton icon="minus" label="Divider" disabled={!can(command("setHorizontalRule"))} onPress={() => run(command("setHorizontalRule"))} />
       <ToolbarSeparator />
       <IconButton icon="table" label="Insert table" short="Table" disabled={!can(INSERT_TABLE)} onPress={() => run(INSERT_TABLE)} />
@@ -239,7 +242,7 @@ const documentClasses = {
     bold: "font-bold",
     italic: "italic",
     code: "font-mono text-sm bg-muted rounded px-1",
-    link: "text-primary underline",
+    link: "text-brand underline",
     strike: "line-through",
   },
 };
@@ -306,14 +309,16 @@ export function RichEditorDemo() {
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 12,
           paddingHorizontal: 12,
           paddingVertical: 8,
           borderTopWidth: 1,
           borderColor: colors.border,
         }}
       >
-        <Text style={{ fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
-          {`${words()} words · ${text().length} characters`}
+        {/* No-break spaces keep each count whole: a narrow bar wraps between them. */}
+        <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+          {`${words()}\u00a0words · ${text().length}\u00a0characters`}
         </Text>
         <View style={{ width: 180 }}>
           <Segmented

@@ -705,9 +705,12 @@ unsafe extern "C" fn slot_run(
 
 /// `value` (owned) as a list slot renders it.
 fn slot(cx: *mut JsContext, value: JsValue) -> JsValue {
+    // `<If>` and `<Each>` are memos: called here, untracked, the slot would
+    // keep their first value; the insert tracks them.
+    let (signal, memo) = reactive::signal_kind(cx, value);
     // SAFETY: an inline check; a component is called untracked.
     unsafe {
-        if qjs::JS_IsFunction(cx, value) && dom::node_id(cx, value).is_none() {
+        if qjs::JS_IsFunction(cx, value) && dom::node_id(cx, value).is_none() && !signal && !memo {
             let mut args = [qjs::JS_NewObject(cx)];
             let r = reactive::untracked_with(cx, || {
                 qjs::JS_Call(cx, value, UNDEFINED, 1, args.as_mut_ptr())
@@ -1016,9 +1019,11 @@ unsafe extern "C" fn separated_run(
         if qjs::JS_IsUndefined(separator) {
             let mut owner = 0f64;
             qjs::JS_ToFloat64(cx, &mut owner, *data.add(4));
-            // The cached separator lives with the cell, not this rerunning computation.
+            qjs::JS_FreeValue(cx, component);
+            // The cached separator lives with the cell, not this rerunning
+            // computation: so does what its getter makes (an `<If>`'s memo).
             separator = nsh_core::reactive::with_owner(reactive::Js(cx), owner as u32, || {
-                slot(cx, component)
+                slot(cx, get(cx, props, "separator"))
             });
             if qjs::JS_IsException(separator) {
                 return separator;

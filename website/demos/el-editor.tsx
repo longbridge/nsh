@@ -64,7 +64,7 @@ function App() {
 
   const action = (label: string, onPress: () => void) => (
     <View onPress={onPress} role="button" {...button("secondary", { size: "sm" })}>
-      <Text style={buttonText()}>{label}</Text>
+      <Text style={buttonText("secondary", { size: "sm" })}>{label}</Text>
     </View>
   );
 

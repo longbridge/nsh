@@ -13,7 +13,10 @@ use nsh_core::{
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
-use crate::headless::{DialogAnswer, Headless};
+use crate::{
+    headless::{DialogAnswer, Headless},
+    module::LocaleSettingsOptions,
+};
 
 /// An app a test opened, driven by steps and read by queries.
 pub(crate) trait Driver: Send {
@@ -70,6 +73,12 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
+    /// The user's locale settings that `settings` names, as the system
+    /// reports them (`localeSettings()`).
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let _ = settings;
+        Err(headless_only("setLocaleSettings"))
+    }
     /// The system hands the app a link that opens it (`openWithUrl`).
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         let _ = url;
@@ -109,6 +118,14 @@ pub(crate) trait Driver: Send {
         let _ = error;
         Err(headless_only("ending a speech session"))
     }
+    /// What the app asked of the speaker, in order.
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        Err(headless_only("`audio()`"))
+    }
+    /// The players playing reach their end.
+    fn end_audio(&mut self) -> Result<(), String> {
+        Err(headless_only("ending a player"))
+    }
     fn texts(&mut self) -> Result<Vec<String>, String>;
     fn count(&mut self, selector: &str) -> Result<usize, String>;
     fn enabled(&mut self, selector: &str) -> Result<bool, String>;
@@ -132,6 +149,14 @@ pub(crate) trait Driver: Send {
     fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Err(headless_only("reading the storage this way"))
     }
+    /// The state of the app's window `id` as the platform reports it;
+    /// `None` while it is not open.
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String>;
+    /// The user presses the close button of the app's window `id`.
+    fn press_window_close(&mut self, id: &str) -> Result<(), String>;
+    /// A picture of the app's window `id`, as [`Driver::screenshot`] is of
+    /// the main window: PNG bytes of its content.
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String>;
 }
 
 impl Driver for Headless {
@@ -224,6 +249,11 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
+    fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
+        let pins = settings.pins("setLocaleSettings")?;
+        let what = format!("setLocaleSettings({})", settings.label());
+        self.set_environment(&what, |e| pins.apply(e))
+    }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)
     }
@@ -261,6 +291,13 @@ impl Driver for Headless {
     }
     fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
         Headless::end_speech(self, error)
+    }
+    fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
+        self.catch_up();
+        Ok(Headless::audio_calls(self))
+    }
+    fn end_audio(&mut self) -> Result<(), String> {
+        Headless::end_audio(self)
     }
     fn texts(&mut self) -> Result<Vec<String>, String> {
         self.catch_up();
@@ -315,6 +352,18 @@ impl Driver for Headless {
             "a screenshot needs a real platform, which draws the app: run the test with `--target`"
                 .into(),
         )
+    }
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        Headless::window_state(self, id)
+    }
+    fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        Headless::press_window_close(self, id)
+    }
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String> {
+        if Headless::window_state(self, id)?.is_none() {
+            return Err(format!("no window {id:?} is open"));
+        }
+        self.screenshot()
     }
 }
 
@@ -420,6 +469,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::HostSend { name, .. } => format!("host.send({name})"),
         TestStep::Back => "back".to_owned(),
+        TestStep::PressWindowClose { id } => format!("window({id}).pressClose"),
         TestStep::Wait { ms } => format!("wait({ms})"),
         TestStep::Clock {
             change: ClockChange::RunFor { ms },
@@ -699,6 +749,20 @@ impl Driver for Remote {
         self.query(TestStep::Scene {
             query: nsh_dev::protocol::SceneQuery::Storage,
         })
+    }
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        let value = self.take(TestStep::WindowState { id: id.into() })?;
+        crate::window_json::from_json(value)
+    }
+    fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        self.action(TestStep::PressWindowClose { id: id.into() })
+    }
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String> {
+        use base64::Engine as _;
+        let png: String = self.query(TestStep::WindowScreenshot { id: id.into() })?;
+        base64::engine::general_purpose::STANDARD
+            .decode(png)
+            .map_err(|e| format!("the host sent a broken picture: {e}"))
     }
 }
 

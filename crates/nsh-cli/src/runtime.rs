@@ -85,6 +85,8 @@ impl Platform {
             Platform::IphoneOs => Some("aarch64-apple-ios"),
             Platform::IphoneSimulator => Some("aarch64-apple-ios-sim"),
             Platform::MacCatalyst => Some("aarch64-apple-ios-macabi"),
+            // Packaged off Windows: cross-built ([`cross_build`]).
+            Platform::Windows if !cfg!(windows) => Some(WINDOWS_TRIPLE),
             Platform::Linux
             | Platform::MacOs
             | Platform::Windows
@@ -115,12 +117,7 @@ impl Platform {
     /// The file of [`Platform::binary`]: with this machine's executable
     /// suffix (`.exe`) when it is built for this machine.
     pub(crate) fn file_name(self, runner: bool) -> String {
-        let suffix = if self.triple().is_none() {
-            env::consts::EXE_SUFFIX
-        } else {
-            ""
-        };
-        format!("{}{suffix}", self.binary(runner))
+        format!("{}{}", self.binary(runner), exe_suffix(self.triple()))
     }
 
     /// The development host (`runner` false) or release runner for it, as
@@ -634,11 +631,57 @@ fn append_web_flags(command: &mut Command, encoded: Option<OsString>, plain: Opt
     }
 }
 
+/// The Windows target a Windows runtime is cross-built for off Windows.
+pub(crate) const WINDOWS_TRIPLE: &str = "x86_64-pc-windows-msvc";
+
+/// The executable suffix of a build for `triple` (`None`: this machine).
+pub(crate) fn exe_suffix(triple: Option<&str>) -> &'static str {
+    match triple {
+        None => env::consts::EXE_SUFFIX,
+        Some(triple) if triple.contains("-windows-") => ".exe",
+        Some(_) => "",
+    }
+}
+
+/// Sets up `cmd` (`cargo` with no arguments yet) to build for `triple`.
+/// A Windows (MSVC) build off Windows links with cargo-xwin, whose
+/// `cargo xwin build` takes the same arguments as `cargo build`, and links
+/// the C runtime statically so the executable needs no Visual C++
+/// redistributable on the machine it runs on.
+pub(crate) fn cross_build(cmd: &mut Command, triple: Option<&str>) -> anyhow::Result<()> {
+    if cfg!(windows) || triple != Some(WINDOWS_TRIPLE) {
+        return Ok(());
+    }
+    let program = cmd.get_program().to_owned();
+    let found = Command::new(&program)
+        .args(["xwin", "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !found {
+        bail!(
+            "building for Windows on this machine needs cargo-xwin and the {WINDOWS_TRIPLE} target:\n  cargo install --locked cargo-xwin\n  rustup target add {WINDOWS_TRIPLE}\nor set NSH_RUNTIME to a runtime with a Windows release runner"
+        );
+    }
+    cmd.arg("xwin").env(
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS",
+        "-C target-feature=+crt-static",
+    );
+    Ok(())
+}
+
 /// Runs cargo in the checkout `root` (the one that runs this CLI under
 /// `cargo run`, else `cargo` from the path): the step "building <what>".
 fn cargo(root: &Path, args: &[&str], what: &str) -> anyhow::Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
-    crate::ui::cargo(Command::new(&cargo).args(args).current_dir(root), what)
+    let mut cmd = Command::new(&cargo);
+    let triple = args
+        .iter()
+        .position(|arg| *arg == "--target")
+        .and_then(|i| args.get(i + 1).copied());
+    cross_build(&mut cmd, triple)?;
+    crate::ui::cargo(cmd.args(args).current_dir(root), what)
 }
 
 fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<PathBuf> {

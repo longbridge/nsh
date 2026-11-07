@@ -3,7 +3,7 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{Idiom, Lifecycle, Locale, Os},
+    platform::{Idiom, Lifecycle, Locale, LocaleSettings, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
@@ -15,6 +15,8 @@ pub struct Environment {
     pub safe_area: EdgeInsets,
     /// Space reserved for system controls in a custom desktop title bar.
     pub title_bar: crate::geometry::Edges<crate::geometry::Points>,
+    /// The app's window: its bounds, mode and display (desktops).
+    pub window_state: Option<crate::desktop::WindowState>,
     /// The software keyboard's height, 0 when hidden.
     pub keyboard_height: Points,
     /// How long the keyboard's show / hide animation takes, in milliseconds.
@@ -39,6 +41,9 @@ pub struct Environment {
     pub idiom: Idiom,
     /// The user's locale, for formatting numbers and dates.
     pub locale: Locale,
+    /// The user's locale settings: the preferred languages, the time zone
+    /// and the regional preferences.
+    pub locale_settings: LocaleSettings,
     /// In a browser, it runs on an Apple platform: shortcuts follow Apple's
     /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
     /// theirs.
@@ -64,6 +69,9 @@ pub struct Environment {
     /// The platform shows notifications
     /// ([`crate::platform::Environment::notifications`]).
     pub notifications: bool,
+    /// The platform plays sound
+    /// ([`crate::platform::Environment::audio`]).
+    pub audio: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -78,6 +86,7 @@ impl Default for Environment {
             window: crate::geometry::size_pt(0.0, 0.0),
             safe_area: EdgeInsets::default(),
             title_bar: crate::geometry::Edges::default(),
+            window_state: None,
             keyboard_height: Points(0.0),
             keyboard_duration: 0.0,
             dark: false,
@@ -90,6 +99,7 @@ impl Default for Environment {
             os_version: (0, 0),
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
+            locale_settings: LocaleSettings::default(),
             apple_keyboard: false,
             ctrl_for_command: false,
             host: false,
@@ -98,6 +108,7 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             notifications: false,
+            audio: false,
             cell: None,
             web_input: false,
         }

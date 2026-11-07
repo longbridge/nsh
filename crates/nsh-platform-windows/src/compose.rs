@@ -180,7 +180,7 @@ impl Composition {
             layer.swap = None;
         }
         if layer.swap.is_none() {
-            let swap = composition_swap_chain(gfx, size)?;
+            let swap = composition_swap_chain(gfx, size, DXGI_SWAP_CHAIN_FLAG(0))?;
             // SAFETY: plain calls on live objects of this thread.
             unsafe { layer.visual.SetContent(&swap)? };
             layer.swap = Some(swap);
@@ -227,8 +227,8 @@ impl Composition {
     pub(crate) fn present(&self, used: usize) -> Result<()> {
         for layer in self.layers.borrow().iter().take(used) {
             if let Some(swap) = &layer.swap {
-                // Not synchronized: the window's own swap chain waits for
-                // the vertical blank once for all of them.
+                // Not synchronized: the window's own swap chain paces the
+                // frames of all of them (`gfx::SwapChain::ready`).
                 // SAFETY: a COM call on a live swap chain.
                 unsafe { swap.Present(0, DXGI_PRESENT(0)).ok()? };
             }
@@ -335,8 +335,14 @@ impl Composition {
     }
 }
 
-/// A swap chain for composition of `size` pixels, premultiplied.
-pub(crate) fn composition_swap_chain(gfx: &Gfx, size: (u32, u32)) -> Result<IDXGISwapChain1> {
+/// A swap chain for composition of `size` pixels, premultiplied, made with
+/// `flags` (a window's base: [`gfx::SWAP_CHAIN_FLAGS`], paced; a layer's:
+/// none, presented with the base).
+pub(crate) fn composition_swap_chain(
+    gfx: &Gfx,
+    size: (u32, u32),
+    flags: DXGI_SWAP_CHAIN_FLAG,
+) -> Result<IDXGISwapChain1> {
     // SAFETY: plain factory creation.
     let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))? };
     let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -353,7 +359,7 @@ pub(crate) fn composition_swap_chain(gfx: &Gfx, size: (u32, u32)) -> Result<IDXG
         Scaling: DXGI_SCALING_STRETCH,
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
         AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
-        Flags: 0,
+        Flags: flags.0 as u32,
     };
     // SAFETY: a valid description on the live device.
     unsafe { factory.CreateSwapChainForComposition(&gfx.d3d, &desc, None) }

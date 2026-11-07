@@ -20,6 +20,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod audio;
 mod canvas;
 mod chrome;
 mod decor;
@@ -44,6 +45,7 @@ mod notifications;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod sound;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -54,6 +56,8 @@ mod transition;
 mod tray;
 mod view;
 mod window;
+#[cfg(feature = "dev")]
+mod xtest;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};

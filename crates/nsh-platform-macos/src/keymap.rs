@@ -103,12 +103,19 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
     };
-    let Some(window) = surface.root.ns().window() else {
+    // The monitor sees the key before any view: the window it is in (the
+    // main one or a window of the app's own) is the one picked in.
+    let Some(window) = event.window(surface.mtm) else {
         return false;
     };
-    if event.window(surface.mtm).as_deref() != Some(&*window) {
+    let Some(root) = crate::window::root_in(surface, &window) else {
+        return false;
+    };
+    let own = root.ns() != surface.root.ns();
+    if crate::window::blocked(surface, own.then_some(&root)) {
         return false;
     }
+    crate::input::enter(surface, own.then_some(root));
     let Some(editing) = editing(surface, &window) else {
         return false;
     };
@@ -144,7 +151,8 @@ fn editing(surface: &Surface, window: &NSWindow) -> Option<bool> {
     let Some(view) = responder.downcast_ref::<NSView>() else {
         return Some(false);
     };
-    let root = surface.root.ns();
+    let root = crate::input::event_root(surface);
+    let root = root.ns();
     if !view.isDescendantOf(root) {
         return None;
     }

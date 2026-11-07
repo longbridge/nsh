@@ -64,6 +64,8 @@ mod imp {
         stop: Arc<AtomicBool>,
         /// The package the bundle came from, named in its errors.
         package: Option<Arc<PackageInfo>>,
+        /// Told of fatal errors ([`Bundle::trial`]).
+        trial: Option<Arc<dyn crate::Trial>>,
     }
 
     impl Script {
@@ -80,6 +82,7 @@ mod imp {
             ui_sets: &[nsh_core::element::Registry],
             posts: nsh_core::element::Posts,
             environment: &Environment,
+            displays: &[nsh_core::desktop::Display],
             tokens: Arc<nsh_core::element::Tokens>,
             theme: nsh_core::element::ThemeTokens,
             text_engine: Rc<M>,
@@ -98,10 +101,12 @@ mod imp {
                 Ok(host) => host,
                 Err(err) => {
                     log::error!("failed to start JS: {err}");
-                    sink.report(
-                        &AppError::new(AppErrorKind::Load, &err.message)
-                            .with_package(bundle.package.clone()),
-                    );
+                    let error = AppError::new(AppErrorKind::Load, &err.message)
+                        .with_package(bundle.package.clone());
+                    if let Some(trial) = &bundle.trial {
+                        trial.failed(&error);
+                    }
+                    sink.report(&error);
                     return None;
                 }
             };
@@ -145,6 +150,7 @@ mod imp {
                 nsh_core::canvas::measure_line(&*text_engine, font, text)
             }));
             host.set_environment(environment);
+            host.set_displays(displays);
             host.set_tokens(tokens);
             host.set_theme_tokens(theme);
             let script = Script {
@@ -153,6 +159,7 @@ mod imp {
                 symbolicator,
                 stop,
                 package: bundle.package.clone(),
+                trial: bundle.trial.clone(),
             };
             // The chunks that come with the bundle: the entry may import
             // them statically, `import()` without waiting.
@@ -184,7 +191,13 @@ mod imp {
             }
             let message = self.symbolicator.borrow_mut().rewrite(message);
             log::error!(target: "js", "{what}: {message}");
-            sink.report(&AppError::new(kind, &message).with_package(self.package.clone()));
+            let error = AppError::new(kind, &message).with_package(self.package.clone());
+            if let Some(trial) = &self.trial
+                && error.is_fatal()
+            {
+                trial.failed(&error);
+            }
+            sink.report(&error);
         }
 
         /// Gives the VM a chunk it imports, or tells it the chunk could not
@@ -297,6 +310,14 @@ mod imp {
             self.host.set_environment(environment);
         }
 
+        pub(crate) fn set_displays(&self, displays: &[nsh_core::desktop::Display]) {
+            self.host.set_displays(displays);
+        }
+
+        pub(crate) fn set_fps_enabled(&self, enabled: bool) {
+            self.host.set_fps_enabled(enabled);
+        }
+
         pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::element::Tokens>) {
             self.host.set_tokens(tokens);
         }
@@ -368,6 +389,7 @@ mod stub {
             _: &[nsh_core::element::Registry],
             _: nsh_core::element::Posts,
             _: &Environment,
+            _: &[nsh_core::desktop::Display],
             _: Arc<nsh_core::element::Tokens>,
             _: nsh_core::element::ThemeTokens,
             _: Rc<M>,
@@ -454,6 +476,14 @@ mod stub {
         }
 
         pub(crate) fn set_environment(&self, _: &Environment) {
+            match *self {}
+        }
+
+        pub(crate) fn set_displays(&self, _: &[nsh_core::desktop::Display]) {
+            match *self {}
+        }
+
+        pub(crate) fn set_fps_enabled(&self, _: bool) {
             match *self {}
         }
 

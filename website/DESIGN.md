@@ -226,6 +226,8 @@ inside `prefers-reduced-motion: no-preference`. The live dot pulses slowly
 
 - English and Chinese pages are written together; same file names, same
   `order` and `demo` (`tests/content.test.ts`).
-- Home copy is the bilingual `copy` object in `src/components/Home.astro`;
-  section names and blurbs are in `src/lib/sections.ts`.
+- Home copy is `src/home/en.json` and `src/home/zh-CN.json`, the same keys in
+  both (`tests/home.test.ts`); numbers, commands and code stay in
+  `src/components/Home.astro`, the same in every language. Section names and
+  blurbs are in `src/lib/sections.ts`.
 - The licence is Apache-2.0; no version number is shown anywhere.

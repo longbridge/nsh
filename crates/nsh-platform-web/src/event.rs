@@ -102,6 +102,9 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
                 size: size(Points(n("size", "width")), Points(n("size", "height"))),
             })
         }
+        // `{ id, event, ... }`: what a sound or a player reported
+        // (`nsh.js`'s `audioEvent`; durations and positions in seconds).
+        EventKind::Audio => audio_payload(&value),
         EventKind::Host => EventPayload::Json(value),
         _ => match &value {
             // Every field goes through: a key the page sends is one the
@@ -190,4 +193,63 @@ fn mouse_button(name: &str) -> Option<nsh_core::MouseButton> {
         "forward" => nsh_core::MouseButton::Forward,
         _ => return None,
     })
+}
+
+/// The payload of an `onAudio` event: `{ id, event, duration?, position?,
+/// bytes?, truncated?, buffering?, error?, message? }`.
+fn audio_payload(value: &serde_json::Value) -> EventPayload {
+    use std::time::Duration;
+
+    use nsh_core::audio::{AudioError, AudioEvent as E};
+    let seconds = |k: &str| {
+        value
+            .get(k)
+            .and_then(|v| v.as_f64())
+            // `try_`: a time too large for a `Duration` is no time, not a
+            // panic.
+            .and_then(|s| Duration::try_from_secs_f64(s).ok())
+    };
+    let id = value.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let name = value.get("event").and_then(|v| v.as_str()).unwrap_or("");
+    let event = match name {
+        "loaded" => E::Loaded {
+            duration: seconds("duration").unwrap_or_default(),
+            bytes: value.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
+            truncated: value
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        },
+        // `duration` is absent for a live stream (Infinity).
+        "load" => E::Load {
+            duration: seconds("duration"),
+        },
+        "playing" => E::Playing,
+        "paused" => E::Paused,
+        "progress" => E::Progress {
+            position: seconds("position").unwrap_or_default(),
+            duration: seconds("duration"),
+        },
+        "buffer" => E::Buffer {
+            buffering: value
+                .get("buffering")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        },
+        "ended" => E::Ended,
+        "failed" => E::Failed {
+            error: value
+                .get("error")
+                .and_then(|v| v.as_str())
+                .and_then(AudioError::from_name)
+                .unwrap_or(AudioError::Failed),
+            message: value
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+        },
+        _ => return EventPayload::None,
+    };
+    EventPayload::Audio { id, event }
 }
