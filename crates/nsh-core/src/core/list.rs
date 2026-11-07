@@ -296,8 +296,9 @@ pub(super) struct ListState {
     pub(super) alignment: ListAlignment,
     /// `stickyHeaderIndices`, sorted.
     pub(super) sticky: Vec<u32>,
-    /// Items kept rendered wherever they are (`Core::set_kept`): the ends
-    /// of a text selection, whose texts must outlive scrolling away.
+    /// Items kept rendered wherever they are (`Core::sync_kept`): those
+    /// holding the keyboard focus, an open overlay or an end of a text
+    /// selection, which must outlive scrolling away.
     kept: Vec<u32>,
     /// `stickyHeaderOffset`: sticky items stick this far from the
     /// viewport's start.

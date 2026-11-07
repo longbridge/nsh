@@ -998,6 +998,35 @@ Motion follows the continuity of the interaction. While a pointer or scroll posi
 the preview surface stable and update its content or position in place. Dismiss it only after the interaction ends;
 repeated fade-out and re-entry on each update reads as flicker.
 
+## Sound
+
+Sound confirms what the eye already sees; it never carries meaning alone. Keep a small set of short, quiet sounds of
+one family, each for one job, so the material says the kind of event before the user knows which one: a choice, a
+state switched, something opening or closing, a success, a warning, an error, a result arriving, a notice that asks for
+the user. Pick by the job, not by the control: a switch and a checkbox share one sound, a segment and a radio another.
+Play them where a change completes (a switch turning, a message sent, a toast's result), not on hover, per keystroke,
+per streamed token or for a number that updates constantly. Silence is the default; a sound that repeats while the
+user works soon reads as noise.
+
+```rust tabs
+const TOGGLE: FileAsset = asset!("sounds/toggle.wav");
+
+let toggle = load_sound(TOGGLE.uri).await?; // once, ahead of the first press
+toggle.play(0.6, if on { 1.0 } else { 0.9 }); // a little lower turning off
+```
+
+```tsx tabs
+import toggleFile from "./sounds/toggle.wav";
+
+const toggle = await Sound.load(toggleFile); // once, ahead of the first press
+toggle.play({ volume: 0.6, rate: on ? 1 : 0.9 }); // a little lower turning off
+```
+
+Load sounds once, ahead of use, so they play within the frame of the change they accompany. Vary one sound with
+`rate` (a switch on and off) before adding another file. Keep the volume below the system's own sounds, and keep
+the interface fully understandable with the sound off: on iOS sounds follow the silent switch, and many people never
+hear them.
+
 ## Designing data-heavy interfaces
 
 Dense does not mean cramped. In tables, trees, long lists, and editors:

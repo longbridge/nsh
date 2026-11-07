@@ -84,6 +84,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -250,6 +251,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

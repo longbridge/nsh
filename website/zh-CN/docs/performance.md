@@ -221,8 +221,13 @@ nsh run App.tsx --target android --trace --release
 nsh run App.tsx --target macos --fps --release
 ```
 
-（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时；
+（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。Linux 也会显示面板，包含 FPS、帧耗时和 p95、JS/core 耗时、CPU 与 RSS，以及最近 120 帧的耗时图和刷新预算线。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时；
 `nsh test --target linux --fps -v`（或 `windows`）可以在测试驱动应用时采集这些读数。
+
+环境变量 `NSH_FPS=1` 无论应用怎样启动都会打开监视器：开发宿主、打包后的应用、Rust 应用、嵌入 NSH 的应用都一样。从 Dock 或
+访达打开的 macOS 打包应用从 `Info.plist` 的 `LSEnvironment` 取得它（`nsh.json`：`"macos": { "infoPlist": { "LSEnvironment": { "NSH_FPS": "1" } } }`）。
+应用自己用 `setFpsEnabled(enabled)` 打开或关闭它，用 `fpsEnabled()` 读取它（见 [`nsh`](../modules/nsh.md#fpsenabled-和-setfpsenabled)）；
+gallery 侧边栏的菜单里有对应的开关。
 
 终端目标用 `nsh run examples/gallery --target tui --fps` 在角落显示一行读数。
 在文本输入框外，`C-h p` 切换显示。读数包括活跃时的 FPS、空闲时的 `idle`、帧耗时和 p95、

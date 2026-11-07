@@ -50,9 +50,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   warns of an app importing `host` from `nsh` without it (`bundle.rs` `ungranted_host`); the host's events need none, the
   host sends them), `openUrl`
   (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed). `nsh`'s `Storage`
-  is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
-  are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
-  newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
+  is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied. `nsh.json`, bundles' `capabilities.json`, packages and embedders' grants are all
+  read with `from_json_lenient` (the bundler warns of what it dropped, `nsh_engine::parse_capabilities` logs it), as a newer NSH may have written them: an unknown capability is not granted, an unknown key inside one drops that
   capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
   retains unrestricted network, webview, status bar, clipboard, picker, speech, audio and URL opening access. Process execution, filesystem access,
   trusted web view input and the host's functions always require explicit declarations, including standalone apps. The embedding app

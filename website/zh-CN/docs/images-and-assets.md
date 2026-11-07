@@ -56,7 +56,7 @@ logo; // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
 在 Rust 中，缺失或损坏的文件会让构建失败，文件改动后 crate 会重新构建。在 TSX 中，资源路径相对于导入它的模块解析，其 `url` 相对于应用根目录（入口文件所在目录）。`nsh build` 会把它们复制到 `out/assets/`，`nsh package` 会把它们放进应用，开发时则由开发服务器提供。
 
 > [!TIP]
-> 在 TSX 中，`src` 也接受 `asset:/path` 字符串，被导入的文件才保证会被发布。从未导入的路径在开发服务器下可以使用（它提供整个应用目录），在打包后的应用中却会缺失。请导入你用到的每一张图片。Rust crate 通过 `assets!()` 发布整个 `assets/` 目录。
+> 在 TSX 中，`src` 也接受 `asset:/path` 字符串，被导入的文件才保证会被发布。从未导入的路径在开发服务器下可以使用（仅限应用目录中隐藏目录以外的图片、字体、音频和视频），在打包后的应用中却会缺失。请导入你用到的每一张图片。Rust crate 通过 `assets!()` 发布整个 `assets/` 目录。
 
 ### 像素密度
 
@@ -350,6 +350,7 @@ function RemoteImage(props: { url: string }) {
 | 文件 | Rust（`asset!`） | TSX 导入 | 页面 |
 |---|---|---|---|
 | `.ttf`、`.otf`、`.woff`、`.woff2` | 带字体族名的 `FontAsset` | 字体的字体族名 | [字体](./fonts.md) |
+| `.wav`、`.m4a`、`.aac`、`.mp3` | 带 URI 的 `FileAsset` | 文件的 `asset:/` URL | [声音](../modules/nsh.md#sound) |
 | `.json` 及其他文件 | 带 URI 的 `FileAsset` | `.json`：解析后的值，打包进脚本 | [项目结构](./project-structure.md#模块) |
 
 两种方式下，字体都在第一帧之前注册。
@@ -380,7 +381,7 @@ import flag from "./images/flag.png";
 const bytes = await (await fetch(flag.url)).bytes();
 ```
 
-引擎在自身线程之外从应用的文件中读取该文件（`nsh run` 期间从开发服务器读取），无需任何能力授权：这些是应用自己的文件。Web 应用会从页面提供资源的位置下载页面未预加载的文件。响应状态为 `200`，带有文件的字节、`Content-Length` 以及由扩展名给出的 `Content-Type`（`image/png`、`application/json` 等），无论文件以何种方式到达，其 `url` 都是该 `asset:/` URL；应用没有随附的文件会以指明该文件的网络错误拒绝。URL 以文件在应用文件中的路径来指明它，请求以 `GET`（或 `HEAD`）读取它：路径离开应用文件的 URL（`..`、绝对路径）和使用其他方法的请求都会以同样的方式拒绝，且不会读取或下载任何内容。
+引擎在自身线程之外从应用的文件中读取该文件（`nsh run` 期间从开发服务器读取），无需任何能力授权：这些是应用自己的文件。Web 应用会从页面提供资源的位置下载页面未预加载的文件。响应状态为 `200`，带有文件的字节、`Content-Length` 以及由扩展名给出的 `Content-Type`（`image/png`、`application/json` 等），无论文件以何种方式到达，其 `url` 都是所请求的 `asset:/` URL（不含片段）；应用没有随附的文件会以指明该文件的网络错误拒绝。URL 以文件在应用文件中的路径来指明它，在每个平台上都一样：scheme 不区分大小写，与 URL 的 scheme 一样；查询或片段不改变所指的文件（`asset:/locales/en.json?v=2` 读取 `locales/en.json`）。请求以 `GET`（或 `HEAD`）读取文件：路径离开应用文件的 URL（`..`、绝对路径）和使用其他方法的请求都会以同样的方式拒绝，且不会读取或下载任何内容。
 
 ### 模块自身的 URL
 

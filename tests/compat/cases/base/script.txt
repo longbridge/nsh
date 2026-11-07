@@ -589,10 +589,11 @@ prop scroll:text:"let a = 1;" scrollbar false
 prop scroll:text:"Alpha" horizontal true
 prop scroll:text:"Alpha" scrollbar false
 style text:"First item" color #0000ffff
-# A press on the link reports its URL; nothing opens it.
+# A press on the link reports its URL and the modifier keys held;
+# nothing opens it.
 expect Link: none
 tap span:the guide
-expect Link: https://example.com/guide
+expect Link: https://example.com/guide (Command: false)
 # HTML.
 expect From HTML
 expect An hypertext paragraph.
@@ -3456,6 +3457,40 @@ expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
 covers [nsh] token
+
+# base-set-theme
+# Another theme while the app runs, in place of nsh.json's and over
+# shadcn's `neutral`; `null` gives nsh.json's back.
+tap id:case-base-set-theme
+expect theme up #138a5aff
+expect theme radius-card 14
+style id:themed backgroundColor #138a5aff
+# `token()` reads it at once and classes follow. nsh.json's theme is not
+# under it (`radius-card` is gone), the default is (`primary`).
+tap id:set
+expect theme result set #2563ebff
+expect theme up #2563ebff
+expect theme radius-card undefined
+expect theme primary #171717ff
+style id:themed backgroundColor #2563ebff
+# Its dark value in the dark appearance.
+tap id:dark
+expect theme up #93c5fdff
+style id:themed backgroundColor #93c5fdff
+tap id:system
+expect theme up #2563ebff
+# A theme with a value NSH cannot read (no color in the dark appearance):
+# a TypeError, and the theme in force stays.
+tap id:bad
+expect theme result refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:built
+expect theme result built
+expect theme up #138a5aff
+expect theme radius-card 14
+style id:themed backgroundColor #138a5aff
+covers [nsh] setTheme
 
 # base-resizable
 tap id:case-base-resizable

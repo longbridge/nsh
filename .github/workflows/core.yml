@@ -29,7 +29,11 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/core.yml"
+      - ".github/actions/cargo/**"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-core/**"
@@ -50,6 +54,7 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/core.yml"
+      - ".github/actions/cargo/**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -58,7 +63,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: core-${{ github.ref }}
+  group: core-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -77,6 +82,13 @@ env:
 
 jobs:
   check:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -91,11 +103,12 @@ jobs:
         with:
           components: clippy
 
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: core
 
       - name: Clippy
         run: cargo clippy --all-targets $PACKAGES -- -D warnings

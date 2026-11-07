@@ -22,6 +22,11 @@ function fakePlayer(options = {}) {
   Object.assign(player, {
     // What the constructor sets that these paths read.
     options: { idiom: "phone", ...options },
+    baseURL: "https://example.test/app/",
+    assetBase: "https://example.test/app/",
+    assets: options.assets,
+    data: options.data,
+    inlineImages: new Map(),
     hostEvents: [],
     fileOperations: new Map(),
     requests: new Map(),
@@ -300,6 +305,40 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
     assert.deepEqual(sent, [[12, phase, 0, 100, 0, 400]]);
     assert.equal(player.pointers.size, 0);
   }
+});
+
+test("a face registered while another loads keeps the app hidden until both have loaded", async () => {
+  const { player } = fakePlayer();
+  const classes = new Set();
+  player.root = {
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
+  };
+  player.starting = true;
+  player.metricsCache = new Map();
+  let loaded = 0;
+  player.call = (f) => f({ nsh_fonts_loaded: () => loaded++ });
+  const face = () => {
+    let resolve;
+    const loading = new Promise((r) => (resolve = r));
+    return { loading, resolve };
+  };
+  const first = face();
+  const second = face();
+  player.fontLoading(first.loading);
+  player.fontLoading(second.loading);
+  first.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(loaded, 0);
+  assert.ok(classes.has("nsh-hidden"));
+  second.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(loaded, 1);
+  assert.ok(!classes.has("nsh-hidden"));
+  clearTimeout(player.fontTimer);
 });
 
 test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {
@@ -643,6 +682,17 @@ test("the runtime's data comes from the URL the page names and reaches the engin
   );
   assert.deepEqual(fetched, ["https://example.test/nsh-syntaxes.0123456789.bin"]);
   assert.deepEqual(handed, [["syntaxes", [1, 2, 3], 1]]);
+});
+
+test("relative URLs are the page's as the player started", () => {
+  const { player } = fakePlayer({ assets: { "logo.png": "https://cdn.test/logo.0123456789.png" } });
+  // The address has moved to another directory since (`history.pushState`).
+  assert.equal(player.asset("photos/a.jpg"), "https://example.test/app/photos/a.jpg");
+  assert.equal(player.asset("/photos/a.jpg"), "https://example.test/photos/a.jpg");
+  assert.equal(player.asset("https://photos.test/a.jpg"), "https://photos.test/a.jpg");
+  assert.equal(player.asset("blob:https://example.test/1"), "blob:https://example.test/1");
+  assert.equal(player.asset("asset:/logo.png"), "https://cdn.test/logo.0123456789.png");
+  assert.equal(player.asset("asset:/icons/x.png"), "https://example.test/app/icons/x.png");
 });
 
 test("data that does not load reaches the engine as none", async () => {
@@ -1550,4 +1600,26 @@ test("a mouse makes a desktop at any width, a touch screen a tablet or a phone (
     globalThis.matchMedia = saved.matchMedia;
     globalThis.screen = saved.screen;
   }
+});
+
+test("a view laid out at no size draws nothing of its own, its border overlay included", () => {
+  const { player } = fakePlayer();
+  const classes = new Set();
+  const el = {
+    _kind: "view",
+    _animation: {},
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+  };
+  Object.assign(player, { view: () => el, placeFrame() {}, readingChanged() {} });
+  // `display: none`: the core lays the view out at no size.
+  player.op_f(["f", 2, 0, 0, 0, 0]);
+  assert.ok(classes.has("nsh-empty"));
+  player.op_f(["f", 2, 8, 8, 40, 32]);
+  assert.ok(!classes.has("nsh-empty"));
+  // One side of no size is no size too.
+  player.op_f(["f", 2, 8, 8, 40, 0]);
+  assert.ok(classes.has("nsh-empty"));
+  // What the class takes away: the border overlay, the outline and the shadow.
+  assert.match(source, /\.nsh-empty > \.nsh-border \{ display: none; \}/);
+  assert.match(source, /\.nsh-v\.nsh-empty \{ outline: none; box-shadow: none; \}/);
 });

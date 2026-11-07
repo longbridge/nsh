@@ -138,7 +138,7 @@ unsafe fn begin(surface: &Surface, panel: &AnyObject, handler: impl Fn(isize) + 
     let handler = RcBlock::new(handler);
     // SAFETY: AppKit's documented NSSavePanel API, as the caller promises.
     unsafe {
-        match surface.root.ns().window() {
+        match crate::window::sheet_window(surface) {
             Some(window) => {
                 let _: () = msg_send![panel, beginSheetModalForWindow: &*window, completionHandler: &*handler];
             }

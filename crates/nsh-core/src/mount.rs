@@ -502,6 +502,12 @@ pub struct ModalConfig {
     pub close_on_backdrop_press: bool,
     /// Swiping a sheet down closes it natively (`closeOnSwipe`).
     pub close_on_swipe: bool,
+    /// The window it shows in (desktops): [`crate::ROOT_ID`], the main
+    /// window, or the root of the app's window of its own that holds it
+    /// (a dialog opened from a `<Window>`'s content shows over that
+    /// window, not the main one). For a window's own root: the window
+    /// holding its node. The core works it out from where the node is.
+    pub window: NodeId,
 }
 
 impl Default for ModalConfig {
@@ -514,6 +520,7 @@ impl Default for ModalConfig {
             close_on_escape: true,
             close_on_backdrop_press: true,
             close_on_swipe: true,
+            window: crate::ROOT_ID,
         }
     }
 }
@@ -662,8 +669,10 @@ pub struct ImageOptions {
 #[derive(Debug, Clone)]
 pub enum MountItem {
     /// Mounted nodes in depth-first logical tree order, independent of native
-    /// stacking (`Insert`). Opt-in through `Core::set_tree_order_tracking`;
-    /// emitted after structural changes in the same batch as the affected views.
+    /// stacking (`Insert`); a list's cells, which it recycles, in the order
+    /// they are on screen. Opt-in through `Core::set_tree_order_tracking`;
+    /// emitted after structural changes and when a list's cells move, in the
+    /// same batch as the affected views.
     TreeOrder(Vec<NodeId>),
     /// Create a native view. It starts detached and invisible.
     Create {

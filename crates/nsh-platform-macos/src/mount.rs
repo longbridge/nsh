@@ -298,7 +298,12 @@ impl Mounter {
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // The root and a window's root fill their window: the
+                // platform reports their size (`set_root_size`), and the
+                // core's frame for them is never theirs to take (it is
+                // the one of a dialog over the main window until the
+                // window's size comes).
+                if *id == ROOT_ID || crate::window::is_window(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;
@@ -598,6 +603,11 @@ impl Mounter {
                 }
             }
             Command::ImageInfo { .. } => crate::image::command(surface, id, command),
+            // A window of the app's own (`Window.open`) shows dialog root
+            // `id`.
+            Command::Desktop(desktop) if id != ROOT_ID => {
+                crate::window::command(surface, id, view, desktop);
+            }
             Command::SetJsResponder { .. } | Command::ClearJsResponder => {
                 crate::input::command(surface, id, command);
             }

@@ -104,7 +104,8 @@ pub(crate) fn package(
     if dir.exists() {
         fs::remove_dir_all(&dir).with_context(|| format!("remove {}", dir.display()))?;
     }
-    let site = Site::new(&dir)?;
+    let asset_base = options.asset_url.map(asset_url).transpose()?;
+    let site = Site::new(&dir, asset_base.as_ref().map(|base| base.prefix.clone()))?;
     let chunk_sides;
     let js = fs::read_to_string(&runtime.js)
         .with_context(|| format!("read {}", runtime.js.display()))?;
@@ -247,7 +248,7 @@ pub(crate) fn package(
         "chunkSides": chunk_sides,
         "nativeExports": native_exports(built.native_use.as_ref()),
         "entryChunks": built.entry_imports,
-        "host": host,
+        "host": host.map(|host| site.module(&host)),
     });
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
@@ -257,7 +258,7 @@ pub(crate) fn package(
         appearance,
         base: base.as_deref(),
         icons: &icons,
-        runtime: &js,
+        runtime: &site.module(&js),
         wasm: &wasm,
         glue: glue.as_deref(),
         code: &code,
@@ -270,6 +271,11 @@ pub(crate) fn package(
             built.capabilities.as_ref(),
             &page_connect(&config.web.connect)?,
         )
+        // The page fetches its files from another origin there.
+        .map(|sources| match &asset_base {
+            Some(base) => format!("{sources} {}", base.origin),
+            None => sources,
+        })
         .as_deref(),
     });
     fs::write(dir.join("index.html"), html)?;
@@ -700,6 +706,18 @@ fn browser_host_files(root: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         .collect()
 }
 
+fn minify_browser_host(name: &str, source: &str) -> anyhow::Result<String> {
+    let code = nsh_bundler::minify_module(name, source).map_err(anyhow::Error::msg)?;
+    // Module-mode compression removes strict directives. The bootstrap is
+    // the one classic script: restore its ESM factories' strict semantics
+    // after the final minification, before computing its content digest.
+    Ok(if name == "bootstrap.js" {
+        format!("\"use strict\";\n{code}")
+    } else {
+        code
+    })
+}
+
 /// Version the complete facade directory together so relative ES imports
 /// remain valid, and every public file keeps immutable cache semantics.
 fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
@@ -713,7 +731,7 @@ fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
             .into_owned();
         let code = fs::read_to_string(&path)?;
         let code = if name.ends_with(".js") {
-            nsh_bundler::minify_module(&name, &code).map_err(anyhow::Error::msg)?
+            minify_browser_host(&name, &code)?
         } else {
             code
         };
@@ -908,23 +926,88 @@ impl Appearance {
 const LIGHT: &str = "#ffffff";
 const DARK: &str = "#000000";
 
+/// `--asset-url`: where a site's files are served from.
+struct AssetUrl {
+    /// What their URLs start with, ending in `/`.
+    prefix: String,
+    /// Its origin, which the page's `connect-src` allows.
+    origin: String,
+}
+
+/// Checks `--asset-url` before anything is built ([`asset_url`]).
+pub(crate) fn check_asset_url(url: &str) -> anyhow::Result<()> {
+    asset_url(url).map(drop)
+}
+
+/// Reads `--asset-url`: an http(s) URL (`https://cdn.example.com/app/`)
+/// without credentials, a query or a fragment. The path the page is served
+/// under is `nsh.json`'s, not this.
+fn asset_url(given: &str) -> anyhow::Result<AssetUrl> {
+    let wrong = || {
+        anyhow::anyhow!(
+            "--asset-url is an http(s) URL (https://cdn.example.com/app/), not {given:?}"
+        )
+    };
+    let url = url::Url::parse(given).map_err(|_| wrong())?;
+    // An IPv6 host has no form in the CSP's `connect-src` it goes into.
+    if !matches!(url.scheme(), "http" | "https")
+        || !matches!(url.host(), Some(url::Host::Domain(_) | url::Host::Ipv4(_)))
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(wrong());
+    }
+    let prefix = url.as_str().to_owned();
+    let prefix = if prefix.ends_with('/') {
+        prefix
+    } else {
+        format!("{prefix}/")
+    };
+    Ok(AssetUrl {
+        prefix,
+        origin: url.origin().ascii_serialization(),
+    })
+}
+
 /// A directory files are added to under content-addressed names.
 struct Site {
     dir: PathBuf,
+    /// Where the files are served from (`--asset-url`, ending in `/`), or
+    /// `None`: next to the page.
+    base: Option<String>,
 }
 
 impl Site {
-    fn new(dir: &Path) -> anyhow::Result<Site> {
+    fn new(dir: &Path, base: Option<String>) -> anyhow::Result<Site> {
         fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-        Ok(Site { dir: dir.into() })
+        Ok(Site {
+            dir: dir.into(),
+            base,
+        })
     }
 
     /// Writes `bytes` as `path` with their digest in its name
-    /// ([`hashed_name`]); returns its URL relative to the page.
+    /// ([`hashed_name`]); returns the URL the page names it by: under
+    /// `base`, else relative to the page.
     fn add(&self, path: &str, bytes: &[u8]) -> anyhow::Result<String> {
         let name = hashed_name(path, bytes);
         self.write(&name, bytes)?;
-        Ok(url_path(&name))
+        Ok(format!(
+            "{}{}",
+            self.base.as_deref().unwrap_or_default(),
+            url_path(&name)
+        ))
+    }
+
+    /// A URL [`Site::add`] gave as a module specifier the page imports: a
+    /// relative one starts with `./`.
+    fn module(&self, url: &str) -> String {
+        match self.base {
+            Some(_) => url.to_owned(),
+            None => format!("./{url}"),
+        }
     }
 
     /// Writes `bytes` as `path`, a name that changes with them already (in
@@ -1045,7 +1128,9 @@ impl Icons {
     }
 }
 
-/// `manifest.webmanifest`: what a browser installs the app as.
+/// `manifest.webmanifest`: what a browser installs the app as. It stays
+/// beside the page under `--asset-url` too: its name has no digest, and
+/// its `start_url` and `scope` are the page's.
 fn manifest(name: &str, id: &str, appearance: Appearance, icons: &Icons) -> String {
     let (light, dark) = appearance.colors();
     let background = if appearance == Appearance::Dark {
@@ -1160,7 +1245,7 @@ struct PageParts<'a> {
     /// The page's `<base href>` ([`page_base`]).
     base: Option<&'a str>,
     icons: &'a Icons,
-    /// URL of `nsh.js`.
+    /// The module specifier of `nsh.js`.
     runtime: &'a str,
     wasm: &'a str,
     /// URL of the wasm-bindgen glue, if the runtime has one.
@@ -1329,6 +1414,27 @@ mod tests {
             "LICENSE.".len() + DIGEST_LEN
         );
         assert!(hashed_name(".env", b"x").starts_with(".env."));
+    }
+
+    #[test]
+    fn the_published_bootstrap_is_a_strict_classic_script() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-bootstrap-{}", std::process::id()));
+        let root = dir.join("host");
+        fs::create_dir_all(root.join("browser")).unwrap();
+        // Export a detached-call probe without letting module-mode compression
+        // fold away the call that observes strictness in the published script.
+        let source = "\"use strict\"; globalThis.bootstrapThis = function () { return this; };";
+        fs::write(root.join("browser/bootstrap.js"), source).unwrap();
+        let site = Site::new(&dir.join("site"), None).unwrap();
+        let published = publish_browser_host(&site, &root).unwrap();
+        let code = fs::read_to_string(site.dir.join(published).join("bootstrap.js")).unwrap();
+        let host = nsh_js::Host::new().unwrap();
+        host.eval_script("bootstrap.js", &code).unwrap();
+        assert!(
+            host.eval_script("check.js", "(0, bootstrapThis)() === undefined")
+                .unwrap()
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1737,7 +1843,7 @@ mod tests {
         )
         .unwrap();
         let publish = |name: &str| {
-            let site = Site::new(&dir.join(name)).unwrap();
+            let site = Site::new(&dir.join(name), None).unwrap();
             let url = publish_glue(&site, &glue).unwrap();
             let published = fs::read_to_string(site.dir.join(&url)).unwrap();
             let snippets = fs::read_dir(&site.dir)
@@ -1790,7 +1896,7 @@ mod tests {
             appearance: Appearance::System,
             base: None,
             icons: &icons,
-            runtime: "nsh.0123456789.js",
+            runtime: "./nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
             glue,
             code: "app.1.js",
@@ -1808,6 +1914,72 @@ mod tests {
         let without = page(&parts(None));
         assert!(!without.contains("modulepreload"), "{without}");
         assert!(!without.contains("bindgen"), "{without}");
+    }
+
+    #[test]
+    fn an_asset_url_is_an_http_url() {
+        let read = |url: &str| asset_url(url).map(|a| (a.prefix, a.origin));
+        assert_eq!(
+            read("https://cdn.example.com/app/").unwrap(),
+            (
+                "https://cdn.example.com/app/".into(),
+                "https://cdn.example.com".into()
+            )
+        );
+        assert_eq!(
+            read("http://127.0.0.1:8791").unwrap(),
+            (
+                "http://127.0.0.1:8791/".into(),
+                "http://127.0.0.1:8791".into()
+            )
+        );
+        assert_eq!(
+            read("https://cdn.example.com/my app/").unwrap().0,
+            "https://cdn.example.com/my%20app/"
+        );
+        for wrong in [
+            "/app/",
+            "app/",
+            "//cdn.example.com/",
+            "ftp://cdn.example.com/",
+            "https://user:pw@cdn.example.com/",
+            "https://cdn.example.com/?v=1",
+            "https://cdn.example.com/#x",
+            "http://[::1]:8794/",
+        ] {
+            assert!(read(wrong).is_err(), "{wrong}");
+        }
+    }
+
+    #[test]
+    fn a_site_under_an_asset_url_names_its_files_there() {
+        let dir = std::env::temp_dir().join(format!("nsh-asset-url-{}", std::process::id()));
+        let relative = Site::new(&dir.join("relative"), None).unwrap();
+        let url = relative.add("app.js", b"x").unwrap();
+        assert!(!url.contains('/') && url.starts_with("app."), "{url}");
+        assert_eq!(relative.module(&url), format!("./{url}"));
+        let based = Site::new(
+            &dir.join("based"),
+            Some("https://cdn.example.com/app/".into()),
+        )
+        .unwrap();
+        let url = based.add("assets/a b.png", b"x").unwrap();
+        assert!(
+            url.starts_with("https://cdn.example.com/app/assets/a%20b."),
+            "{url}"
+        );
+        assert_eq!(based.module(&url), url);
+        // The file itself is written in the site's directory, as without one.
+        assert!(
+            based
+                .dir
+                .join("assets")
+                .read_dir()
+                .unwrap()
+                .next()
+                .is_some()
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1869,7 +2041,7 @@ mod tests {
             appearance: Appearance::Light,
             base: Some("/apps/counter/"),
             icons: &Icons::default(),
-            runtime: "nsh.0123456789.js",
+            runtime: "./nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
             glue: None,
             code: "app.1.js",
@@ -1890,7 +2062,7 @@ mod tests {
             appearance: Appearance::System,
             base: None,
             icons: &Icons::default(),
-            runtime: "nsh.0123456789.js",
+            runtime: "./nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
             glue: None,
             code: "app.1.js",
@@ -2240,7 +2412,8 @@ mod tests {
                 "/snippets/app-1/inline0.js",
                 "/nsh-host.js",
                 "/browser/runtime.js",
-                "/browser/dom.js",
+                "/browser/bootstrap.js",
+                "/browser/realm.js",
             ] {
                 let file = format!("{origin}{file}");
                 assert!(
@@ -2313,7 +2486,7 @@ mod tests {
                 appearance: Appearance::System,
                 base,
                 icons: &icons,
-                runtime: "nsh.0123456789.js",
+                runtime: "./nsh.0123456789.js",
                 wasm: "nsh.1111111111.wasm",
                 glue: Some("nsh-bindgen.2222222222.js"),
                 code: "app.3333333333.js",

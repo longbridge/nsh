@@ -715,6 +715,14 @@ final class Decor extends Drawable {
                     outline.setRoundRect(r, fit(r)[0]);
                 } else if (Build.VERSION.SDK_INT >= 30) {
                     outline.setPath(shape(r, 0, new Path()));
+                } else if (continuous) {
+                    // Smoothed corners are not always convex, and Android 9
+                    // takes only convex outlines. Clipping is by path here
+                    // (`needsPathClip`), so the outline only casts the shadow:
+                    // a round rect of the smallest corner stands in for it.
+                    float smallest = Float.MAX_VALUE;
+                    for (float corner : fit(r)) smallest = Math.min(smallest, corner);
+                    outline.setRoundRect(r, smallest);
                 } else {
                     // Rounded rectangles are convex.
                     outline.setConvexPath(shape(r, 0, new Path()));

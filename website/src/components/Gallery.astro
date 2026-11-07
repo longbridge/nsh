@@ -77,6 +77,8 @@ const t = zh
 </section>
 
 <script>
+  import { playSelect } from '../lib/sound';
+
   for (const root of document.querySelectorAll<HTMLElement>('[data-gallery]')) {
     const stage = root.querySelector<HTMLElement>('[data-stage]')!;
     const frame = root.querySelector<HTMLIFrameElement>('[data-frame]');
@@ -99,7 +101,10 @@ const t = zh
     // Phones see the phone layout whatever was chosen.
     set(saved === 'phone' || matchMedia('(max-width: 640px)').matches ? 'phone' : 'desktop');
     for (const [i, b] of buttons.entries()) {
-      b.addEventListener('click', () => set(b.dataset.width!));
+      b.addEventListener('click', () => {
+        if (b.getAttribute('aria-checked') !== 'true') playSelect();
+        set(b.dataset.width!);
+      });
       // A radio group: the arrows move the choice.
       b.addEventListener('keydown', (e) => {
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;

@@ -122,7 +122,7 @@ submodule (the per-primitive submodules are the deprecated past).
 | The Rust face for components | `nsh_core::prelude`: `sound()`, `audio_player()` (as `speech_available()`), through `element::ambient` |
 | Root commands and events | `ops.rs`: `Command::Audio(AudioCommand)`, `EventKind::Audio` → `EventPayload::Audio { id, event }` |
 | The platform's say | `Environment::audio: bool` (`platform.rs`, `element/env.rs`) |
-| The platforms | `nsh-platform-{ios,macos}` `audio.rs` (shared, as `speech.rs` is), `nsh-platform-android` `Audio.java` + JNI, `nsh-platform-windows` `native/audio.rs`, `nsh-platform-linux` and `nsh-platform-gpui` on GStreamer, `nsh-platform-web/web/nsh.js` |
+| The platforms | `nsh-platform-apple` `audio.rs` (macOS and iOS, as `speech.rs` is), `nsh-platform-android` `Audio.java` + JNI, `nsh-platform-windows` `native/audio.rs`, `nsh-platform-linux` and `nsh-platform-gpui` on GStreamer, `nsh-platform-web/web/nsh.js` |
 | Tests | `nsh-testing`'s headless driver gets an `AudioBackend` fake (as speech's); `tests/compat/cases/audio/` |
 
 ## The API
@@ -159,7 +159,8 @@ player.dispose();
   (`Environment::audio`, or the core has an `AudioBackend`).
 - `Sound.load(src: string): Promise<Sound>`: fetches the bytes and has the
   platform decode them to PCM. `src` is what `Image` takes: a bundled asset
-  (relative path or `asset:`), a `file:` URL, `data:` / `blob:`, or `http(s)`.
+  (relative path or `asset:`; TSX imports `.wav`, `.m4a`, `.aac` and `.mp3`
+  files as their `asset:/` URL and ships them, `nsh-bundler`'s `plugin.rs`), a `file:` URL, `data:` / `blob:`, or `http(s)`.
   The bytes come through the image loader's L1–L3 (`image-loading-design.md`:
   assets, files, the remote loader with its disk cache, dedup and limits) so
   `Sound.load` never writes a second loader; the platform only decodes.
@@ -299,7 +300,7 @@ The rest of the Rust face is the builder's, patterned on `speech.rs`'s.
 |---|---|---|---|
 | iOS, macOS | `AVAudioEngine` with one `AVAudioPlayerNode` per playback over a shared mixer; `AVAudioFile` / `AVAudioPCMBuffer` decoded once at `Load` | `AVPlayer`, the class `Video` uses in `native.rs`, with no layer | one `AVAudioEngine` per NSH engine (`AppView` / `NshAppView`), started lazily, stopped with it; `AVAudioSession` `.ambient` (mixes with others, honours the silent switch) set once on iOS when the first sound or player starts; a player pauses on `UIApplication.didEnterBackground` |
 | Android | `SoundPool` (one per NSH engine, max 32 streams), `load` from a temp file or an `AssetFileDescriptor`; the duration read from the container with `MediaExtractor` before `load` (`SoundPool` reports none) — under the 5 s cap its own decoded-size limit (about 1.5 MiB) is never hit | `MediaPlayer`, the class `VideoBox.java` uses, with its `AudioFocusRequest` handling repeated | `Audio.java` next to `VideoBox.java`; events through the same JNI event map (`Native.java`'s key list updated) |
-| Windows | `XAudio2` (one engine per NSH engine; `IXAudio2SourceVoice` per playback over a mastering voice), Media Foundation's `IMFSourceReader` decodes to PCM at `Load` | `IMFMediaEngine`, the class `native/video.rs` uses, audio-only (no video output) | |
+| Windows | `XAudio2` (one engine per NSH engine; `IXAudio2SourceVoice` per playback over a mastering voice), Media Foundation's `IMFSourceReader` decodes to PCM at `Load`, on one decoding thread for the process | `IMFMediaEngine`, the class `native/video.rs` uses, audio-only (no video output) | |
 | Linux | GStreamer (`sound.rs`): decoded once off the main thread (`decodebin` into 48 kHz stereo floats, cut at the length allowed), played from memory by one live pipeline per engine, an `appsrc` per voice into an `audiomixer` pad (its volume; another rate resamples the samples once) | `gtk::MediaFile`, as `native.rs`'s video; GTK media streams have no rate, so a player's `rate` is ignored there | the `gstreamer`, `gstreamer-app` and `gstreamer-audio` crates (GTK already plays media through GStreamer; the review of #955 showed a stream per play could not keep `Sound`'s promise of decoding once and starting within a frame); GTK has no buffering signal, so `buffer` is reported only while a play waits for its load |
 | GPUI | not yet: `Environment::audio` off | not yet | |
 | Web | the core sends `AudioCommand::LoadUrl` (the browser fetches; the image loader has no threads there), checking the source first; `AudioContext` (one per NSH engine) + `decodeAudioData` at `Load`, an `AudioBufferSourceNode` per playback | an `HTMLAudioElement` as the `<video>` path in `nsh.js` | the `AudioContext` is created and resumed on the page's first user gesture the engine observes; `play` before it is `not-allowed` |

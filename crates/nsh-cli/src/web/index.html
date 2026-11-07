@@ -37,7 +37,7 @@
   // root. The page's host (`app.host`, nsh.json `web.host`) answers the
   // app's `nsh/host` calls: its `createHost(player)` runs once the player
   // exists, before the app starts, so no call comes earlier.
-  import { createPlayer } from "./{{runtime}}";
+  import { createPlayer } from "{{runtime}}";
 
   const app = {{app}};
   // Every URL of the app, resolved once against the page's base (its

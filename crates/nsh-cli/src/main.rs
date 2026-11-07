@@ -320,8 +320,13 @@ enum Command {
     /// together.
     UpdateManifest {
         /// The archives named `<name>-<version>-<os>-<arch>.<ext>`.
-        #[arg(required = true)]
+        #[arg(required_unless_present_any = ["package", "links"])]
         archives: Vec<PathBuf>,
+        /// A signed package of the app's code (`nsh publish`'s `.nshpkg`),
+        /// which apps trusting its root (`updater.packages.roots`) run
+        /// without a new app.
+        #[arg(long)]
+        package: Option<PathBuf>,
         /// The app's directory or entry, whose `nsh.json` has the id and version.
         #[arg(long, default_value = ".")]
         entry: PathBuf,
@@ -537,6 +542,12 @@ struct PackageArgs {
     /// machine at the address it prints).
     #[arg(long)]
     run: bool,
+    /// Web: the http(s) URL the site's files are served from, a CDN
+    /// (`https://cdn.example.com/app/`), as the page names them; `index.html`
+    /// stays at the page's address. Default: next to the page, named
+    /// relatively, so the site runs from any directory.
+    #[arg(long, value_name = "URL", conflicts_with = "run")]
+    asset_url: Option<String>,
 }
 
 impl Command {
@@ -820,10 +831,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             server_only,
         } => {
             no_limits_for_rust(&entry, limits)?;
-            // `nsh dev` serves hosts on other machines.
+            // `--server-only` serves hosts started elsewhere, on other
+            // machines too; a host `nsh dev` starts is on the network only
+            // as `nsh run` starts it.
             let listen = dev::Listen {
                 port: port.unwrap_or_default(),
-                network: true,
+                network: server_only || target.uses_network(),
             };
             if server_only {
                 let session = dev::DevSession::start(&entry, listen, release, limits)?;
@@ -864,6 +877,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 abi,
                 format,
                 run,
+                asset_url,
             } = *args;
             let mut config = package::read_config(&entry)?;
             config.name = name.or(config.name);
@@ -888,6 +902,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 abis: &abi,
                 format,
                 run,
+                asset_url: asset_url.as_deref(),
             })
         }
         Command::Run {
@@ -909,12 +924,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 &entry,
                 dev::Listen {
                     port: port.unwrap_or_default(),
-                    // Phones open the web page; a device's host may be on
-                    // the network. A window here needs only this machine.
-                    network: matches!(
-                        target,
-                        run::Target::Ios | run::Target::Android | run::Target::Web
-                    ),
+                    network: target.uses_network(),
                 },
                 release,
                 run::HostFlags {
@@ -935,6 +945,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Keygen { name } => sign::keygen(&name),
         Command::UpdateManifest {
             archives,
+            package,
             entry,
             key,
             notes,
@@ -943,6 +954,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             out,
         } => updater::manifest(updater::ManifestOptions {
             archives: &archives,
+            package: package.as_deref(),
             entry: &entry,
             key: key.as_deref(),
             notes: notes.as_deref(),

@@ -97,33 +97,23 @@ impl Installation {
     }
 
     /// Replaces the app with the archive at `archive` (`.tar.gz` or `.zip`,
-    /// already verified, as `nsh package` makes them).
+    /// already verified, as `nsh package` makes them). The running app is
+    /// left as it is: the caller restarts it (`nsh_core::restart`).
     pub fn install(&self, archive: &Path) -> Result<(), Error> {
         let scratch = staging(self.scratch_parent())?;
-        let result = self.install_from(archive, &scratch, false);
+        let result = self.install_from(archive, &scratch);
         let _ = fs::remove_dir_all(&scratch);
         result
     }
 
-    /// Replaces the app and starts it, restoring the old installation if
-    /// launching fails. The archive must already be verified, as in
-    /// [`Self::install`]. The caller exits only after this succeeds.
-    pub fn install_and_launch(&self, archive: &Path) -> Result<(), Error> {
-        let scratch = staging(self.scratch_parent())?;
-        let result = self.install_from(archive, &scratch, true);
-        let _ = fs::remove_dir_all(&scratch);
-        result
-    }
-
-    fn install_from(&self, archive: &Path, scratch: &Path, launch: bool) -> Result<(), Error> {
+    fn install_from(&self, archive: &Path, scratch: &Path) -> Result<(), Error> {
         unpack(archive, scratch)?;
         let new = single_entry(scratch)?;
         self.check_new(&new)?;
-        let activate = || if launch { self.launch() } else { Ok(()) };
         if cfg!(windows) {
-            swap_entries_with(&self.root, &new, activate)
+            swap_entries(&self.root, &new)
         } else {
-            swap_directory(&self.root, &new, activate)
+            swap_directory(&self.root, &new)
         }
     }
 
@@ -164,31 +154,6 @@ impl Installation {
             if !status.success() {
                 return Err(Error::Install("its code signature is not valid".into()));
             }
-        }
-        Ok(())
-    }
-
-    /// Starts the installed app with this run's arguments. The caller then
-    /// exits. On macOS, through LaunchServices, as a user's launch is.
-    pub fn launch(&self) -> Result<(), Error> {
-        let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-        if cfg!(target_os = "macos") {
-            let mut open = Command::new("/usr/bin/open");
-            open.arg("-n").arg(&self.root);
-            if !args.is_empty() {
-                open.arg("--args").args(&args);
-            }
-            let output = open.output()?;
-            if !output.status.success() {
-                return Err(Error::Install(format!(
-                    "launch failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                )));
-            }
-        } else {
-            Command::new(self.root.join(&self.executable))
-                .args(&args)
-                .spawn()?;
         }
         Ok(())
     }
@@ -295,11 +260,7 @@ fn single_entry(dir: &Path) -> Result<PathBuf, Error> {
 
 /// Swaps two directories by renames; puts the old one back if the new one
 /// cannot move.
-fn swap_directory(
-    root: &Path,
-    new: &Path,
-    activate: impl FnOnce() -> Result<(), Error>,
-) -> Result<(), Error> {
+fn swap_directory(root: &Path, new: &Path) -> Result<(), Error> {
     let name = root
         .file_name()
         .ok_or_else(|| Error::Install("the app has no directory name".into()))?;
@@ -313,11 +274,6 @@ fn swap_directory(
         fs::rename(&old, root)?;
         return Err(e.into());
     }
-    if let Err(error) = activate() {
-        fs::rename(root, new)?;
-        fs::rename(&old, root)?;
-        return Err(error);
-    }
     let _ = fs::remove_dir_all(&old);
     Ok(())
 }
@@ -325,16 +281,7 @@ fn swap_directory(
 /// Swaps the entries of `root` for those of `new`, the old ones renamed in
 /// place, since what runs can be renamed but not removed. Undone if any
 /// step fails.
-#[cfg(test)]
 fn swap_entries(root: &Path, new: &Path) -> Result<(), Error> {
-    swap_entries_with(root, new, || Ok(()))
-}
-
-fn swap_entries_with(
-    root: &Path,
-    new: &Path,
-    activate: impl FnOnce() -> Result<(), Error>,
-) -> Result<(), Error> {
     let pid = std::process::id();
     let old_name = |name: &std::ffi::OsStr| {
         let mut old = OsString::from(format!("{OLD}{pid}-"));
@@ -356,7 +303,7 @@ fn swap_entries_with(
             fs::rename(entry.path(), root.join(&name))?;
             moved_in.push(name);
         }
-        activate()
+        Ok(())
     })();
     if let Err(e) = result {
         for name in &moved_in {
@@ -598,27 +545,6 @@ mod tests {
         assert_eq!(fs::read_to_string(&exe).unwrap(), "1.0.0");
     }
 
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn launch_failure_restores_the_old_app() {
-        let dir = TempDir::new();
-        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
-        let build = dir.path().join("build");
-        let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
-        // The fixture has execute permission but is not a valid executable.
-        let archive = tar_gz(&build, &new, "new.tar.gz");
-        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
-        assert!(installation.install_and_launch(&archive).is_err());
-        assert_eq!(version(&root), "1.0.0");
-        assert_eq!(fs::read_to_string(exe).unwrap(), "1.0.0");
-        assert!(
-            !fs::read_dir(dir.path())
-                .unwrap()
-                .flatten()
-                .any(|e| e.file_name().to_string_lossy().starts_with(STAGING))
-        );
-    }
-
     #[cfg(unix)]
     #[test]
     fn a_non_executable_update_leaves_the_old_app_intact() {
@@ -667,13 +593,6 @@ mod tests {
         assert_eq!(fs::read_to_string(root.join("App.exe")).unwrap(), "new");
         assert!(!root.join("gone").exists());
         assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
-
-        fs::create_dir_all(&new).unwrap();
-        fs::write(new.join("App.exe"), "unlaunchable").unwrap();
-        assert!(
-            swap_entries_with(&root, &new, || Err(Error::Install("launch failed".into()))).is_err()
-        );
-        assert_eq!(fs::read_to_string(root.join("App.exe")).unwrap(), "new");
 
         // A new tree that is not there: everything is put back.
         let missing = dir.path().join("missing");

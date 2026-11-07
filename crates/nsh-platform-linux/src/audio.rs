@@ -150,7 +150,7 @@ impl Speaker {
         glib::spawn_future_local(async move {
             let decoded = decoding
                 .await
-                .unwrap_or_else(|_| Err("the decoder stopped".to_owned()));
+                .unwrap_or_else(|_| Err("the decoder stopped".into()));
             let Some(inner) = speaker.upgrade() else {
                 return;
             };
@@ -169,7 +169,11 @@ impl Speaker {
                     drop(inner);
                     report(&control, id, event);
                 }
-                Err(message) => {
+                Err(sound::Failure::Unsupported(message)) => {
+                    drop(inner);
+                    report(&control, id, failed(AudioError::NotSupported, &message));
+                }
+                Err(sound::Failure::Other(message)) => {
                     drop(inner);
                     report(&control, id, failed(AudioError::Decode, &message));
                 }

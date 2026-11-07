@@ -10,7 +10,8 @@
 use std::time::Duration;
 
 use crate::{
-    EdgeInsets, EventPayload, ModalAnimation, NodeId, PayloadValue, Points, ScreenAnimation, Size,
+    Bounds, EdgeInsets, EventPayload, ModalAnimation, NodeId, PayloadValue, Points,
+    ScreenAnimation, Size,
 };
 
 /// Push and pop.
@@ -296,6 +297,18 @@ pub fn back_target(
     back_stack(None).map(Back::Stack)
 }
 
+/// Whether a stack may take going back as far as its layout goes: it and
+/// every view around it (`frames`, the root's aside) have a size. The core
+/// lays out `display: none` (a tab not selected) and everything in it at no
+/// size, and a page of a stack so laid out at its stack's, which no
+/// platform's own hidden state sees; such a stack keeps its screens while
+/// another shows. Every backend with a global back asks this beside its own
+/// check (the web's `stackShown` and Android's `StackBox` as well); apps
+/// have no use for it.
+pub fn shown_in_layout(frames: impl IntoIterator<Item = Bounds<Points>>) -> bool {
+    frames.into_iter().all(|frame| !frame.is_empty())
+}
+
 /// The first of `candidates` that contains none of the others
 /// (`contains(a, b)`: `b` is inside `a`): of the stacks that take going
 /// back, the innermost.
@@ -345,6 +358,22 @@ pub fn insets_payload(i: EdgeInsets) -> EventPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stack_laid_out_at_no_size_takes_no_going_back() {
+        let at = |w: f32, h: f32| Bounds::new(Default::default(), Size::new(Points(w), Points(h)));
+        assert!(shown_in_layout([at(390.0, 844.0), at(390.0, 844.0)]));
+        // `display: none`: the core lays it out at no size.
+        assert!(!shown_in_layout([Bounds::default()]));
+        assert!(!shown_in_layout([at(390.0, 0.0)]));
+        assert!(!shown_in_layout([at(0.0, 844.0)]));
+        // A stack of a fixed size in a page of a stack so laid out.
+        assert!(!shown_in_layout([
+            at(390.0, 300.0),
+            Bounds::default(),
+            at(390.0, 844.0)
+        ]));
+    }
 
     #[test]
     fn eases_out() {

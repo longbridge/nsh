@@ -1,5 +1,6 @@
 //! Typed root parts reach the document's text before classes and styles;
-//! inline links are stops of Tab, pressed with Return.
+//! inline links are stops of Tab, pressed with Return; a link's press
+//! reports the modifier keys held.
 
 use nsh_base::{
     TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles, text_view,
@@ -134,4 +135,54 @@ fn tab_reaches_a_documents_links_in_order_and_return_presses_them() {
     app.press_key("enter").unwrap();
     app.wait_for("Pressed: https://example.com/guide #notes #notes")
         .unwrap();
+}
+
+/// A link and a footnote reference; each press, with whether Command was
+/// held, on screen.
+#[component]
+fn LinkModifiers() -> impl IntoElement {
+    let pressed = signal(Vec::<String>::new());
+    view()
+        .child(
+            text_view()
+                .markdown("Read [the guide](https://example.com/guide)[^n].\n\n[^n]: A note.")
+                .on_link_press(move |e: &TextViewLinkPressEvent| {
+                    let held = if e.modifiers.cmd { "cmd" } else { "plain" };
+                    let press = format!("{}:{held}", e.url);
+                    pressed.update(|p| p.push(press));
+                }),
+        )
+        .child(text(move || {
+            format!("Pressed: {}", pressed.get().join(" "))
+        }))
+}
+
+#[test]
+fn a_link_press_reports_the_modifier_keys_held() {
+    let mut config = EngineConfig::new(Root::of::<LinkModifiers>());
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    app.wait_for("the guide").unwrap();
+    app.press("the guide").unwrap();
+    app.wait_for("Pressed: https://example.com/guide:plain")
+        .unwrap();
+    app.hold_keys("mod", true).unwrap();
+    app.press("the guide").unwrap();
+    app.wait_for("Pressed: https://example.com/guide:plain https://example.com/guide:cmd")
+        .unwrap();
+    app.press("1").unwrap();
+    app.wait_for(
+        "Pressed: https://example.com/guide:plain https://example.com/guide:cmd #footnote-n:cmd",
+    )
+    .unwrap();
+    // The keyboard holds no pointer's modifiers: Return presses with none.
+    app.hold_keys("mod", false).unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for(
+        "Pressed: https://example.com/guide:plain https://example.com/guide:cmd \
+         #footnote-n:cmd https://example.com/guide:plain",
+    )
+    .unwrap();
 }

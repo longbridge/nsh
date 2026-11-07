@@ -60,7 +60,7 @@ block2.workspace = true
 crossbeam-channel.workspace = true
 dispatch2.workspace = true
 objc2.workspace = true
-objc2-app-kit.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSDockTile", "NSPanel"] }
 objc2-core-foundation.workspace = true
 objc2-core-graphics.workspace = true
 objc2-core-text.workspace = true
@@ -76,6 +76,10 @@ nsh-testing = { workspace = true, features = ["agent"], optional = true }
 
 [[test]]
 name = "accessibility"
+harness = false
+
+[[test]]
+name = "background"
 harness = false
 
 [[test]]

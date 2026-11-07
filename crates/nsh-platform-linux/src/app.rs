@@ -237,6 +237,7 @@ impl AppView {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&crate::surface::widget(&surface)));
         overlay.set_vexpand(true);
+        *surface.fps_overlay.borrow_mut() = overlay.downgrade();
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let outer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         outer.append(&slot);
@@ -255,7 +256,7 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
-        if view.options.borrow().fps {
+        if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.surface.enable_fps();
         }
         view
@@ -332,6 +333,8 @@ impl AppView {
             picker: None,
             speech: None,
             audio: None,
+            // Windows of the app's own are this backend's (`crate::window`).
+            windows: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -430,6 +433,18 @@ thread_local! {
     /// The standalone app's application ([`run_app`]): what [`quit`] ends.
     static STANDALONE: RefCell<Option<glib::WeakRef<gtk::Application>>> =
         const { RefCell::new(None) };
+    /// The app asked to start again when its run ends.
+    static RESTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Quits the standalone app as [`quit`] does, and starts it again once
+/// this process has exited ([`nsh_core::restart`]). A view embedded in
+/// another app leaves the app's lifecycle to that app: nothing happens
+/// there.
+pub(crate) fn restart() {
+    if quit() {
+        RESTART.set(true);
+    }
 }
 
 /// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
@@ -450,6 +465,8 @@ pub(crate) fn quit() -> bool {
 /// Closes `app`'s windows (closing the main one stops its engine), then
 /// ends its run.
 fn quit_application(app: &gtk::Application) {
+    // Closed without asking the app (`closeOnPress`).
+    crate::window::set_quitting();
     for window in app.windows() {
         window.close();
     }
@@ -503,19 +520,65 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             }
             return;
         };
+        // nsh.json `window`: known before the window is made, so its first
+        // frame has it.
+        // A JS bundle's or a Rust app's root's.
+        let app_of: Result<App, String> = match source {
+            AppSource::Rust(root) => Ok(App::Rust(root)),
+            AppSource::Bundle(bundle) => Ok(App::Js(bundle)),
+            #[cfg(feature = "dev")]
+            AppSource::DevServer(url) => Err(url),
+        };
+        let launch = app_of
+            .as_ref()
+            .ok()
+            .and_then(App::main_window)
+            .cloned()
+            .unwrap_or_default();
+        // `restoreBounds`: where its last run left it (the engine keeps it
+        // as it changes), fitted on the displays there are.
+        let kept = match &app_of {
+            Ok(app) if launch.restore_bounds => {
+                let mut config = EngineConfig::new(app.clone());
+                config.data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
+                config.storage = options.storage.clone();
+                config.main_window_placement(&crate::window::displays())
+            }
+            _ => None,
+        };
+        let size = kept
+            .map(|p| p.bounds.size)
+            .or(launch.default_size)
+            .map_or(options.size, |s| {
+                (s.width.0.round() as i32, s.height.0.round() as i32)
+            });
         let window = gtk::ApplicationWindow::builder()
             .application(app)
             .title(&options.title)
-            .default_width(options.size.0)
-            .default_height(options.size.1)
+            .default_width(size.0.max(1))
+            .default_height(size.1.max(1))
             .build();
         let view = AppView::new(options.clone());
         window.set_child(Some(&view.widget()));
-        match source {
-            AppSource::Rust(root) => view.load(App::Rust(root)),
-            AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        crate::window::launch_main(
+            &view.surface,
+            window.upcast_ref(),
+            &launch,
+            kept.map(|p| p.mode),
+        );
+        // The user closes it as the app's `closeOnPress` says.
+        let weak = Rc::downgrade(&view.surface);
+        window.connect_close_request(move |_| match weak.upgrade() {
+            Some(surface) => crate::window::main_close_request(&surface),
+            None => glib::Propagation::Proceed,
+        });
+        match app_of {
+            Ok(app) => view.load(app),
             #[cfg(feature = "dev")]
-            AppSource::DevServer(url) => crate::dev::start(&view, url),
+            Err(url) => crate::dev::start(&view, url),
+            // Only a dev server is no app.
+            #[cfg(not(feature = "dev"))]
+            Err(_) => {}
         }
         install_shortcuts(app, &window);
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
@@ -525,7 +588,18 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     });
     // GTK must not parse the host's own arguments: only the URL the app
     // was opened with goes to it (`open`).
-    app.run_with_args(&args)
+    let code = app.run_with_args(&args);
+    // The new process waits for this one to exit.
+    if RESTART.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on restart; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::restart::spawn_after_exit() {
+            log::error!("cannot restart the app: {err}");
+        }
+    }
+    code
 }
 
 /// Draws with GSK's GL renderer instead of its Vulkan one (GTK's default
@@ -561,13 +635,7 @@ fn install_shortcuts(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     // GtkWindow's own action. Not an application accelerator: those run
     // before everything, and an app may bind Ctrl+W itself (`nsh/keymap`,
     // e.g. to close a tab); this one comes last.
-    let close = gtk::ShortcutController::new();
-    close.set_propagation_phase(gtk::PropagationPhase::Bubble);
-    close.add_shortcut(gtk::Shortcut::new(
-        gtk::ShortcutTrigger::parse_string("<Control>w"),
-        Some(gtk::NamedAction::new("window.close")),
-    ));
-    window.add_controller(close);
+    crate::window::close_shortcut(window.upcast_ref());
     let fullscreen = gtk::gio::SimpleAction::new("fullscreen", None);
     let weak = window.downgrade();
     fullscreen.connect_activate(move |_, _| {

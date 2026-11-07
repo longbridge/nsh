@@ -213,6 +213,7 @@ const data = JSON.stringify({
 
 <script>
   import { mountSelect } from '../lib/ui/select';
+  import { playSelect } from '../lib/sound';
   import { paginateAll, paginateFeatured, selectShowcases, type BrowsedApp, type ShowcaseSort } from '../lib/showcase-browser';
 
   interface Copy {
@@ -319,6 +320,7 @@ const data = JSON.stringify({
     sortRoot.addEventListener('change', refilter);
     for (const chip of chips) {
       chip.addEventListener('click', () => {
+        if (state.category !== chip.dataset.category) playSelect();
         state.category = chip.dataset.category!;
         refilter();
       });

@@ -3,7 +3,7 @@ import { createAnimatedValue } from "nsh";
 import { Dialog, NavPage } from "nsh/base";
 import { safeAreaInsets } from "nsh";
 import { Icon } from "../../icons";
-import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../../ui";
+import { backdrop, Button, colors, finish, header, PageHeader, Press, Sheet, Stat, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../../ui";
 import { Depth, OrderBook } from "./Book";
 import { Chart } from "./Chart";
 import { compact, type Market, percent, price, sectors, type Stock, signed, time, toneOf } from "./market";
@@ -434,7 +434,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           open={ticket()}
           animation="fade"
           onOpenChange={({ open }) => ticket.set(open)}
-          backdropStyle={{ backgroundColor: "rgba(0,0,0,0.32)" }}
+          backdropStyle={backdrop()}
           style={{
             alignSelf: "center",
             marginVertical: "auto",
