@@ -394,7 +394,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.storage()` | What the app's storage holds now. |
-| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
+| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, that is laid out with a size (not in a tab laid out at no size) pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
 | `app.dialogs()` | The dialogs the app showed, in order. |
 | `app.onPick(handler)` | Answers the picks the app asks for from now on (`Picker.pickImages`, `Picker.pickFiles`): `handler` gets what the pick asks (`kind`: `"images"` or `"files"`, `multiple`, `limit`, `maxDimension`, `quality`, `format`, `filters`) and returns the files the user picks (`{ name, type?, data: Uint8Array }`, given to the app as they are), or `null` to cancel. Without a handler, picks are cancelled. Headless runs. |
@@ -415,6 +415,10 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
 | `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
+| `app.window(id)` | A window of the app on a desktop, by the id the app gave it (`"main"`: the main window). Headless runs play a desktop's windows: one display, each window opening where it asks to be, focused unless it is a panel or asks not to be. |
+| `app.window(id).state()` | The window's state as the platform reports it to the app (`WindowState`: `mode`, `minimized`, `visible`, `focused`, `bounds`, `contentBounds`, `display`), `null` while it is not open. |
+| `await app.window(id).pressClose()` | Presses the window's close button as the user does: the window reports the press (`onClosePress`, reason `"closeButton"`) and closes when its `closeOnPress` lets it. |
+| `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the main window, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
 most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
@@ -546,7 +550,7 @@ own input at the views their selectors name, as Playwright does in a browser:
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
   when the test says nothing) presses its button;
-- `app.screenshot(path)` takes a picture of the window.
+- `app.screenshot(path)` takes a picture of the window, `app.window(id).screenshot(path)` of another window of the app.
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows

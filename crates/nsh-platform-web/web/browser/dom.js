@@ -1,6 +1,6 @@
 // The JSX facade delegates node ownership, value reconciliation, prop
 // decoding and layout operations to Rust.
-const PLATFORM_PROPS = new Set(["ios", "android", "desktop", "web"]);
+const PLATFORM_PROPS = new Set(["ios", "android", "macos", "desktop", "web"]);
 
 export function createDom(invoke, values, reactive, live, wake) {
   const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap();

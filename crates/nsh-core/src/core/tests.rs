@@ -332,17 +332,17 @@ fn pan_permission_filters_native_values_and_events_without_losing_them() {
 /// The tokens of a theme file of the tests' own format, `{ "key":
 /// "#rrggbb", … }` over the sample's (`None`: the sample's): the core reads
 /// `uiTheme` with what a UI set brings.
-fn test_tokens(json: Option<&str>) -> Result<crate::element::Tokens, String> {
+fn test_tokens(json: Option<&str>) -> Result<(crate::element::Tokens, Vec<String>), String> {
     let mut tokens = crate::element::tokens::sample();
     let Some(json) = json else {
-        return Ok(tokens);
+        return Ok((tokens, Vec::new()));
     };
     let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     for (key, value) in value.as_object().ok_or("not an object")? {
         let color = value.as_str().and_then(Color::parse).ok_or("not a color")?;
         tokens.set_color(key, color.into());
     }
-    Ok(tokens)
+    Ok((tokens, Vec::new()))
 }
 
 /// Tokens with just `colors`.
@@ -1982,6 +1982,66 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(cells.len(), 25);
     c.commit();
     assert_eq!(c.node_count(), 2 + cells.len());
+}
+
+/// With tree order tracked (a platform's focus traversal), a list's
+/// recycled cells come in the order they are on screen, not in the order
+/// they were made, and their moves send the order again.
+#[test]
+fn tracked_tree_order_puts_a_lists_cells_in_screen_order() {
+    let mut c = core();
+    c.set_tree_order_tracking(true);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(1000),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let mut order = Vec::new();
+    let mut take = |batch: Option<MountBatch>| {
+        for item in batch.into_iter().flat_map(|b| b.items) {
+            if let MountItem::TreeOrder(nodes) = item {
+                order = nodes;
+            }
+        }
+    };
+    take(c.commit());
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    take(c.commit());
+    for y in [600.0, 300.0, 1500.0, 900.0, 2400.0, 1700.0] {
+        c.set_scroll_offset(2, point(px(0.0), px(y)), u32::MAX);
+        take(c.commit());
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        take(c.commit());
+    }
+    let shown: Vec<u32> = order
+        .iter()
+        .copied()
+        .filter(|id| cells.contains(id))
+        .collect();
+    assert_eq!(shown.len(), cells.len());
+    let y = |id: &u32| c.nodes[c.key(*id).unwrap() as usize].frame.origin.y.0;
+    assert!(shown.windows(2).all(|w| y(&w[0]) <= y(&w[1])), "{shown:?}");
+    // The cells were recycled out of the order they were made in.
+    assert_ne!(shown, cells);
 }
 
 #[test]
@@ -4686,6 +4746,112 @@ fn view_with_classes(c: &mut Core<FakeEngine>, id: NodeId, classes: &str) {
     );
 }
 
+/// A JS value for the host decoders in these tests, with the shapes they
+/// read: objects of fields, arrays, strings, numbers, booleans and null.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "a test input implements the whole HostInput trait"
+)]
+enum HostTestValue<'a> {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(&'a str),
+    Object(Vec<(&'a str, HostTestValue<'a>)>),
+    Array(Vec<HostTestValue<'a>>),
+}
+
+impl<'a> HostTestValue<'a> {
+    fn object(fields: impl IntoIterator<Item = (&'a str, HostTestValue<'a>)>) -> Self {
+        Self::Object(fields.into_iter().collect())
+    }
+}
+
+struct HostTestList<'a>(Vec<HostTestValue<'a>>);
+
+impl<'a> crate::js::host::HostList for HostTestList<'a> {
+    type Item = HostTestValue<'a>;
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn item(&self, index: usize) -> Option<Self::Item> {
+        self.0.get(index).cloned()
+    }
+}
+
+impl<'a> crate::js::host::HostInput for HostTestValue<'a> {
+    type List = HostTestList<'a>;
+
+    fn is_nullish(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    fn is_object(&self) -> bool {
+        matches!(self, Self::Object(_) | Self::Array(_))
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    fn as_string(&self) -> Option<String> {
+        match self {
+            Self::String(v) => Some((*v).to_owned()),
+            _ => None,
+        }
+    }
+
+    fn field(&self, key: &str) -> Option<Self> {
+        match self {
+            Self::Object(fields) => fields
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.clone()),
+            _ => None,
+        }
+    }
+
+    fn as_list(&self) -> Option<Self::List> {
+        match self {
+            Self::Array(items) => Some(HostTestList(items.clone())),
+            _ => None,
+        }
+    }
+
+    fn entries(&self) -> Vec<(String, Self)> {
+        match self {
+            Self::Object(fields) => fields
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn truthy(&self) -> bool {
+        match self {
+            Self::Null => false,
+            Self::Bool(v) => *v,
+            Self::Number(v) => *v != 0.0 && !v.is_nan(),
+            Self::String(v) => !v.is_empty(),
+            Self::Object(_) | Self::Array(_) => true,
+        }
+    }
+}
+
 #[test]
 fn backdrop_material_survives_restyling_and_resets() {
     use crate::{BackdropMaterial, js::host::HostProps};
@@ -4761,6 +4927,244 @@ fn backdrop_material_survives_restyling_and_resets() {
     .unwrap();
     let mounted = view_style_of(&c.commit().unwrap(), 2).unwrap();
     assert_eq!(mounted.backdrop_material, BackdropMaterial::UltraThin);
+    assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
+}
+
+#[test]
+fn macos_backdrop_decodes_and_survives_restyling() {
+    use crate::{
+        MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |value: HostTestValue<'_>| {
+        let mut cx = HostCx::for_element(Tag::View);
+        <Prop as HostProps>::decode("backdrop", &value, &mut cx)
+            .expect("a macOS backdrop prop")
+            .expect("a value")
+    };
+    // Its fields default to AppKit's popover material, within the window,
+    // active.
+    assert_eq!(
+        MacOsBackdrop::default(),
+        MacOsBackdrop {
+            material: MacOsBackdropMaterial::Popover,
+            blending: MacOsBackdropBlending::WithinWindow,
+            state: MacOsBackdropState::Active,
+        }
+    );
+    // Every material AppKit's roles name decodes from the API's camel case.
+    for (name, material) in [
+        ("titlebar", MacOsBackdropMaterial::Titlebar),
+        ("selection", MacOsBackdropMaterial::Selection),
+        ("menu", MacOsBackdropMaterial::Menu),
+        ("popover", MacOsBackdropMaterial::Popover),
+        ("sidebar", MacOsBackdropMaterial::Sidebar),
+        ("headerView", MacOsBackdropMaterial::HeaderView),
+        ("sheet", MacOsBackdropMaterial::Sheet),
+        ("windowBackground", MacOsBackdropMaterial::WindowBackground),
+        ("hudWindow", MacOsBackdropMaterial::HudWindow),
+        ("fullScreenUI", MacOsBackdropMaterial::FullScreenUI),
+        ("toolTip", MacOsBackdropMaterial::ToolTip),
+        (
+            "contentBackground",
+            MacOsBackdropMaterial::ContentBackground,
+        ),
+        (
+            "underWindowBackground",
+            MacOsBackdropMaterial::UnderWindowBackground,
+        ),
+        (
+            "underPageBackground",
+            MacOsBackdropMaterial::UnderPageBackground,
+        ),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "material",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material,
+                ..MacOsBackdrop::default()
+            })),
+            "{name}"
+        );
+    }
+    for (name, blending) in [
+        ("withinWindow", MacOsBackdropBlending::WithinWindow),
+        ("behindWindow", MacOsBackdropBlending::BehindWindow),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "blending",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material: MacOsBackdropMaterial::default(),
+                blending,
+                state: MacOsBackdropState::default(),
+            })),
+            "{name}"
+        );
+    }
+    for (name, state) in [
+        (
+            "followsWindowActiveState",
+            MacOsBackdropState::FollowsWindowActiveState,
+        ),
+        ("active", MacOsBackdropState::Active),
+        ("inactive", MacOsBackdropState::Inactive),
+    ] {
+        let prop = decode(HostTestValue::object([(
+            "state",
+            HostTestValue::String(name),
+        )]));
+        assert_eq!(
+            prop,
+            Prop::MacOsBackdrop(Some(MacOsBackdrop {
+                material: MacOsBackdropMaterial::default(),
+                blending: MacOsBackdropBlending::default(),
+                state,
+            })),
+            "{name}"
+        );
+    }
+    // The host prop's object names AppKit's roles, blending and state.
+    let prop = decode(HostTestValue::object([
+        ("material", HostTestValue::String("hudWindow")),
+        ("blending", HostTestValue::String("behindWindow")),
+        ("state", HostTestValue::String("followsWindowActiveState")),
+    ]));
+    let backdrop = MacOsBackdrop {
+        material: MacOsBackdropMaterial::HudWindow,
+        blending: MacOsBackdropBlending::BehindWindow,
+        state: MacOsBackdropState::FollowsWindowActiveState,
+    };
+    assert_eq!(prop, Prop::MacOsBackdrop(Some(backdrop)));
+    // Left out fields take their defaults.
+    assert_eq!(
+        decode(HostTestValue::Object(Vec::new())),
+        Prop::MacOsBackdrop(Some(MacOsBackdrop::default()))
+    );
+    // An unknown name, the kebab case the API no longer writes included,
+    // and a field of another type keep the default: a prop never fails.
+    for value in [
+        HostTestValue::String("unknown"),
+        HostTestValue::String("hud-window"),
+        HostTestValue::String("behind-window"),
+        HostTestValue::Number(1.0),
+    ] {
+        assert_eq!(
+            decode(HostTestValue::object([("material", value)])),
+            Prop::MacOsBackdrop(Some(MacOsBackdrop::default()))
+        );
+    }
+    // A value that is not an object clears the prop, as null does.
+    assert_eq!(
+        decode(HostTestValue::String("hudWindow")),
+        Prop::MacOsBackdrop(None)
+    );
+
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: prop.clone(),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .macos_backdrop,
+        Some(backdrop)
+    );
+    // Restyling preserves the platform prop, whether or not it has a blur.
+    c.apply(style_op(
+        2,
+        &[("backdropFilter", StyleValue::Str("blur(30px)"))],
+    ))
+    .unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .macos_backdrop,
+        Some(backdrop)
+    );
+    // A cleared key resets the prop to none.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: <Prop as HostProps>::reset(&prop).unwrap(),
+    })
+    .unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .macos_backdrop,
+        None
+    );
+    // The host decoder's null does the same.
+    assert_eq!(decode(HostTestValue::Null), Prop::MacOsBackdrop(None));
+}
+
+#[test]
+fn glass_tint_updates_and_removal_keeps_effects() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let style = |tint: Option<&str>| {
+        let mut props = vec![
+            ("backdropFilter", StyleValue::Str("blur(12px)")),
+            ("glassEffect", StyleValue::Str("regular")),
+        ];
+        if let Some(tint) = tint {
+            props.push(("glassTintColor", StyleValue::Str(tint)));
+        }
+        style_op(2, &props)
+    };
+    c.apply(style(Some("#ff0000"))).unwrap();
+    let mounted = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(mounted.glass_tint_color, Some(Color(0xff00_00ff)));
+    assert_eq!(mounted.glass_effect, crate::GlassEffect::Regular);
+    // A new color updates the native tint.
+    c.apply(style(Some("#00ff00"))).unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .glass_tint_color,
+        Some(Color(0x00ff_00ff))
+    );
+    // The style without the key resets it; the glass and blur effects stay.
+    c.apply(style(None)).unwrap();
+    let mounted = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(mounted.glass_tint_color, None);
+    assert_eq!(mounted.glass_effect, crate::GlassEffect::Regular);
     assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
 }
 
@@ -9733,7 +10137,7 @@ mod components {
             })
         };
         let themed = |hex: u32| {
-            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap())
+            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap().0)
         };
         c.commit().unwrap();
         c.set_host_tokens(Some(themed(0x00ff00)));
@@ -11120,6 +11524,297 @@ mod components {
             }
         }
         assert!(shown.iter().all(|t| !t.starts_with("failed")), "{shown:?}");
+    }
+
+    /// A long list of its own rows: row 1 holds a field, row 2 a menu (an
+    /// overlay) while it is open; a press closes the menu.
+    #[component]
+    fn RowsWithFieldAndMenu() -> impl IntoElement {
+        let menu = signal(true);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| menu.set(false)))
+            .child(
+                virtual_list(500, move |at| {
+                    view()
+                        .h(px(40.0))
+                        .child(text(move || format!("row {}", at.index())))
+                        .child(when(
+                            move || at.index() == 1,
+                            || view().focusable(true).child(text("field")),
+                        ))
+                        .child(when(
+                            move || at.index() == 2 && menu.get(),
+                            || overlay().child(text("menu")),
+                        ))
+                })
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A row holding the keyboard focus or an open overlay stays rendered
+    /// while the list scrolls far away: recycled, its field would lose the
+    /// focus and its menu close. Once they are gone, the row is recycled.
+    #[test]
+    fn virtual_lists_keep_rows_with_the_focus_or_an_open_overlay() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<RowsWithFieldAndMenu>(|| ()));
+        let batch = c.commit().unwrap();
+        let list = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                _ => None,
+            })
+            .expect("a list");
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        let text_node = |content: &str| {
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"))
+        };
+        let field = {
+            let key = c.key(text_node("field")).unwrap();
+            c.nodes[c.nodes[key as usize].parent as usize].id
+        };
+        let menu = text_node("menu");
+        c.set_states(field, FOCUSED);
+        let _ = c.commit();
+        let bound = |c: &Core<FakeEngine>, row: u32| {
+            let key = c.key(list).unwrap();
+            let list = c.nodes[key as usize].list.as_ref().unwrap();
+            list.slots.iter().any(|s| s.index == Some(row))
+        };
+        let scroll = |c: &mut Core<FakeEngine>, y: f32, applied| {
+            c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+            for _ in 0..3 {
+                let _ = c.commit();
+            }
+        };
+        scroll(&mut c, 4000.0, 1);
+        scroll(&mut c, 12000.0, 2);
+        assert!(
+            bound(&c, 1) && c.key(field).is_ok(),
+            "the focused row stays"
+        );
+        assert!(
+            bound(&c, 2) && c.key(menu).is_ok(),
+            "the row with the open menu stays"
+        );
+        // The focus leaves and the menu closes: the rows go.
+        c.set_states(field, 0);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let _ = c.commit();
+        scroll(&mut c, 16000.0, 3);
+        assert!(!bound(&c, 1) && !bound(&c, 2));
+    }
+
+    /// What a branch of `ScopedRows` provides to what it makes.
+    #[derive(Clone)]
+    struct BranchContext(&'static str);
+
+    thread_local! {
+        /// Whether a row of `ScopedRows` ran after its branch went.
+        static RAN_AFTER_BRANCH: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Its own rows in a branch that provides a context and holds a signal
+    /// of its own; a press closes the branch and changes what the rows read.
+    #[component]
+    fn ScopedRows() -> impl IntoElement {
+        let (open, tick) = (signal(true), signal(0u32));
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                batch(|| {
+                    tick.update(|t| *t += 1);
+                    open.set(false);
+                })
+            }))
+            .child(when(open, move || {
+                provide_context(BranchContext("provided"));
+                let local = signal(1u32);
+                virtual_list(3, move |at| {
+                    let label = use_context::<BranchContext>().map_or("missing", |c| c.0);
+                    effect(move || {
+                        tick.get();
+                        if local.try_get().is_none() {
+                            RAN_AFTER_BRANCH.with(|r| r.set(true));
+                        }
+                    });
+                    view()
+                        .h(px(40.0))
+                        .child(text(format!("{label} {}", at.index())))
+                })
+                .estimated_item_size(px(40.0))
+                .flex_1()
+            }))
+    }
+
+    #[test]
+    fn virtual_list_rows_belong_to_the_run_that_made_the_list() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ScopedRows>(|| ()));
+        let batch = c.commit().unwrap();
+        // The rows see what the branch around the list provides.
+        let shown = texts(&batch);
+        assert!(shown.contains(&"provided 0".to_owned()), "{shown:?}");
+        assert!(!shown.iter().any(|t| t.starts_with("missing")), "{shown:?}");
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        // They go with the branch: nothing of theirs runs once it went.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        for _ in 0..3 {
+            let _ = c.commit();
+        }
+        assert!(!RAN_AFTER_BRANCH.with(Cell::get));
+    }
+
+    thread_local! {
+        static REOWNED_CONTROL:
+            Cell<Option<(Signal<bool>, Owner, Owner)>> = const { Cell::new(None) };
+        static REOWNED_B_ROW:
+            Cell<Option<Signal<u32>>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn ReownedVirtualList() -> impl IntoElement {
+        let use_b = signal(false);
+        let (owner_a, list_a) = crate::element::create_root(|| {
+            virtual_list(1, |_| text("A").h(px(40.0)))
+                .estimated_item_size(px(40.0))
+                .flex_1()
+        });
+        let (owner_b, list_b) = crate::element::create_root(|| {
+            virtual_list(1, |_| {
+                let live = signal(7u32);
+                REOWNED_B_ROW.with(|r| r.set(Some(live)));
+                text("B").h(px(40.0))
+            })
+            .estimated_item_size(px(40.0))
+            .flex_1()
+        });
+        REOWNED_CONTROL.with(|c| c.set(Some((use_b, owner_a, owner_b))));
+        // These independent roots require explicit disposal.
+        cleanup(move || {
+            owner_a.dispose();
+            owner_b.dispose();
+        });
+        view().flex_1().child(dynamic(move || {
+            if use_b.get() {
+                list_b.clone()
+            } else {
+                list_a.clone()
+            }
+        }))
+    }
+
+    #[test]
+    fn disposing_a_lists_previous_creator_keeps_its_current_rows() {
+        REOWNED_B_ROW.with(|r| r.set(None));
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ReownedVirtualList>(|| ()));
+        let first = c.commit().unwrap();
+        assert_eq!(texts(&first), ["A"]);
+        let list = first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the list");
+
+        let (use_b, owner_a, owner_b) = REOWNED_CONTROL.with(Cell::get).unwrap();
+        let _entered = c.components.runtime.enter();
+        assert!(owner_a.is_live() && owner_b.is_live());
+        use_b.set(true);
+        let switched = c.commit().unwrap();
+        assert_eq!(texts(&switched), ["B"]);
+        // Switching creators retains the native list instead of replacing it.
+        assert!(
+            !switched
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == list))
+        );
+        assert!(!switched.items.iter().any(|i| matches!(
+            i,
+            MountItem::Create {
+                kind: ViewKind::Scroll,
+                ..
+            }
+        )));
+        assert!(owner_a.is_live() && owner_b.is_live());
+        let row = REOWNED_B_ROW.with(Cell::get).expect("B rendered");
+        assert_eq!(row.try_get(), Some(7));
+
+        owner_a.dispose();
+        assert!(owner_b.is_live(), "B's creator remains live");
+        assert_eq!(
+            row.try_get(),
+            Some(7),
+            "A's cleanup must not dispose the retained list's B row"
+        );
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ScopedItemsProps {
+        items: Items,
+    }
+
+    #[component]
+    fn ScopedItemsHost(props: ScopedItemsProps) -> impl IntoElement {
+        view().flex_1().list(
+            props.items,
+            |list| list.flex_1().estimated_item_size(px(40.0)),
+            |row, _| row,
+        )
+    }
+
+    #[component]
+    fn ScopedItemsCaller() -> impl IntoElement {
+        view().flex_1().child(when(true, || {
+            provide_context(BranchContext("provided"));
+            ScopedItemsHost::element(ScopedItemsProps::initial())
+                .flex_1()
+                .items(virtual_list(1, |at| {
+                    let label = use_context::<BranchContext>().map_or("missing", |c| c.0);
+                    text(format!("{label} {}", at.index())).h(px(40.0))
+                }))
+        }))
+    }
+
+    #[test]
+    fn virtual_rows_passed_as_items_see_their_creators_context() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ScopedItemsCaller>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["provided 0"]);
     }
 
     /// A chat: its own rows in a list that follows its end; a press makes
@@ -14720,6 +15415,67 @@ mod views {
         assert!(style.is_some(), "{:#?}", batch.items);
     }
 
+    #[component]
+    fn OptionalGlassTint() -> impl IntoElement {
+        let step = stored(0_u8);
+        let tint = signal(Some(AdaptiveColor::rgb(0xff0000, 0x00ff00)));
+        view()
+            .size_10()
+            .glass_effect(crate::GlassEffect::Regular)
+            .backdrop_blur(px(12.0))
+            .glass_tint_color(rgb(0xaabbcc))
+            .glass_tint_color(tint)
+            .on_press(move |_: &()| {
+                step.with(|value| *value += 1);
+                tint.set(match step.get() {
+                    1 => None,
+                    2 => Some(AdaptiveColor::TRANSPARENT),
+                    _ => Some(AdaptiveColor::rgb(0x0000ff, 0xffff00)),
+                });
+            })
+    }
+
+    #[test]
+    fn an_optional_tint_restores_native_default_without_losing_glass() {
+        for dark in [false, true] {
+            let mut c = core();
+            c.set_class_environment(crate::tailwind::ClassEnvironment {
+                dark,
+                ..Default::default()
+            });
+            c.mount_root(&Root::new::<OptionalGlassTint>(|| ()));
+            let mut batch = c.commit().unwrap();
+            let host = root_host(&batch);
+            let expected = [
+                Some(if dark {
+                    Color(0x00ff00ff)
+                } else {
+                    Color(0xff0000ff)
+                }),
+                None,
+                Some(Color::TRANSPARENT),
+                Some(if dark {
+                    Color(0xffff00ff)
+                } else {
+                    Color(0x0000ffff)
+                }),
+            ];
+            for (step, tint) in expected.into_iter().enumerate() {
+                if step != 0 {
+                    assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+                    batch = c.commit().unwrap();
+                }
+                let style = view_style_of(&batch, host).unwrap();
+                assert_eq!(style.glass_tint_color, tint, "dark={dark}, step={step}");
+                assert_eq!(style.glass_effect, crate::GlassEffect::Regular);
+                assert_eq!(
+                    style.effects.as_ref().unwrap().backdrop_filters,
+                    [crate::Filter::Blur(px(12.0))]
+                );
+            }
+        }
+    }
+
     /// A track whose color moves between two theme colors natively.
     #[component]
     fn Track() -> impl IntoElement {
@@ -17856,10 +18612,12 @@ mod rust_desktop {
 
     use super::*;
     use crate::{
-        desktop::{DesktopCommand, TitleBarStyle},
+        desktop::{
+            DesktopCommand, TitleBarOptions, TitleBarStyle, WindowAttributes, WindowRequest,
+        },
         element::{
             Root,
-            desktop::{close_window, quit, set_title_bar, title_bar},
+            desktop::{current_window, quit, restart, title_bar},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -17872,7 +18630,15 @@ mod rust_desktop {
 
     #[component]
     fn Chrome() -> impl IntoElement {
-        set_title_bar(TitleBarStyle::Hidden, Some(px(42.0)));
+        let window = current_window();
+        window.set(WindowAttributes {
+            title_bar: Some(TitleBarOptions {
+                style: TitleBarStyle::Hidden,
+                height: Some(px(42.0)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
         let drag = signal(true);
         DRAG.set(Some(drag));
         view()
@@ -17885,9 +18651,10 @@ mod rust_desktop {
             .child(
                 text("Close window")
                     .window_drag(false)
-                    .on_press(|_: &()| close_window()),
+                    .on_press(move |_: &()| window.close()),
             )
             .child(text("Quit").on_press(|_: &()| quit()))
+            .child(text("Restart").on_press(|_: &()| restart()))
     }
 
     #[test]
@@ -17905,7 +18672,7 @@ mod rust_desktop {
         });
         c.mount_root(&Root::of::<Chrome>());
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::SetTitleBar {style:TitleBarStyle::Hidden, height:Some(px(42.0))})));
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if matches!(&**command, DesktopCommand::SetAttributes(a) if a.title_bar.is_some_and(|t| t.style == TitleBarStyle::Hidden && t.height == Some(px(42.0)))))));
         let header = batch
             .items
             .iter()
@@ -17928,6 +18695,14 @@ mod rust_desktop {
             .iter()
             .find_map(|item| match item {
                 MountItem::Text { id, text, .. } if text.text == "Quit" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let restart_button = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Restart" => Some(*id),
                 _ => None,
             })
             .unwrap();
@@ -17992,7 +18767,7 @@ mod rust_desktop {
         );
         assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Request(WindowRequest::Close))));
         // Quitting is a command of its own: the platform ends the app's run,
         // not only its window.
         assert!(c.component_event(quit_button, EventKind::Press, &EventPayload::None));
@@ -18009,6 +18784,544 @@ mod rust_desktop {
             })
             .collect();
         assert_eq!(sent, [&DesktopCommand::Quit]);
+        // Restarting too: the platform quits, then starts the app again.
+        assert!(c.component_event(restart_button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::Restart)));
+    }
+}
+
+mod rust_windows {
+    use std::cell::RefCell;
+
+    use super::*;
+    use crate::{
+        desktop::{
+            DesktopCommand, OpenWindow, SizeToContent, WindowAttributes, WindowCloseCause,
+            WindowEvent, WindowKind, WindowLevel, WindowRequest,
+        },
+        element::{
+            Root,
+            desktop::{OpenChange, current_window, window},
+        },
+        geometry::Edges,
+        prelude::*,
+    };
+
+    thread_local! {
+        static TITLE: RefCell<Option<Signal<String>>> = const { RefCell::new(None) };
+        static CHANGES: RefCell<Vec<OpenChange>> = const { RefCell::new(Vec::new()) };
+        static INSIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    #[component]
+    fn Windows() -> impl IntoElement {
+        let title = signal(String::from("Inspector"));
+        TITLE.with(|t| *t.borrow_mut() = Some(title));
+        let open = signal(true);
+        view().child(
+            window()
+                .id("inspector")
+                .kind(WindowKind::Panel)
+                .title(move || title.get())
+                .open(move || open.get())
+                .on_open_change(move |e| {
+                    CHANGES.with(|c| c.borrow_mut().push(*e));
+                    open.set(e.open);
+                })
+                .content(|| {
+                    INSIDE.with(|i| *i.borrow_mut() = Some(current_window().id().to_owned()));
+                    text("Inspector")
+                }),
+        )
+    }
+
+    fn desktop_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } => Some((*id, (**command).clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rust_windows_open_with_their_kinds_defaults_and_send_what_changes() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Windows>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let [(id, DesktopCommand::OpenWindow(open))] = &commands[..] else {
+            panic!("one window opens: {commands:?}");
+        };
+        let OpenWindow { options, .. } = &**open;
+        assert_eq!(options.id, "inspector");
+        assert_eq!(options.kind, WindowKind::Panel);
+        // The kind's defaults arrive resolved, the app's own over them.
+        let a = &options.attributes;
+        assert_eq!(a.title.as_deref(), Some("Inspector"));
+        assert_eq!(a.level, Some(WindowLevel::Floating));
+        assert_eq!(a.taskbar, Some(false));
+        assert_eq!(a.close_on_press, Some(true));
+        // `current_window()` in its content is the window.
+        assert_eq!(
+            INSIDE.with(|i| i.borrow().clone()).as_deref(),
+            Some("inspector")
+        );
+        // A changed title: one diff with only the title.
+        {
+            let _entered = c.components.runtime.enter();
+            TITLE.with(|t| t.borrow().unwrap().set("Layers".into()));
+        }
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        assert_eq!(
+            commands,
+            [(
+                *id,
+                DesktopCommand::SetAttributes(Box::new(WindowAttributes {
+                    title: Some("Layers".into()),
+                    ..Default::default()
+                }))
+            )]
+        );
+        // Escape closed it (its policy): the app hears why and the window's
+        // root goes.
+        c.component_event(
+            *id,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::Closed {
+                cause: WindowCloseCause::Escape,
+            })),
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            CHANGES.with(|c| c.borrow().clone()),
+            [OpenChange {
+                open: false,
+                reason: WindowCloseCause::Escape
+            }]
+        );
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Remove { id: removed } | MountItem::Delete { id: removed } if removed == id)),
+            "{:?}",
+            batch.items
+        );
+    }
+
+    thread_local! {
+        static PRESSES: RefCell<Vec<(String, crate::desktop::CloseReason)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    #[component]
+    fn ClosePresses() -> impl IntoElement {
+        crate::element::desktop::main_window().on_close_press(|reason| {
+            PRESSES.with(|p| p.borrow_mut().push(("main".into(), reason)))
+        });
+        view().child(window().id("notes").content(|| {
+            let this = current_window();
+            let id = this.id().to_owned();
+            this.on_close_press(move |reason| {
+                PRESSES.with(|p| p.borrow_mut().push((id.clone(), reason)))
+            });
+            text("Notes")
+        }))
+    }
+
+    #[test]
+    fn rust_listeners_hear_close_presses_of_the_main_window_and_their_own() {
+        use crate::desktop::CloseReason;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<ClosePresses>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let [(notes, DesktopCommand::OpenWindow(_))] = &commands[..] else {
+            panic!("one window opens: {commands:?}");
+        };
+        for (id, reason) in [
+            (crate::ROOT_ID, CloseReason::CloseButton),
+            (*notes, CloseReason::Shortcut),
+            (crate::ROOT_ID, CloseReason::Shortcut),
+        ] {
+            c.component_event(
+                id,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::ClosePress { reason })),
+            );
+            let _ = c.commit();
+        }
+        assert_eq!(
+            PRESSES.with(|p| p.borrow().clone()),
+            [
+                ("main".to_owned(), CloseReason::CloseButton),
+                ("notes".to_owned(), CloseReason::Shortcut),
+                ("main".to_owned(), CloseReason::Shortcut),
+            ]
+        );
+    }
+
+    thread_local! {
+        static FITTED: RefCell<Option<crate::element::desktop::WindowHandle>> =
+            const { RefCell::new(None) };
+    }
+
+    /// A main window as tall as its content, and a panel as large as its
+    /// content.
+    #[component]
+    fn Fitted() -> impl IntoElement {
+        current_window().set(WindowAttributes {
+            size_to_content: Some(SizeToContent::Height),
+            ..Default::default()
+        });
+        view().child(view().h(px(120.0))).child(
+            window()
+                .id("fitted")
+                .attributes(WindowAttributes {
+                    size_to_content: Some(SizeToContent::Both),
+                    ..Default::default()
+                })
+                .content(|| {
+                    FITTED.with(|f| *f.borrow_mut() = Some(current_window()));
+                    view().w(px(300.0)).h(px(200.0))
+                }),
+        )
+    }
+
+    #[test]
+    fn rust_windows_fit_their_content_and_report_their_title_bars() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        c.mount_root(&Root::of::<Fitted>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let fit = |w: Option<f32>, h: Option<f32>| {
+            DesktopCommand::Request(WindowRequest::SetContentSize {
+                width: w.map(Points),
+                height: h.map(Points),
+            })
+        };
+        // The main window: only its height, its content's.
+        assert!(
+            commands.contains(&(ROOT_ID, fit(None, Some(120.0)))),
+            "{commands:?}"
+        );
+        let Some((id, _)) = commands
+            .iter()
+            .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
+        else {
+            panic!("the panel opens: {commands:?}");
+        };
+        let id = *id;
+        assert!(
+            commands.contains(&(id, fit(Some(300.0), Some(200.0)))),
+            "{commands:?}"
+        );
+        // The platform sized them: nothing more to ask.
+        // (A commit with nothing to mount gives no batch.)
+        c.set_viewport(size(px(800.0), px(120.0)));
+        if let Some(batch) = c.commit() {
+            assert!(
+                !desktop_commands(&batch)
+                    .iter()
+                    .any(|(_, c)| matches!(c, DesktopCommand::Request(_))),
+                "{:?}",
+                batch.items
+            );
+        }
+        // Its title bar's area, as the platform reports it.
+        let handle = FITTED
+            .with(|f| f.borrow().clone())
+            .expect("the panel's handle");
+        {
+            let _entered = c.components.runtime.enter();
+            assert_eq!(handle.title_bar(), Edges::default());
+        }
+        let area = Edges {
+            top: px(28.0),
+            left: px(72.0),
+            ..Default::default()
+        };
+        c.component_event(
+            id,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::TitleBar(area))),
+        );
+        let _entered = c.components.runtime.enter();
+        assert_eq!(handle.title_bar(), area);
+    }
+
+    /// A popover anchored to a button and a dialog, both in a window's
+    /// content, below a tall view of the main window.
+    #[component]
+    fn Popups() -> impl IntoElement {
+        let button = element_ref();
+        view().child(view().h(px(500.0))).child(
+            window()
+                .id("tools")
+                .default_size(size(px(300.0), px(100.0)))
+                .content(move || {
+                    view()
+                        .pl(px(20.0))
+                        .pt(px(50.0))
+                        .child(view().element_ref(&button).w(px(60.0)).h(px(30.0)))
+                        .child(
+                            overlay()
+                                .anchor(&button)
+                                .placement(crate::overlay::Placement::Bottom)
+                                .align(crate::overlay::Align::Start)
+                                .w(px(80.0))
+                                .h(px(40.0))
+                                .child(text("pop")),
+                        )
+                        .child(modal().child(text("dialog")))
+                }),
+        )
+    }
+
+    #[test]
+    fn rust_windows_show_their_popups_and_dialogs_in_themselves() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        c.mount_root(&Root::of::<Popups>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let Some((window, _)) = commands
+            .iter()
+            .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
+        else {
+            panic!("the window opens: {commands:?}");
+        };
+        let window = *window;
+        // The popover's view goes into the window's root view, placed in
+        // its coordinates, whatever is above the window's node in the main
+        // window: above the button, as the window (100 points tall, not the
+        // main window's 600) has no room below it.
+        let text_parent = |batch: &MountBatch, label: &str| {
+            let id = batch.items.iter().find_map(|i| match i {
+                MountItem::Text { id, text, .. } if &*text.text == label => Some(*id),
+                _ => None,
+            })?;
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == id => Some(*parent),
+                _ => None,
+            })
+        };
+        let popover = text_parent(&batch, "pop").expect("the popover's view");
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::Insert { parent, child, .. } if *parent == window && *child == popover
+            )),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(
+            frame_of(&batch, popover).map(|f| f.origin),
+            Some(point(px(20.0), px(10.0)))
+        );
+        // The dialog shows over the window, not the main one.
+        let dialog = text_parent(&batch, "dialog").expect("the dialog's root");
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(window));
+        // The window's own root: in the main window.
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == window => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
+    }
+
+    #[test]
+    fn main_windows_that_restore_their_bounds_keep_their_placement() {
+        use crate::desktop::{MainWindowOptions, WindowMode, WindowPlacement, WindowState};
+        let mut c = core();
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            ..Default::default()
+        });
+        let bounds =
+            crate::geometry::Bounds::new(point(px(40.0), px(60.0)), size(px(640.0), px(480.0)));
+        let placement = WindowPlacement::new(WindowMode::Maximized, bounds);
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            window_state: Some(WindowState::new(bounds, placement)),
+            ..Default::default()
+        });
+        let kept = {
+            let _entered = c.components.runtime.enter();
+            crate::storage::Storage::get_item("nsh.window:main")
+        };
+        let kept: WindowPlacement = serde_json::from_str(&kept.expect("kept")).unwrap();
+        assert_eq!(kept, placement);
+    }
+
+    /// A window with no size of the app's, and one with a `defaultSize`,
+    /// each filled by a view.
+    #[component]
+    fn Sized() -> impl IntoElement {
+        view()
+            .child(window().id("unsized").content(|| {
+                view()
+                    .flex_grow(1.0)
+                    .child(view().w(px(200.0)).h(px(100.0)))
+            }))
+            .child(
+                window()
+                    .id("document")
+                    .default_size(size(px(640.0), px(560.0)))
+                    .content(|| view().flex_grow(1.0)),
+            )
+    }
+
+    #[test]
+    fn window_roots_are_laid_out_at_their_own_size() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(1100.0), px(820.0)));
+        c.mount_root(&Root::of::<Sized>());
+        let batch = c.commit().unwrap();
+        let opened: Vec<(NodeId, String)> = desktop_commands(&batch)
+            .into_iter()
+            .filter_map(|(id, c)| match c {
+                DesktopCommand::OpenWindow(open) => Some((id, open.options.id.clone())),
+                _ => None,
+            })
+            .collect();
+        let id_of = |name: &str| {
+            opened
+                .iter()
+                .find(|(_, n)| n == name)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| panic!("{name} opens: {opened:?}"))
+        };
+        let (free_size, document) = (id_of("unsized"), id_of("document"));
+        let main = rect(0.0, 0.0, 1100.0, 820.0);
+        // Never the main window's size: the size it opens at, or its
+        // content's until the platform tells.
+        assert_eq!(
+            frame_of(&batch, document),
+            Some(rect(0.0, 0.0, 640.0, 560.0))
+        );
+        let first = frame_of(&batch, free_size).expect("the window root's frame");
+        assert_ne!(first, main);
+        assert_eq!(first.size, size(px(200.0), px(100.0)));
+        // The platform reports their sizes: laid out at them, and again
+        // at each new one.
+        c.set_root_size(free_size, size(px(500.0), px(400.0)), EdgeInsets::default());
+        c.set_root_size(document, size(px(700.0), px(600.0)), EdgeInsets::default());
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, free_size),
+            Some(rect(0.0, 0.0, 500.0, 400.0))
+        );
+        assert_eq!(
+            frame_of(&batch, document),
+            Some(rect(0.0, 0.0, 700.0, 600.0))
+        );
+        c.set_root_size(free_size, size(px(520.0), px(300.0)), EdgeInsets::default());
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, free_size),
+            Some(rect(0.0, 0.0, 520.0, 300.0))
+        );
+    }
+
+    /// A plain dialog next to a window of the app's own.
+    #[component]
+    fn DialogBesideWindow() -> impl IntoElement {
+        view()
+            .child(
+                view()
+                    .p(px(30.0))
+                    .child(modal().child(text("plain dialog"))),
+            )
+            .child(window().id("side").content(|| text("side")))
+    }
+
+    #[test]
+    fn plain_dialog_roots_fill_the_main_window() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(1100.0), px(820.0)));
+        c.mount_root(&Root::of::<DialogBesideWindow>());
+        let batch = c.commit().unwrap();
+        let text = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id, text, .. } if &*text.text == "plain dialog" => Some(*id),
+                _ => None,
+            })
+            .expect("the dialog's text");
+        let dialog = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == text => Some(*parent),
+                _ => None,
+            })
+            .expect("the dialog's root");
+        // The main window's size, wherever its node is, a window of the
+        // app's own open or not; its window is the main one.
+        assert_eq!(
+            frame_of(&batch, dialog),
+            Some(rect(0.0, 0.0, 1100.0, 820.0))
+        );
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
+        // The main window resized: so is it.
+        c.set_viewport(size(px(900.0), px(700.0)));
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, dialog), Some(rect(0.0, 0.0, 900.0, 700.0)));
+    }
+
+    #[test]
+    fn rust_windows_render_nothing_off_desktops() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Ios,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Windows>());
+        let batch = c.commit().unwrap();
+        assert!(desktop_commands(&batch).is_empty());
     }
 }
 
@@ -18019,7 +19332,7 @@ mod rust_menus {
         desktop::{DesktopCommand, MenuItem as Item, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, popup_menu_at, set_application_menu, set_title},
+            desktop::{MenuItem, current_window, popup_menu_at, set_application_menu},
         },
         keymap::Modifiers,
         platform::Os,
@@ -18032,7 +19345,10 @@ mod rust_menus {
     fn Menus() -> impl IntoElement {
         let wrap = signal(false);
         let log = signal(String::from("ready"));
-        set_title("Notes");
+        current_window().set(crate::desktop::WindowAttributes {
+            title: Some("Notes".into()),
+            ..Default::default()
+        });
         effect(move || {
             set_application_menu(vec![MenuItem::submenu(
                 "View",
@@ -18150,13 +19466,9 @@ mod rust_menus {
         });
         c.mount_root(&Root::of::<Menus>());
         let batch = c.commit().unwrap();
-        assert!(
-            batch
-                .items
-                .iter()
-                .filter_map(desktop)
-                .any(|c| *c == DesktopCommand::SetTitle("Notes".into()))
-        );
+        assert!(batch.items.iter().filter_map(desktop).any(
+            |c| matches!(c, DesktopCommand::SetAttributes(a) if a.title.as_deref() == Some("Notes"))
+        ));
         let (id, checked) = first_action(&batch);
         assert!(id >= 1 << 31, "views' ids are above JS's: {id}");
         assert_eq!(checked, Some(false));
@@ -22421,6 +23733,28 @@ fn render_lists_binds(
     }
 }
 
+/// Stacks the children of view `parent` as `batch` inserts and removes
+/// them (`stacked`, bottom to top).
+fn stack_children(stacked: &mut Vec<NodeId>, parent: NodeId, batch: Option<&MountBatch>) {
+    for item in batch.iter().flat_map(|b| &b.items) {
+        match *item {
+            MountItem::Insert {
+                parent: p,
+                child,
+                before,
+            } if p == parent => {
+                stacked.retain(|&v| v != child);
+                let at = before
+                    .and_then(|b| stacked.iter().position(|&v| v == b))
+                    .unwrap_or(stacked.len());
+                stacked.insert(at, child);
+            }
+            MountItem::Remove { id } => stacked.retain(|&v| v != id),
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     let mut c = core();
@@ -22434,10 +23768,13 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         })
         .unwrap();
     }
-    c.commit();
+    // The second list's views, bottom to top, as the batches stack them.
+    let mut stacked = Vec::new();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     // The page's scroll view pins them, in its offsets: the first list's
     // row 0 from 100 until row 10 pushes it out, row 10 from 600 until its
     // bottom meets the list's end (1100).
@@ -22455,9 +23792,10 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     // The second list's rows are not bound yet (it starts at 1100, past
     // the window); scrolled there, its row 0 joins, from 1100.
     c.set_scroll_offset(2, point(px(0.0), px(1200.0)), 0);
-    c.commit();
+    stack_children(&mut stacked, 5, c.commit().as_ref());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
+    stack_children(&mut stacked, 5, Some(&batch));
     let pinned = sticky_of(&batch, 2).expect("the page's sticky cells");
     assert!(
         pinned.contains(&(cells[&5][bound_slot(&c, 5, 0) as usize], 1100.0, 1550.0)),
@@ -22467,11 +23805,14 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         pinned.contains(&(cells[&4][bound_slot(&c, 4, 10) as usize], 600.0, 1050.0)),
         "{pinned:?}"
     );
-    // A sticky cell goes on top of its list's other cells.
-    assert!(batch.items.iter().any(|i| matches!(
-        i,
-        MountItem::Insert { parent: 5, child, before: None } if *child == cells[&5][bound_slot(&c, 5, 0) as usize]
-    )));
+    // A sticky cell goes on top of its list's other cells: only sticky
+    // cells are above it.
+    let sticky = [0, 10].map(|i| cells[&5][bound_slot(&c, 5, i) as usize]);
+    let at = stacked.iter().position(|&v| v == sticky[0]).unwrap();
+    assert!(
+        stacked[at + 1..].iter().all(|v| sticky.contains(v)),
+        "{stacked:?}"
+    );
     // The first list leaves the page: its cells leave the page's set, and
     // the second list's move up with it (it now starts at 100).
     c.apply(Op::Remove {
@@ -24862,18 +26203,23 @@ mod built_in_scrollbars {
         prelude::*,
     };
 
-    /// A bar: a view with a thumb.
+    /// A bar: a view with a thumb, counting its cleanups.
     #[derive(Default)]
     struct Bar;
 
     #[derive(Clone, PartialEq, Props)]
     struct BarProps {}
 
+    thread_local! {
+        static BARS_CLEANED: Cell<u32> = const { Cell::new(0) };
+    }
+
     impl Component for Bar {
         type Props = BarProps;
         type Event = NoEvent;
 
         fn view(_: BarProps, _: Scope<NoEvent>) -> impl IntoElement {
+            cleanup(|| BARS_CLEANED.with(|c| c.set(c.get() + 1)));
             view().child(view().w(px(4.0)).h(px(20.0)))
         }
     }
@@ -25290,6 +26636,32 @@ mod built_in_scrollbars {
         );
         assert_eq!(indicator(&batch), Some(true));
         assert!(c.decorated.is_empty());
+        assert_eq!(BARS_CLEANED.with(Cell::get), 1, "the bar's cleanup ran");
+    }
+
+    #[test]
+    fn a_scrollbar_turned_off_releases_its_bar_in_the_runtime() {
+        let (mut c, batch) = scroll_view(true, Some(ScrollbarSetting::Shown));
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scrollbar(ScrollbarSetting::Hidden),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar)),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(BARS_CLEANED.with(Cell::get), 1, "the bar's cleanup ran");
     }
 
     #[test]

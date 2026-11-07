@@ -26,6 +26,7 @@ pub(crate) struct State {
     pub(crate) lists: Lists,
     pub(crate) platform: crate::platform_modules::PlatformModules,
     pub(crate) menus: crate::desktop::Menus,
+    pub(crate) windows: crate::window::Windows,
     pub(crate) touches: crate::touch::Touches,
     pub(crate) animations: crate::animated::Animations,
     pub(crate) canvases: crate::canvas::Canvases,
@@ -83,6 +84,7 @@ pub(crate) fn install(
             lists: Lists::default(),
             platform: Default::default(),
             menus: Default::default(),
+            windows: Default::default(),
             touches: Default::default(),
             animations: Default::default(),
             canvases: Default::default(),
@@ -133,6 +135,7 @@ pub(crate) fn uninstall(cx: &Ctx<'_>) {
         state.animations.free_all(raw);
         state.platform.free_all(raw);
         state.menus.free_all(raw);
+        state.windows.free_all(raw);
         state.lists.free_all(raw);
         state.components.free_all(raw);
         state.env.free_all(raw);

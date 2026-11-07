@@ -159,8 +159,8 @@ go elsewhere under these rules rather than into them.
   system feature (a system gesture, a system material) goes in that platform's object; when several platforms have
   it, each object carries it under one name (WebView's `allowsBackForwardNavigationGestures` in `ios={{…}}` and
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
-  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
-  so a key no platform has fails the type check.
+  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `MacOSProps`, `DesktopProps`, an element's own
+  extending them), so a key no platform has fails the type check.
 - **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux), the web in the desktop idiom or
   a terminal (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it
   runs the iOS backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`,
@@ -195,7 +195,7 @@ members, so a shape decides what can ever be added to it. The API follows these 
 release (item 3 of the API review); where code differs from one, the rule wins and the code follows.
 
 - A method whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`,
-  `net.connect({ host, port })`, `Window.setTitleBar({ style, height })`), never a further positional parameter;
+  `net.connect({ host, port })`, `WindowRef.setBounds({ origin, size, animated })`), never a further positional parameter;
   parameters the user judged will not grow stay positional (`setSelection(start, end?)`, `seek(seconds)`,
   `DockArea.addPanel(panel, placement?, size?)`, `DataTable.scrollToRow` / `scrollToColumn(…, animated?)`,
   `Editor.revealPosition(position, center)`, a range's start and end such as `DataTable.dump(start?, end?)`;
@@ -308,7 +308,18 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
-| `Window.setTitleBar(style, height?)` | `Window.setTitleBar({ style, height? })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object. Rust's `set_title_bar(style, height)` unchanged |
+| `Window.setTitleBar(style, height?)` | `WindowRef.set({ titleBar: { style, height? } })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object; 2026-11-06: an attribute of `set` |
+| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowHandle`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
+| `Window.setTitle(t)`, `setTitleBar(o)`, `setLevel(l)` | `set({ title, titleBar, level })` | Shapes that can grow | One `set(partial)` for every attribute, no per-attribute setters |
+| `Window.toggleMaximize()`, `toggleFullScreen()` | `setMode("maximized" \| "fullScreen" \| "normal")`, `minimize()`, `restore()` | States | Intents, not toggles; minimized is apart from the mode |
+| `Window.setFrame(frame)` | `WindowRef.setBounds({ origin?, size?, animated? })` | Where names come from | It moves and sizes the window's bounds |
+| `Window.setBounds(bounds)` | `WindowRef.setPlacement(placement)` | Where names come from | It restores a saved placement (Win32's `WINDOWPLACEMENT`) |
+| `WindowBounds { mode: "windowed" \| "maximized" \| "fullscreen", bounds }`, `WindowState.windowBounds` | `WindowPlacement { mode: WindowMode, bounds }`, `WindowState.placement`; `WindowMode` `"normal" \| "maximized" \| "fullScreen"` | Where names come from | `WindowState.hidden` became `visible` |
+| `Window.setSkipTaskbar(true)` | `set({ taskbar: false })` | States | An attribute named after what it shows |
+| `Window.orderFront()` | `WindowRef.focus()` | Where names come from | The DOM's and GPUI's verb |
+| `Window.setMenuBar(mode)` | `Menu.setMenuBar(mode)` | Where names come from | The menu bar is the menus' |
+| `Window.open(c, { size, position, level, frame })` → `{ id, focus, hide, close }` | `Window.open(c, WindowOptions)` → `WindowRef`; `<Window>` | Open state | `defaultSize`, `defaultPosition`; `level` and `frame` attributes |
+| (the focused window as "current") | `currentWindow()`: the window the calling component renders in (tree-scoped, through context); `focusedWindow()` the focused one | Environment | Named as Tauri's `getCurrentWindow()` under the accessor rule; the meaning of Flutter's, Qt's and Compose's |
 | **Standard modules** | | | |
 | `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
 | **`nsh`: the environment** | | | |

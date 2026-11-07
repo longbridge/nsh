@@ -26,6 +26,8 @@ mod app {
     #[component]
     pub fn Card() -> impl IntoElement {
         let skip = signal(true);
+        let win = window::current_window();
+        let close = win.clone();
         // The root draws nothing: only the card shows.
         view().flex_1().p_4().child(
             view()
@@ -57,9 +59,11 @@ mod app {
                         .child(action("Toggle taskbar", move || {
                             let next = !skip.get_untracked();
                             skip.set(next);
-                            window::set_skip_taskbar(next);
+                            let mut attributes = nsh_core::desktop::WindowAttributes::default();
+                            attributes.taskbar = Some(!next);
+                            win.set(attributes);
                         }))
-                        .child(action("Close", window::close_window)),
+                        .child(action("Close", move || close.close())),
                 ),
         )
     }

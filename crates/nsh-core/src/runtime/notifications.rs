@@ -141,6 +141,8 @@ pub(crate) struct ShowNotificationOptions {
     title: String,
     /// Its text.
     body: Option<String>,
+    /// Shows it without a sound or vibration (false: with the system's).
+    silent: Option<bool>,
 }
 
 impl ShowNotificationOptions {
@@ -150,11 +152,10 @@ impl ShowNotificationOptions {
                 "Notifications.show: `id` and `title` must not be empty".into(),
             ));
         }
-        Ok(Notification::new(
-            self.id,
-            self.title,
-            self.body.unwrap_or_default(),
-        ))
+        Ok(
+            Notification::new(self.id, self.title, self.body.unwrap_or_default())
+                .silent(self.silent.unwrap_or_default()),
+        )
     }
 }
 

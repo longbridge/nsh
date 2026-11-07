@@ -1113,13 +1113,25 @@ final class Mounter {
         }
     }
 
+    /**
+     * Interpolates two colors in premultiplied ARGB, as CSS and the core's
+     * `lerp_color` (`transition.rs`) do, so that transparent ends do not pass
+     * through black. The progress is clamped: an overshooting easing (a bouncy
+     * spring's projection) must not carry a channel past its ends, where the
+     * packed byte would wrap into a garbage color for a frame.
+     */
     static int lerpColor(int a, int b, float t) {
-        int r = 0;
-        for (int shift = 0; shift < 32; shift += 8) {
-            int ca = (a >>> shift) & 0xff, cb = (b >>> shift) & 0xff;
-            r |= Math.round(ca + (cb - ca) * t) << shift;
+        if (a == b) return a;
+        t = Math.max(0f, Math.min(1f, t));
+        float alphaA = (a >>> 24) & 0xff, alphaB = (b >>> 24) & 0xff;
+        float alpha = alphaA + (alphaB - alphaA) * t;
+        int out = Math.round(Math.max(0, Math.min(255, alpha))) << 24;
+        if (alpha <= 0) return out;
+        for (int shift = 0; shift <= 16; shift += 8) {
+            float x = ((a >>> shift) & 0xff) * alphaA, y = ((b >>> shift) & 0xff) * alphaB;
+            out |= Math.round(Math.max(0, Math.min(255, (x + (y - x) * t) / alpha))) << shift;
         }
-        return r;
+        return out;
     }
 
     /** Animates the style change of `v` from `from` to the values just set. */
@@ -1862,6 +1874,16 @@ final class Mounter {
         return !shownModals.isEmpty();
     }
 
+    /** The windows of the dialogs shown, bottom to top (the test agent's screenshots). */
+    java.util.List<android.view.Window> modalWindows() {
+        java.util.ArrayList<android.view.Window> windows = new java.util.ArrayList<>();
+        for (ModalHost m : shownModals) {
+            android.view.Window window = m.dialogWindow();
+            if (window != null) windows.add(window);
+        }
+        return windows;
+    }
+
     /** The window of the topmost dialog shown, or null. */
     View topModalWindow() {
         for (int i = shownModals.size() - 1; i >= 0; i--) {
@@ -2216,6 +2238,26 @@ final class Mounter {
             }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 28: {
+                int request = b.getInt();
+                String path = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openPath(context, path);
+                if (opened) {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id"}, new Object[] {(double) request});
+                } else {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                            new Object[] {(double) request, "no app opened the file"});
+                }
+                break;
+            }
+            case 30: {
+                // A file request with no Android implementation: fail it so
+                // the waiting call returns instead of hanging.
+                int request = b.getInt();
+                eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                        new Object[] {(double) request, "not supported on Android"});
                 break;
             }
             case 44: {

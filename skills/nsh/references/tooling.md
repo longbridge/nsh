@@ -17,6 +17,15 @@ TSX apps use the prebuilt runtime. Check only the target the user needs in
 permissions when installing tools. If setup is unavailable, continue with code and
 state which checks remain unverified.
 
+For Cargo, recommend [huacnlee/cargo](https://github.com/huacnlee/cargo), the Cargo
+NSH is developed with: dependencies built once for every project and Git worktree, and
+a build directory that stays under a size limit. It replaces `~/.cargo/bin/cargo`, so
+install it only when the user agrees; `cargo -V` names it.
+
+```sh
+curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh     # Windows: irm https://huacnlee.github.io/cargo/install.ps1 | iex
+```
+
 For a new app, choose an unused destination and pass an explicit template:
 
 ```sh
@@ -57,7 +66,7 @@ Every command takes `[ENTRY]`: the app's directory (default `.`) or a TSX entry 
 - **`nsh build` does not type check.** Only `nsh check` does. `nsh check` does not see what only the bundler knows: text in a `View`, a capabilities typo, a missing asset. Run both on TSX; see [tsx.md](tsx.md#who-reports-what).
 - `nsh check` downloads TypeScript's native compiler once. Offline, pass `--tsc <path>` or set `NSH_TSC`.
 - `nsh test PATH` with a directory runs `cargo test` for each crate. With a test file, it runs only that file.
-- `.nsh/` is generated and git-ignored: `types/`, `rust/` (runner sources), `out/` (default output). Cargo keeps `target/` and respects `CARGO_TARGET_DIR`.
+- `.nsh/` is generated and git-ignored: `types/`, `rust/` (runner sources), `out/` (default output). Cargo keeps `target/` and respects `CARGO_TARGET_DIR`; huacnlee/cargo builds under `~/.cargo/targets/` and still puts the binaries in `target/`.
 - Every command refreshes `.nsh/types` to the `nsh` you run.
 - With `rust` or `mixed`, `nsh-*` crates come from crates.io at the CLI's version, or a checkout with `--nsh-source <dir>`. An app on another version is retargeted to this CLI, and only a real API change stops it. All NSH crates must come from one place.
 
@@ -137,13 +146,13 @@ Notes:
 | Conditional UI | `when(os() == Os::Ios, \|\| ..)` | `<If when={platform.os === "ios"}>` |
 | Android back button | `on_back_press(listener)` | `BackHandler.on("press", listener)` from `nsh/mobile` |
 | Bar over the iOS keyboard | `input_accessory_view(id)` | `InputAccessoryView` from `nsh/mobile` |
-| Window and menus | `nsh_core::element::desktop`: `set_title_bar`, `title_bar`, `set_title`, `close_window`, `set_application_menu`, `popup_menu` | `Window`, `Menu`, `titleBar` from `nsh/desktop` |
+| Windows and menus | `nsh_core::element::desktop`: `window()`, `current_window()` (`WindowHandle`: `set(WindowAttributes)`, `set_mode`, `close`, ...), `title_bar`, `set_application_menu`, `popup_menu` | `<Window>`, `Window.open`, `currentWindow()` (`WindowRef`: `set({ title, titleBar })`, `setMode`, `close`, ...), `Menu`, `titleBar` from `nsh/desktop` |
 | Status bar | `.status_bar(StatusBarStyle::Light)` on `nav_page()` or `dialog()` | `statusBar={{ foreground: "light" }}` on `NavPage` or `Dialog` |
 | Target-gated Rust | `#[cfg(target_os = "macos")]`, `#[cfg(target_arch = "wasm32")]` | - |
 | A view of the OS | `native(name)`, registered with `#[native_components(macos)]` | `nativeComponent(name, spec)` |
 
 - Desktop means macOS, Windows, Linux, and browsers in the desktop idiom. Mobile means iOS, Android, Mac Catalyst and browsers in the phone or tablet idiom.
-- Gate layout and input on `platform.desktop`. Gate `Window` and `Menu` calls on `isAvailable` from `nsh/desktop`, which is false in browsers.
+- Gate layout and input on `platform.desktop`. Gate windows and `Menu` calls on `isAvailable` from `nsh/desktop`, which is false in browsers.
 - Mac Catalyst reports `"ios"` and takes `ios={{…}}` props.
 - Web has no registered native components. On the desktops, `#[native_components]` is one function per platform, each registering the same names, with `nsh-platform-*` per-target dependencies.
 
@@ -200,7 +209,7 @@ nsh package --target web              # static site
 ```
 
 - Output goes to `.nsh/out/`, or `-o`.
-- `nsh.json` gives `name`, `id` (required), `version`, `build`, `icon`. Flags override them: `--name`, `--id`, `--app-version`, `--build`, `--icon`. Unknown keys are errors. A `com.example.` id warns.
+- `nsh.json` gives `name`, `id` (required), `version`, `build`, `icon`. Flags override them: `--name`, `--id`, `--app-version`, `--build`, `--icon`. What NSH cannot read (unknown keys, values of an unknown form) is warned of and left out. A `com.example.` id warns.
 - `--run` installs and launches; `web` serves the site. Not for `--target ios`.
 - Android defaults to the debug key and to `arm64-v8a` and `armeabi-v7a`. `--abi` changes them. `NSH_KEYSTORE_PASSWORD` holds the password.
 - A TSX entry adds its name: `nsh package App.tsx --target ...`. A mixed app is run from its directory the same way, with Cargo building its runner.

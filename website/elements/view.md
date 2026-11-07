@@ -226,6 +226,10 @@ removes file-drag/drop listeners; leaving, cancellation, completion and destinat
 Acceptance uses the Copy operation and mounted native state. The app decides whether to read, open or transfer the
 received files.
 
+Text inputs belong to the destination around them: files dropped on an input's text reach that destination as
+anywhere else in it, with the same enter and leave events, and the input keeps its text as it was. Text dragged
+into an input, and files dropped on an input outside any destination, behave as the platform's text fields do.
+
 ## Ref methods
 
 A plain view's ref is a `ViewRef`: `focus()`, `blur()` and `measure()`. `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to

@@ -60,7 +60,7 @@ pub(crate) struct Host {
     limits: Mutex<nsh_engine::Limits>,
     /// Where loaded apps keep their data, each in a directory named by its
     /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
-    data_dir: Option<std::path::PathBuf>,
+    pub(crate) data_dir: Option<std::path::PathBuf>,
     /// The directory loaded apps keep their storage in, overriding their own
     /// (`NshView.setStorageDirectory`); `None`: theirs.
     storage: Mutex<Option<std::path::PathBuf>>,
@@ -202,6 +202,7 @@ impl Host {
             picker: None,
             speech: None,
             audio: None,
+            windows: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone());
@@ -557,7 +558,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         answers: Mutex::new(None),
         pending: Mutex::new(None),
         viewport: Mutex::new(Size::new(px(0.0), px(0.0))),
-        environment: Mutex::new(Environment::default()),
+        environment: Mutex::new(Environment {
+            // `OpenPath` of one of the app's own files (`SystemUi.openPath`):
+            // the system's viewer reads it through the FilesProvider. The
+            // dialogs have no answer here.
+            file_requests: true,
+            ..Environment::default()
+        }),
         animation_queue: Mutex::new(VecDeque::new()),
         seq: AtomicU64::new(0),
         ui: Mutex::new(UiAnimation::default()),
@@ -955,6 +962,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     source_map: JString<'_>,
     capabilities: JString<'_>,
     app: JString<'_>,
+    updater: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -986,10 +994,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
         let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
         bundle = bundle.with_app_id(id);
     }
-    match bundle.with_capabilities_json(declared.as_deref()) {
-        Ok(bundle) => host.load(bundle),
-        Err(err) => log::error!("cannot load the bundle: {err}"),
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+    let mut bundle = match bundle.with_capabilities_json(declared.as_deref()) {
+        Ok(bundle) => bundle,
+        Err(err) => return log::error!("cannot load the bundle: {err}"),
+    };
+    // A packaged app (`AppActivity`) runs a newer signed package of its code
+    // it downloaded instead.
+    #[cfg(feature = "js")]
+    if bytecode != 0
+        && !updater.is_null()
+        && let Some(run) = crate::package::downloaded(&mut env, host, &mut bundle, &updater)
+    {
+        return host.load(run);
     }
+    #[cfg(not(feature = "js"))]
+    let _ = updater;
+    host.load(bundle);
 }
 
 /// Runs a Rust app's root in the `NshView` with native handle `handle`
@@ -1531,7 +1552,44 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             .ok()?;
         Some(PayloadValue::Number(n))
     };
-    let payload = if keys.is_null() {
+    let payload = if kind == EventKind::FileRequest {
+        // "id", "error": the answer to an `OpenPath` (`SystemUi.openPath`;
+        // the paths of the request say nothing new, an open answers none).
+        let len = if keys.is_null() {
+            0
+        } else {
+            env.get_array_length(&keys).unwrap_or(0)
+        };
+        let mut id = None;
+        let mut error = None;
+        for i in 0..len {
+            let Ok(key) = env.get_object_array_element(&keys, i) else {
+                continue;
+            };
+            let Ok(key) = env.get_string(&JString::from(key)).map(String::from) else {
+                continue;
+            };
+            let Some(v) = read(&mut env, i) else {
+                continue;
+            };
+            match (key.as_str(), v) {
+                ("id", PayloadValue::Number(n)) => id = Some(n as u32),
+                ("error", PayloadValue::Str(message)) => error = Some(message),
+                ("error", PayloadValue::Null) => {}
+                _ => {}
+            }
+        }
+        // Without an id an answer could only land on request 0: drop the
+        // event instead of letting a stray one finish another request.
+        let Some(id) = id else {
+            return;
+        };
+        EventPayload::FileRequest {
+            id,
+            paths: Vec::new(),
+            error,
+        }
+    } else if keys.is_null() {
         match read(&mut env, 0) {
             Some(v) => EventPayload::Value(v),
             None => EventPayload::None,

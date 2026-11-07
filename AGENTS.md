@@ -458,7 +458,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
     empty. A command that runs at the commit (a component's or ref's method) cannot throw: given an unknown id or
     index it does nothing and logs a warning.
   - Methods whose parameters may grow take their options as one object (`net.connect({ host, port })`,
-    `Window.setTitleBar({ style, height })`); parameters the user judged will not grow stay positional
+    `WindowRef.setBounds({ origin, size, animated })`); parameters the user judged will not grow stay positional
     (`setSelection(start, end?)`, `seek(seconds)`, `DockArea.addPanel(panel, placement?, size?)`,
     `DataTable.scrollToRow(row, animated?)`, `Editor.revealPosition(position, center)`, a range's start and end):
     decided per method by the user (2026-10-28), not changed on reading this rule.
@@ -605,10 +605,22 @@ Every pull-request workflow also handles `merge_group: checks_requested`, so Git
 combined commit. Queue runs execute the full workflow without PR path filters; Compat always builds on a queue
 run. Website deployment runs only on pushes and manual dispatches. `.github/ci/paths.py` checks the queue
 trigger alongside the dependency paths.
-CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
-restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
-release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
-`files` in `paths.py`.
+Runners are the bottleneck, so a run takes one only when its result can still matter. Every pull-request
+workflow takes `pull_request` `types: [opened, synchronize, reopened, ready_for_review, closed]` (`paths.py` checks
+it), and its jobs skip drafts and the `closed` event: a draft runs nothing until it is marked ready, and closing or
+merging a pull request starts a run that runs nothing but takes its concurrency group, cancelling the runs it still
+has queued or running. The jobs that build (all but `CI paths`) are debounced: they name the environment
+`ci-debounce` with `deployment: false`, whose wait timer holds them a few minutes without a runner, so a push
+followed by another within that time cancels the first run before it starts. Each workflow's concurrency group is
+the pull request's number, or the ref for pushes and queue runs (`github.event.pull_request.number || github.ref`):
+a merged pull request's `closed` event carries the base branch as its ref, so a group of the ref alone would cancel
+`main`'s run of the merge commit. Groups cancel in progress (Website's pushes to `main` queue instead: each one
+deploys).
+CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` installs a pinned release after the toolchain
+and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
+`main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
+file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
 
 ## Parallel agents
 
@@ -630,8 +642,9 @@ pull requests.
 2. Changes to the runtime (`nsh-js`), engine or core: run `nsh test --trace` and check item counts and timings. Changes to
    anything apps use: `cargo xtask compat` passes, and `tests/compat/` checks the change (`docs/dev/compatibility.md`).
 3. Changes to the platform layer: launch with `nsh run`, check screenshots and simulate input where needed (the terminal needs the Screen
-   Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
-   screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
+   Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and the
+   system's clicks fail, but window screenshots still work, and `nsh test --target macos` runs as unlocked: it is the way
+   to check a macOS change while the screen is locked). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
    Android: `adb exec-out screencap -p`, `adb shell input tap|swipe|text|keyevent` (all work with the screen locked).
    The desktops: `nsh test <entry> --target macos|linux|windows|gpui` with steps on standard input
    (`await app.screenshot("a.png"); await app.press("label:Plan")`) opens the app in the platform's window, acts with

@@ -262,6 +262,7 @@ Text elements do not draw gradients on iOS.
 | `filter` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()` (without a color, in the text color, as in CSS); several separated by spaces | `.brightness(n)`, `.contrast(n)`, `.grayscale(n)`, `.hue_rotate(angle)`, `.invert(n)`, `.saturate(n)`, `.sepia(n)`, `.blur(px(..))` |
 | `backdropFilter` | Filters of what is behind the view: `"blur(10px)"` (frosted glass) | `.backdrop_blur(px(10.0))`, `.backdrop_saturate(n)`, ... |
 | `glassEffect` | `"regular"` or `"clear"` for Apple's Liquid Glass on iOS 26 and macOS 26 and later; `"none"` (the default) uses `backdropFilter` | `.glass_effect(GlassEffect::Regular)` |
+| `glassTintColor` | On iOS 26 and macOS 26, a color the glass takes on; `null` (the default) restores the system's own | `.glass_tint_color(color)` / `.glass_tint_color(None)` |
 | `mixBlendMode` | How the view blends with what is behind it: `"multiply"`, `"screen"`, `"overlay"`, ... | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -312,8 +313,38 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 `"clear"` takes less color from the background. Pair it with `backdropFilter` for the blur shown on earlier iOS
 versions and other platforms. The glass follows the view's size and rounded corners.
 
+`glassTintColor` tints that glass on iOS 26 and macOS 26: `null` (or removing the key) restores the system's default.
+An explicit transparent color is a tint, not a reset. It draws nothing without `glassEffect`, and the blur fallback
+on earlier systems is unchanged. Rust accepts static colors directly or a `Signal<Option<AdaptiveColor>>`:
+
+```rust
+let tint = signal(Some(AdaptiveColor::rgb(0xffd278, 0xffd278)));
+let panel = view().glass_effect(GlassEffect::Regular).glass_tint_color(tint);
+// In the corresponding UI actions:
+tint.set(None); // restore the native default
+tint.set(Some(AdaptiveColor::rgb(0x5080ff, 0x5080ff)));
+```
+
 ```tsx
-<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular", glassTintColor: "rgba(255, 210, 120, 0.35)" }} />
+```
+
+On macOS, `macos={{ backdrop: { material, blending, state } }}` selects an `NSVisualEffectView` material of its
+own, with or without a blur. `material` is one of `"titlebar"`, `"selection"`, `"menu"`, `"popover"` (the
+default), `"sidebar"`, `"headerView"`, `"sheet"`, `"windowBackground"`, `"hudWindow"`,
+`"fullScreenUI"`, `"toolTip"`, `"contentBackground"`, `"underWindowBackground"` or
+`"underPageBackground"`; `blending` is `"withinWindow"` (the default) or `"behindWindow"`; `state` is
+`"followsWindowActiveState"`, `"active"` (the default) or `"inactive"`. An explicit backdrop wins over
+`glassEffect` and `backdropFilter`; without it, macOS keeps the glass on macOS 26 and later and the blur
+elsewhere. Rust uses `.macos_backdrop(backdrop)` with a `MacOsBackdrop` (the struct is `#[non_exhaustive]`: start from
+`MacOsBackdrop::default()` and set `material`, `blending` and `state`); `None` (the default) leaves the fallback.
+`"behindWindow"` shows what is behind the window only in a transparent one. Window attributes can request this;
+a custom Rust host can also use `AppOptions { transparent: true, .. }` as an initial default, overridden by explicit
+main-window attributes and later window updates. Standard hosts default to opaque windows, and a view's blending
+never enables transparency. An embedded `AppView` leaves its host window unchanged.
+
+```tsx
+<View macos={{ backdrop: { material: "hudWindow", blending: "behindWindow" } }} style={{ height: 64 }} />
 ```
 
 ### Progressive blur
@@ -469,6 +500,7 @@ These keys and classes carry what native platforms do beyond CSS:
 | `tintColor` | `tint-*` | Recolors an `<Image>`'s opaque pixels (template images, icons) |
 | `borderCurve` | | `"continuous"`: corners that ease into the edges, as the system's own (Apple's continuous corners) |
 | `glassEffect` | | Apple's Liquid Glass behind the view on iOS 26 and macOS 26, the `backdropFilter` elsewhere |
+| `glassTintColor` | | The tint of that glass on iOS 26 and macOS 26; `null` restores the native default |
 | `writingDirection` | | A text's base direction, `"auto"` (the default: from its content, as the platforms' text views do), `"ltr"` or `"rtl"`; `direction` sets the layout's |
 | `textAlignVertical` | | Where text shorter than its `<Text>` box sits: `"top"` (the default), `"center"` or `"bottom"` |
 | `textAlign: "auto"` | | The text's natural side, by its direction (the default) |

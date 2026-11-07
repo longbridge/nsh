@@ -2403,6 +2403,13 @@ impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::Tr
     }
 }
 
+/// A backdrop where an optional one goes (`.macos_backdrop(backdrop)`).
+impl IntoReactive<Option<crate::MacOsBackdrop>> for crate::MacOsBackdrop {
+    fn into_reactive(self) -> super::Reactive<Option<crate::MacOsBackdrop>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

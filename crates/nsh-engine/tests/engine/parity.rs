@@ -110,6 +110,7 @@ mount(() => <Text>{{shown()}}</Text>);
             websocket: None,
             refuse_connections: None,
             filesystem: None,
+            windows: None,
             assets: None,
             environment: Environment {
                 os: Os::Linux,

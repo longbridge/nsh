@@ -111,14 +111,15 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
-    "openUrl": { "schemes": ["https", "mailto"] }
+    "openUrl": { "schemes": ["https", "mailto"] },
+    "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
 }
 ```
 
 **没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
 `network.sockets`；宿主的函数也一样，即 `host`。**有 `"capabilities"` 的应用
-只能做其中列出的事**：其他一律拒绝。未知的键会导致构建错误，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
+只能做其中列出的事**：其他一律拒绝。NSH 读不懂的键或值不授予任何权限，构建时会给出警告，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
 [签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
 ### `network`
@@ -196,6 +197,22 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 
 允许应用在应用之外打开 URL（[`openUrl`](../modules/nsh.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme。scheme 未被授予的 URL 以 `ERR_ACCESS_DENIED` reject（`permission` 为 `"openUrl"`，`resource` 为该 URL）。会执行代码或访问应用自身数据的 URL（`javascript:`、`data:`、`file:` 等）无论能力如何都不会打开。
 
+### `windows`
+
+允许应用在桌面平台上打开自己的窗口（[`Window`](../modules/nsh-desktop.md#窗口)）：`"windows": true` 允许除浮层外的所有种类，
+也可以写成一个对象来缩小范围：
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `kinds` | `string[]` | 可以打开的种类：`"normal"`、`"dialog"`、`"panel"`、`"popup"`、`"overlay"`。缺省：除 `"overlay"` 外的所有种类。 |
+| `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
+| `max` | `number` | 同时可以打开的自己的窗口数。缺省：不限。 |
+| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `contentProtected` | `boolean` | 不出现在截图和屏幕共享中的窗口。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+
+`overlay` 和 `contentProtected` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面，
+而受保护的窗口会让用户的录屏看不到它显示的内容。主窗口不需要授权。
+
 ### 存储
 
 每个应用都可以用 [`Storage`](../modules/nsh.md#storage) 在设备上保存自己的数据，无需任何能力：存储里只有该应用自己的数据，保存位置由宿主应用决定。
@@ -241,6 +258,7 @@ if (host.available()) {
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |
 | 进程（`process`） | `run` 被 reject，`spawn` 和 `exit` 抛出，错误为 `ERR_ACCESS_DENIED`，`permission` 为 `"process"`，`resource` 为该命令（`exit` 为 `"exit"`）；不会启动子进程。 |
 | TCP socket（`net.connect`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为 `"host:port"`；发生在任何 DNS 查询之前。 |
+| 窗口（`Window.open`、`<Window>`） | 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"windows"`，`resource` 为窗口的 id；不会打开任何窗口。`set()` 中未授权的属性保持不变，并给出警告。 |
 | WebSocket | `websocket` 模块的 `connect` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为该 URL；全局 `WebSocket` 像连接失败时那样先触发 `error`，再触发 `close`（code 为 1006）。 |
 
 [标准模块](../modules/standard-modules.md#失败)的错误带有 `code` `"ERR_ACCESS_DENIED"`，应用借此区分被拒绝与操作失败；
@@ -316,7 +334,7 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 |---|---|---|
 | 限制（堆、栈、时间、节点） | 运行时，按 VM | 宿主应用按视图设定（嵌入的应用） |
 | 加固 | 运行时，在加载时 | 开发环境之外始终开启 |
-| 能力 | 运行时（fetch、图片、视频、web view、状态栏、文件、进程、socket） | 应用（`nsh.json`）和宿主应用（授权） |
+| 能力 | 运行时（fetch、图片、视频、web view、状态栏、窗口、文件、进程、socket） | 应用（`nsh.json`）和宿主应用（授权） |
 | 代码完整性 | 签名验证 | `nsh publish`；宿主应用信任的根密钥 |
 
 ## 另请参阅
