@@ -285,6 +285,9 @@ pub(crate) struct Surface {
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// What is held of the main window: its policies, title bar and look
+    /// ([`crate::window`]).
+    pub(crate) main_window: crate::window::Held,
     /// The window observed for its bounds ([`crate::window_state`]).
     pub(crate) window: crate::window_state::Watch,
     /// Videos, web views and registered native components.
@@ -376,6 +379,7 @@ impl Surface {
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            main_window: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
         });
@@ -744,6 +748,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
@@ -1191,7 +1196,7 @@ fn frame_rate_range(rate: Option<f32>, max: f32) -> objc2_quartz_core::CAFrameRa
 }
 
 /// Runs `f` on the main queue after `ms` milliseconds.
-fn after(ms: u64, f: impl FnOnce() + Send + 'static) {
+pub(crate) fn after(ms: u64, f: impl FnOnce() + Send + 'static) {
     let when = dispatch2::DispatchTime::NOW.time((ms * 1_000_000) as i64);
     if let Err(err) = DispatchQueue::main().after(when, f) {
         log::error!("cannot schedule a frame: {err:?}");

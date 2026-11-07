@@ -255,6 +255,7 @@ events! {
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
+    Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
 
 }
 
@@ -869,6 +870,8 @@ pub enum EventPayload {
         /// What it reported.
         event: crate::audio::AudioEvent,
     },
+    /// What a window of the app's own reported ([`EventKind::Window`]).
+    Window(Box<crate::desktop::WindowEvent>),
     /// The answer to a [`Command::FileRequest`] ([`EventKind::FileRequest`],
     /// [`crate::file_dialog`]).
     FileRequest {
@@ -2635,6 +2638,16 @@ pub enum Prop {
     /// a draggable view stay clickable without it.
     #[prop(desktop = "windowDrag")]
     WindowDrag(Option<bool>),
+    /// `windowControl` (desktops): the view of a title bar the app draws
+    /// acts as one of the system's window buttons (minimize, maximize,
+    /// close): the platform hit-tests it as that button and carries out its
+    /// press.
+    #[prop(desktop = "windowControl")]
+    WindowControl(Option<crate::desktop::WindowControl>),
+    /// `windowResize` (desktops): pressing the view resizes a frameless
+    /// window by that edge or corner.
+    #[prop(desktop = "windowResize")]
+    WindowResize(Option<crate::desktop::ResizeEdge>),
     /// `tooltip`: a hint about the view, shown above it on the desktops
     /// while the pointer rests on it (after half a second) until the
     /// pointer leaves or presses it, never on touch screens; it never takes

@@ -334,6 +334,8 @@ impl AppView {
             picker: None,
             speech: None,
             audio: None,
+            // Windows of the app's own are this backend's (`crate::window`).
+            windows: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -464,6 +466,8 @@ pub(crate) fn quit() -> bool {
 /// Closes `app`'s windows (closing the main one stops its engine), then
 /// ends its run.
 fn quit_application(app: &gtk::Application) {
+    // Closed without asking the app (`closeOnPress`).
+    crate::window::set_quitting();
     for window in app.windows() {
         window.close();
     }
@@ -500,8 +504,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     let shown_open = shown.clone();
     // The URLs the app was launched with: the view gets them before its app
     // loads, so they are its address when its code first runs.
-    let launch: Rc<RefCell<Vec<String>>> = Rc::default();
-    let launch_open = launch.clone();
+    let launch_links: Rc<RefCell<Vec<String>>> = Rc::default();
+    let launch_open = launch_links.clone();
     app.connect_open(move |app, files, _| {
         if shown_open.borrow().is_none() {
             launch_open
@@ -525,22 +529,68 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             }
             return;
         };
+        // nsh.json `window`: known before the window is made, so its first
+        // frame has it.
+        // A JS bundle's or a Rust app's root's.
+        let app_of: Result<App, String> = match source {
+            AppSource::Rust(root) => Ok(App::Rust(root)),
+            AppSource::Bundle(bundle) => Ok(App::Js(bundle)),
+            #[cfg(feature = "dev")]
+            AppSource::DevServer(url) => Err(url),
+        };
+        let launch = app_of
+            .as_ref()
+            .ok()
+            .and_then(App::main_window)
+            .cloned()
+            .unwrap_or_default();
+        // `restoreBounds`: where its last run left it (the engine keeps it
+        // as it changes), fitted on the displays there are.
+        let kept = match &app_of {
+            Ok(app) if launch.restore_bounds => {
+                let mut config = EngineConfig::new(app.clone());
+                config.data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
+                config.storage = options.storage.clone();
+                config.main_window_placement(&crate::window::displays())
+            }
+            _ => None,
+        };
+        let size = kept
+            .map(|p| p.bounds.size)
+            .or(launch.default_size)
+            .map_or(options.size, |s| {
+                (s.width.0.round() as i32, s.height.0.round() as i32)
+            });
         let window = gtk::ApplicationWindow::builder()
             .application(app)
             .title(&options.title)
-            .default_width(options.size.0)
-            .default_height(options.size.1)
+            .default_width(size.0.max(1))
+            .default_height(size.1.max(1))
             .build();
         let view = AppView::new(options.clone());
         window.set_child(Some(&view.widget()));
-        for url in launch.take() {
+        crate::window::launch_main(
+            &view.surface,
+            window.upcast_ref(),
+            &launch,
+            kept.map(|p| p.mode),
+        );
+        // The user closes it as the app's `closeOnPress` says.
+        let weak = Rc::downgrade(&view.surface);
+        window.connect_close_request(move |_| match weak.upgrade() {
+            Some(surface) => crate::window::main_close_request(&surface),
+            None => glib::Propagation::Proceed,
+        });
+        for url in launch_links.take() {
             view.open_url(&url);
         }
-        match source {
-            AppSource::Rust(root) => view.load(App::Rust(root)),
-            AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        match app_of {
+            Ok(app) => view.load(app),
             #[cfg(feature = "dev")]
-            AppSource::DevServer(url) => crate::dev::start(&view, url),
+            Err(url) => crate::dev::start(&view, url),
+            // Only a dev server is no app.
+            #[cfg(not(feature = "dev"))]
+            Err(_) => {}
         }
         install_shortcuts(app, &window);
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
@@ -597,13 +647,7 @@ fn install_shortcuts(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     // GtkWindow's own action. Not an application accelerator: those run
     // before everything, and an app may bind Ctrl+W itself (`nsh/keymap`,
     // e.g. to close a tab); this one comes last.
-    let close = gtk::ShortcutController::new();
-    close.set_propagation_phase(gtk::PropagationPhase::Bubble);
-    close.add_shortcut(gtk::Shortcut::new(
-        gtk::ShortcutTrigger::parse_string("<Control>w"),
-        Some(gtk::NamedAction::new("window.close")),
-    ));
-    window.add_controller(close);
+    crate::window::close_shortcut(window.upcast_ref());
     let fullscreen = gtk::gio::SimpleAction::new("fullscreen", None);
     let weak = window.downgrade();
     fullscreen.connect_activate(move |_, _| {

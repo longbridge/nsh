@@ -66,6 +66,8 @@ mod imp {
         stop: Arc<AtomicBool>,
         /// The package the bundle came from, named in its errors.
         package: Option<Arc<PackageInfo>>,
+        /// Told of fatal errors ([`Bundle::trial`]).
+        trial: Option<Arc<dyn crate::Trial>>,
     }
 
     impl Script {
@@ -101,10 +103,12 @@ mod imp {
                 Ok(host) => host,
                 Err(err) => {
                     log::error!("failed to start JS: {err}");
-                    sink.report(
-                        &AppError::new(AppErrorKind::Load, &err.message)
-                            .with_package(bundle.package.clone()),
-                    );
+                    let error = AppError::new(AppErrorKind::Load, &err.message)
+                        .with_package(bundle.package.clone());
+                    if let Some(trial) = &bundle.trial {
+                        trial.failed(&error);
+                    }
+                    sink.report(&error);
                     return None;
                 }
             };
@@ -158,6 +162,7 @@ mod imp {
                 symbolicator,
                 stop,
                 package: bundle.package.clone(),
+                trial: bundle.trial.clone(),
             };
             // The chunks that come with the bundle: the entry may import
             // them statically, `import()` without waiting.
@@ -189,7 +194,13 @@ mod imp {
             }
             let message = self.symbolicator.borrow_mut().rewrite(message);
             log::error!(target: "js", "{what}: {message}");
-            sink.report(&AppError::new(kind, &message).with_package(self.package.clone()));
+            let error = AppError::new(kind, &message).with_package(self.package.clone());
+            if let Some(trial) = &self.trial
+                && error.is_fatal()
+            {
+                trial.failed(&error);
+            }
+            sink.report(&error);
         }
 
         /// Gives the VM a chunk it imports, or tells it the chunk could not

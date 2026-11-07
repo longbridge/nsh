@@ -947,13 +947,23 @@ impl ViewObj {
     /// the surface's own, or a window of the app's own's
     /// ([`NshView::set_window_of`]). The surface's input then picks in this
     /// view's window ([`crate::input::enter`]).
+    ///
+    /// A window under a modal dialog of the app's own takes no input
+    /// ([`crate::window::blocked`]).
     fn input_surface(&self) -> Option<std::rc::Rc<Surface>> {
         if let Some(surface) = self.surface() {
+            if crate::window::blocked(&surface, None) {
+                return None;
+            }
             crate::input::enter(&surface, None);
             return Some(surface);
         }
         let surface = self.ivars().window.borrow().upgrade()?;
-        crate::input::enter(&surface, Some(NshView(self.retain())));
+        let root = NshView(self.retain());
+        if crate::window::blocked(&surface, Some(&root)) {
+            return None;
+        }
+        crate::input::enter(&surface, Some(root));
         Some(surface)
     }
 
@@ -964,16 +974,21 @@ impl ViewObj {
     fn root_hit(&self, point: NSPoint) -> Retained<NSView> {
         let me = || Retained::from(&**self);
         // A query AppKit makes at any time: it picks in this root and leaves
-        // the input's window (`input::enter`) to the events.
+        // the input's window (`input::enter`) to the events. A window under
+        // a modal dialog of the app's own hands nothing to its hosted views.
+        let own = self.surface().is_none();
         let Some(surface) = self
             .surface()
             .or_else(|| self.ivars().window.borrow().upgrade())
         else {
             return me();
         };
+        let root = NshView(self.retain());
+        if crate::window::is_blocked(&surface, own.then_some(&root)) {
+            return me();
+        }
         let outer = superview(self);
         let p = self.convertPoint_fromView(point, outer.as_deref());
-        let root = NshView(self.retain());
         let Some(native) = crate::input::native_at(&root, p.x as f32, p.y as f32) else {
             return me();
         };

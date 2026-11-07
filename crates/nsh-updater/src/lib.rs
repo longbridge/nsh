@@ -8,6 +8,12 @@
 //! manifest's bytes whether there is a newer version, [`Download`] checks
 //! the asset as it arrives and [`install`] replaces the installed app.
 //!
+//! A manifest may also offer a signed package (`.nshpkg`) of the app's TSX
+//! ([`PackageAsset`]): an app whose `nsh.json` trusts package roots
+//! ([`Packages`]) runs a newer build of its code without a new app
+//! ([`Config::check_package`]; verifying and running it is `nsh-engine`'s
+//! `updates`).
+//!
 //! No network here: the caller brings the bytes (the JS module `nsh/updater`
 //! over the platform's HTTP stack, or a Rust app over its own), and no UI.
 
@@ -73,6 +79,24 @@ pub struct Config {
     /// once it is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
+    /// The build number of the bundle shipped in the app (`nsh.json`
+    /// `"build"`): a package runs only when its build is newer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<u64>,
+    /// Signed packages the app takes over the air; `None`: it takes none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packages: Option<Packages>,
+}
+
+/// `nsh.json`'s `"updater": { "packages": … }`: the app runs newer builds
+/// of its code from signed packages (`.nshpkg`) certified by these roots.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Packages {
+    /// The root public keys (`nsh keygen`'s `root.pub`, base64) whose
+    /// certified release keys may sign the app's packages. At least one.
+    pub roots: Vec<String>,
 }
 
 impl Config {
@@ -122,7 +146,23 @@ impl Config {
         if let Some(key) = &self.public_key {
             public_key(key)?;
         }
+        if let Some(packages) = &self.packages {
+            if packages.roots.is_empty() {
+                return Err(Error::Config(
+                    "packages.roots: name at least one root key (`nsh keygen`'s root.pub)".into(),
+                ));
+            }
+            for root in &packages.roots {
+                decode32(root, "packages.roots")?;
+            }
+        }
         Ok(())
+    }
+
+    /// The roots packages are verified against; empty when the app takes
+    /// no packages.
+    pub fn package_roots(&self) -> &[String] {
+        self.packages.as_ref().map_or(&[], |p| &p.roots)
     }
 
     /// The manifest's URL.
@@ -151,19 +191,7 @@ impl Config {
         signature: Option<&[u8]>,
         platform: &str,
     ) -> Result<Option<Available>, Error> {
-        if let Some(key) = &self.public_key {
-            let signature =
-                signature.ok_or_else(|| Error::Manifest("the manifest is not signed".into()))?;
-            verify(key, manifest, signature)?;
-        }
-        let parsed: Manifest =
-            serde_json::from_slice(manifest).map_err(|e| Error::Manifest(e.to_string()))?;
-        if parsed.id != self.id {
-            return Err(Error::Manifest(format!(
-                "it is for {:?}, this app is {:?}",
-                parsed.id, self.id
-            )));
-        }
+        let parsed = self.open(manifest, signature)?;
         let version = semver::Version::parse(&parsed.version)
             .map_err(|e| Error::Manifest(format!("version {:?}: {e}", parsed.version)))?;
         let current =
@@ -184,6 +212,77 @@ impl Config {
             size: asset.size,
         }))
     }
+
+    /// The package the manifest offers, if the app takes packages, its
+    /// build is newer than `running_build` (the running package's, or the
+    /// shipped bundle's) and `runtime` (this runtime's version) runs it.
+    /// Fails as [`Config::check`] does, and on a package entry without a
+    /// SHA-256. The package itself is not trusted from this: whoever
+    /// downloads it verifies its signature against [`Packages::roots`].
+    pub fn check_package(
+        &self,
+        manifest: &[u8],
+        signature: Option<&[u8]>,
+        running_build: u64,
+        runtime: &str,
+    ) -> Result<Option<AvailablePackage>, Error> {
+        if self.package_roots().is_empty() {
+            return Ok(None);
+        }
+        let parsed = self.open(manifest, signature)?;
+        let Some(package) = parsed.package else {
+            return Ok(None);
+        };
+        if package.build <= running_build || !version_at_least(runtime, &package.min_runtime) {
+            return Ok(None);
+        }
+        if package.sha256.is_empty() {
+            return Err(Error::Manifest("the package has no sha256".into()));
+        }
+        let url = resolve(&self.manifest_url(), &package.url);
+        check_url(&url).map_err(Error::Manifest)?;
+        Ok(Some(AvailablePackage {
+            version: package.version,
+            build: package.build,
+            notes: parsed.notes,
+            url,
+            sha256: package.sha256,
+            size: package.size,
+        }))
+    }
+
+    /// The manifest, its signature checked and its id this app's.
+    fn open(&self, manifest: &[u8], signature: Option<&[u8]>) -> Result<Manifest, Error> {
+        if let Some(key) = &self.public_key {
+            let signature =
+                signature.ok_or_else(|| Error::Manifest("the manifest is not signed".into()))?;
+            verify(key, manifest, signature)?;
+        }
+        let parsed: Manifest =
+            serde_json::from_slice(manifest).map_err(|e| Error::Manifest(e.to_string()))?;
+        if parsed.id != self.id {
+            return Err(Error::Manifest(format!(
+                "it is for {:?}, this app is {:?}",
+                parsed.id, self.id
+            )));
+        }
+        Ok(parsed)
+    }
+}
+
+/// Whether semver-like `have` (`1.2.3`) is at least `needs`, as packages
+/// compare their minimum runtime: missing parts count as 0, pre-release
+/// and build suffixes are ignored.
+fn version_at_least(have: &str, needs: &str) -> bool {
+    let parse = |v: &str| -> [u64; 3] {
+        let mut parts = [0; 3];
+        let core = v.split(['-', '+']).next().unwrap_or_default();
+        for (part, text) in parts.iter_mut().zip(core.split('.')) {
+            *part = text.parse().unwrap_or(0);
+        }
+        parts
+    };
+    parse(have) >= parse(needs)
 }
 
 /// `latest.json`.
@@ -199,7 +298,54 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// By [`platform`]: `linux-x86_64`, `macos-aarch64`, `android`, `ios`.
+    /// Empty in a release that only has a package (still written: older
+    /// runtimes require it).
+    #[serde(default)]
     pub platforms: BTreeMap<String, Asset>,
+    /// A signed package of the app's code, for every platform: apps that
+    /// take packages run it without a new app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<PackageAsset>,
+}
+
+/// The signed package (`.nshpkg`) of a [`Manifest`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct PackageAsset {
+    /// The package's version string (its `nsh.json` `"version"`).
+    pub version: String,
+    /// The package's build number: newer than the running one to be
+    /// offered.
+    pub build: u64,
+    /// Where it is, absolute or relative to the manifest.
+    pub url: String,
+    /// The package's SHA-256, in hex.
+    pub sha256: String,
+    /// The package's size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// The lowest runtime that runs it (`MAJOR.MINOR.PATCH`), as its
+    /// header says.
+    pub min_runtime: String,
+}
+
+/// A newer package of the app's code ([`Config::check_package`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AvailablePackage {
+    /// Its version string.
+    pub version: String,
+    /// Its build number.
+    pub build: u64,
+    /// What changed (the manifest's notes).
+    pub notes: Option<String>,
+    /// Where it is, absolute.
+    pub url: String,
+    /// Its SHA-256, in hex.
+    pub sha256: String,
+    /// Its size in bytes.
+    pub size: Option<u64>,
 }
 
 /// One platform's entry of a [`Manifest`].
@@ -514,6 +660,119 @@ mod tests {
         assert!(config().check(other, None, "linux-x86_64").is_err());
         let plain = manifest("2.0.0", "http://x.dev/a.tar.gz");
         assert!(config().check(&plain, None, "linux-x86_64").is_err());
+    }
+
+    fn takes_packages() -> Config {
+        Config {
+            build: Some(3),
+            packages: Some(Packages {
+                roots: vec![public()],
+            }),
+            ..config()
+        }
+    }
+
+    fn package_manifest(build: u64, min_runtime: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.app",
+            "version": "1.2.0",
+            "notes": "Fixes",
+            "package": {
+                "version": "1.2.1", "build": build, "url": "com.example.app-5.nshpkg",
+                "sha256": "ab", "size": 2, "minRuntime": min_runtime,
+            },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn package_roots_are_keys() {
+        assert!(takes_packages().validate().is_ok());
+        let none = Config {
+            packages: Some(Packages { roots: vec![] }),
+            ..config()
+        };
+        assert!(none.validate().is_err());
+        let bad = Config {
+            packages: Some(Packages {
+                roots: vec!["not a key".into()],
+            }),
+            ..config()
+        };
+        assert!(bad.validate().is_err());
+        // The packaged file keeps them.
+        let bytes = serde_json::to_vec(&takes_packages()).unwrap();
+        assert_eq!(Config::parse(&bytes).unwrap(), takes_packages());
+    }
+
+    #[test]
+    fn only_a_newer_package_this_runtime_runs_is_offered() {
+        let check = |config: &Config, build, min: &str, running| {
+            config
+                .check_package(&package_manifest(build, min), None, running, "0.5.0")
+                .unwrap()
+        };
+        let available = check(&takes_packages(), 5, "0.5.0", 3).unwrap();
+        assert_eq!((available.version.as_str(), available.build), ("1.2.1", 5));
+        assert_eq!(available.notes.as_deref(), Some("Fixes"));
+        assert_eq!(
+            available.url,
+            "https://github.com/owner/repo/releases/latest/download/com.example.app-5.nshpkg"
+        );
+        // Not newer than what runs, a newer runtime needed, or no roots.
+        assert!(check(&takes_packages(), 5, "0.5.0", 5).is_none());
+        assert!(check(&takes_packages(), 2, "0.5.0", 3).is_none());
+        assert!(check(&takes_packages(), 5, "0.6.0", 3).is_none());
+        assert!(check(&takes_packages(), 5, "0.5.0-beta.1", 3).is_some());
+        assert!(check(&config(), 5, "0.5.0", 3).is_none());
+        // A manifest without a package, or of only a package.
+        let plain = manifest("1.3.0", "a.tar.gz");
+        assert!(
+            takes_packages()
+                .check_package(&plain, None, 3, "0.5.0")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            takes_packages()
+                .check(&package_manifest(5, "0.5.0"), None, "linux-x86_64")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn package_manifests_are_checked_as_others() {
+        let signed = Config {
+            public_key: Some(public()),
+            ..takes_packages()
+        };
+        let bytes = package_manifest(5, "0.1.0");
+        assert!(signed.check_package(&bytes, None, 3, "0.5.0").is_err());
+        let signature = sign(SECRET, &bytes).unwrap();
+        assert!(
+            signed
+                .check_package(&bytes, Some(signature.as_bytes()), 3, "0.5.0")
+                .unwrap()
+                .is_some()
+        );
+        let other = br#"{"id":"com.other","version":"1.0.0","package":{"version":"1","build":9,"url":"p","sha256":"ab","minRuntime":"0.1.0"}}"#;
+        assert!(
+            takes_packages()
+                .check_package(other, None, 3, "0.5.0")
+                .is_err()
+        );
+        let plain = serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.app", "version": "1.0.0",
+            "package": { "version": "1", "build": 9, "url": "http://x.dev/p.nshpkg",
+                         "sha256": "ab", "minRuntime": "0.1.0" },
+        }))
+        .unwrap();
+        assert!(
+            takes_packages()
+                .check_package(&plain, None, 3, "0.5.0")
+                .is_err()
+        );
     }
 
     #[test]

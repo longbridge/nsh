@@ -368,7 +368,7 @@ public class NshView extends FrameLayout {
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
-            Native.load(handle, code, false, map, capabilities, app);
+            Native.load(handle, code, false, map, capabilities, app, null);
             return true;
         } catch (Exception e) {
             reportError("cannot read bundle " + file + ": " + e);
@@ -384,15 +384,27 @@ public class NshView extends FrameLayout {
      * @return false (reported to the error listener) if it cannot be read
      */
     public boolean loadAssetBundle(String dir) {
+        return loadAssetBundle(dir, false);
+    }
+
+    /**
+     * {@link #loadAssetBundle(String)} for the activity of packaged apps
+     * ({@link AppActivity}): with {@code packages}, a newer signed package of
+     * the app's code it downloaded ({@code nsh/updater}'s
+     * {@code downloadPackage}) runs instead, when the app's
+     * {@code assets/nsh-updater.json} trusts package roots.
+     */
+    boolean loadAssetBundle(String dir, boolean packages) {
         try {
             byte[] code = Net.readAll(getContext().getAssets().open(dir + "/bundle.nshc"));
             // Null when the app declares no capabilities / has no id.
             String capabilities = readAssetText(dir + "/capabilities.json");
             String app = readAssetText(dir + "/app.json");
+            String updater = packages ? readAssetText(dir + "/assets/nsh-updater.json") : null;
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
-            Native.load(handle, code, true, null, capabilities, app);
+            Native.load(handle, code, true, null, capabilities, app, updater);
             return true;
         } catch (Exception e) {
             reportError("cannot read the app bundle: " + e);

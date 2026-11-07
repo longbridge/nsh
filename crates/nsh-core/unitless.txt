@@ -100,6 +100,9 @@ core::Core::set_zoom(scale)                                      # a zoom scale 
 css::Color::with_alpha(factor)                                   # an opacity factor
 desktop::menu_icon::fade(opacity)                                # an opacity factor
 desktop::menu_icon::want(scale)                                  # device pixels per point, a ratio
+desktop::window_state::Display.refresh_rate                     # a refresh rate (Hz)
+desktop::window_state::Display.scale_factor                     # device pixels per point, a ratio
+desktop::window_state::WindowState.scale_factor                 # device pixels per point, a ratio
 effects::Filter::Brightness.0                                    # a filter amount (1 leaves the image as it is)
 effects::Filter::Contrast.0                                      # a filter amount (1 leaves the image as it is)
 effects::Filter::Grayscale.0                                     # a filter amount (1 leaves the image as it is)

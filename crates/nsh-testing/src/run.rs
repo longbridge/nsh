@@ -51,7 +51,7 @@ pub enum Built {
     Js(Box<Bundle>, Option<String>),
     /// The root of an app of Rust only (`nsh.json` `"root"`): what `open`
     /// of the app starts.
-    Rust(Root),
+    Rust(Box<Root>),
 }
 
 /// What an entry [`Compile`] builds is.
@@ -476,7 +476,7 @@ impl Session {
         let app = match self.build(&path)? {
             Built::Js(bundle, Some(map)) => nsh_engine::App::Js(bundle.with_source_map(map)),
             Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
-            Built::Rust(root) => nsh_engine::App::Rust(root),
+            Built::Rust(root) => nsh_engine::App::Rust(*root),
         };
         let clock = launch
             .clock
