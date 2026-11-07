@@ -320,6 +320,11 @@ pub(crate) struct Ivars {
     container: RefCell<Option<Retained<Container>>>,
     /// The surface (root views only): mouse, keyboard and resizes go there.
     surface: RefCell<Weak<Surface>>,
+    /// The surface whose window of the app's own (`Window.open`) this view
+    /// is the root of: its mouse and keyboard go there, picked in this
+    /// view ([`crate::input::enter`]); its resizes are the window's
+    /// ([`crate::window`]).
+    window: RefCell<Weak<Surface>>,
     /// Set once the root's tracking area is installed.
     tracking: Cell<bool>,
     /// Text and canvas views: the layer their content is drawn in
@@ -433,42 +438,42 @@ define_class!(
     unsafe impl NSDraggingDestination for ViewObj {
         #[unsafe(method(draggingEntered:))]
         fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
-            self.ivars().surface.borrow().upgrade().map_or(NSDragOperation::None, |surface| {
+            self.input_surface().map_or(NSDragOperation::None, |surface| {
                 crate::file_drop::begin(&surface, sender)
             })
         }
 
         #[unsafe(method(draggingUpdated:))]
         fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
-            self.ivars().surface.borrow().upgrade().map_or(NSDragOperation::None, |surface| {
+            self.input_surface().map_or(NSDragOperation::None, |surface| {
                 crate::file_drop::update(&surface, sender)
             })
         }
 
         #[unsafe(method(draggingExited:))]
         fn dragging_exited(&self, _sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self.input_surface() {
                 crate::file_drop::clear(&surface);
             }
         }
 
         #[unsafe(method(prepareForDragOperation:))]
         fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
-            self.ivars().surface.borrow().upgrade().is_some_and(|surface| {
+            self.input_surface().is_some_and(|surface| {
                 crate::file_drop::update(&surface, sender) == NSDragOperation::Copy
             })
         }
 
         #[unsafe(method(performDragOperation:))]
         fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
-            self.ivars().surface.borrow().upgrade().is_some_and(|surface| {
+            self.input_surface().is_some_and(|surface| {
                 crate::file_drop::perform(&surface, sender)
             })
         }
 
         #[unsafe(method(draggingEnded:))]
         fn dragging_ended(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) {
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self.input_surface() {
                 crate::file_drop::clear(&surface);
             }
         }
@@ -534,7 +539,7 @@ define_class!(
             // A press hit tests (and its hosted view converts it) with
             // AppKit's geometry: scroll offsets still shown as layer
             // transforms move into the bounds first.
-            if let Some(surface) = self.surface()
+            if let Some(surface) = self.input_surface()
                 && pressing(self.mtm())
             {
                 crate::scroll::commit_pending(&surface);
@@ -548,7 +553,8 @@ define_class!(
             // frame (an absolutely positioned menu over a web view),
             // ignores layer transforms and hidden layers, and reaches
             // views animating out or under `pointerEvents: "none"`.
-            let root = self.ivars().surface.borrow().strong_count() > 0;
+            let root = self.ivars().surface.borrow().strong_count() > 0
+                || self.ivars().window.borrow().strong_count() > 0;
             match hit {
                 Some(_) if root => Some(self.root_hit(point)),
                 other => other,
@@ -672,7 +678,7 @@ define_class!(
         // The root sets NSH's cursor; other views pass it up to it.
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, event: &NSEvent) {
-            match self.surface() {
+            match self.input_surface() {
                 Some(surface) => crate::input::cursor_update(&surface),
                 // SAFETY: NSView's own handling (passes it up).
                 None => unsafe { msg_send![super(self), cursorUpdate: event] },
@@ -681,7 +687,7 @@ define_class!(
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
-            match self.surface() {
+            match self.input_surface() {
                 // Scrolls move views: a frame for the performance monitor.
                 Some(surface) => surface.measure(true, || {
                     crate::input::event(&surface, event);
@@ -705,7 +711,7 @@ define_class!(
         /// The Edit menu's Copy (Cmd+C): the selected text.
         #[unsafe(method(copy:))]
         fn copy(&self, _sender: Option<&AnyObject>) {
-            if let Some(surface) = self.surface() {
+            if let Some(surface) = self.input_surface() {
                 crate::text::copy(&surface);
             }
         }
@@ -714,7 +720,7 @@ define_class!(
         /// selectable view's.
         #[unsafe(method(selectAll:))]
         fn select_all(&self, _sender: Option<&AnyObject>) {
-            if let Some(surface) = self.surface() {
+            if let Some(surface) = self.input_surface() {
                 crate::text::select_all(&surface);
             }
         }
@@ -795,6 +801,8 @@ define_class!(
             crate::sight::moved();
             if let Some(surface) = self.surface() {
                 surface.resized(size.width as f32, size.height as f32);
+            } else if let Some(surface) = self.ivars().window.borrow().upgrade() {
+                crate::window::resized(&surface, &NshView(self.retain()));
             }
         }
 
@@ -858,6 +866,9 @@ define_class!(
             crate::sight::moved();
             NshView(self.retain()).set_layer_geometry();
             NshView(self.retain()).rescale();
+            if self.ivars().window.borrow().strong_count() > 0 {
+                self.install_tracking();
+            }
             if let Some(surface) = self.surface() {
                 self.install_tracking();
                 crate::system::window_changed(&surface);
@@ -913,13 +924,13 @@ impl ViewObj {
     // Only the root stores a surface. A focused child (a Tab stop) uses its
     // ancestors for keyboard handling; drawing and pointer hooks stay root-only.
     fn keyboard_surface(&self) -> Option<std::rc::Rc<Surface>> {
-        if let Some(surface) = self.surface() {
+        if let Some(surface) = self.input_surface() {
             return Some(surface);
         }
         let mut parent = superview(self);
         while let Some(view) = parent {
             if let Some(root) = view.downcast_ref::<ViewObj>()
-                && let Some(surface) = root.surface()
+                && let Some(surface) = root.input_surface()
             {
                 return Some(surface);
             }
@@ -932,18 +943,38 @@ impl ViewObj {
         self.ivars().surface.borrow().upgrade()
     }
 
+    /// The surface an event reaching this view goes to, when it is a root:
+    /// the surface's own, or a window of the app's own's
+    /// ([`NshView::set_window_of`]). The surface's input then picks in this
+    /// view's window ([`crate::input::enter`]).
+    fn input_surface(&self) -> Option<std::rc::Rc<Surface>> {
+        if let Some(surface) = self.surface() {
+            crate::input::enter(&surface, None);
+            return Some(surface);
+        }
+        let surface = self.ivars().window.borrow().upgrade()?;
+        crate::input::enter(&surface, Some(NshView(self.retain())));
+        Some(surface)
+    }
+
     /// What the root's `hitTest:` returns inside it: a hosted AppKit view
     /// nsh's picking lands on (past overlays that let the pointer
     /// through), else the root itself. `point` is in the root's
     /// superview's coordinates.
     fn root_hit(&self, point: NSPoint) -> Retained<NSView> {
         let me = || Retained::from(&**self);
-        let Some(surface) = self.surface() else {
+        // A query AppKit makes at any time: it picks in this root and leaves
+        // the input's window (`input::enter`) to the events.
+        let Some(surface) = self
+            .surface()
+            .or_else(|| self.ivars().window.borrow().upgrade())
+        else {
             return me();
         };
         let outer = superview(self);
         let p = self.convertPoint_fromView(point, outer.as_deref());
-        let Some(native) = crate::input::native_at(&surface, p.x as f32, p.y as f32) else {
+        let root = NshView(self.retain());
+        let Some(native) = crate::input::native_at(&root, p.x as f32, p.y as f32) else {
             return me();
         };
         // A web view that does not scroll leaves wheels to the app's
@@ -959,7 +990,7 @@ impl ViewObj {
     }
 
     fn pointer(&self, event: &NSEvent) {
-        if let Some(surface) = self.surface() {
+        if let Some(surface) = self.input_surface() {
             // Drags may scroll or pan (a frame for the performance
             // monitor); the rest changes the screen through the engine.
             let drag = matches!(
@@ -1149,6 +1180,7 @@ impl NshView {
             state: RefCell::new(ViewState::new(id, kind)),
             container: RefCell::new(None),
             surface: RefCell::new(Weak::new()),
+            window: RefCell::new(Weak::new()),
             tracking: Cell::new(false),
             content: RefCell::new(None),
             overlay: RefCell::new(None),
@@ -1169,6 +1201,14 @@ impl NshView {
     /// and keyboard events and reports its size.
     pub(crate) fn set_surface(&self, surface: Weak<Surface>) {
         *self.ivars().surface.borrow_mut() = surface;
+    }
+
+    /// Makes this the root view of a window of `surface`'s app
+    /// (`Window.open`; `Weak::new()` when it leaves it): it takes the
+    /// window's mouse and keyboard events for the surface, and its resizes
+    /// are reported as the window's ([`crate::window`]).
+    pub(crate) fn set_window_of(&self, surface: Weak<Surface>) {
+        *self.ivars().window.borrow_mut() = surface;
     }
 
     /// From an AppKit view of ours, if it is one.

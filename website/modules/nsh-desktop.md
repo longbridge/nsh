@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), its state and the displays (`window_state`, `displays`, `set_window_bounds`), `quit`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
+`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), its state and the displays (`window_state`, `displays`, `set_window_bounds`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
 
 ```rust tabs
 use nsh_core::{
@@ -109,19 +109,21 @@ chat.focus();
 
 The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
 `close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
-it too. `Window.open` runs on Linux and Windows; on other platforms it throws.
+it too. `Window.open` runs on macOS, Windows and Linux; on other platforms it throws.
 
 ## Application
 
 ```ts
 const Application: {
   quit(): void;
+  restart(): void;
 };
 ```
 
 | Member | Rust | Description |
 |---|---|---|
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
+| `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
 update. The app stops as when its last window closes, then its run ends, also when closing the window alone would
@@ -130,6 +132,23 @@ item: the standalone app on macOS returns from `run_app` as with Cmd+Q; in a GPU
 reaches its `AppView::on_close_request` handler as `CloseRequest::Quit`, which quits when the app is ready; elsewhere
 the quit goes ahead as the Quit item's does. A view
 embedded in another app leaves the app's lifecycle to that app. In the terminal the app ends, as with a quit role.
+
+`Application.restart()` is for a setting that takes effect at the next start, such as the app's language: the app asks
+the user first, then calls it. The app quits as with `quit()`, and once its process has exited the same program starts
+again with the arguments it was started with; the two processes never run side by side. On macOS an app inside an
+`.app` bundle comes back through Launch Services, as when the user opens it. It works in standalone apps on macOS,
+Windows and Linux, including those `nsh package` builds; a view embedded in another app (a GPUI app's `AppView`, say)
+leaves restarting to that app. Under `nsh run` the app quits, and `nsh run` ends with it: check restarting in an app
+`nsh package` builds.
+
+```tsx
+import { Application } from "nsh/desktop";
+
+async function changeLanguage(language: string) {
+  await saveLanguage(language);
+  if (await confirmRestart()) Application.restart();
+}
+```
 
 ## A title bar of your own
 
@@ -525,7 +544,7 @@ On macOS they ask the user for no permission. A letter is the key that types it 
 
 On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
 
-On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`, or in a Lua configuration `hl.bind("CTRL + ALT + K", hl.dsp.global("com.example.mail:ctrl+alt+k"))`. The portal knows the app by its id, which needs the app's `.desktop` file: `nsh package` installs one, and `nsh run` writes one for an app with URL schemes.
 
 ```tsx
 import { GlobalShortcut, Window } from "nsh/desktop";

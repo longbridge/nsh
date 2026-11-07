@@ -665,7 +665,11 @@ impl Surface {
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
         self.invalid.set(false);
-        crate::render::frame(self);
+        // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
+        // `invalid` stays set (no second `WM_PAINT` meanwhile).
+        if crate::render::frame(self) {
+            self.invalid.set(true);
+        }
     }
 
     /// Hosted items drawn by the frame just shown, with their window

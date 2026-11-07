@@ -237,7 +237,9 @@ fn resized(surface: &Surface, window: &AppWindow) {
 /// Draws `window` (`WM_PAINT`, and at once when resized).
 fn paint(surface: &Rc<Surface>, window: &AppWindow) {
     window.invalid.set(false);
-    crate::render::window_frame(
+    // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
+    // `invalid` stays set (no second `WM_PAINT` meanwhile).
+    let deferred = crate::render::window_frame(
         surface,
         &window.view,
         window.hwnd,
@@ -246,6 +248,9 @@ fn paint(surface: &Rc<Surface>, window: &AppWindow) {
         window.pixels.get(),
         window.scale.get(),
     );
+    if deferred {
+        window.invalid.set(true);
+    }
 }
 
 /// The window's frame (`Window.setFrame` on the window's handle): its
@@ -320,6 +325,16 @@ pub(crate) fn handle(
             }
             // SAFETY: as above.
             let _ = unsafe { EndPaint(hwnd, &ps) };
+            Some(Some(LRESULT(0)))
+        }
+        crate::window::WM_NSH_PAINT => {
+            // Drawn now: a pending `WM_PAINT` would only draw the same frame
+            // again.
+            // SAFETY: a plain call on this window.
+            let _ = unsafe { windows::Win32::Graphics::Gdi::ValidateRect(Some(hwnd), None) };
+            if let Some(window) = &window {
+                paint(surface, window);
+            }
             Some(Some(LRESULT(0)))
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),

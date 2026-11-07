@@ -302,6 +302,40 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
   }
 });
 
+test("a face registered while another loads keeps the app hidden until both have loaded", async () => {
+  const { player } = fakePlayer();
+  const classes = new Set();
+  player.root = {
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
+  };
+  player.starting = true;
+  player.metricsCache = new Map();
+  let loaded = 0;
+  player.call = (f) => f({ nsh_fonts_loaded: () => loaded++ });
+  const face = () => {
+    let resolve;
+    const loading = new Promise((r) => (resolve = r));
+    return { loading, resolve };
+  };
+  const first = face();
+  const second = face();
+  player.fontLoading(first.loading);
+  player.fontLoading(second.loading);
+  first.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(loaded, 0);
+  assert.ok(classes.has("nsh-hidden"));
+  second.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(loaded, 1);
+  assert.ok(!classes.has("nsh-hidden"));
+  clearTimeout(player.fontTimer);
+});
+
 test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {
   const { player } = fakePlayer();
   const ran = [];
