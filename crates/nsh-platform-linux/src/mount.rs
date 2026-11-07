@@ -154,7 +154,9 @@ impl Mounter {
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // A window's size is the window's (it reports it with
+                // `set_root_size`).
+                if *id == ROOT_ID || crate::window::is_window(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;
@@ -406,9 +408,14 @@ impl Mounter {
     fn command(&self, surface: &Rc<Surface>, id: NodeId, command: &Command) {
         let view = self.views.get(&id);
         match command {
-            Command::Focus => view.map_or((), crate::text_input::focus),
+            Command::Focus => match view {
+                Some(view) if view.kind() == ViewKind::Input => crate::text_input::focus(view),
+                Some(view) => crate::key_focus::focus(view),
+                None => {}
+            },
             Command::Blur => match view {
                 Some(view) if view.kind() == ViewKind::Input => crate::text_input::blur(view),
+                Some(view) if crate::key_focus::blur(view) => {}
                 _ => crate::text_input::blur_all(surface),
             },
             Command::SetSelection { start, end } => {
@@ -427,6 +434,11 @@ impl Mounter {
                     crate::scroll::command(surface, view, command);
                 }
             }
+            // A window of the app's own (`Window.open`) hosts dialog root
+            // `id`.
+            Command::Desktop(desktop) if id != ROOT_ID => {
+                crate::window::command(surface, id, view, desktop)
+            }
             // Here, with the view at hand: `Surface::view` would borrow the
             // mounter again while a batch is applied.
             Command::AccessibilityFocus => {
@@ -444,6 +456,7 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::Load(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

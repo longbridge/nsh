@@ -81,6 +81,10 @@ final class Native {
     static final int FILE_REQUEST = 69;
     static final int SPEECH = 70;
     static final int DOWNLOAD = 71;
+    static final int NOTIFICATION = 72;
+    static final int URL_SCHEME = 73;
+    static final int AUDIO = 74;
+    static final int WINDOW = 75;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -153,7 +157,7 @@ final class Native {
     static native byte[] imageBytes(long handle, String uri);
 
     /** {@code capabilities}: the app's declaration (JSON), {@code app}: its {@code app.json} ({@code id}); null for none. */
-    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app);
+    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app, String updater);
 
     static native boolean connectDevServer(long handle, String url);
 
@@ -217,8 +221,13 @@ final class Native {
      * values: safe area top, right, bottom, left, keyboard height, keyboard
      * animation duration (s), font scale, 1 if the language is right to left.
      * locale: the default locale's language tag (`Intl`'s default).
+     * timeZone: the system's time zone's ID (`Europe/Berlin`).
+     * languages: the preferred languages' tags, most preferred first, comma-separated.
+     * regional: the system's format locale's tag, with Android 14's regional
+     * preferences as its Unicode extension (`en-US-u-fw-mon-mu-celsius`).
      */
-    static native void environment(long handle, float[] values, boolean dark, String locale);
+    static native void environment(long handle, float[] values, boolean dark, String locale, String timeZone,
+            String languages, String regional);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
 

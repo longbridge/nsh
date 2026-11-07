@@ -56,6 +56,8 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
+        windows: None,
     }
 }
 
@@ -141,6 +143,8 @@ fn first_error(bundle: Bundle) -> String {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
+        windows: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
     rx.recv_timeout(Duration::from_secs(5))

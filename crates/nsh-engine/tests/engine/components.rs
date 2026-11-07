@@ -107,6 +107,8 @@ fn app_config(
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
+        windows: None,
     }
 }
 
@@ -1586,6 +1588,61 @@ fn picked_images_reach_js_as_files() {
     );
 }
 
+const FILE_PICKER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const files = await Picker.pickFiles({
+    multiple: true,
+    limit: 2,
+    filters: [{ name: "Documents", extensions: [".PDF", "*.md"] }],
+  });
+  const [{ file }] = files;
+  const text = await file.text();
+  const url = URL.createObjectURL(file);
+  shown.set(
+    `${files.length} ${file instanceof File} ${file.name} ${file.type} ${file.size} ${text} ${url.startsWith("blob:")}`,
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_reach_js_with_their_names_and_bytes() {
+    let (engine, rx) = start(FILE_PICKER);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let mut file = nsh_core::picker::PickedFile::default();
+                file.name = "/tmp/report.final.pdf".into();
+                file.data = nsh_core::ImageData::new(b"%PDF".to_vec());
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: vec![file.clone(), file.clone(), file],
+                    },
+                );
+            }
+        }
+        shows(batch, "2 true report.final.pdf application/pdf 4 %PDF true")
+    });
+    let asked = asked.expect("a pick");
+    assert_eq!(asked.limit, 2);
+    assert_eq!(asked.filters[0].name, "Documents");
+    assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -1968,6 +2025,130 @@ Menu.popup([{ label: "Copy link", onSelect: () => chosen.set("copied") }]).then(
 mount(() => <Text>{chosen()}</Text>);
 "#;
 
+const MENU_ICONS: &str = r#"import { mount, Text } from "nsh";
+import { Menu } from "nsh/desktop";
+
+const svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+const url = URL.createObjectURL(new Blob(["<svg/>"], { type: "image/svg+xml" }));
+Menu.setApplicationMenu([
+  {
+    label: "File",
+    icon: svg,
+    submenu: [
+      { label: "New", icon: svg },
+      { label: "Logo", icon: { url: "asset:/logo.png", size: { width: 16, height: 16 }, scales: [1, 2] } },
+      { label: "Blob", icon: url },
+      { label: "Remote", icon: "https://example.com/a.png" },
+      { label: "Empty", icon: "" },
+      { label: "None" },
+    ],
+  },
+]);
+
+let wrong = "accepted";
+try {
+  Menu.setApplicationMenu([{ label: "File", submenu: [{ label: "Bad", icon: 12 }] }]);
+} catch (e) {
+  wrong = e.message;
+}
+
+mount(() => <Text>{wrong}</Text>);
+"#;
+
+/// An item's `icon` reaches the platform as `<Image>`'s `src` does: a `data:`
+/// URI or a blob's bytes in hand under a short key, an imported image with its
+/// size and scales; nothing for an empty string, and a throw for what is no
+/// image.
+#[test]
+fn menu_icons_reach_the_platform_as_image_sources() {
+    use nsh_core::{
+        ImageScales,
+        desktop::{DesktopCommand, MenuItem},
+    };
+
+    let (_engine, rx) = start_in(
+        MENU_ICONS,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let mut menu = None;
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } = item
+                && let DesktopCommand::SetMenu(Some(items)) = &**command
+            {
+                menu = Some(items.clone());
+            }
+        }
+        shows(
+            batch,
+            "nsh/desktop: an item's `icon` is a URL or an imported image",
+        )
+    });
+    assert!(
+        batches.iter().any(|b| shows(
+            b,
+            "nsh/desktop: an item's `icon` is a URL or an imported image"
+        )),
+        "{batches:?}"
+    );
+    let menu = menu.expect("the menu");
+    let [MenuItem::Submenu { icon, items, .. }] = &*menu else {
+        panic!("a submenu: {menu:?}");
+    };
+    let inline = icon.as_ref().expect("the submenu's icon");
+    assert_eq!(
+        &*inline.data.as_ref().expect("its bytes").to_vec(),
+        b"<svg xmlns='http://www.w3.org/2000/svg'/>"
+    );
+    assert!(
+        inline.uri.starts_with("data:image/svg+xml;nsh-key="),
+        "{}",
+        inline.uri
+    );
+    let icons: Vec<_> = items
+        .iter()
+        .map(|item| match item {
+            MenuItem::Action(action) => action.icon.clone(),
+            other => panic!("an action: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        icons[0].as_ref().map(|icon| &*icon.uri),
+        Some(&*inline.uri),
+        "the same image, the same key"
+    );
+    let logo = icons[1].as_ref().expect("the imported image");
+    assert_eq!(&*logo.uri, "asset:/logo.png");
+    assert_eq!(
+        logo.size,
+        Some(nsh_core::geometry::size(
+            nsh_core::Points(16.0),
+            nsh_core::Points(16.0)
+        ))
+    );
+    assert_eq!(logo.scales, [1.0, 2.0].into_iter().collect::<ImageScales>());
+    assert_eq!(logo.data, None);
+    let blob = icons[2].as_ref().expect("the blob's URL");
+    assert!(
+        blob.uri.starts_with("data:image/svg+xml;nsh-key="),
+        "{}",
+        blob.uri
+    );
+    assert_eq!(&*blob.data.as_ref().expect("its bytes").to_vec(), b"<svg/>");
+    assert_eq!(
+        &*icons[3].as_ref().expect("the URL").uri,
+        "https://example.com/a.png"
+    );
+    assert_eq!(icons[4], None, "an empty URL is no image");
+    assert_eq!(icons[5], None);
+}
+
 /// `Menu.setApplicationMenu` reaches the platform as items with ids and
 /// shortcuts (a role's by default), and the platform's `onMenu` calls the
 /// chosen item's function; mobile platforms get nothing.
@@ -2008,6 +2189,7 @@ fn menus_reach_the_platform_and_call_back() {
         checked: None,
         role: None,
         when: nsh_core::keymap::When::Always,
+        icon: None,
     };
     let quit = MenuAction {
         id: 0,
@@ -2017,6 +2199,7 @@ fn menus_reach_the_platform_and_call_back() {
         checked: None,
         role: Some(MenuRole::Quit),
         when: nsh_core::keymap::When::Always,
+        icon: None,
     };
     assert_eq!(
         &*menu,
@@ -2028,6 +2211,7 @@ fn menus_reach_the_platform_and_call_back() {
                 MenuItem::Separator,
                 MenuItem::Action(quit)
             ],
+            icon: None,
         }]
     );
     engine.control().dispatch_event(
@@ -2072,6 +2256,43 @@ fn menus_reach_the_platform_and_call_back() {
             ..
         }
     )));
+}
+
+const QUIT: &str = r#"import { mount, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+Application.quit();
+Application.restart();
+mount(() => <Text>{`quit ${typeof Application.quit} ${typeof Application.restart}`}</Text>);
+"#;
+
+/// `Application.quit()` reaches the platform as the root's quit command, which it
+/// carries out as its quit menu role; `Application.restart()` as the root's
+/// restart command.
+#[test]
+fn app_quit_reaches_the_platform() {
+    use nsh_core::desktop::DesktopCommand;
+
+    let (_engine, rx) = start_in(
+        QUIT,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "quit function function"));
+    for expected in [DesktopCommand::Quit, DesktopCommand::Restart] {
+        assert!(
+            batches.iter().flat_map(|b| &b.items).any(|item| matches!(
+                item,
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } if **command == expected
+            )),
+            "{expected:?}: {batches:?}"
+        );
+    }
 }
 
 const LOCALE: &str = r#"import { mount, Text } from "nsh";

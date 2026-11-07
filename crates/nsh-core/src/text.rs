@@ -725,6 +725,15 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// Whether each line takes all that fits and [`TextEngine::measure`]'s
+    /// width is the widest line's: a maximum width between that width and
+    /// the one measured then breaks the lines at the same places, so the
+    /// core knows the size without typesetting. A window's resize changes
+    /// the width of every text of a page on every size.
+    fn breaks_lines_greedily(&self) -> bool {
+        false
+    }
+
     /// The final layout in a box of exactly `size`, for drawing.
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
@@ -803,6 +812,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
         (**self).prepare_aligned(text, alignments)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        (**self).breaks_lines_greedily()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
@@ -1230,6 +1243,9 @@ pub(crate) struct MeasureCache {
     previous: FxHashMap<(u64, u32), Size<Points>>,
     pixel_ratio: f32,
     cell: Option<Size<Points>>,
+    /// The commit of a burst of resizes under way (`Core::set_resizing`):
+    /// text it did not find near the screen is not measured.
+    pub(crate) resizing: Option<u32>,
 }
 
 impl Default for MeasureCache {
@@ -1239,6 +1255,7 @@ impl Default for MeasureCache {
             previous: FxHashMap::default(),
             pixel_ratio: 1.0,
             cell: None,
+            resizing: None,
         }
     }
 }
@@ -1396,6 +1413,23 @@ fn woff_tables_size(data: &[u8]) -> Result<Option<u64>, String> {
         size += u64::from(length);
     }
     Ok(Some(size))
+}
+
+/// The family name a font registers under, which `fontFamily` names: its
+/// typographic family (name 16) when it has one, else its family (name
+/// 1). A WOFF or WOFF2 font's is the one of the font it holds.
+pub fn font_family(data: &[u8]) -> Result<String, String> {
+    let data = font_data(data)?;
+    let face = ttf_parser::Face::parse(&data, 0).map_err(|e| format!("not a font: {e}"))?;
+    let name = |id| {
+        face.names()
+            .into_iter()
+            .filter(|n| n.name_id == id && n.is_unicode())
+            .find_map(|n| n.to_string())
+    };
+    name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
+        .or_else(|| name(ttf_parser::name_id::FAMILY))
+        .ok_or_else(|| "the font has no family name".to_owned())
 }
 
 #[cfg(test)]
@@ -1722,6 +1756,15 @@ mod tests {
             assert_eq!(face(&data), original);
         }
         assert!(font_data(b"wOF2 and nothing else").is_err());
+        assert_eq!(font_family(ttf).as_deref(), Ok("Pacifico"));
+        assert_eq!(
+            font_family(include_bytes!(
+                "../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2"
+            ))
+            .as_deref(),
+            Ok("Pacifico")
+        );
+        assert!(font_family(b"not a font").is_err());
     }
 
     /// A WOFF file of 68 bytes whose one table declares `length` bytes.

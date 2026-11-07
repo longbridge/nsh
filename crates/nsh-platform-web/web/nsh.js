@@ -90,8 +90,19 @@ const SLIDE_MS = 300;
 const FADE_MS = 200;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
+// Browsers that order Tab and screen readers by `reading-order`
+// (`orderReading`); the others keep the DOM's order.
+const READING_ORDER = typeof CSS !== "undefined" && !!CSS.supports?.("reading-flow", "source-order");
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
+/** How long after something animated comes due a timer makes it happen
+ * when no animation frame did (`keepDeadline`, `moveScreens`, ...): more
+ * than a frame, so that while the page shows its frames always come first. */
+const LATE_MS = 50;
+/** How long a dialog waits for the two frames before it comes in
+ * (`present`): far more than two frames, so it only waits that long while
+ * frames stop (a hidden tab). */
+const ENTER_LATE_MS = 250;
 
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
@@ -159,6 +170,13 @@ const KEYFRAMES = `
   text-underline-offset: 0.2em; }
 .nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
+/* A view of no size (\`display: none\` lays it out at none) draws nothing of
+   its own, as on the native backends, which draw inside its bounds: CSS
+   would still draw its border overlay (a border-box is never smaller than
+   its borders, so four 1px borders make a 2px square), its outline and its
+   shadow's spread. Its children stay, a zero-size anchor's included. */
+.nsh-empty > .nsh-border { display: none; }
+.nsh-v.nsh-empty { outline: none; box-shadow: none; }
 /* The mounter's own styles: no element has an inline style but its frame
    and animated values (generated classes, \`op_css\`, come after these). */
 .nsh-page { overscroll-behavior: none; }
@@ -172,6 +190,9 @@ const KEYFRAMES = `
 .nsh-box-none { pointer-events: none; }
 .nsh-inert, .nsh-inert * { pointer-events: none !important; }
 .nsh-clip { overflow: clip; }
+/* Chromium drops the backdrop filters (or their masks) inside a view that clips with \`corner-shape\` corners
+   (placeCorners): such a view with a backdrop-filtered view inside clips with circular corners of the radius. */
+.nsh-curve-clip:has(.nsh-backdrop) { corner-shape: round !important; border-radius: var(--nsh-round) !important; }
 /* A sticky list cell's range of travel (op_sticky): it lifts the cell above the other cells, and with no breadth
    across it takes no pointer events. The cell sticks inside it, at its left in either direction. */
 .nsh-track { position: absolute; z-index: 5; }
@@ -370,6 +391,26 @@ function timeZoneName() {
 }
 
 /**
+ * What the browser knows of the regional preferences of `locale`
+ * (`localeSettings()`'s `hourCycle` and the like): its hour cycle and first day of the week,
+ * and the locale with its likely region (`de` is `de-Latn-DE`), which has
+ * the others. Browsers tell no user settings of them.
+ */
+function regional(locale) {
+  const known = { locale };
+  try {
+    const l = new Intl.Locale(locale);
+    known.locale = l.maximize().toString();
+    // `weekInfo` before browsers made it `getWeekInfo()`.
+    known.firstDay = (l.getWeekInfo?.() ?? l.weekInfo)?.firstDay;
+    known.hourCycle = new Intl.DateTimeFormat(locale, { hour: "numeric" }).resolvedOptions().hourCycle;
+  } catch {
+    // A tag the browser does not take: the region's.
+  }
+  return known;
+}
+
+/**
  * The key of a key event as `nsh_key` takes it (-1: none): the character
  * it types without modifiers, or, when Shift or Option change it or the
  * layout types no ASCII there, the US layout's character of the same key
@@ -434,6 +475,13 @@ function defineClass(name, text, replace, weight = 2) {
     console.warn("[nsh] style rule not accepted:", text, err);
   }
 }
+
+/** Whether the browser draws `corner-shape` (Chromium; not Safari or Firefox so far). */
+const CORNER_SHAPE = typeof CSS !== "undefined" && CSS.supports?.("corner-shape", "squircle");
+/** How far along each edge a continuous corner of radius 1 reaches, as Core Animation's. */
+const CONTINUOUS_REACH = 1.528;
+/** The `superellipse()` that at that reach passes where a circle of radius 1 does on the diagonal. */
+const CONTINUOUS_SUPERELLIPSE = 1.7;
 
 /** The class of CSS text `text` (as the engine names them), defined when
  * new; `weight` repeats it in the selector, over the views' style classes. */
@@ -841,6 +889,9 @@ class Player {
     this.appearing = [];
     this.disappearing = [];
     this.changedStacks = new Set();
+    // Scroll views (or their content layers) whose content the batch
+    // placed or added to (`orderReading`).
+    this.readingHosts = new Set();
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
@@ -1386,7 +1437,9 @@ class Player {
     }
     if (pending.length > 1) return;
     const settle = () => {
-      const waiting = this.fontsPending;
+      // A copy: faces registered while these load join `fontsPending`, and
+      // must be found there when these are done.
+      const waiting = [...this.fontsPending];
       Promise.all(waiting).then(() => {
         if (this.fontsPending.length > waiting.length) {
           this.fontsPending = this.fontsPending.slice(waiting.length);
@@ -1448,6 +1501,7 @@ class Player {
   /** Stops what ran and empties the root; its size. */
   reset() {
     this.stop();
+    this.audioDispose();
     this.resetHistory();
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
@@ -1468,7 +1522,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom();
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1577,6 +1631,8 @@ class Player {
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    clearTimeout(this.keeper?.timer);
+    this.keeper = null;
     this.browserHost?.stop();
     this.wasm?.nsh_stop();
     } finally { this.stopping = false; }
@@ -1633,12 +1689,63 @@ class Player {
     }
   }
 
+  /** The engine wants a frame (`request_frame`): the native animations
+   * run, or JS asked for one. */
   requestFrame() {
+    this.deadlineSoon();
     if (this.frame) return;
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
+      this.frameAt = performance.now();
       this.call((w) => w.nsh_frame(now));
     });
+  }
+
+  /** `keepDeadline` once the call into the engine that asked for a frame
+   * is over: the engine is not reentrant, and one look after however many
+   * asked in it is enough. */
+  deadlineSoon() {
+    if (this.deadlineQueued) return;
+    this.deadlineQueued = true;
+    queueMicrotask(() => {
+      this.deadlineQueued = false;
+      this.keepDeadline();
+    });
+  }
+
+  /**
+   * Makes what the native animations end happen on time while no
+   * animation frames come: browsers run no `requestAnimationFrame` in a
+   * hidden tab (nor, often, in an iframe out of view), and an animation
+   * must still end and tell the app (`finished`). A timer waits for the
+   * graph's next deadline (`nsh_deadline`) and `LATE_MS` more; if no frame
+   * ran since it came due, it runs one at the current time, which steps
+   * the graph there, ends what ended and gives the next deadline. While
+   * frames come it does nothing. Nothing waits for what only draws (an
+   * animation looping forever, a JS frame request), so a hidden page with
+   * a spinner does no work. Browsers throttle a hidden page's timers (to
+   * about once a second), which an end there can come as late as.
+   */
+  keepDeadline() {
+    if (this.trapped || !this.wasm?.nsh_deadline) return;
+    const now = performance.now();
+    const at = this.wasm.nsh_deadline(now);
+    if (at < 0) return;
+    // One timer at a time: the one waiting for an earlier deadline
+    // schedules the next when it fires.
+    if (this.keeper && this.keeper.at <= at) return;
+    clearTimeout(this.keeper?.timer);
+    const keeper = { at, timer: 0 };
+    keeper.timer = setTimeout(() => {
+      if (this.keeper !== keeper) return;
+      this.keeper = null;
+      if (!(this.frameAt >= at)) {
+        this.frameAt = performance.now();
+        this.call((w) => w.nsh_frame(this.frameAt));
+      }
+      this.keepDeadline();
+    }, Math.max(0, at + LATE_MS - now));
+    this.keeper = keeper;
   }
 
   resized() {
@@ -1656,11 +1763,12 @@ class Player {
   /**
    * The kind of device, decided when an app starts (it never changes while
    * it runs, as on every platform): a mouse (a fine pointer that hovers)
-   * and a viewport at least 600 wide make a desktop, a touch screen whose
-   * short side is at least 600 a tablet, the rest a phone.
+   * makes a desktop at any width, as a narrow window does on the native
+   * desktops, a touch screen whose short side is at least 600 a tablet,
+   * the rest a phone.
    */
-  measureIdiom(width) {
-    if (matchMedia("(pointer: fine) and (hover: hover)").matches && width >= 600) return "desktop";
+  measureIdiom() {
+    if (matchMedia("(pointer: fine) and (hover: hover)").matches) return "desktop";
     return Math.min(screen.width, screen.height) >= 600 ? "pad" : "phone";
   }
 
@@ -1681,7 +1789,8 @@ class Player {
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
     // `lifecycle()`: hidden (another tab, a minimized window) or without
-    // the focus.
+    // the focus. The time zone (`localeSettings()`) is read again then too: browsers tell no
+    // change of the system's zone, which the user makes away from the page.
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
     addEventListener("blur", changed);
@@ -1729,6 +1838,10 @@ class Player {
     return {
       idiom: this.idiom,
       locale,
+      // The browser's preferred languages (`localeSettings()`), the locale's
+      // first; `languagechange` tells their changes.
+      languages: [...new Set([locale, ...languages.filter(Boolean)])],
+      regional: regional(locale),
       rtl: dir === "rtl" || dir === "ltr" ? dir === "rtl" : rightToLeft(locale),
       reduceMotion: this.reducedMotion.matches,
       fontScale: Math.round(fontSize / 16 * 100) / 100,
@@ -1740,7 +1853,10 @@ class Player {
       lifecycle: document.visibilityState === "hidden"
         ? "background"
         : document.hasFocus() ? "active" : "inactive",
+      timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
+      notifications: typeof window.Notification === "function",
+      audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
     };
   }
 
@@ -1814,6 +1930,16 @@ class Player {
     box.replaceChildren(copy, message);
   }
 
+  /** Loads `img` from `src`, the address of `uri`: an app's asset from
+   * another origin (a packaged site's `--asset-url`) as a CORS image, so a
+   * canvas and a transition's snapshot may still draw it. */
+  setImageSource(img, uri, src) {
+    const asset = uri?.startsWith("asset:/") && new URL(src, location.href).origin !== location.origin;
+    if (asset) img.crossOrigin = "anonymous";
+    else img.removeAttribute("crossorigin");
+    img.src = src;
+  }
+
   asset(uri) {
     if (!uri) return uri;
     if (uri.startsWith("asset:/")) {
@@ -1834,6 +1960,43 @@ class Player {
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
+    if (this.readingHosts?.size) this.orderReading();
+  }
+
+  /** `el` was placed or added in `parent`: when that is a scroll view's
+   * content, its reading order is set again after the batch. */
+  readingChanged(parent) {
+    if (!READING_ORDER || !parent) return;
+    // A sticky cell is in a track among the other cells.
+    const host = parent._list ? parent.parentNode : parent;
+    if (host && (host._kind === "scroll" || host._screenOrder || host.classList.contains("nsh-layer"))) (this.readingHosts ??= new Set()).add(host);
+  }
+
+  /** Tab and screen readers go through a scroll view's content in the
+   * order it is on screen, along the scroll axis, then across it, as on
+   * the other platforms. A list's recycled cells stay where they were
+   * made in the DOM, which is also the order they paint in, so the DOM is
+   * not in their rows' order: `reading-order` gives the rows' order
+   * without moving them (a move would blur a focused field, restart
+   * animations and reload frames inside them). */
+  orderReading() {
+    for (const host of this.readingHosts) {
+      const scroll = host._kind === "scroll" || host._screenOrder ? host : host.parentNode;
+      const horizontal = scroll?._screenOrder ? scroll._screenOrder === "horizontal" : !!scroll?._horizontal;
+      const kids = [];
+      for (const child of host.children) {
+        const f = (child._list ? child.firstElementChild : child)?._frame;
+        if (f && (child._id !== undefined || child._list)) kids.push(horizontal ? [f[0], f[1], child] : [f[1], f[0], child]);
+      }
+      kids.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      if (host.style.readingFlow !== "source-order") host.style.readingFlow = "source-order";
+      kids.forEach(([, , child], i) => {
+        if (child._readingOrder === i) return;
+        child._readingOrder = i;
+        child.style.readingOrder = String(i);
+      });
+    }
+    this.readingHosts.clear();
   }
 
   /** The batch is applied: views it removed leave the page, unless they
@@ -1938,6 +2101,7 @@ class Player {
     child._leftWith = null;
     const host = parent._layer ?? parent;
     host.insertBefore(child, before && before.parentNode === host ? before : null);
+    this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
@@ -2021,8 +2185,16 @@ class Player {
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
     const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
+    // A stack laid out at no size (`display: none`: a tab not selected) or
+    // at one again changes whether it shows (`stackShown`).
+    const emptied = el._kind === "stack" && el._frame && !(el._frame[2] > 0 && el._frame[3] > 0) !== !(w > 0 && h > 0);
     el._frame = [x, y, w, h];
+    // No size: nothing of its own shows (`.nsh-empty`).
+    el.classList.toggle("nsh-empty", !(w > 0 && h > 0));
+    if (emptied) this.syncHistorySoon();
     this.placeFrame(el);
+    this.readingChanged(el.parentNode);
+    if (resized && el._corners) this.placeCorners(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
       const box = (f) => ({ left: `${f[0]}px`, top: `${f[1]}px`, width: `${f[2]}px`, height: `${f[3]}px` });
       const a = this.animateLayout(el, [box(from), box(el._frame)], update);
@@ -2062,23 +2234,64 @@ class Player {
 
   /** Visual style: its class replaces the previous one; the frame and
    * animated properties are inline. */
-  op_s([, id, css, border, tint]) {
+  op_s([, id, css, border, tint, ...corners]) {
     const el = this.view(id);
     if (!el) return;
     swapClass(el, "_class", this.styleClass(css));
+    if (CORNER_SHAPE) {
+      // Marks the views a clipping `corner-shape` ancestor must not hide (`.nsh-curve-clip`).
+      const backdrop = CLASSES.rules.get(el._class)?.style.backdropFilter;
+      el.classList.toggle("nsh-backdrop", !!backdrop && backdrop !== "none");
+    }
     if (border) {
       if (!el._border) el._border = document.createElement("div");
       el._border.className = `nsh-border ${this.styleClass(border)}`;
+      el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
       el.append(el._border);
     } else if (el._border) {
       el._border.remove();
       el._border = null;
     }
+    el._corners = corners.length ? corners : null;
+    this.placeCorners(el);
     if (el._kind === "image") {
       el._tint = tint;
       this.applyTint(el);
     }
+  }
+
+  /**
+   * `borderCurve: "continuous"` as CSS `corner-shape`, which shapes the view's
+   * border, shadows, clip and backdrop too. Corners reach as far along the
+   * edges as iOS's, and pass where circular corners of the radius do on the
+   * diagonal, so a radius looks as round as on the native backends. Without
+   * room to reach that far they stay circular, so a pill stays a pill, as
+   * `nsh-platform-macos`'s; so do browsers without `corner-shape`.
+   *
+   * Chromium (verified in 156) shows no backdrop filter, or one without its
+   * mask, inside a view that clips with `corner-shape` corners. A clipping
+   * view (`nsh-curve-clip`) falls back to circular corners of the radius
+   * (`--nsh-round`) while a backdrop-filtered view (`nsh-backdrop`, `op_s`)
+   * is inside it.
+   */
+  placeCorners(el) {
+    const r = el._corners;
+    const f = el._frame;
+    const fits = CORNER_SHAPE && r && f && Math.max(...r) * CONTINUOUS_REACH <= Math.min(f[2], f[3]) / 2;
+    const name = fits
+      ? cssClass(
+          `border-radius:${r.map((v) => `${v * CONTINUOUS_REACH}px`).join(" ")};corner-shape:superellipse(${CONTINUOUS_SUPERELLIPSE});--nsh-round:${r.map((v) => `${v}px`).join(" ")};`,
+          3,
+        )
+      : null;
+    swapClass(el, "_cornerClass", name);
+    if (CORNER_SHAPE) {
+      const overflow = fits ? CLASSES.rules.get(el._class)?.style.overflow : "";
+      const clips = fits && ((overflow && overflow !== "visible") || el.classList.contains("nsh-scroll") || el.classList.contains("nsh-clip"));
+      el.classList.toggle("nsh-curve-clip", !!clips);
+    }
+    if (el._border) swapClass(el._border, "_cornerClass", name);
   }
 
   op_a([, id, prop, value]) {
@@ -2293,6 +2506,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._props = props;
+    // A list in its parent's viewport: its cells are read in screen order.
+    if (el._screenOrder !== props.screenOrder) {
+      el._screenOrder = props.screenOrder;
+      this.readingChanged(el);
+    }
     if (props.testID) el.dataset.testid = props.testID;
     else delete el.dataset.testid;
     const pe = props.pointerEvents;
@@ -2559,7 +2777,7 @@ class Player {
     if (el._ph) {
       el._ph.className = el._imgClass + (el._ph.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
       if (ph) {
-        if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
+        if (el._ph.getAttribute("src") !== ph) this.setImageSource(el._ph, placeholder, ph);
       } else {
         el._ph.remove();
         el._ph = null;
@@ -2579,7 +2797,7 @@ class Player {
     // Shown when it loaded: faded in over the placeholder, or at once.
     img.style.transition = "";
     img.style.opacity = fade > 0 ? "0" : "";
-    img.src = src;
+    this.setImageSource(img, uri, src);
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
@@ -2849,6 +3067,10 @@ class Player {
     host._navOverlay = o;
     this.shaderViews.add(o);
     this.shaderDirty(o);
+    // Its frames end it (`shaderFrame`); without them (a hidden tab) this
+    // does, and the change is reported on time all the same.
+    const running = o._shader.running;
+    setTimeout(() => { if (o._shader.running === running) this.endTransition(o); }, running.ms + LATE_MS);
     return true;
   }
 
@@ -3239,7 +3461,11 @@ class Player {
       }
       again ||= runs;
     }
-    if (again) {
+    this.fitSharedCanvas(now);
+    // A view this frame marked (a screen effect another shader drew under,
+    // `shaderDirty`) has queued the next one already: a second callback
+    // would run the next frame twice, and each of those twice again.
+    if (again && !this.shaderFrameQueued) {
       this.shaderFrameQueued = true;
       requestAnimationFrame((t) => this.shaderFrame(t));
     }
@@ -3293,7 +3519,6 @@ class Player {
     s.pictures[2] = s.pictures[3] = null;
     this.freeTextures(s, [2, 3]);
     const canvas = el._shaderCanvas;
-    canvas._bitmap?.transferFromImageBitmap(null);
     canvas.width = 0;
   }
 
@@ -3326,6 +3551,45 @@ class Player {
     this._shaderGl = gl;
     this._shaderPrograms = new Map();
     return gl;
+  }
+
+  /**
+   * The shared canvas, at least `pw` × `ph` pixels: each view draws into
+   * its top-left corner. Setting its size reallocates its drawing buffer,
+   * so it fits the largest view that draws rather than each in turn (a
+   * screen effect drawn among small shaders would resize it twice a
+   * frame), and shrinks only once the views have needed less for a while
+   * (`fitSharedCanvas`).
+   */
+  sharedCanvas(gl, pw, ph) {
+    const canvas = gl.canvas;
+    const need = (this._shaderNeed ??= [0, 0]);
+    need[0] = Math.max(need[0], pw);
+    need[1] = Math.max(need[1], ph);
+    if (canvas.width < pw) canvas.width = pw;
+    if (canvas.height < ph) canvas.height = ph;
+    return canvas;
+  }
+
+  /**
+   * After a frame that drew: the shared canvas shrinks to the largest view
+   * drawn since it became larger than needed, a second on.
+   */
+  fitSharedCanvas(now) {
+    const need = this._shaderNeed;
+    this._shaderNeed = null;
+    // A view drew: the context is there.
+    const canvas = need && this.shaderGl()?.canvas;
+    if (!canvas) return;
+    if (canvas.width <= need[0] && canvas.height <= need[1]) {
+      this._shaderSmaller = null;
+      return;
+    }
+    const smaller = (this._shaderSmaller ??= { since: now, size: [0, 0] });
+    smaller.size = [Math.max(smaller.size[0], need[0]), Math.max(smaller.size[1], need[1])];
+    if (now - smaller.since < 1000) return;
+    this._shaderSmaller = null;
+    [canvas.width, canvas.height] = smaller.size;
   }
 
   /**
@@ -3492,18 +3756,17 @@ class Player {
     ratio = Math.min(ratio, 4096 / Math.max(w + 2 * m, h + 2 * m, 1));
     const pw = Math.max(1, Math.round((w + 2 * m) * ratio));
     const ph = Math.max(1, Math.round((h + 2 * m) * ratio));
-    const canvas = gl.canvas;
-    if (canvas.width !== pw || canvas.height !== ph) {
-      canvas.width = pw;
-      canvas.height = ph;
-    }
+    const canvas = this.sharedCanvas(gl, pw, ph);
     const time = (s.kept + (s.since != null ? t - s.since : 0)) / 1000;
     let progress = s.progress;
     if (s.running) {
       const p = Math.min(1, Math.max(0, (t - s.running.start) / s.running.ms));
       progress = s.running.reverse ? 1 - p : p;
     }
-    gl.viewport(0, 0, pw, ph);
+    // Its top-left corner of the shared canvas (GL's y goes up).
+    gl.viewport(0, canvas.height - ph, pw, ph);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, canvas.height - ph, pw, ph);
     gl.useProgram(program.program);
     gl.bindVertexArray(program.vao);
     if (program.builtins) {
@@ -3542,14 +3805,10 @@ class Player {
         [st.left, st.top, st.width, st.height] = [left, left, `${w + 2 * m}px`, `${h + 2 * m}px`];
       }
     }
-    if (canvas.transferToImageBitmap) {
-      target._bitmap ??= target.getContext("bitmaprenderer");
-      target._bitmap.transferFromImageBitmap(canvas.transferToImageBitmap());
-    } else {
-      target._2d ??= target.getContext("2d");
-      target._2d.clearRect(0, 0, pw, ph);
-      target._2d.drawImage(canvas, 0, 0);
-    }
+    // A copy on the GPU of its corner, which the next view draws over.
+    target._2d ??= target.getContext("2d");
+    target._2d.globalCompositeOperation = "copy";
+    target._2d.drawImage(canvas, 0, 0, pw, ph, 0, 0, pw, ph);
     // A screen effect pictures what shaders in the surface drew.
     const screen = this.screenShader;
     if (screen && screen !== el && screen._shader && role !== 3 && !s.nav) {
@@ -3707,6 +3966,7 @@ class Player {
         host.insertBefore(track, cell.parentNode === host ? cell : null);
         track.append(cell);
         cell._track = track;
+        this.readingChanged(host);
         tracks.set(cellId, cell);
       }
       cell._range = range;
@@ -3725,6 +3985,7 @@ class Player {
     if (cell.parentNode === track) track.replaceWith(cell);
     else track.remove();
     this.placeFrame(cell);
+    this.readingChanged(cell.parentNode);
   }
 
   /** Where the views around `track` (up to its scroll view) put it in the
@@ -3777,11 +4038,10 @@ class Player {
   // the desktop backends.
 
   /** Whether `el` has a bar: a scroll view along one axis with its
-   * indicator, and horizontal ones always (a mouse without a horizontal
-   * wheel has no other way to move them, as mouse drags do not scroll),
-   * unless a built-in bar of the app's takes their place. */
+   * indicator, on either axis, unless a built-in bar of the app's takes
+   * its place. */
   barShown(el) {
-    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || (el._horizontal && !el._replaced));
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator && !el._replaced);
   }
 
   /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
@@ -4332,7 +4592,7 @@ class Player {
         entry.ready = true;
         for (const w of entry.waiting) this.drawSoon(w);
       };
-      img.src = src;
+      this.setImageSource(img, uri, src);
       this.images.set(src, entry);
     }
     if (!entry.ready) entry.waiting.add(el);
@@ -4712,7 +4972,16 @@ class Player {
       old.style.pointerEvents = "none";
       if (!motion.fade && top) top.animate(shift(parallax, 0), options);
     }
-    if (done) a.onfinish = done;
+    if (!done) return;
+    // Web Animations finish as the page renders, which stops with its
+    // frames (a hidden tab): a timer ends the change on time without them.
+    let finish = () => {
+      finish = null;
+      clearTimeout(timer);
+      done();
+    };
+    const timer = setTimeout(() => finish?.(), motion.duration + LATE_MS);
+    a.onfinish = () => finish?.();
   }
 
   /** The batch is applied: the stacks it changed animate to their new top
@@ -4765,13 +5034,27 @@ class Player {
     return modals[modals.length - 1] ?? null;
   }
 
+  /** Whether stack `el` shows: in the tree, visible, and laid out with a
+   * size, as the views around it. `display: none` (a tab not selected) is
+   * laid out by the core at zero size, which the browser's
+   * `checkVisibility` does not see. */
+  stackShown(el) {
+    if (!el.isConnected || !(el.checkVisibility?.({ visibilityProperty: true }) ?? true)) return false;
+    // It and the views around it: a page of a stack laid out at no size is
+    // laid out at its stack's.
+    for (let view = el; view && view !== this.root; view = view.parentElement) {
+      const frame = view._frame;
+      if (frame && !(frame[2] > 0 && frame[3] > 0)) return false;
+    }
+    return true;
+  }
+
   /** The innermost shown stack (inside `within`, else anywhere) that goes
    * back: it has a screen under the top one, or a top one that asks. */
   backStack(within) {
-    const shown = (el) => el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true);
     const candidates = [];
     for (const el of this.views.values()) {
-      if (el._kind !== "stack" || !shown(el) || (within && !within.contains(el))) continue;
+      if (el._kind !== "stack" || !this.stackShown(el) || (within && !within.contains(el))) continue;
       const screens = this.screensOf(el);
       if (screens.length > 1 || screens[screens.length - 1]?._screen?.preventBack) candidates.push(el);
     }
@@ -4840,7 +5123,7 @@ class Player {
   backDepth() {
     let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
     for (const el of this.views.values()) {
-      if (el._kind === "stack" && el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true)) {
+      if (el._kind === "stack" && this.stackShown(el)) {
         depth += Math.max(0, this.screensOf(el).length - 1);
       }
     }
@@ -5008,13 +5291,17 @@ class Player {
     this.placeModal(el);
     el.style.transition = "none";
     this.hideModal(el, motion);
-    el._entering = true;
+    // This presentation's (truthy): a timer of an earlier one finds
+    // another.
+    const entering = el._entering = {};
     this.scopeFocus();
     this.syncHistorySoon();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // In two frames, once its starting place has been drawn, or without
+    // frames after a while (a hidden tab: its `onShow` still comes).
+    const enter = () => {
       // Dismissed before it came in (`endPresentation` reported it shown),
       // or presented again meanwhile: nothing more to do.
-      if (!el._entering) return;
+      if (el._entering !== entering) return;
       el._entering = false;
       if (el._navShader && !this.viewportDialogs) {
         // Through its `transitionShader` over the root: it shows at once under it.
@@ -5032,7 +5319,9 @@ class Player {
         el._showTimer = 0;
         this.event(el._id, "onShow");
       }, motion === "none" ? 0 : 350);
-    }));
+    };
+    requestAnimationFrame(() => requestAnimationFrame(enter));
+    setTimeout(enter, ENTER_LATE_MS);
   }
 
   /**
@@ -5442,6 +5731,22 @@ class Player {
         }
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
+      case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
+      case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
+      case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
+      case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
+      case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;
+      case "audioStop": this.audioStop(args[0]); break;
+      case "audioUnload": this.audioUnload(args[0]); break;
+      case "playerOpen": this.playerOpen(args[0], args[1], { volume: args[2], rate: args[3], loop: args[4] }); break;
+      case "playerPreload": this.playerPreload(args[0]); break;
+      case "playerResume": this.playerResume(args[0]); break;
+      case "playerPause": this.playerPause(args[0]); break;
+      case "playerSeek": this.playerSeek(args[0], args[1]); break;
+      case "playerSet": this.playerSet(args[0], { volume: args[1], rate: args[2], loop: args[3] }); break;
+      case "playerClose": this.playerClose(args[0]); break;
+      case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
@@ -5451,6 +5756,7 @@ class Player {
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
+      case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
@@ -5517,6 +5823,365 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
+  // Audio (`Sound`, `AudioPlayer`) -----------------------------------------
+  //
+  // One `AudioContext` per runtime (an NSH engine: `reset` disposes it):
+  // sounds are decoded into `AudioBuffer`s at load and played by an
+  // `AudioBufferSourceNode` (+ a `GainNode`) per play; players are
+  // `HTMLAudioElement`s. Browsers keep a context suspended and refuse
+  // `play()` until the page's first user gesture: a sound played before it is
+  // silence, a player's `play()` is `Failed { not-allowed }`.
+
+  audioEvent(id, event, fields) {
+    this.event(ROOT_ID, "onAudio", { id, event, ...fields });
+  }
+
+  audioState() {
+    return (this.audio ??= { ctx: null, sounds: new Map(), voices: [], players: new Map(), unlock: null });
+  }
+
+  /** The context, made on first use; resumed by the page's first gesture. */
+  audioContext() {
+    const audio = this.audioState();
+    if (audio.ctx) return audio.ctx;
+    const Context = window.AudioContext ?? window.webkitAudioContext;
+    if (typeof Context !== "function") return null;
+    const ctx = (audio.ctx = new Context());
+    const types = ["pointerdown", "keydown", "touchend", "click"];
+    const unlock = () => {
+      ctx.resume?.().then?.(() => {
+        if (ctx.state === "running") release();
+      }, () => {});
+    };
+    const release = () => {
+      for (const type of types) window.removeEventListener(type, unlock, true);
+      audio.unlock = null;
+    };
+    for (const type of types) window.addEventListener(type, unlock, { capture: true, passive: true });
+    audio.unlock = release;
+    return ctx;
+  }
+
+  audioBytesFromBase64(text) {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  /** The bytes at `url` (`asset:/` or http(s)); past `maxBytes` is a quota error. */
+  async audioFetch(url, maxBytes) {
+    let response;
+    try {
+      response = await fetch(this.asset(url));
+    } catch (err) {
+      throw { code: "network", message: String(err?.message ?? err) };
+    }
+    if (!response.ok) throw { code: "network", message: `HTTP ${response.status}` };
+    const length = Number(response.headers.get("content-length"));
+    if (length > maxBytes) throw { code: "quota-exceeded", message: `${length} bytes (at most ${maxBytes})` };
+    let bytes;
+    try {
+      bytes = await response.arrayBuffer();
+    } catch (err) {
+      throw { code: "network", message: String(err?.message ?? err) };
+    }
+    if (bytes.byteLength > maxBytes) {
+      throw { code: "quota-exceeded", message: `${bytes.byteLength} bytes (at most ${maxBytes})` };
+    }
+    return bytes;
+  }
+
+  /** `AudioCommand::Load` / `LoadUrl`: decode what `source()` gives. */
+  async audioLoad(id, source, maxDuration) {
+    const audio = this.audioState();
+    const entry = { buffer: null, voices: new Set() };
+    audio.sounds.get(id)?.voices.forEach((voice) => this.audioEndVoice(voice));
+    audio.sounds.set(id, entry);
+    const fail = (error) => {
+      if (audio.sounds.get(id) !== entry) return;
+      audio.sounds.delete(id);
+      this.audioEvent(id, "failed", { error: error?.code ?? "decode", message: String(error?.message ?? error ?? "") });
+    };
+    try {
+      const ctx = this.audioContext();
+      if (!ctx) return fail({ code: "unavailable", message: "no Web Audio" });
+      const bytes = await source();
+      if (audio.sounds.get(id) !== entry) return;
+      let buffer;
+      try {
+        buffer = await ctx.decodeAudioData(bytes);
+      } catch (err) {
+        return fail({ code: "decode", message: String(err?.message ?? err ?? "undecodable audio") });
+      }
+      if (audio.sounds.get(id) !== entry) return;
+      const truncated = buffer.duration > maxDuration;
+      if (truncated) {
+        // Only `maxDuration` of it is kept, as on the other platforms.
+        const frames = Math.max(1, Math.floor(maxDuration * buffer.sampleRate));
+        const short = ctx.createBuffer(buffer.numberOfChannels, frames, buffer.sampleRate);
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+          short.copyToChannel(buffer.getChannelData(c).subarray(0, frames), c);
+        }
+        buffer = short;
+      }
+      entry.buffer = buffer;
+      this.audioEvent(id, "loaded", {
+        duration: buffer.duration,
+        bytes: buffer.length * buffer.numberOfChannels * 4,
+        truncated,
+      });
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  audioEndVoice(voice) {
+    const audio = this.audioState();
+    audio.voices = audio.voices.filter((v) => v !== voice);
+    voice.sound.voices.delete(voice);
+    voice.src.onended = null;
+    try { voice.src.stop(); } catch { /* not started or already stopped */ }
+    try { voice.src.disconnect(); voice.gain.disconnect(); } catch { /* already */ }
+  }
+
+  audioPlay(id, volume, rate) {
+    const audio = this.audioState();
+    const sound = audio.sounds.get(id);
+    const ctx = audio.ctx;
+    // Before the first gesture the context is suspended: silence, not a sound
+    // that starts late.
+    if (!sound?.buffer || !ctx || ctx.state !== "running") return;
+    // At most 32 voices at once: the oldest stops.
+    while (audio.voices.length >= 32) this.audioEndVoice(audio.voices[0]);
+    const src = ctx.createBufferSource();
+    src.buffer = sound.buffer;
+    src.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain).connect(ctx.destination);
+    const voice = { src, gain, sound };
+    src.onended = () => this.audioEndVoice(voice);
+    audio.voices.push(voice);
+    sound.voices.add(voice);
+    src.start();
+  }
+
+  audioStop(id) {
+    this.audioState().sounds.get(id)?.voices.forEach((voice) => this.audioEndVoice(voice));
+  }
+
+  audioUnload(id) {
+    const audio = this.audioState();
+    this.audioStop(id);
+    audio.sounds.delete(id);
+  }
+
+  playerOpen(id, src, settings) {
+    const audio = this.audioState();
+    audio.players.get(id) && this.playerClose(id);
+    audio.players.set(id, { id, src, settings, el: null, failed: false, buffering: false, timer: 0, closed: false });
+  }
+
+  playerEmit(player, event, fields) {
+    if (!player.closed) this.audioEvent(player.id, event, fields);
+  }
+
+  playerDuration(el) {
+    return Number.isFinite(el.duration) ? el.duration : undefined;
+  }
+
+  playerProgress(player) {
+    const el = player.el;
+    if (!el) return;
+    this.playerEmit(player, "progress", { position: el.currentTime, duration: this.playerDuration(el) });
+  }
+
+  playerStopTimer(player) {
+    clearInterval(player.timer);
+    player.timer = 0;
+  }
+
+  playerFail(player, error, message) {
+    this.playerStopTimer(player);
+    player.failed = true;
+    this.playerEmit(player, "failed", { error, message });
+  }
+
+  /** The element of `player`, made (and loading) on first need. */
+  playerElement(player) {
+    if (player.el) return player.el;
+    const el = (player.el = new Audio());
+    el.preload = "auto";
+    this.playerApply(player);
+    const buffer = (on) => {
+      if (player.buffering === on) return;
+      player.buffering = on;
+      this.playerEmit(player, "buffer", { buffering: on });
+    };
+    el.addEventListener("loadedmetadata", () =>
+      this.playerEmit(player, "load", { duration: this.playerDuration(el) }));
+    el.addEventListener("playing", () => {
+      buffer(false);
+      this.playerStopTimer(player);
+      player.timer = setInterval(() => this.playerProgress(player), 250);
+    });
+    el.addEventListener("waiting", () => buffer(true));
+    el.addEventListener("canplay", () => buffer(false));
+    el.addEventListener("pause", () => {
+      this.playerStopTimer(player);
+      // The end pauses the element too: `ended` is what that reports.
+      if (el.ended) return;
+      this.playerProgress(player);
+      this.playerEmit(player, "paused");
+    });
+    el.addEventListener("ended", () => {
+      this.playerStopTimer(player);
+      this.playerProgress(player);
+      this.playerEmit(player, "ended");
+    });
+    el.addEventListener("error", () => {
+      if (!el.getAttribute("src")) return;
+      const http = /^https?:/i.test(player.src);
+      this.playerFail(player, http ? "network" : "decode", el.error?.message || `media error ${el.error?.code}`);
+    });
+    el.src = this.asset(player.src);
+    return el;
+  }
+
+  playerApply(player) {
+    const el = player.el;
+    if (!el) return;
+    el.volume = Math.min(1, Math.max(0, player.settings.volume));
+    el.playbackRate = player.settings.rate;
+    el.loop = Boolean(player.settings.loop);
+  }
+
+  playerPreload(id) {
+    const player = this.audioState().players.get(id);
+    if (player) this.playerElement(player);
+  }
+
+  playerResume(id) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    // After a failure, play again from a fresh load.
+    if (player.failed && player.el) {
+      player.failed = false;
+      player.el.removeAttribute("src");
+      player.el.load();
+      player.el.src = this.asset(player.src);
+    }
+    player.failed = false;
+    const el = this.playerElement(player);
+    if (el.ended) el.currentTime = 0;
+    el.play().then(() => {
+      this.playerEmit(player, "playing");
+    }, (err) => {
+      // A `pause()` or a new load interrupts a pending `play()`: not a failure.
+      if (err?.name === "AbortError") return;
+      this.playerFail(
+        player,
+        err?.name === "NotAllowedError" ? "not-allowed" : err?.name === "NotSupportedError" ? "not-supported" : "failed",
+        String(err?.message ?? err),
+      );
+    });
+  }
+
+  playerPause(id) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    if (!player.el || player.el.paused) this.playerEmit(player, "paused");
+    else player.el.pause();
+  }
+
+  playerSeek(id, position) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    const el = this.playerElement(player);
+    const duration = this.playerDuration(el);
+    el.currentTime = duration === undefined ? position : Math.min(position, duration);
+    this.playerProgress(player);
+  }
+
+  playerSet(id, settings) {
+    const player = this.audioState().players.get(id);
+    if (!player) return;
+    player.settings = settings;
+    this.playerApply(player);
+  }
+
+  playerClose(id) {
+    const audio = this.audioState();
+    const player = audio.players.get(id);
+    if (!player) return;
+    player.closed = true;
+    this.playerStopTimer(player);
+    audio.players.delete(id);
+    const el = player.el;
+    if (el) {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+      player.el = null;
+    }
+  }
+
+  /** Frees everything the audio of the engine that ran held (`reset`). */
+  audioDispose() {
+    const audio = this.audio;
+    if (!audio) return;
+    for (const id of [...audio.players.keys()]) this.playerClose(id);
+    for (const voice of [...audio.voices]) this.audioEndVoice(voice);
+    audio.sounds.clear();
+    audio.unlock?.();
+    audio.ctx?.close?.().catch?.(() => {});
+    this.audio = null;
+  }
+
+  // `Notifications.permission` / `requestPermission`: `Notification`'s own
+  // values. A browser refuses a prompt the user did not cause by answering
+  // `default` or `denied`.
+  async notificationPermission(request, ask) {
+    let permission = window.Notification.permission;
+    if (ask && permission === "default") {
+      try {
+        permission = await window.Notification.requestPermission();
+      } catch (err) {
+        console.warn(`[nsh] notifications: ${err}`);
+      }
+    }
+    this.event(ROOT_ID, "onNotification", { id: request, permission });
+  }
+
+  // `Notifications.show`: replaces the one of the same id (`tag`). Android's
+  // browsers have the class but throw: only a service worker shows there.
+  showNotification(request, id, title, body, silent) {
+    let shown = false;
+    if (window.Notification.permission === "granted") {
+      try {
+        const notification = new window.Notification(title, { body, tag: id, silent });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+          this.event(ROOT_ID, "onNotification", { pressed: id });
+        };
+        (this.notifications ??= new Map()).set(id, notification);
+        shown = true;
+      } catch (err) {
+        console.warn(`[nsh] notifications: ${err}`);
+      }
+    }
+    this.event(ROOT_ID, "onNotification", { id: request, shown });
+  }
+
+  // `Notifications.setBadge`: an installed web app's icon, where browsers
+  // have the Badging API.
+  setBadge(count) {
+    const set = count > 0 ? navigator.setAppBadge?.(count) : navigator.clearAppBadge?.();
+    set?.catch?.((err) => console.warn(`[nsh] setBadge: ${err}`));
   }
 
   // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
@@ -5589,6 +6254,55 @@ class Player {
         for (const p of picked) {
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, p.width, p.height, p.lastModified));
+        }
+        return w.nsh_picked(request);
+      });
+    };
+    input.addEventListener("change", () => answer([...(input.files ?? [])]));
+    input.addEventListener("cancel", () => answer([]));
+    this.root.append(input);
+    input.click();
+  }
+
+  /**
+   * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
+   * bytes and names stay as they are; a file larger than `maxBytes` is left
+   * out. A cancelled input sends none.
+   */
+  pickFiles(request, limit, accept, maxBytes) {
+    const app = this.app;
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) input.accept = accept;
+    input.multiple = limit > 1;
+    input.style.display = "none";
+    let answered = false;
+    const answer = async (files) => {
+      if (answered) return;
+      answered = true;
+      input.remove();
+      const picked = [];
+      for (const file of files.slice(0, limit)) {
+        if (file.size > maxBytes) {
+          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          continue;
+        }
+        try {
+          picked.push({
+            name: file.name,
+            type: file.type,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            lastModified: file.lastModified,
+          });
+        } catch {
+          // Unreadable: left out.
+        }
+      }
+      if (app !== this.app) return;
+      this.call((w) => {
+        for (const p of picked) {
+          this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
+            w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }
         return w.nsh_picked(request);
       });
@@ -5700,7 +6414,7 @@ class Player {
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
     img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ error: `failed to load ${uri}` });
-    img.src = this.asset(uri);
+    this.setImageSource(img, uri, this.asset(uri));
   }
 
   // Network -------------------------------------------------------------
@@ -6250,6 +6964,8 @@ class Player {
     // and selectable text keep theirs.
     root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
     root.addEventListener("copy", (e) => this.copyText(e));
+    // A selectable view's `onSelectionChange`: what a copy would give.
+    document.addEventListener("selectionchange", () => this.areaSelectionChanged());
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
     root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
@@ -6285,20 +7001,32 @@ class Player {
    * `onContextMenu` of the nearest view around `e`'s target that listens,
    * unless a field or selectable text is nearer (it keeps the browser's
    * menu); true when a view took it. The browser raises `contextmenu` for
-   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   * pointer gestures and accessibility actions. `keyDown` handles the Menu
+   * key and Shift+F10 too: Chromium on macOS does not raise that event for
+   * them. Keyboard requests name no pointer and start at the view's
+   * bottom-start corner.
    */
-  contextMenu(e) {
+  contextMenu(e, keyboard = false) {
     const view = this.viewOf(e.target);
     if (!view) return false;
     for (const el of this.ancestors(view)) {
       if (el._events?.has("onContextMenu")) {
         e.preventDefault();
-        const [pageX, pageY] = this.point(e);
         const r = el.getBoundingClientRect();
+        // Chromium can name a mouse for keyboard context menus, but no
+        // button (-1). Older MouseEvents without pointerType are mouse input.
+        const pointerType = keyboard || e.button === -1 ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        let at = e;
+        if (pointerType === null) {
+          const rtl = getComputedStyle(el).direction === "rtl";
+          at = { clientX: rtl ? r.right : r.left, clientY: r.bottom, target: e.target };
+        }
+        const [pageX, pageY] = this.point(at);
         this.event(el._id, "onContextMenu", {
-          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          position: { x: at.clientX - r.left, y: at.clientY - r.top },
           pagePosition: { x: pageX, y: pageY },
           modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+          pointerType: ["mouse", "pen", "touch"].includes(pointerType) ? pointerType : pointerType && "mouse",
         });
         return true;
       }
@@ -6423,6 +7151,11 @@ class Player {
       }
       return;
     }
+    if (inRoot && plain && ((e.key === "F10" && e.shiftKey) || (e.key === "ContextMenu" && !e.shiftKey))) {
+      // Prevent the native default when handled, so browsers that also
+      // generate contextmenu do not open the same menu twice.
+      if (this.contextMenu(e, true)) return;
+    }
     if (this.selectionKey(e)) return;
     if (inRoot && focus._pressable && plain && !e.shiftKey && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
@@ -6470,16 +7203,29 @@ class Player {
    * nothing, and attachments (U+FFFC) are left out, as the native
    * platforms copy. */
   copyText(e) {
-    const sel = getSelection();
     if (e.target.closest?.(".nsh-field")) return;
-    if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return;
-    const range = sel.getRangeAt(0);
+    const out = this.selectedText();
+    if (out === null) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", out);
+  }
+
+  /** The selected text as {@link copyText} copies it, or null when nothing
+   * selectable in this player is selected; within `only` (an element)
+   * when given, of `given` (a range) instead of the selection when given. */
+  selectedText(only = null, given = null) {
+    let range = given;
+    if (!range) {
+      const sel = getSelection();
+      if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return null;
+      range = sel.getRangeAt(0);
+    }
     let out = "";
     let last = null;
     let lastArea = null;
     let lastBox = null;
     let found = false;
-    for (const run of this.root.querySelectorAll(".nsh-run")) {
+    for (const run of (only ?? this.root).querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
       // A link's characters are in a span inside the run.
@@ -6505,17 +7251,58 @@ class Player {
       out += area ? part.replaceAll("\uFFFC", "") : part;
       if (to === text.length && run._after) out += run._after;
     }
-    if (!found) return;
-    e.preventDefault();
-    e.clipboardData.setData("text/plain", out.replace(/\s+$/, ""));
+    if (!found) return null;
+    return given ? out : out.replace(/\s+$/, "");
+  }
+
+  /** Where the selection starts in the copy of all of `area` (UTF-16
+   * units): what maps it back to the document the area shows. */
+  selectionStart(area) {
+    const sel = getSelection();
+    if (!sel?.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    if (!area.contains(range.startContainer)) return 0;
+    const before = document.createRange();
+    before.setStart(area, 0);
+    before.setEnd(range.startContainer, range.startOffset);
+    if (before.collapsed) return 0;
+    return (this.selectedText(area, before) ?? "").length;
+  }
+
+  /** The document's selection changed: the selectable view it is in (the
+   * outermost) hears its text (`onSelectionChange`), and one it left hears
+   * "" (nothing selected), each only when its text changed. */
+  areaSelectionChanged() {
+    const sel = getSelection();
+    const anchor = sel?.rangeCount ? sel.anchorNode : null;
+    const inRoot = anchor && this.root.contains(anchor);
+    const area = inRoot ? this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement) : null;
+    const last = this._selectedArea;
+    if (last && last !== area) {
+      this._selectedArea = null;
+      if (last._selectedText && last._events?.has("onSelectionChange") && last.isConnected) {
+        this.event(last._id, "onSelectionChange", { text: "", start: 0 });
+      }
+      last._selectedText = "";
+    }
+    if (!area) return;
+    this._selectedArea = area;
+    if (!area._events?.has("onSelectionChange")) return;
+    const text = this.selectedText(area) ?? "";
+    if (text === (area._selectedText ?? "")) return;
+    area._selectedText = text;
+    this.event(area._id, "onSelectionChange", { text, start: text ? this.selectionStart(area) : 0 });
   }
 
   /** Select all and Escape in selectable text with a selection: within it. */
   selectionKey(e) {
     const sel = getSelection();
     const anchor = sel?.anchorNode;
+    const el = anchor?.nodeType === 1 ? anchor : anchor?.parentElement;
+    // After select all in a selectable view the selection starts at the
+    // view itself, outside its texts.
     const text = sel?.rangeCount && !sel.isCollapsed && anchor && this.root.contains(anchor)
-      ? this.selectableText(anchor.nodeType === 1 ? anchor : anchor.parentElement)
+      ? this.selectableText(el) ?? this.areaOf(el)
       : null;
     if (!text) return false;
     if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -6660,10 +7447,27 @@ class Player {
       };
       a.frame = requestAnimationFrame(step);
     }
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there.
+    const watch = () => {
+      if (!a.frame || el._glide !== a) return;
+      if (performance.now() - a.last < 200) {
+        a.watch = setTimeout(watch, 200);
+        return;
+      }
+      cancelAnimationFrame(a.frame);
+      a.frame = 0;
+      a.at = [a.x, a.y];
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      settle();
+    };
     clearTimeout(a.timer);
     a.timer = setTimeout(() => {
       a.timer = 0;
-      settle();
+      clearTimeout(a.watch);
+      if (a.frame) watch();
+      else settle();
     }, 200);
   }
 
@@ -6678,6 +7482,7 @@ class Player {
     if (!a) return;
     cancelAnimationFrame(a.frame);
     clearTimeout(a.timer);
+    clearTimeout(a.watch);
     el._glide = null;
     this.drive(el, -1);
     // Browsers clamp the offsets of scrolls.

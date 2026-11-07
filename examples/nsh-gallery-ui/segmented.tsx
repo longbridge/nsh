@@ -1,5 +1,6 @@
 import { platform, Text } from "nsh";
 import { Tab, Tabs } from "nsh/base";
+import { play } from "./sound";
 import { colors, finish, TERMINAL_ROW, terminal } from "./theme";
 
 /**
@@ -37,7 +38,10 @@ export function Segmented<T extends string>(props: {
             <Tab
               selected={props.value === option().value}
               onPress={() => {
-                if (option().value !== props.value) props.onChange(option().value);
+                if (option().value !== props.value) {
+                  play("select");
+                  props.onChange(option().value);
+                }
               }}
               style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
@@ -81,7 +85,10 @@ export function Segmented<T extends string>(props: {
           <Tab
             selected={props.value === option().value}
             onPress={() => {
-              if (option().value !== props.value) props.onChange(option().value);
+              if (option().value !== props.value) {
+                  play("select");
+                  props.onChange(option().value);
+                }
             }}
             style={{
               ...(spread ? { flex: 1, paddingHorizontal: 8 } : { paddingHorizontal: 10 }),

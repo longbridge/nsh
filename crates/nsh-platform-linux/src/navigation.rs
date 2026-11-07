@@ -37,8 +37,9 @@
 //! when the app removes one it leaves as an image of its last frame, then
 //! gets `onDismiss`.
 //!
-//! Transitions run on the root's frame clock and only move views
-//! (`shift`, `fade`): nothing is laid out again while they run.
+//! Transitions run on the surface's frames ([`Surface::add_frame_callback`]:
+//! the root's frame clock, and their ends kept while it stops) and only
+//! move views (`shift`, `fade`): nothing is laid out again while they run.
 
 use std::{
     cell::{Cell, RefCell},
@@ -58,7 +59,10 @@ use nsh_core::{
 use nsh_engine::ColorScheme;
 use rustc_hash::FxHashMap;
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    surface::{Next, Surface},
+    view::NshView,
+};
 
 /// The window's color (libadwaita's), under a screen's content, so a screen
 /// moving over another hides it.
@@ -202,6 +206,8 @@ enum Motion {
     },
     ModalIn {
         view: NshView,
+        /// The root view it shows in (its window's).
+        host: NshView,
         fade: bool,
         shader: Option<NavRun>,
     },
@@ -209,6 +215,8 @@ enum Motion {
         /// The modal to report `onDismiss` for at the end (`None`: it was
         /// reported when the user closed it).
         dismiss: Option<NodeId>,
+        /// The root view it showed in (its window's).
+        host: NshView,
         layer: Layer,
         /// Where the modal was.
         frame: Bounds<Points>,
@@ -295,18 +303,13 @@ impl Motion {
                         }
                     }
                 }
-                Motion::ModalIn { view, .. } => {
+                Motion::ModalIn { view, host, .. } => {
                     rest(view);
-                    (surface.root.clone(), Some(view.clone()), None, false)
+                    (host.clone(), Some(view.clone()), None, false)
                 }
-                Motion::ModalOut { layer, .. } => {
+                Motion::ModalOut { layer, host, .. } => {
                     layer.set_opacity(1.0);
-                    (
-                        surface.root.clone(),
-                        None,
-                        Some(layer.clone().upcast()),
-                        true,
-                    )
+                    (host.clone(), None, Some(layer.clone().upcast()), true)
                 }
             };
         let (Some(from), Some(to)) = (
@@ -475,6 +478,14 @@ fn image_of(paintable: &gtk::WidgetPaintable, width: f32, height: f32) -> Option
     snapshot.to_node()
 }
 
+/// The root views modals show in: the surface's (the main window's) and
+/// those of the app's windows of its own.
+fn hosts(surface: &Surface) -> Vec<(NodeId, NshView)> {
+    let mut hosts = vec![(ROOT_ID, surface.root.clone())];
+    hosts.extend(crate::window::roots(surface));
+    hosts
+}
+
 /// Moves `tail` to the end of `parent`'s children (drawn last), unless it
 /// is there already.
 fn keep_last(parent: &impl IsA<gtk::Widget>, tail: &[gtk::Widget]) {
@@ -589,24 +600,20 @@ impl Nav {
 
     /// Puts the views of `motion` where they are at eased progress `e`;
     /// under a shader's overlay, where they end.
-    fn apply(&self, surface: &Surface, motion: &Motion, e: f32) {
-        self.place(
-            surface,
-            motion,
-            if motion.overlay().is_some() { 1.0 } else { e },
-        );
+    fn apply(&self, motion: &Motion, e: f32) {
+        self.place(motion, if motion.overlay().is_some() { 1.0 } else { e });
     }
 
     /// A frame of `motion` at eased progress `e`.
-    fn frame(&self, surface: &Surface, motion: &Motion, e: f32) {
+    fn frame(&self, motion: &Motion, e: f32) {
         match motion.overlay() {
             Some(run) => run.tick(),
-            None => self.place(surface, motion, e),
+            None => self.place(motion, e),
         }
     }
 
     /// Puts the views of `motion` where they are at eased progress `e`.
-    fn place(&self, surface: &Surface, motion: &Motion, e: f32) {
+    fn place(&self, motion: &Motion, e: f32) {
         match motion {
             Motion::Push {
                 stack,
@@ -651,27 +658,33 @@ impl Nav {
                     set_shift(below, (below_x.0, 0.0));
                 }
             }
-            Motion::ModalIn { view, fade, .. } => {
+            Motion::ModalIn {
+                view, host, fade, ..
+            } => {
                 if *fade {
                     set_fade(view, e);
                 } else {
                     // From below the window's bottom edge.
-                    let h = surface.root.state().frame.size.height.0;
+                    let h = host.state().frame.size.height.0;
                     let y = view.state().frame.origin.y.0;
                     set_shift(view, (0.0, modal_in_offset(Points(h - y), e).0));
                 }
             }
             Motion::ModalOut {
-                layer, frame, fade, ..
+                layer,
+                host,
+                frame,
+                fade,
+                ..
             } => {
-                let h = surface.root.state().frame.size.height.0;
+                let h = host.state().frame.size.height.0;
                 let y = if *fade {
                     layer.set_opacity((1.0 - e) as f64);
                     frame.origin.y.0
                 } else {
                     frame.origin.y.0 + modal_out_offset(Points(h - frame.origin.y.0), e).0
                 };
-                surface.root.set_native(
+                host.set_native(
                     layer,
                     rect(frame.origin.x.0, y, frame.size.width.0, frame.size.height.0),
                 );
@@ -680,7 +693,7 @@ impl Nav {
     }
 
     fn end(&mut self, surface: &Surface, motion: Motion) {
-        self.apply(surface, &motion, 1.0);
+        self.apply(&motion, 1.0);
         match motion {
             Motion::Push { stack, .. } => self.settle(stack.id()),
             Motion::Pop {
@@ -707,8 +720,13 @@ impl Nav {
                 set_fade(&view, 1.0);
                 surface.event(view.id(), EventKind::Show, EventPayload::None);
             }
-            Motion::ModalOut { dismiss, layer, .. } => {
-                surface.root.remove_native(&layer);
+            Motion::ModalOut {
+                dismiss,
+                layer,
+                host,
+                ..
+            } => {
+                host.remove_native(&layer);
                 if let Some(id) = dismiss {
                     surface.event(id, EventKind::Dismiss, EventPayload::None);
                 }
@@ -747,7 +765,7 @@ impl Nav {
         mut motion: Motion,
         shader: Option<&nsh_core::NavShader>,
     ) {
-        self.apply(surface, &motion, 0.0);
+        self.apply(&motion, 0.0);
         if let Some(shader) = shader {
             motion.add_overlay(surface, shader);
         }
@@ -759,27 +777,25 @@ impl Nav {
                 return;
             }
         };
-        self.apply(surface, &motion, 0.0);
+        self.apply(&motion, 0.0);
         self.transitions.push(duration, motion);
         if self.ticking {
             return;
         }
         self.ticking = true;
-        let weak = Rc::downgrade(surface);
-        surface.root.add_tick_callback(move |_, clock| {
-            let Some(surface) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
+        // On the surface's frames, which also keep the transitions' ends
+        // while the window draws none: screens settle and report it on time.
+        surface.add_frame_callback(|surface, now| {
             let Ok(mut nav) = surface.nav.try_borrow_mut() else {
-                return glib::ControlFlow::Continue;
+                return Next::At(now);
             };
-            // Microseconds.
-            nav.tick(&surface, clock.frame_time() as f64 / 1_000_000.0);
-            if nav.transitions.is_empty() {
-                nav.ticking = false;
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
+            nav.tick(surface, now);
+            match nav.transitions.deadline(now) {
+                Some(at) => Next::At(at),
+                None => {
+                    nav.ticking = false;
+                    Next::Done
+                }
             }
         });
     }
@@ -789,7 +805,7 @@ impl Nav {
         for tick in self.transitions.tick(now) {
             match tick {
                 Tick::Ended(motion) => self.end(surface, motion),
-                Tick::At(i, e) => self.frame(surface, &self.transitions[i], e),
+                Tick::At(i, e) => self.frame(&self.transitions[i], e),
             }
         }
     }
@@ -995,6 +1011,11 @@ impl Nav {
     fn back_stack(&self, within: Option<&NshView>) -> Option<NodeId> {
         let wants = |st: &StackNav| {
             st.view.is_mapped()
+                && nsh_core::navigation::shown_in_layout(
+                    std::iter::successors(Some(st.view.clone()), NshView::parent_view)
+                        .filter(|v| v.parent_view().is_some())
+                        .map(|v| v.state().frame),
+                )
                 && within.is_none_or(|w| st.view.is_ancestor(w))
                 && st.screens.takes_back(|top| {
                     self.screens
@@ -1021,6 +1042,10 @@ impl Nav {
         };
         let Some(view) = m.view.take() else { return };
         let restore = m.restore.take().and_then(|w| w.upgrade());
+        let host = view
+            .parent()
+            .and_downcast::<NshView>()
+            .unwrap_or_else(|| surface.root.clone());
         let frame = view.state().frame;
         let own = modal_motion(surface, m.config.animation);
         // Unmapped, the paintable keeps the image the modal showed last.
@@ -1040,9 +1065,9 @@ impl Nav {
         set_fade(&view, 1.0);
         self.scope_focus(surface);
         if let Some(widget) = restore
-            && let Some(root) = surface.root.root()
+            && let Some(root) = host.root()
             && root.focus().is_none()
-            && widget.is_ancestor(&surface.root)
+            && widget.is_ancestor(&host)
         {
             // Refused while another modal still covers it. A text field
             // would select all its text otherwise, and the next key typed
@@ -1058,6 +1083,7 @@ impl Nav {
                 layer.set_node(Some(node));
                 let motion = Motion::ModalOut {
                     dismiss: (!reported).then_some(id),
+                    host,
                     layer,
                     frame,
                     fade: own.is_some_and(|(_, fade)| fade),
@@ -1087,8 +1113,10 @@ impl Nav {
             surface.event(id, EventKind::Show, EventPayload::None);
             return;
         }
+        let host = self.host(surface, id);
         let motion = Motion::ModalIn {
             view,
+            host,
             fade: own.is_some_and(|(_, fade)| fade),
             shader: None,
         };
@@ -1117,7 +1145,9 @@ impl Nav {
     /// first when it listens (it sends `Command::Back` when no listener
     /// takes it), else the innermost stack pops. Whether something took it.
     fn go_back(&mut self, surface: &Rc<Surface>) -> bool {
-        if self.order.is_empty() && surface.root.state().events.contains(EventKind::BackPress) {
+        if self.newest_in(surface, ROOT_ID).is_none()
+            && surface.root.state().events.contains(EventKind::BackPress)
+        {
             surface.event(ROOT_ID, EventKind::BackPress, EventPayload::None);
             return true;
         }
@@ -1128,8 +1158,19 @@ impl Nav {
     /// stack inside the newest modal pops, else the modal asks to close,
     /// else the innermost stack pops. Whether something took it.
     fn default_back(&mut self, surface: &Rc<Surface>) -> bool {
-        let target = back_target(self.order.last().copied(), false, |modal| {
-            let view = modal.and_then(|id| self.modals.get(&id)?.view.clone());
+        self.back_in(surface, ROOT_ID)
+    }
+
+    /// Going back in window `window` (the main one or one of the app's
+    /// own): its newest modal and its stacks only.
+    fn back_in(&mut self, surface: &Rc<Surface>, window: NodeId) -> bool {
+        let newest = self.newest_in(surface, window);
+        // A window of the app's own: only the stacks inside it.
+        let root = (window != ROOT_ID).then(|| crate::window::host_root(surface, window));
+        let target = back_target(newest, false, |modal| {
+            let view = modal
+                .and_then(|id| self.modals.get(&id)?.view.clone())
+                .or_else(|| root.clone());
             self.back_stack(view.as_ref())
         });
         match target {
@@ -1144,55 +1185,96 @@ impl Nav {
     /// the views under it (`can-focus` off holds for a widget's descendants
     /// too). Dialogs are not views, and keep theirs.
     fn scope_focus(&self, surface: &Surface) {
-        let top = self
-            .order
-            .last()
-            .and_then(|id| self.modals.get(id))
-            .and_then(|m| m.view.clone());
-        let mut child = surface.root.first_child();
-        while let Some(c) = child {
-            child = c.next_sibling();
-            if c.is::<NshView>() {
-                c.set_can_focus(
-                    top.as_ref()
-                        .is_none_or(|t| t.upcast_ref::<gtk::Widget>() == &c),
-                );
+        // Each window keeps the focus inside its own newest modal.
+        for (window, host) in hosts(surface) {
+            let top = self
+                .newest_in(surface, window)
+                .and_then(|id| self.modals.get(&id))
+                .and_then(|m| m.view.clone());
+            let mut child = host.first_child();
+            while let Some(c) = child {
+                child = c.next_sibling();
+                if c.is::<NshView>() {
+                    c.set_can_focus(
+                        top.as_ref()
+                            .is_none_or(|t| t.upcast_ref::<gtk::Widget>() == &c),
+                    );
+                }
             }
         }
+    }
+
+    /// The window modal `id` shows in: its `ModalConfig.window` while that
+    /// window is open, else the main one.
+    fn window_of(&self, surface: &Surface, id: NodeId) -> NodeId {
+        self.modals
+            .get(&id)
+            .map(|m| m.config.window)
+            .filter(|&w| w != ROOT_ID && crate::window::is_window(surface, w))
+            .unwrap_or(ROOT_ID)
+    }
+
+    /// The root view modal `id` shows in.
+    fn host(&self, surface: &Surface, id: NodeId) -> NshView {
+        crate::window::host_root(surface, self.window_of(surface, id))
+    }
+
+    /// The newest modal presented in window `window`.
+    fn newest_in(&self, surface: &Surface, window: NodeId) -> Option<NodeId> {
+        self.order
+            .iter()
+            .rev()
+            .copied()
+            .find(|&id| self.window_of(surface, id) == window)
     }
 
     /// Keeps the presented modals (and those leaving) over the app's
     /// views.
     fn raise_modals(&self, surface: &Surface) {
-        let mut tail: Vec<gtk::Widget> = Vec::new();
-        for m in self.order.iter().filter_map(|id| self.modals.get(id)) {
-            if let Some(view) = &m.view {
-                tail.push(view.clone().upcast());
+        // Per window: the root view each shows in.
+        let mut tails: Vec<(NshView, Vec<gtk::Widget>)> = Vec::new();
+        let mut push =
+            |host: NshView, widget: gtk::Widget| match tails.iter_mut().find(|(h, _)| *h == host) {
+                Some((_, tail)) => tail.push(widget),
+                None => tails.push((host, vec![widget])),
+            };
+        for &id in &self.order {
+            if let Some(view) = self.modals.get(&id).and_then(|m| m.view.clone()) {
+                push(self.host(surface, id), view.upcast());
             }
         }
         for motion in self.transitions.iter() {
-            if let Motion::ModalOut { layer, .. } = motion {
-                tail.push(layer.clone().upcast());
+            if let Motion::ModalOut { layer, host, .. } = motion {
+                push(host.clone(), layer.clone().upcast());
             }
         }
-        keep_last(&surface.root, &tail);
+        for (host, tail) in tails {
+            keep_last(&host, &tail);
+        }
     }
 
-    /// Sizes modal `id` to the surface and reports it (with the surface's
-    /// safe area).
+    /// Sizes modal `id` to the root view of its window and reports it
+    /// (with the surface's safe area in the main window).
     fn size_modal(&mut self, surface: &Surface, id: NodeId) {
+        let window = self.window_of(surface, id);
+        let host = crate::window::host_root(surface, window);
         let Some(m) = self.modals.get_mut(&id) else {
             return;
         };
         let Some(view) = &m.view else { return };
-        let f = surface.root.state().frame;
+        let insets = if window == ROOT_ID {
+            safe_area(surface)
+        } else {
+            EdgeInsets::default()
+        };
+        let f = host.state().frame;
         let frame = rect(0.0, 0.0, f.size.width.0, f.size.height.0);
         if std::mem::replace(&mut view.state_mut().frame, frame) != frame {
             view.queue_allocate();
             view.moved();
         }
         let size = frame.size;
-        report(surface, id, &mut m.reported, size, safe_area(surface));
+        report(surface, id, &mut m.reported, size, insets);
     }
 
     /// Listens to the window's back keys and the mouse's back button.
@@ -1249,8 +1331,14 @@ pub(crate) fn default_back(surface: &Rc<Surface>) {
 
 /// The window of `surface`, when a text field (a `gtk::TextView` or any
 /// `gtk::Editable`) or a web view's page has its keyboard focus.
+#[cfg(feature = "dev")]
 pub(crate) fn focused_field(surface: &Surface) -> Option<gtk::Root> {
-    let root = surface.root.root()?;
+    focused_field_in(&surface.root)
+}
+
+/// [`focused_field`] in the window of root view `host`.
+fn focused_field_in(host: &NshView) -> Option<gtk::Root> {
+    let root = host.root()?;
     let focus = root.focus()?;
     (focus.is::<gtk::TextView>()
         || focus.is::<gtk::Editable>()
@@ -1269,6 +1357,17 @@ pub(crate) fn key_pressed(
     key: gdk::Key,
     modifiers: gdk::ModifierType,
 ) -> bool {
+    key_pressed_in(surface, ROOT_ID, key, modifiers)
+}
+
+/// [`key_pressed`] in window `window` (the main one or one of the app's
+/// own): it goes back among that window's modals and stacks.
+pub(crate) fn key_pressed_in(
+    surface: &Rc<Surface>,
+    window: NodeId,
+    key: gdk::Key,
+    modifiers: gdk::ModifierType,
+) -> bool {
     let mods = modifiers
         & (gdk::ModifierType::CONTROL_MASK
             | gdk::ModifierType::ALT_MASK
@@ -1281,12 +1380,25 @@ pub(crate) fn key_pressed(
     };
     if back
         && key == gdk::Key::Escape
-        && let Some(root) = focused_field(surface)
+        && let Some(root) = focused_field_in(&crate::window::host_root(surface, window))
     {
         root.set_focus(None::<&gtk::Widget>);
         return true;
     }
-    back && go_back(surface)
+    back && go_back_in(surface, window)
+}
+
+/// Goes back in window `window` (the main one, with the app's
+/// `onBackPress`, or one of the app's own: its newest modal, else its
+/// innermost stack): whether something took it.
+pub(crate) fn go_back_in(surface: &Rc<Surface>, window: NodeId) -> bool {
+    if window == ROOT_ID {
+        return go_back(surface);
+    }
+    match surface.nav.try_borrow_mut() {
+        Ok(mut nav) => nav.back_in(surface, window),
+        Err(_) => false,
+    }
 }
 
 /// A screen was pushed (`added`) or popped in `stack`.
@@ -1335,6 +1447,9 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
 
 /// `ModalConfig`.
 pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &ModalConfig) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
@@ -1362,19 +1477,25 @@ pub(crate) fn deleted(surface: &Surface, id: NodeId) {
 
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
-    let m = nav.modals.entry(id).or_default();
+    // In its window (`ModalConfig.window`, sent before it is presented).
+    nav.modals.entry(id).or_default();
+    let host = nav.host(surface, id);
+    let m = nav.modals.get_mut(&id).expect("just made");
     if m.view.is_some() {
         return;
     }
     // The field being typed in under the modal leaves it (until the modal
     // closes).
-    let window = surface.root.root();
+    let window = host.root();
     let focus = window
         .as_ref()
         .and_then(|r| r.focus())
-        .filter(|f| f.is_ancestor(&surface.root));
+        .filter(|f| f.is_ancestor(&host));
     if let (Some(window), Some(_)) = (&window, &focus) {
         window.set_focus(None::<&gtk::Widget>);
     }
@@ -1386,7 +1507,7 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     if view.parent().is_some() {
         view.unparent();
     }
-    view.insert_before(&surface.root, None::<&gtk::Widget>);
+    view.insert_before(&host, None::<&gtk::Widget>);
     nav.order.push(id);
     nav.scope_focus(surface);
     nav.size_modal(surface, id);
@@ -1394,8 +1515,31 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     nav.presenting.push(id);
 }
 
+/// Modal `id` is shown in a window of its own (`Window.open`) instead:
+/// it leaves the surface's modals at once, without events, and the focus
+/// it took goes back.
+pub(crate) fn release(surface: &Rc<Surface>, id: NodeId) {
+    let mut nav = surface.nav.borrow_mut();
+    nav.order.retain(|&m| m != id);
+    nav.presenting.retain(|&m| m != id);
+    let restore = nav
+        .modals
+        .remove(&id)
+        .and_then(|m| m.restore)
+        .and_then(|w| w.upgrade());
+    nav.scope_focus(surface);
+    if let Some(widget) = restore
+        && widget.is_ancestor(&surface.root)
+    {
+        widget.grab_focus();
+    }
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::removed(surface, view) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     match nav.modals.get_mut(&id) {
@@ -1445,6 +1589,12 @@ pub(crate) fn header_item_removed(surface: &Rc<Surface>, view: &NshView) {
 
 /// The surface was resized (modals follow).
 pub(crate) fn surface_resized(surface: &Surface, _width: f32, _height: f32) {
+    resize_modals(surface);
+}
+
+/// A root view was resized (the surface's or a window's): the modals in
+/// it follow.
+pub(crate) fn resize_modals(surface: &Surface) {
     let Ok(mut nav) = surface.nav.try_borrow_mut() else {
         return;
     };

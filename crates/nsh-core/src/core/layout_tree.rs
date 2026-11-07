@@ -41,11 +41,11 @@
 use slab::Slab;
 use taffy::{
     AvailableSpace, BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Display,
-    Layout, LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer,
-    LayoutGridContainer, LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RunMode, Size,
-    Style, TraversePartialTree, TraverseTree, compute_block_layout, compute_cached_layout,
-    compute_flexbox_layout, compute_grid_layout, compute_hidden_layout, compute_oof_layout,
-    compute_root_layout,
+    FlexDirection, FlexWrap, Layout, LayoutBlockContainer, LayoutContainingBlock,
+    LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput, LayoutPartialTree,
+    NodeId, RequestedAxis, RunMode, Size, Style, TraversePartialTree, TraverseTree,
+    compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
+    compute_hidden_layout, compute_oof_layout, compute_root_layout,
 };
 
 use super::terminal_layout::{self, Grid, Role};
@@ -441,7 +441,8 @@ impl<C> LayoutTree<C> {
     }
 
     /// Whether what changes inside `node` cannot change what its parent's
-    /// layout takes from it, so that layout stands: it has a size of fixed
+    /// layout takes from it, so that layout stands: it is placed absolutely
+    /// at a size of fixed points both ways, or it has a size of fixed
     /// points both ways in a flex container, and everything the flex
     /// algorithm takes from an item follows from that size alone. Its flex
     /// basis is `auto`, its main size (a percentage basis against a parent
@@ -464,6 +465,17 @@ impl<C> LayoutTree<C> {
         };
         let fixed = |d: taffy::Dimension| d.into_raw().tag() == taffy::CompactLength::LENGTH_TAG;
         let (style, parent) = (&n.style, &self.nodes[key(parent)].style);
+        // Placed out of flow at a size of fixed points: its parent takes
+        // nothing from its content, whatever its parent's layout (the
+        // cells of a table, rows of a list placed by their offsets).
+        if n.last.is_some()
+            && style.position == taffy::Position::Absolute
+            && style.display != Display::None
+            && fixed(style.size.width)
+            && fixed(style.size.height)
+        {
+            return true;
+        }
         let baseline = |a: taffy::AlignItems| a.keyword() == taffy::AlignItemsKeyword::Baseline;
         n.last.is_some()
             && parent.display == Display::Flex
@@ -483,6 +495,28 @@ impl<C> LayoutTree<C> {
     /// was asked too much to tell, the caller marks it dirty
     /// ([`LayoutTree::mark_dirty`]). A leaf never asked (new, or dirty
     /// already) measures as before: nothing was computed from it.
+    /// Whether `node`'s size follows from its style alone both ways: fixed
+    /// points, or a percentage of a parent sized in fixed points that way.
+    /// What it contains, such as its text, then never changes its size.
+    pub(crate) fn sized_by_style(&self, node: NodeId) -> bool {
+        let n = &self.nodes[key(node)];
+        let Some(parent) = n.parent else {
+            return false;
+        };
+        let parent = &self.nodes[key(parent)].style;
+        let style = &n.style;
+        let tag = |d: taffy::Dimension| d.into_raw().tag();
+        let axis = |own: taffy::Dimension, of: taffy::Dimension| {
+            tag(own) == taffy::CompactLength::LENGTH_TAG
+                || (tag(own) == taffy::CompactLength::PERCENT_TAG
+                    && tag(of) == taffy::CompactLength::LENGTH_TAG)
+        };
+        n.last.is_some()
+            && style.display != Display::None
+            && axis(style.size.width, parent.size.width)
+            && axis(style.size.height, parent.size.height)
+    }
+
     pub(crate) fn measures_as_before<M>(&mut self, node: NodeId, mut measure: M) -> bool
     where
         M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
@@ -570,6 +604,57 @@ impl<C> LayoutTree<C> {
     }
 }
 
+/// Taffy's flexbox, with a row's width as CSS's shrink-to-fit has it. In
+/// definite space Taffy adds up the items' flex bases, so an item with
+/// `flex: 1` counts for nothing, however much text it holds: a view around
+/// the row, sized by it, ends up narrower than the width its items' heights
+/// were measured at. The row's width is its max-content width, up to that
+/// space.
+fn compute_flex_layout<C, M>(
+    view: &mut View<'_, C, M>,
+    node: NodeId,
+    mut inputs: LayoutInput,
+) -> LayoutOutput
+where
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+{
+    let n = view.node(node);
+    if let (None, AvailableSpace::Definite(space)) =
+        (inputs.known_dimensions.width, inputs.available_space.width)
+        && matches!(
+            n.style.flex_direction,
+            FlexDirection::Row | FlexDirection::RowReverse
+        )
+        && n.style.flex_wrap == FlexWrap::NoWrap
+        && n.children
+            .iter()
+            .any(|&child| view.node(child).style.flex_grow > 0.0)
+    {
+        let measuring = LayoutInput {
+            run_mode: RunMode::ComputeSize,
+            axis: RequestedAxis::Horizontal,
+            ..inputs
+        };
+        let bases = compute_flexbox_layout(view, node, measuring).size.width;
+        let content = compute_flexbox_layout(
+            view,
+            node,
+            LayoutInput {
+                available_space: Size {
+                    width: AvailableSpace::MaxContent,
+                    ..inputs.available_space
+                },
+                ..measuring
+            },
+        )
+        .size
+        .width;
+        inputs.known_dimensions.width = Some(bases.max(content.min(space)));
+        inputs.known_dimensions_are_definite.width = true;
+    }
+    compute_flexbox_layout(view, node, inputs)
+}
+
 /// Whether `style` is a view's that nothing styles: React Native's
 /// defaults ([`crate::style::unstyled_layout`]), in either direction.
 fn unstyled(style: &Style) -> bool {
@@ -643,7 +728,7 @@ where
                 (Display::None, _) => compute_hidden_layout(view, node),
                 (Display::Block, true) => compute_block_layout(view, node, inputs, block),
                 (Display::FlowRoot, true) => compute_block_layout(view, node, inputs, None),
-                (Display::Flex, true) => compute_flexbox_layout(view, node, inputs),
+                (Display::Flex, true) => compute_flex_layout(view, node, inputs),
                 (Display::Grid, true) => compute_grid_layout(view, node, inputs),
                 (_, false) => view.measure_leaf(node, inputs, false),
             };

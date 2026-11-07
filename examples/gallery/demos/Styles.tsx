@@ -113,6 +113,41 @@ function Corners() {
   );
 }
 
+/** A blur growing toward the bottom: layers of `backdropFilter`, each masked in further along. */
+function ProgressiveBlur() {
+  const layers = [1.5, 3, 6, 12, 24];
+  return (
+    <Card icon="styles" title="Progressive blur" subtitle="backdropFilter · maskImage">
+      <View style={{ height: 160, borderRadius: radius.control, borderCurve: "continuous", overflow: "hidden", backgroundColor: colors.surface }}>
+        <Each of={Array.from({ length: 8 }, (_, i) => i)}>
+          {(i) => (
+            <View style={{ height: 20, paddingLeft: 12, justifyContent: "center", backgroundColor: i() % 2 ? colors.info : colors.surface }}>
+              <Text style={{ fontSize: 12, color: i() % 2 ? "#fff" : colors.text }}>The quick brown fox {i()}</Text>
+            </View>
+          )}
+        </Each>
+        <View style={{ pointerEvents: "none", position: "absolute", left: 0, right: 0, bottom: 0, height: 120 }}>
+          <Each of={layers}>
+            {(r, i) => (
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  backdropFilter: `blur(${r()}px)`,
+                  maskImage: `linear-gradient(to bottom, transparent ${(i() / layers.length) * 100}%, black ${((i() + 1) / layers.length) * 100}%)`,
+                }}
+              />
+            )}
+          </Each>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
 function Borders() {
   return (
     <Card icon="components" title="Borders" subtitle="per side · dashed · dotted">
@@ -352,7 +387,7 @@ function FlipCard() {
               : {
                   backgroundColor: "#eef2fc",
                   backgroundImage: "linear-gradient(180deg, #f0f4fd 0%, #ebf0fb 100%)",
-                  boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
+                  boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(16,20,30,0.10)",
                   borderColor: "#cdd8f3",
                 }),
             transform: [{ perspective: 800 }, { rotateY: angle }],
@@ -380,7 +415,7 @@ function FlipCard() {
               : {
                   backgroundColor: "#f1f7e2",
                   backgroundImage: "linear-gradient(180deg, #f2f8e4 0%, #eef5da 100%)",
-                  boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
+                  boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(16,20,30,0.10)",
                   borderColor: "#d3e3a8",
                 }),
             transform: [{ perspective: 800 }, { rotateY: angle.interpolate({ inputRange: [0, 180], outputRange: [180, 360] }) }],
@@ -548,6 +583,6 @@ export function Styles() {
   // cards its Cells hold (borders, clipping and layers, numerals, the
   // writing direction) and leaves the others out.
   const sections =
-    platform.idiom === "terminal" ? [Borders, Layers, Numerals, RightToLeft] : [Corners, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
+    platform.idiom === "terminal" ? [Borders, Layers, Numerals, RightToLeft] : [Corners, ProgressiveBlur, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
   return <DemoPage cards={sections} />;
 }

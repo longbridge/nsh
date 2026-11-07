@@ -12,7 +12,8 @@ cargo build -p nsh-cli -p nsh-tui-host
 ```
 
 The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
-profile, and starts it with inherited stdin/stdout. CLI diagnostics, the host's stderr and the host logger append
+profile, and starts it with inherited stdin/stdout. App preparation and host builds show their progress on stderr
+until the host is ready to launch. While it runs, CLI diagnostics, the host's stderr and the host logger append
 to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C copies a selection and otherwise exits;
 Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the
 screen and raw mode before the CLI reaps it.
@@ -285,7 +286,8 @@ compared side by side with the others. Its layout and colors' meanings are the g
 - **The core lays out in points.** Taffy places each view. The backend projects its frame to Cells using the
   rounding rule below; child frames, content boxes, drawing and hit testing share that projection. Text is measured
   on the grid on the engine thread. Changing the area passed to `render` sends the new viewport and environment
-  to the engine.
+  to the engine. An app loaded before the surface's first draw shows from the engine's layout at the drawn area
+  on, never laid out for a surface with no size.
 - **One engine per surface.** `app.rs` owns the public lifecycle and configuration. `surface.rs` carries complete
   `MountBatch` messages, structured errors and frame requests over a channel. Only rendering drains the inbox;
   `mount.rs` applies a whole batch before callbacks, drawing or input can observe it. Replacing or stopping an

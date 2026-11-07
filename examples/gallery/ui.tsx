@@ -1,10 +1,11 @@
 // Gallery shell and navigation. Reusable components and visual rules live
 // in the repository's internal nsh-gallery-ui layer.
 import type { Bounds, JSX, ScrollProps } from "nsh";
-import { computed, Image, Scroll, signal, Text, View } from "nsh";
+import { Canvas, computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
 import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
+import { play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
 
@@ -29,13 +30,13 @@ export function PageHeader(props: {
   right?: JSX.Element;
   /** The bar's fill (default the page's background). */
   background?: string;
-  /** The back button's color (default the accent). */
+  /** The back button's color (default the text's). */
   tint?: string;
   /** Over the content (a transparent header): no fill, no hairline. */
   transparent?: boolean;
 }) {
   const back = () => !props.left && !props.root && nav.routes().length > 1;
-  const tint = () => props.tint ?? colors.accent;
+  const tint = () => props.tint ?? colors.text;
   const goBack = () => (props.onBack ? props.onBack() : nav.pop());
   if (terminal) {
     // One row, then the rule on a row of its own.
@@ -124,7 +125,10 @@ export function ThemeToggle(props: { bar?: boolean }) {
   if (props.bar) {
     return (
       <Press
-        onPress={() => setColorScheme(isDark() ? "light" : "dark")}
+        onPress={() => {
+          play("toggle", { rate: isDark() ? 1 : 0.9 });
+          setColorScheme(isDark() ? "light" : "dark");
+        }}
         scale={0.92}
         accessibilityLabel={isDark() ? "Light appearance" : "Dark appearance"}
       >
@@ -139,9 +143,37 @@ export function ThemeToggle(props: { bar?: boolean }) {
       icon={isDark() ? "sun" : "moon"}
       label={isDark() ? "Light appearance" : "Dark appearance"}
       title="Theme"
-      onPress={() => setColorScheme(isDark() ? "light" : "dark")}
+      onPress={() => {
+          play("toggle", { rate: isDark() ? 1 : 0.9 });
+          setColorScheme(isDark() ? "light" : "dark");
+        }}
     />
   );
+}
+
+/** Turns the gallery's sounds on and off: the switch sounds as it turns on,
+ * and once more, lower, as it turns off. */
+export function SoundToggle(props: { bar?: boolean }) {
+  const label = () => (soundsOn() ? "Mute sounds" : "Turn sounds on");
+  const flip = () => {
+    if (soundsOn()) {
+      play("toggle", { rate: 0.9 });
+      setSoundsOn(false);
+    } else {
+      setSoundsOn(true);
+      play("toggle");
+    }
+  };
+  if (props.bar) {
+    return (
+      <Press onPress={flip} scale={0.92} accessibilityLabel={label()}>
+        <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+          <Icon name={soundsOn() ? "volume-high" : "volume-off"} size={18} tint={colors.text} />
+        </View>
+      </Press>
+    );
+  }
+  return <ToolButton icon={soundsOn() ? "volume-high" : "volume-off"} label={label()} title="Sound" onPress={flip} />;
 }
 
 /**
@@ -173,6 +205,48 @@ export function ToolButton(props: { icon: IconName; label: string; title?: strin
 
 /** NSH's mark, sharp at any size, in the appearance shown (its dot is dark
  * on light backgrounds); none in the terminal. */
+/** The index's opening, in the banner's composition: the mark, the name and
+ * its slogan in citrus, over the banner's halftone fading in from the top
+ * right. Text only in the terminal, which has no canvas to draw dots on. */
+export function Banner() {
+  return (
+    <View style={{ marginHorizontal: 16, paddingHorizontal: 20, paddingVertical: 22, gap: 14, borderRadius: 16, borderCurve: "continuous", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, overflow: "hidden" }}>
+      {!terminal && (
+        <Canvas
+          style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+          draw={(cx, { width, height }) => {
+            const cell = 12;
+            const dot = alpha(colors.text, isDark() ? 0.3 : 0.24);
+            const lit = colors.accent;
+            for (let y = cell / 2; y < height; y += cell) {
+              for (let x = cell / 2; x < width; x += cell) {
+                // Strongest at the top right, gone before the copy.
+                const d = Math.hypot((width - x) / (width * 0.75), y / (height * 1.3));
+                const k = 1 - d;
+                if (k <= 0) continue;
+                const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+                const r = (0.5 + 1.9 * k) * (0.55 + 0.45 * (n - Math.floor(n)));
+                cx.fillStyle = (n - Math.floor(n)) > 0.95 && k > 0.45 ? lit : dot;
+                cx.beginPath();
+                cx.arc(x, y, r, 0, Math.PI * 2);
+                cx.fill();
+              }
+            }
+          }}
+        />
+      )}
+      <Logo size={44} />
+      <View style={{ gap: 4 }}>
+        <Text style={{ fontSize: 28, fontWeight: "600", letterSpacing: -0.6, color: colors.text }}>Native Shell</Text>
+        <Text style={{ fontSize: 16, color: colors.accent }}>Build once, native everywhere</Text>
+      </View>
+      <Text style={{ fontSize: 13, lineHeight: 19, color: colors.muted }}>Every demo here is native UI from one TSX app, on {platformNames}.</Text>
+    </View>
+  );
+}
+
+const platformNames = "macOS, Windows, Linux, iOS, Android, the web and the terminal";
+
 export function Logo(props: { size: number }) {
   if (terminal) return null;
   return <Image src={isDark() ? logoDark : logoLight} style={{ width: props.size, height: props.size }} />;

@@ -201,7 +201,8 @@ fn windows(cx: &mut TestAppContext) {
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
-    set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
+    set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
+    a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -395,7 +396,10 @@ impl NativeComponent for KeyLog {
             div()
                 .size_full()
                 .track_focus(&focus)
-                .on_key_down(move |e, _, _| keys.borrow_mut().push(e.keystroke.unparse()))
+                .on_key_down(move |e, _, cx| {
+                    keys.borrow_mut()
+                        .push(e.keystroke.unparse(cx.platform_info().os))
+                })
                 .into_any_element(),
         )
     }
@@ -497,7 +501,12 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
     // GPUI's test window sends no releases. K's release reaches the keymap
     // while the component has the focus, so the next Ctrl+K is not a repeat.
     cx.simulate_event(gpui::KeyUpEvent {
-        keystroke: gpui::Keystroke::parse(&format!("{primary}-k")).unwrap(),
+        keystroke: gpui::Keystroke::parse(if cfg!(target_os = "macos") {
+            "cmd-k"
+        } else {
+            "ctrl-k"
+        })
+        .unwrap(),
     });
     cx.simulate_keystrokes(&format!("{primary}-k shift-{primary}-n"));
     assert_eq!(
@@ -996,12 +1005,12 @@ fn height_below_title_bar(cx: &mut VisualTestContext) -> f32 {
 const OWNED_WINDOW: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
-import { Menu, Window } from "nsh/desktop";
+import { Menu, currentWindow } from "nsh/desktop";
 
 function App() {
   const height = signal(-1);
   const chosen = signal("");
-  Window.setTitle("Owned");
+  currentWindow().set({ title: "Owned" });
   Menu.setApplicationMenu([
     {
       label: "File",
@@ -1021,10 +1030,31 @@ function App() {
 mount(App);
 "#;
 
-/// The app's height the field reads.
+/// The app's height the field reads, once the app is laid out at the
+/// height its surface is drawn at. The engine lays the app out first at
+/// the surface's height before the app's first batch, which brings the
+/// menu bar that makes the surface shorter: the field reads that first
+/// height until the engine lays the app out again.
 fn app_height(view: &Entity<AppView>, cx: &mut VisualTestContext) -> f32 {
-    let text = wait_until(view, cx, |t| t.starts_with("h ") && !t.starts_with("h -1"));
-    text.split(' ').nth(1).and_then(|h| h.parse().ok()).unwrap()
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let read = field_text(view, cx)
+            .as_deref()
+            .and_then(|t| t.strip_prefix("h "))
+            .and_then(|t| t.split(' ').next()?.parse::<f32>().ok());
+        let drawn = view.read_with(cx, |view, _| {
+            view.surface().root.state().frame.size.height.0.round()
+        });
+        if read == Some(drawn) {
+            return drawn;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the field reads the height {read:?}, the surface is {drawn} tall"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx: &mut TestAppContext) {
@@ -1086,12 +1116,12 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
 const AUTO_HIDDEN_BAR: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
-import { Menu, Window } from "nsh/desktop";
+import { Menu } from "nsh/desktop";
 
 function App() {
   const height = signal(-1);
   const chosen = signal("");
-  Window.setMenuBar("autoHide");
+  Menu.setMenuBar("autoHide");
   Menu.setApplicationMenu([
     { label: "File", submenu: [{ label: "New", onSelect: () => chosen.set(" new") }] },
   ]);
@@ -1512,21 +1542,22 @@ fn the_app_s_state_follows_its_window_s_activation_and_visibility(cx: &mut TestA
 const SIZED_WINDOW: &str = r#"
 import { mount, View } from "nsh";
 import { Input } from "nsh/base";
-import { Menu, Window } from "nsh/desktop";
+import { Menu, currentWindow } from "nsh/desktop";
 
 function App() {
-  Window.setFrame({ size: { width: 640, height: 480 } });
+  const win = currentWindow();
+  win.setBounds({ size: { width: 640, height: 480 } });
   Menu.setApplicationMenu([
     {
       label: "View",
       submenu: [
-        { label: "Narrow", shortcut: "mod+shift+n", onSelect: () => Window.setFrame({ size: { width: 500 } }) },
+        { label: "Narrow", shortcut: "mod+shift+n", onSelect: () => win.setBounds({ size: { width: 500 } }) },
         {
           label: "Both",
           shortcut: "mod+shift+b",
           onSelect: () => {
-            Window.setFrame({ size: { width: 600 } });
-            Window.setFrame({ size: { height: 400 } });
+            win.setBounds({ size: { width: 600 } });
+            win.setBounds({ size: { height: 400 } });
           },
         },
       ],
@@ -1541,7 +1572,7 @@ function App() {
 mount(App);
 "#;
 
-fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppContext) {
+fn set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", SIZED_WINDOW, &[]).unwrap();
     let (view, cx) = owned_view(cx, code, |_| {});
     wait_for(&view, cx, "sized");
@@ -1564,4 +1595,54 @@ fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppC
     // platforms that do not).
     cx.simulate_keystrokes(&format!("shift-{primary}-b"));
     wait_until_window(cx, "the window at 600x400", |cx| size(cx) == (600.0, 400.0));
+}
+
+/// A bar 100 × 40 at (10, 10) that drags the window and has a context
+/// menu, over a focused field that shows where the menu was asked for.
+const DRAG_AREA_MENU: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+
+function App() {
+  const asked = signal("-");
+  return (
+    <View style={{ flex: 1 }}>
+      <View
+        desktop={{ windowDrag: true }}
+        onContextMenu={(e) => asked.set(`menu ${Math.round(e.position.x)} ${Math.round(e.position.y)}`)}
+        style={{ marginLeft: 10, marginTop: 10, width: 100, height: 40 }}
+      />
+      <Input autoFocus value={asked()} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", DRAG_AREA_MENU, &[]).unwrap();
+    let (view, cx) = owned_view(cx, code, |_| {});
+    wait_for(&view, cx, "-");
+    // Not the window menu (Linux): the view's own menu. The surface starts
+    // below the platform's title bar (macOS, Windows).
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
+    let (position, button, modifiers) = (
+        gpui::point(gpui::px(x + 30.0), gpui::px(y + 25.0)),
+        gpui::MouseButton::Right,
+        gpui::Modifiers::default(),
+    );
+    cx.simulate_event(gpui::MouseDownEvent {
+        position,
+        button,
+        modifiers,
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position,
+        button,
+        modifiers,
+        click_count: 1,
+    });
+    wait_for(&view, cx, "menu 20 15");
 }

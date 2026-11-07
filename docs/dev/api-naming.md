@@ -195,7 +195,7 @@ members, so a shape decides what can ever be added to it. The API follows these 
 release (item 3 of the API review); where code differs from one, the rule wins and the code follows.
 
 - A method whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`,
-  `net.connect({ host, port })`, `Window.setTitleBar({ style, height })`), never a further positional parameter;
+  `net.connect({ host, port })`, `WindowRef.setBounds({ origin, size, animated })`), never a further positional parameter;
   parameters the user judged will not grow stay positional (`setSelection(start, end?)`, `seek(seconds)`,
   `DockArea.addPanel(panel, placement?, size?)`, `DataTable.scrollToRow` / `scrollToColumn(…, animated?)`,
   `Editor.revealPosition(position, center)`, a range's start and end such as `DataTable.dump(start?, end?)`;
@@ -220,7 +220,7 @@ release (item 3 of the API review); where code differs from one, the rule wins a
     error), and Node's codes for I/O (`ENOENT`, `EACCES`:
     the OS refused, never NSH's capabilities) and its own (`ERR_FS_FILE_TOO_LARGE`, `ERR_OUT_OF_RANGE`). Never
     `EACCES` or a code-less message for a capability denial. `nsh/test`'s steps fail with codes of their own
-    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`;
+    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_COVERED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`;
     `ERR_NSH_TEST_UNSUPPORTED` for an `open` option the `--target` cannot honor).
   - Never a sentinel (`false`, `-1`, `""`, `[]`) or silence for a failure: the clipboard and the picker reject when
     not granted. `null` stays an answer to a query with nothing there (`groupOf`, `posAtCoords` over nothing,
@@ -268,7 +268,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `onHoverOut: () => void` | `onMouseLeave: (e: MouseEvent) => void` | Begin and end | As above, the DOM's `mouseleave`; `e` is where the mouse was last. Rust `on_mouse_leave` |
 | `onHoverMove(e: HoverEvent)` (no button down) and `onMouseMove(e: Point)` (button down too) | one `onMouseMove(e: MouseEvent)` | Payloads | The DOM's `mousemove`, GPUI's `on_mouse_move`: every move over the view, with or without a button down (`e.pressedButton`), and a modifier key changing while the mouse rests there; one object, as every event. Rust `on_mouse_move` |
 | `HoverEvent` (type) | `MouseEvent` `{ position; pagePosition; modifiers; pressedButton: MouseButton \| null }`, `MouseButton` `"left" \| "right" \| "middle" \| "back" \| "forward"` | Points | GPUI's `MouseMoveEvent` and `MouseButton`; the payload of all three mouse events. `hoverStyle` and `hover:` keep CSS's name |
-| `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
+| `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape, and `pointerType: PointerType \| null` (`"mouse"`, `"pen"`, `"touch"`) | Points | `Menu.popup(items, e.pagePosition)`; `pointerType` is the DOM's (a keyboard `contextmenu` is a `PointerEvent` with `pointerType` `""`), `null` for no pointer as `pressedButton` is for no button |
 | `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout({ bounds }: { bounds: Bounds })` | Geometry | `LayoutEvent` dropped; `onLayout(bounds)` first, one object since 2026-10-27 (Payloads, below) |
 | `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
 | `YNode` (every ref; what primitives return) | `ViewRef` (`focus`, `blur`, `measure`; what an element is, in `JSX.Element`), and per element `InputRef` (`setSelection`), `ScrollRef` (`scrollTo`, `zoomTo`, `scrollToEnd`), `ListRef` (`scrollTo`, `scrollToOffset`, `scrollToIndex`, `scrollToEnd`), `WebViewRef`, `VideoRef` (`seek`), `NativeComponentRef` (`command`) over it; primitives return `JSX.Element` | Shapes that can grow | 2026-10-28: a method added to one element appears on its ref only. `Overlay`'s `anchor`, `setAccessibilityFocus` and a Rust component's ref's `node` take a `ViewRef`; the methods' signatures are unchanged |
@@ -299,6 +299,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | **WebView** | | | |
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
+| (new) wry's `WebViewBuilder::with_incognito(bool)` (the web views of GPUI Kit's `gpui-webview`) | `incognito` (`false`), Rust `.incognito(bool)` | States | wry's name, which Tauri's and other web view APIs share: a state of the web view, read when it is made (Rust takes a value, not a signal). A boolean, not a storage mode: a named persistent store would be a prop of its own, which `incognito` composes with |
 | **NavPage** | | | |
 | `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
@@ -307,7 +308,18 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
-| `Window.setTitleBar(style, height?)` | `Window.setTitleBar({ style, height? })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object. Rust's `set_title_bar(style, height)` unchanged |
+| `Window.setTitleBar(style, height?)` | `WindowRef.set({ titleBar: { style, height? } })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object; 2026-11-06: an attribute of `set` |
+| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowHandle`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
+| `Window.setTitle(t)`, `setTitleBar(o)`, `setLevel(l)` | `set({ title, titleBar, level })` | Shapes that can grow | One `set(partial)` for every attribute, no per-attribute setters |
+| `Window.toggleMaximize()`, `toggleFullScreen()` | `setMode("maximized" \| "fullScreen" \| "normal")`, `minimize()`, `restore()` | States | Intents, not toggles; minimized is apart from the mode |
+| `Window.setFrame(frame)` | `WindowRef.setBounds({ origin?, size?, animated? })` | Where names come from | It moves and sizes the window's bounds |
+| `Window.setBounds(bounds)` | `WindowRef.setPlacement(placement)` | Where names come from | It restores a saved placement (Win32's `WINDOWPLACEMENT`) |
+| `WindowBounds { mode: "windowed" \| "maximized" \| "fullscreen", bounds }`, `WindowState.windowBounds` | `WindowPlacement { mode: WindowMode, bounds }`, `WindowState.placement`; `WindowMode` `"normal" \| "maximized" \| "fullScreen"` | Where names come from | `WindowState.hidden` became `visible` |
+| `Window.setSkipTaskbar(true)` | `set({ taskbar: false })` | States | An attribute named after what it shows |
+| `Window.orderFront()` | `WindowRef.focus()` | Where names come from | The DOM's and GPUI's verb |
+| `Window.setMenuBar(mode)` | `Menu.setMenuBar(mode)` | Where names come from | The menu bar is the menus' |
+| `Window.open(c, { size, position, level, frame })` → `{ id, focus, hide, close }` | `Window.open(c, WindowOptions)` → `WindowRef`; `<Window>` | Open state | `defaultSize`, `defaultPosition`; `level` and `frame` attributes |
+| (the focused window as "current") | `currentWindow()`: the window the calling component renders in (tree-scoped, through context); `focusedWindow()` the focused one | Environment | Named as Tauri's `getCurrentWindow()` under the accessor rule; the meaning of Flutter's, Qt's and Compose's |
 | **Standard modules** | | | |
 | `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
 | **`nsh`: the environment** | | | |
@@ -856,7 +868,7 @@ and `Input`'s React Native names follow the rules as well.
 | `onPressOutside` | | none (`DialogChangeReason::*Press`) | The act, a press, named after where it went down |
 | `onCancel` | | `Dialog::on_cancel`, `actions::Cancel` (Escape in `Popover`) | Escape and the Android back button, as for dialogs |
 | `Popover`, `HoverCard`, `Tooltip`, `Sheet` (`nsh/base`) | | `popover.rs`, `hover_card.rs`, `tooltip.rs`, `sheet.rs` | Parts as `Dialog`'s: `popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`; `trigger` and `content` slots |
-| `Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu` (`nsh/base`) | | `gpui-component` `PopupMenu`, `ContextMenu` (`gpui-base` has no menu) | `MenuItem::on_select` as `PopupMenu`'s items; `Submenu`'s `back` slot is the row a sheet shows above its items |
+| `Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu` (`nsh/base`) | | `gpui-component` `PopupMenu`, `ContextMenu` (`gpui-base` has no menu) | `MenuItem::on_select` as `PopupMenu`'s items; `Submenu`'s `back` slot is the row a sheet shows above its items; `Submenu`'s `onOpenChange({ open, reason })` is an NSH addition (`PopupMenu`'s submenus report nothing), the payload `Menu`'s, so an app can load a submenu's items when it first opens |
 | `MenuItem` `checked`, `checkedStyle` (new) | `checked?: boolean` (a checkable item while set), `checked:` classes | `gpui-component` `PopupMenuItem::checked`, `PopupMenu::menu_with_check`; `nsh/desktop`'s `MenuItem.checked` | One name with the native menus' item; the value the app's, `onSelect` the press (as `PopupMenu`'s items, whose action the app flips), so no `onCheckedChange` |
 | `MenuItem` `role` (new) | `"menuitemcheckbox"` by default while `checked` is set, `"menuitemradio"` for one choice of a group | GPUI `Role::MenuItemCheckBox`, `Role::MenuItemRadio`; `Checkbox`'s `role` | gpui-component has no radio items (its checked items are all one kind); a role instead of a radio group component, as `Checkbox` takes one, and the app checks one item of the group |
 | `MenuItem` slot `indicator`, `indicatorClass` / `indicatorStyle` (new) | the indicator part before the content, `checked:` / `disabled:` projected from the item, the app's mark inside it (as `Checkbox`'s) | `PopupMenu`'s check icon (`IconName::Check`), `check_side(Side)` | No built-in icon: the mark is the app's element. No `checkSide`: gpui-component needs it to place an icon it draws itself, while here the app places its own mark: the `indicator` slot is laid out before the content (`check_side(Side::Left)`, where an icon's place is given to the mark), and a trailing mark (`Side::Right`) is an element of the content with `group-checked:` classes, `group` on the item |

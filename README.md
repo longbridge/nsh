@@ -198,6 +198,8 @@ Logs and errors show in the terminal. What each platform needs:
 | [`examples/rust-exports`](examples/rust-exports) | A TSX app using a component, a module and a class of its own Rust crate |
 | [`examples/gallery`](examples/gallery) | A tour of what NSH supports: lists, navigation, forms, controls, gestures, animation, images, styles, text, web view and video, `fetch` |
 | [`examples/counter`](examples/counter) | The smallest app |
+| [`examples/tasks-rs`](examples/tasks-rs) | A small Rust app with a store, pages, a list, a system alert and tests, laid out as the Coding Guides say |
+| [`examples/tasks`](examples/tasks) | The same app in TSX |
 | [`examples/hopper`](examples/hopper) | A dark, tabbed dashboard built only from primitives: interactive canvas charts, sliders, menus, animation |
 | [`examples/desktop`](examples/desktop) | A desktop app with a title bar and menus of its own (`nsh/desktop`) |
 | [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | NSH inside existing native apps, with a native component the app registers |
@@ -206,6 +208,20 @@ Logs and errors show in the terminal. What each platform needs:
 ```sh
 cargo run
 ```
+
+## Skills for AI coding agents
+
+Install the NSH skills for your coding agent (Claude Code, Codex, Cursor, Gemini CLI and others), so it follows
+NSH's model in Rust, Rust with TSX, or TSX:
+
+```sh
+npx skills add longbridge/nsh
+```
+
+| Skill | What it gives the agent |
+|---|---|
+| [`nsh`](skills/nsh/SKILL.md) | Building apps in Rust (preferred), Rust with TSX, or TSX: the Coding Guides, a page per mode, tooling, and a tested app in Rust and in TSX |
+| [`nsh-design-guides`](skills/nsh-design-guides/SKILL.md) | The Design Guides, for any screen, interaction or interface copy |
 
 ## Acknowledgements
 

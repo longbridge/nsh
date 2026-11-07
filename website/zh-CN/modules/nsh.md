@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、`setTheme`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[语音识别](#speech)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -263,6 +263,43 @@ function token<K extends keyof Tokens>(name: K): Tokens[K];
 import { effect, token } from "nsh";
 
 effect(() => console.log("primary is", token("primary"), "radius", token("radius")));
+```
+
+## setTheme
+
+```ts
+function setTheme(theme: Theme | null): void;
+
+interface Theme {
+  cssVars: {
+    theme?: Record<string, string | number>;
+    light?: Record<string, string | number>;
+    dark?: Record<string, string | number>;
+  };
+}
+```
+
+在应用运行时把 `theme` 设为应用的主题，取代 `nsh.json` 的 `"theme"`：格式与它相同，也和它一样叠加在 shadcn/ui 的令牌之上。
+它立即生效：调用之后 `token()` 马上读到新的令牌，引用令牌的类名、`nsh/base` 和 Rust 组件的 `theme()` 在下一帧跟上，两种外观都是。
+嵌入方应用的[主题覆盖](../docs/tailwind.md#主题-token)仍然优先于它。传 `null` 恢复应用构建时的主题。
+
+主题要整个读得懂：有值读不懂时（NSH 不认识的颜色，如 `#zz` 或 `lab()`；指不到颜色的 `var()`；或一种外观下是颜色、另一种外观下却不是颜色的值），
+`setTheme` 抛出 `TypeError`，逐一列出这些值，正在显示的主题保持不变。阴影这类不属于任何令牌类型的值会被略过，和 `nsh.json`
+的主题一样。新主题请从应用自己的主题出发，只改不同的部分，这样类名引用的令牌都还有值（`up` 在 `nsh.json` 的主题里时的 `bg-up`）。
+Rust：对 `nsh_base::Theme` 调用 `set_tokens(theme.into())`（[主题 token](../docs/tailwind.md#主题-token)）。
+
+```tsx
+import { setTheme } from "nsh";
+import theme from "./theme.json"; // nsh.json 的 `"theme"` 指向的文件
+
+// 应用的主题，换一个 primary 颜色。
+function brand(color: string) {
+  const { light, dark } = theme.cssVars;
+  setTheme({ cssVars: { ...theme.cssVars, light: { ...light, primary: color }, dark: { ...dark, primary: color } } });
+}
+
+brand("#e11d48");
+setTheme(null); // 恢复应用的主题
 ```
 
 ## View、Text、Scroll、Overlay
@@ -843,17 +880,17 @@ const toggle = () => {
 
 ## Device
 
-设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`lifecycle()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度、区域设置和应用状态是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一种像素密度的屏幕、离开应用再回来）时，读取它们的地方会随之更新。
+设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`locale_settings()`、`lifecycle()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度、区域设置、语言与地区设置和应用状态是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小、语言或地区设置、移到另一个时区、移到另一种像素密度的屏幕、离开应用再回来）时，读取它们的地方会随之更新。
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Lifecycle, Os},
-    prelude::*, // window、dark、font_scale、locale、lifecycle、os、idiom、pixel_ratio、set_color_scheme……
+    platform::{Appearance, HourCycle, Idiom, Lifecycle, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday},
+    prelude::*, // window、dark、font_scale、locale、locale_settings、lifecycle、os、idiom、pixel_ratio、set_color_scheme……
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { colorScheme, fontScale, lifecycle, locale, localeSettings, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 ```
 
 教程见[设备与环境](../docs/device-and-environment.md)。
@@ -912,6 +949,32 @@ const locale: Accessor<string>;
 
 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`），或嵌入它的应用设置的区域设置。响应式。Rust：`locale() -> Locale`（`locale().as_str()` 即标签）。`Intl` 默认按它格式化；读取它来选择你自己的翻译文案（[设备与环境](../docs/device-and-environment.md#语言和地区)）。
 
+### localeSettings
+
+```ts
+const localeSettings: Accessor<LocaleSettings>;
+
+interface LocaleSettings {
+  readonly languages: readonly string[];
+  readonly timeZone: string;
+  readonly hourCycle: "h11" | "h12" | "h23" | "h24";
+  readonly firstDayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  readonly measurementSystem: "metric" | "us" | "uk";
+  readonly temperatureUnit: "celsius" | "fahrenheit";
+}
+```
+
+用户在区域设置之外的语言与地区设置：系统和语言、地区放在一起保存、一起改动的设置。响应式：其中任何一项变化时它都会变化；只想跟随其中一项时，在 `computed` 中读取它。Rust：`locale_settings() -> LocaleSettings`，字段相同，用蛇形命名（`languages`、`time_zone`、`hour_cycle`、`first_day_of_week`、`measurement_system`、`temperature_unit`）。名称和取值都是 `Intl` 的，可以直接传入它的选项（[设备与环境](../docs/device-and-environment.md#语言与地区设置)）：
+
+- `languages`：偏好语言，BCP 47 标签，按偏好从高到低排列（`["de-DE", "en-US"]`）：系统的列表；嵌入它的应用设置了自己的语言时，那个语言排在最前。从不为空。用其中第一个有翻译的语言显示应用的文字，其余是它的后备。`locale()` 是区域格式，可以不同（英文文字、德国日期）。Rust：`Languages`（`iter()`、`first()`、`as_slice()`，每项是一个 `Locale`）。
+- `timeZone`：设备的时区，即系统给它的名称：IANA 名称（`"Europe/Berlin"`、`"America/New_York"`）、`"UTC"`，或系统使用偏移量时区时的名称（Android 上的 `"GMT+01:00"`）。随系统设置变化，例如用户出行时。`Date` 的本地时间跟随系统时区，`Intl` 给出的名称与它相同（`Intl.DateTimeFormat().resolvedOptions().timeZone`）；读取这个名称来显示它、和日期一起保存，或交给时区库。Rust：`TimeZone`（`as_str()` 即名称）。
+- `hourCycle`：12 小时制或 24 小时制，用 `Intl` 对小时周期的命名：`"h12"`（`12:30 PM`）、`"h23"`（`00:30`），以及较少见的 `"h11"`（`0:30 PM`）和 `"h24"`（`24:30`）。是系统的设置，否则是所在地区的。`Intl` 按区域设置自己的小时周期书写时间：把它作为 `hourCycle` 选项传入，就能按用户的习惯书写。`TimeField` 和 `DatePicker` 的 `hourCycle` 在 `"h11"` 和 `"h12"` 时用 `"h12"`，其余用 `"h23"`。Rust：`HourCycle`（`twelve_hour()` 表示有上午和下午）。
+- `firstDayOfWeek`：每周从哪一天开始，按 ISO 8601（以及 `Intl.Locale` 的 `firstDay`）给星期编号：1 是星期一，7 是星期日。即日历的第一列。是系统的设置，否则是所在地区的（美国是 7，德国是 1，埃及是 6）。`Calendar` 和 `DatePicker` 的 `firstDayOfWeek` 从 0（星期日）开始计数：传入 `firstDayOfWeek % 7`。Rust：`Weekday`（`number()`）。
+- `measurementSystem`：度量长度、重量和容积所用的单位：`"metric"`（公制）、`"us"`（英尺、英里、磅、加仑）或 `"uk"`（公制，但距离用英里、容量用品脱）。是系统的设置，否则是所在地区的。Rust：`MeasurementSystem`。
+- `temperatureUnit`：温度单位：`"celsius"`（摄氏度）或 `"fahrenheit"`（华氏度）。是系统的设置，否则是所在地区的（美国及少数几个地区是华氏度）。Rust：`TemperatureUnit`。
+
+除非 `open` 设置了 `localeSettings`，headless 测试中它是区域设置的（区域设置本身作为偏好语言、所在地区的偏好），时区是 UTC；测试中的本地时间仍是这台机器的。
+
 ### lifecycle
 
 ```ts
@@ -946,6 +1009,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 ```
 
 无论系统外观如何，立即以 `scheme` 显示应用：`colorScheme()`、`dark:` 类、组件的主题和平台控件（警告框、状态栏的默认样式）都随之变化；`"system"` 重新跟随系统。`nsh.json` 的 `"appearance"` 从启动时就设置它。Rust：`set_color_scheme(Appearance::Dark)`（`Appearance::Light`、`Appearance::System`）。
+
+### fpsEnabled 和 setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` 打开性能监视器，`false` 关闭它：macOS 上是应用右上角的面板（见 [macOS](../docs/macos.md#性能监视器)），iOS、Windows、Linux 和 GPUI 上是每秒一行 `nsh::perf` 日志，终端上是一行状态（见[性能](../docs/performance.md#在屏幕上--fps)）。`fpsEnabled()` 表示监视器是否在测量，以平台报告的为准（响应式），所以开关显示的是平台实际的状态；应用用 `--fps` 或环境变量 `NSH_FPS=1` 启动时它也为开。在没有监视器的平台上（Android、Web），`fpsEnabled()` 保持为 `false`。Rust：`set_fps_enabled(true)`、`fps_enabled() -> bool`。
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
 
 ### platform
 
@@ -1106,6 +1182,18 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 
 - 安全区域（Rust 的 `safe_area()`；TSX 的 `safeArea()`、`safeAreaInsets()`）和软键盘（Rust 的 `keyboard_height()`；TSX 的 `keyboardFrame()`）见[安全区域与键盘](#safe-area-and-keyboard)。
 - 屏幕阅读器和减弱动态效果的设置在 [`nsh` 的无障碍 API](#accessibility) 中。
+
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
+```
+
+在应用运行时注册字体，结果是 `{ family }`，即它的字体族名，供 `fontFamily` 使用：应用下载或生成的字体，即 TrueType、OpenType、WOFF 或 WOFF2 数据，或者字体文件的 URL（应用自己的文件 `asset:/...`，或网络上的文件，按 `fetch` 的方式读取：适用 `network` 权限）。此后使用该字体族的文字都会用它排版，之前已显示的文字也会重新排版。`network` 权限不允许该 URL 或它重定向到的 URL 时，以一个 `Error` 拒绝，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"network"`，`resource` 为被拒绝的 URL，与 `fetch` 相同；URL 无法加载或数据不是字体时以 `Error` 拒绝。Rust：`register_font(data) -> Answer<Result<String, String>>`，在任务中等待。应用发布的字体则在第一帧之前注册（[字体](../docs/fonts.md#在应用运行时注册字体)）。
 
 ## PanResponder
 
@@ -1574,7 +1662,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // 允许选择多个（false：一个）
+  limit?: number; // multiple 时最多选几个（最多 100）
+  filters?: { name: string; extensions: string[] }[]; // 提供的文件类型（不给：任意文件）
+}
+
+interface PickedFile {
+  file: File; // 名称、类型、字节大小和内容，都保持原样
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // 允许选多张（false：一张）
@@ -1593,6 +1692,7 @@ interface PickedImage {
 | TS | Rust |
 |---|---|
 | `await Picker.pickImages(options)` | `pick_images(request).await -> Vec<PickedFile>` |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `multiple`、`limit` | `PickRequest::new(multiple, limit)`（`limit` 为 0 表示最多 100） |
 | `maxDimension` | `request.max_dimension = Some(DevicePixels(2048))` |
 | `quality` | `request.quality = Some(Percentage(0.8))` |
@@ -1701,12 +1801,47 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+显示系统的文件选择器，可选任意类型的文件，resolve 为用户选中的文件；用户取消时 resolve 为 `[]`。拒绝的情况与
+`pickImages` 相同：超出范围的选项（`limit: 0`、没有扩展名的过滤器）以 `RangeError` reject，没有 `picker` 能力时以
+`ERR_ACCESS_DENIED` reject。Rust：`pick_files(request)`。
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "文档", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| 平台 | 选择器 | 过滤器 |
+|---|---|---|
+| macOS | `NSOpenPanel` 表单 | 所有扩展名合为一组 |
+| Windows | `IFileOpenDialog` | 每个过滤器一个选项，显示其名称 |
+| Linux | `GtkFileDialog`（有 portal 时用 portal 的） | 每个过滤器一个选项，显示其名称 |
+| iOS | `UIDocumentPickerViewController`，以副本形式 | 所有扩展名合为一组 |
+| Android | `ACTION_OPEN_DOCUMENT` | 按媒体类型；有 Android 不认识的扩展名时提供任意文件 |
+| Web | `<input type=file>` | 所有扩展名合为一组 |
+| GPUI | GPUI 的打开对话框，可选任意文件 | 不符合的文件在选择后被剔除 |
+
+所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，因此超过 512 MiB 的文件不会出现在
+结果中，并记录到日志。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
+
 ### 嵌入 NSH 的应用
 
 嵌入 NSH、并且有自己选择器（比如带有应用自己的相册）的应用可以自己回答选取：在 Rust 中，把 `PickerBackend`
 （`nsh_core::picker`）交给引擎（`EngineConfig::picker`，GPUI 和 GPUI Kit 应用用 `AppView::set_picker`），它会收到每次选取的
 `PickRequest` 并返回文件，系统的选择器不会出现。它返回的文件和平台给的一样会被补全：截到请求的数量上限，大小、类型和
-扩展名从字节中读出。
+扩展名从字节中读出。`pick_files` 以同样的方式回答 `pickFiles`；没有实现它的 backend 会取消这些选取，系统的选择器同样不会出现。
 
 ### 测试
 
@@ -1714,9 +1849,97 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 和 `pickFiles` 什么也不显示，
 > 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
-> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 中，`pick_images` 和 `pick_files` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+
+## Notifications
+
+`Notifications` 显示系统通知并设置应用图标的角标（macOS 上是 Dock 图标）。在用户做了需要通知的操作时再请求权限，然后显示：
+
+```tsx
+import { Notifications } from "nsh";
+
+Notifications.on("press", ({ id }) => openChat(id));
+
+async function notifyMe() {
+  if ((await Notifications.requestPermission()) !== "granted") return;
+  await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you coming?" });
+  Notifications.setBadge(1);
+}
+```
+
+Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`set_badge` 和 `next_notification_press`。
+
+| 平台 | 通知 | 角标 |
+| --- | --- | --- |
+| macOS | 通知中心，需要已签名的应用包；`nsh run` 的非应用包宿主上，以及未设置 `AppOptions::notifications` 的嵌入应用中为 `unavailable` | Dock，无需权限 |
+| iOS | 通知中心 | 主屏幕，需要权限 |
+| Android | 系统通知，Android 13 需要 `POST_NOTIFICATIONS`（`nsh package` 会为获得 `notifications` 能力的应用声明） | 没有可设置的数字：启动器会标记有通知显示的应用，数字随之后显示的通知一起传递 |
+| Windows | Toast 通知，除非用户在设置里关闭了应用的通知（即 `denied`）。Windows 没有授权弹窗，`requestPermission` 不会询问用户。未设置 `AppOptions::notifications` 的嵌入应用为 `unavailable` | 任务栏按钮上的数字，最多显示 `99+`；任务栏使用小按钮时不显示 |
+| Linux | 桌面的通知守护进程（`org.freedesktop.Notifications`）：运行时为 `granted`，不弹提示，否则为 `unavailable` | Unity launcher API，支持它的 Dock 才显示（Plasma、Ubuntu Dock、Dash to Dock），其他环境不显示 |
+| Web | `Notification`，需要浏览器允许页面直接显示（Android 上不行） | Badging API，仅限已安装的应用 |
+| 终端、GPUI | `unavailable` | 无 |
+
+### Notifications.show
+
+`show` 的结果表示系统是否接收了这条通知；没有权限时为 `false`。应用在前台时通知照常显示。用相同的 `id` 再次显示会替换旧通知，`Notifications.close(id)` 用于移除。
+
+`silent: true` 让通知显示时不发声、不振动，与 Web 的 `Notification` 一致；默认播放系统提示音。Apple 平台显示不带声音的通知，Android 把它放进不提醒的分组（无声音、振动和弹出横幅），Windows 显示静音的 toast，Linux 附带通知服务的 `suppress-sound` 提示，Web 把 `silent` 交给浏览器。
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.on
+
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
+
+### Notifications.permission
+
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
+
+## UrlScheme
+
+`UrlScheme` 报告打开应用的链接：应用在 `nsh.json` 中认领的 scheme 的 URL，例如网页上「在应用中打开」按钮发出的
+`myapp://orders/42`，或完成登录后浏览器跳回应用的链接。应用只需认领一次，`nsh package` 会把这些 scheme 声明给系统：
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` 报告系统交给应用的每一个链接，启动时和运行中都会。没有监听者时到达的链接（包括启动应用的那个）会留给下一个监听者
+（最多 16 个，超出时丢弃最早的），所以在应用启动时，或处理链接的界面准备好后再监听都可以。Rust 代码 await
+`nsh_core::prelude` 的 `next_url_scheme_open()`；Rust 应用生成的代码会把 scheme 交给它的根组件（`Root::url_schemes`）。
+
+链接是来自应用外部的输入：任何网页或应用都能用任意路径和参数打开 `myapp://`。在执行链接要求的操作之前，像对待其他输入一样先校验
+（id 确实存在、操作经用户确认）。NSH 只放行应用自己的 scheme、长度不超过 16 KB 的链接，并且从不自行导航：链接打开什么由应用决定。
+
+scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小写比较。Web、文件和系统应用的 scheme（`http`、`https`、`file`、
+`mailto`、`tel`、`sms` 等）在构建应用时会被拒绝。
+
+| 平台 | 应用如何认领 scheme |
+| --- | --- |
+| macOS | 应用 `Info.plist` 中的 `CFBundleURLTypes`；系统会打开应用，或把链接交给正在运行的那个 |
+| iOS、Mac Catalyst | 应用 `Info.plist` 中的 `CFBundleURLTypes`；包括启动应用的链接和运行中到达的链接 |
+| Android | `nsh package` 写入清单的 `ACTION_VIEW` intent filter；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
+| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件并设为默认处理程序；`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
+
+`nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
+在运行中打开一个链接，两者都在无头模式下运行。
+
+嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
+`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
 
 ## Speech
 
@@ -1856,6 +2079,125 @@ async fn dictate() -> String {
 > 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"speech": true` 授予语音。没有授予时 `Speech.start` 抛出一个
 > `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`，`resource` 为 `""`。在 Rust 中，会话以
 > `not-allowed` 结束，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+
+## Sound
+
+两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 的音效用 GStreamer、播放器用 GTK 的媒体流（播放器的速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
+
+```rust tabs
+use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
+```
+
+```tsx tabs
+import { AudioPlayer, Sound } from "nsh";
+```
+
+```ts
+declare class Sound {
+  static available(): Promise<boolean>;
+  static load(src: string): Promise<Sound>;
+  play(options?: { volume?: number; rate?: number }): void;
+  stop(): void;
+  readonly duration: number;
+  dispose(): void;
+}
+
+declare class AudioPlayer {
+  constructor(src: string, options?: { volume?: number; rate?: number; loop?: boolean });
+  static available(): Promise<boolean>;
+  on(event: "load", listener: (load: { duration: number }) => void): () => void;
+  on(event: "progress", listener: (progress: { currentTime: number; duration: number }) => void): () => void;
+  on(event: "buffer", listener: (buffer: { buffering: boolean }) => void): () => void;
+  on(event: "end", listener: () => void): () => void;
+  on(event: "error", listener: (error: { code: AudioErrorCode; message: string }) => void): () => void;
+  play(): Promise<void>;
+  preload(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  volume: number;
+  rate: number;
+  loop: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly state: "idle" | "loading" | "playing" | "paused" | "ended";
+  dispose(): void;
+}
+
+type AudioErrorCode =
+  | "not-allowed" | "network" | "decode" | "not-supported"
+  | "quota-exceeded" | "unavailable" | "failed";
+```
+
+| TSX | Rust |
+|---|---|
+| `await Sound.available()` | `audio_available().await -> bool` |
+| `await Sound.load(src)` | `load_sound(src).await -> Result<Sound, AudioFailure>` |
+| `sound.play({ volume, rate })` | `sound.play(volume, rate)` |
+| `new AudioPlayer(src, options)` | `audio_player(src, settings) -> AudioPlayer` |
+| `player.on("progress", ...)` | `player.next().await -> Option<AudioEvent>` |
+| `player.play()` / `pause()` / `seek(s)` | `player.play()` / `pause()` / `seek(duration)`（drop 即关闭） |
+
+### Sound.load
+
+从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+
+### Sound.play
+
+在正在播放的声音之上再起一路播放（同时最多 32 路，超出时最早的一路停止），音量 `volume`（0 到 1）、速率 `rate`（0.5 到 2，音高随之变化）。它没有返回值，设备静音或没有输出时也不会失败——那就是静音。超出范围的值抛出 `RangeError`。`stop()` 停止这个音效的所有播放。
+
+```tsx
+import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
+
+const tap = await Sound.load(tapFile);
+
+function Key(props: { label: string }) {
+  return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
+}
+```
+
+### AudioPlayer
+
+播放器在 `play()` 或 `preload()` 之前什么都不加载。它的 `state` 和 `currentTime` 跟随平台的报告：知道时长后来一次 `load`（直播流为 `Infinity`），播放期间以及跳转之后约每秒四次 `progress`，等待数据时 `buffer`，播到结尾时 `end`（循环的播放器则从头再播）。`play()` 在开始播放后 resolve，出错时按 `error` 报告的原因 reject。播放器在 `dispose()` 时停止，或在创建它的一方离开时停止：播放期间请一直持有它。
+
+```tsx
+import { AudioPlayer, signal } from "nsh";
+
+const position = signal(0);
+const voice = new AudioPlayer("https://example.com/messages/42.m4a");
+voice.on("progress", ({ currentTime }) => position.set(currentTime));
+voice.on("end", () => position.set(0));
+await voice.play();
+```
+
+```rust
+use nsh_core::{audio::{AudioEvent, PlayerSettings}, prelude::*};
+
+async fn play_message(url: &str) {
+    let mut player = audio_player(url, PlayerSettings::default());
+    player.play();
+    while let Some(event) = player.next().await {
+        if event == AudioEvent::Ended {
+            break;
+        }
+    }
+}
+```
+
+### 格式
+
+音效和播放器播放平台能解码的格式。WAV 和 AAC（`.m4a`）在所有平台都能播放，适合音效；AAC 和 MP3 适合播放器。
+
+### 嵌入 NSH 的应用
+
+以自己的方式播放声音的宿主应用，给引擎一个 `AudioBackend`（`nsh_core::audio`，`EngineConfig::audio`）：它收到每条 `AudioCommand` 以及对应音效或播放器的 `AudioSink`，可以从任意线程向其报告。此时平台不播放任何声音。
+
+### 测试
+
+`nsh test` 在 headless 运行中把声音交给一个假扬声器：音效按 WAV 解码（时长取自文件头），播放器立即播放其源的一分钟，`app.endAudio()` 让正在播放的播放器播到结尾，`app.audio()` 列出应用发出的请求（`load`、`play`、`open`、`resume`、`seek` 等）。参见[测试](../docs/testing-and-trace.md)。
+
+> [!NOTE]
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，出声需要授权 `"audio": true`。未授权时 `Sound.load` 会 reject、`new AudioPlayer` 会抛出 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`、`permission` 为 `"audio"`、`resource` 为音源。Rust 中加载或播放器以 `not-allowed` 失败。参见[沙箱与 capability](../docs/sandbox-and-capabilities.md)。
 
 ## Storage
 

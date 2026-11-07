@@ -16,6 +16,7 @@ on:
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-windows/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -30,6 +31,9 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/windows.yml"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
@@ -39,6 +43,7 @@ on:
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
+      - "crates/nsh-updater/**"
       - "crates/nsh-platform-windows/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
@@ -60,7 +65,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -73,6 +78,13 @@ env:
 
 jobs:
   check:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     runs-on: windows-latest
     env:
       # QuickJS is C: bindgen needs libclang, which the image's LLVM has.

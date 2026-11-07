@@ -32,6 +32,8 @@ imagesize.workspace = true
 naga = { workspace = true, optional = true }
 # WOFF and WOFF2 fonts (`text::font_data`).
 wuff.workspace = true
+# Fonts' family names (`text::font_family`).
+ttf-parser.workspace = true
 
 [features]
 # SVG images for the native backends (`svg`: sniffing, sizes and rasters with
@@ -60,13 +62,19 @@ futures-util.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
-# `process`'s children: their process groups and exits (`runtime/process.rs`).
-libc.workspace = true
 # The image disk cache (`image/cache.rs`).
 httpdate.workspace = true
 # The image loader's downloads (`image/loader.rs`, feature `loader`).
 ureq = { workspace = true, optional = true }
 crc32fast.workspace = true
+# `nsh/updater`.
+nsh-updater.workspace = true
+
+# `process`'s children: their process groups and exits (`runtime/process.rs`);
+# the names of Unix error numbers (`element/system.rs`). Emscripten is wasm32
+# and `unix` both, so it needs libc for the `cfg(unix)` code too.
+[target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
+libc.workspace = true
 
 # `process`'s children on Windows: their jobs (`runtime/process.rs`); the
 # machine's memory for the image budget (`image/memory.rs`).
@@ -85,6 +93,4 @@ windows-sys = { workspace = true, features = [
 nsh-core = { path = ".", features = ["shader"] }
 # The `unit_types` check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
-# The fonts `text::font_data` decompresses are checked as fonts.
-ttf-parser.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }

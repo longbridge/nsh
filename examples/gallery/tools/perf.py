@@ -120,6 +120,9 @@ def main() -> int:
         "}, 3_600_000);\n"
     )
     command = [args.nsh, "-v", "test", str(test), "--target", args.target, "--fps"]
+    if args.target == "macos":
+        # The active app, as the baseline's runs were (`nsh test` runs macOS apps in the background by default).
+        command.append("--foreground")
     print("$", " ".join(command), file=sys.stderr)
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     scenario = None

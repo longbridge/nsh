@@ -71,6 +71,17 @@ export function LucideIcon(props: { name: LucideIconName; size?: number; tint: s
   );
 }
 
+/** A Lucide icon as an SVG `data:` URL, for what takes an image rather than a
+ * view: a native menu item's `icon`, which shows it in the menu's text color. */
+export function lucideSvg(name: LucideIconName): string {
+  const elements = (lucide[name] as LucideElement[]).map(({ tag, ...attributes }) => {
+    const written = Object.entries(attributes).map(([key, value]) => `${key}="${value}"`);
+    return `<${tag} ${written.join(" ")}/>`;
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${elements.join("")}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 /** An icon-only control's Lucide icon, or in the terminal its short
  * `label` as text in the icon's tint (`IconLabel`'s Lucide form). */
 export function LucideLabel(props: { name: LucideIconName; label: string; size?: number; tint: string }) {

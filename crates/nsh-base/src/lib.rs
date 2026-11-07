@@ -66,6 +66,8 @@ mod switch;
 mod syntax;
 mod table;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
 pub mod terminal;
 pub mod text_view;
 
@@ -92,6 +94,12 @@ use nsh_core::element::{ComponentSpec, Registry};
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
 pub use nsh_core::element::{Input, input};
 
+#[cfg(feature = "term")]
+pub use crate::term::{
+    Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,
+    TerminalEmulatorEvent, TerminalEmulatorFactory, TerminalEvent, TerminalLine, TerminalModes,
+    TerminalProps, TerminalRun, TerminalSize, TerminalStyle, VtEmulator, terminal,
+};
 pub use crate::{
     accordion::{
         Accordion, AccordionElement, AccordionEvent, AccordionHeader, AccordionHeaderElement,
@@ -154,8 +162,8 @@ pub use crate::{
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
-        context_menu, menu, menu_item, menu_separator, submenu,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
+        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
@@ -206,9 +214,10 @@ pub use crate::{
     tabs::{Tab, TabElement, TabEvent, TabProps, Tabs, TabsElement, TabsProps, tab, tabs},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
-        TextViewParts, TextViewProps, TextViewStyles, text_view,
+        TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewClasses,
+        TextViewCodeAction, TextViewCodeActionEvent, TextViewElement, TextViewEvent,
+        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart, TextViewParts,
+        TextViewProps, TextViewSelectionEvent, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
@@ -232,7 +241,6 @@ pub use crate::{
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
     tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
 };
-
 #[cfg(feature = "editor")]
 pub use crate::{
     diff::{
@@ -274,7 +282,7 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
         // `env.rs`), declared by hand.
         .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack", "Input"])
         // The theme: the app's over the default, as design tokens.
-        .tokens_from(tokens_of);
+        .tokens_from(theme::read_tokens);
     registry
 }
 
@@ -330,6 +338,8 @@ pub mod parts {
         ("resizable", resizable),
         #[cfg(feature = "plot")]
         ("plot", plot),
+        #[cfg(feature = "term")]
+        ("term", term),
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
@@ -452,6 +462,12 @@ pub mod parts {
         rich_editor::js::register(registry);
     }
 
+    /// `Terminal`.
+    #[cfg(feature = "term")]
+    pub fn term(registry: &mut Registry) {
+        registry.register::<crate::Terminal>();
+    }
+
     /// `DataTable`.
     pub fn data_table(registry: &mut Registry) {
         registry.register::<DataTable>();
@@ -570,6 +586,7 @@ mod tests {
                 "TableHeader",
                 "TableRow",
                 "Tabs",
+                "Terminal",
                 "TextView",
                 "TimeField",
                 "Toast",

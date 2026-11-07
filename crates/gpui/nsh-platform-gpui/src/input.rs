@@ -289,6 +289,10 @@ pub(crate) struct Input {
     /// Where the mouse last was (root coordinates): keyboard scrolling
     /// goes to the scroll view under it.
     last: Cell<Option<(f32, f32)>>,
+    /// The window [`Input::last`] is in: one of the app's own (its
+    /// root node), else the main window. A batch or a modifier change picks
+    /// again there, not in the main window.
+    last_window: Cell<Option<NodeId>>,
     /// The modifier keys and the mouse button last seen: the mouse events
     /// of views a batch moved under a still mouse carry them.
     modifiers: Cell<Modifiers>,
@@ -665,7 +669,7 @@ fn over_link(view: &NshView, x: f32, y: f32) -> bool {
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return Cursor::Arrow;
     };
     if let Some(native) = &hit.item {
@@ -687,6 +691,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         if let Some(c) = view_cursor(&s) {
             return c;
         }
+        if let Some(edge) = s.props.window_resize {
+            return resize_cursor(edge);
+        }
         if in_area && crate::selectable_view::selects(&s) {
             return Cursor::Text;
         }
@@ -701,7 +708,7 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
 /// (header buttons, editors) or a view with press or touch handlers is
 /// nearer.
 pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return false;
     };
     if hit.item.is_some() {
@@ -726,6 +733,100 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     false
 }
 
+/// The cursor over a view that resizes the window by `edge`.
+pub(crate) fn resize_cursor(edge: nsh_core::desktop::ResizeEdge) -> Cursor {
+    use nsh_core::desktop::ResizeEdge as E;
+    match edge {
+        E::Top | E::Bottom => Cursor::ResizeNs,
+        E::Left | E::Right => Cursor::ResizeEw,
+        E::TopLeft | E::BottomRight => Cursor::ResizeNwse,
+        E::TopRight | E::BottomLeft => Cursor::ResizeNesw,
+    }
+}
+
+/// What the view at `(x, y)` (root coordinates) does to the window when
+/// pressed: the nearest view that sets `windowControl` or `windowResize`
+/// says, unless a text field or a hosted item is nearer.
+pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPart> {
+    let hit = pick(&surface.input_root(), x, y, true)?;
+    if hit.item.is_some() {
+        return None;
+    }
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if let Some(part) = WindowPart::of(&s.props) {
+                return Some(part);
+            }
+            if s.kind == ViewKind::Input {
+                return None;
+            }
+        }
+        view = v.parent_view();
+    }
+    None
+}
+
+/// A part of the window an app's view stands for (`desktop={{
+/// windowControl }}` / `{{ windowResize }}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowPart {
+    /// A system button: minimize, maximize or close.
+    Control(nsh_core::desktop::WindowControl),
+    /// An edge or a corner that resizes the window.
+    Resize(nsh_core::desktop::ResizeEdge),
+}
+
+impl WindowPart {
+    fn of(props: &nsh_core::ViewProps) -> Option<WindowPart> {
+        props
+            .window_control
+            .map(WindowPart::Control)
+            .or(props.window_resize.map(WindowPart::Resize))
+    }
+}
+
+/// The views that stand for parts of the window, as rectangles in root
+/// coordinates (transforms are not followed), for platforms that hit-test
+/// them themselves (Windows' snap layouts on the maximize button).
+pub(crate) fn window_part_rects(
+    surface: &Surface,
+) -> Vec<(WindowPart, nsh_core::Bounds<nsh_core::Points>)> {
+    fn walk(
+        view: &NshView,
+        origin: (f32, f32),
+        out: &mut Vec<(WindowPart, nsh_core::Bounds<nsh_core::Points>)>,
+    ) {
+        let s = view.state();
+        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
+            return;
+        }
+        if let Some(part) = WindowPart::of(&s.props) {
+            let r = crate::geom::rect(
+                origin.0,
+                origin.1,
+                s.frame.size.width.0,
+                s.frame.size.height.0,
+            );
+            out.push((part, r));
+            return;
+        }
+        view.with_children(|children| {
+            for child in children {
+                let o = {
+                    let c = child.state();
+                    s.child_origin(c.frame, c.shift)
+                };
+                walk(child, (origin.0 + o.0, origin.1 + o.1), out);
+            }
+        });
+    }
+    let mut out = Vec::new();
+    walk(&surface.input_root(), (0.0, 0.0), &mut out);
+    out
+}
+
 /// Where pressing drags the window, as rectangles in root coordinates:
 /// what [`window_drag`] answers point by point, for platforms that
 /// hit-test drag areas themselves (Windows, `crate::chrome`). The views
@@ -735,7 +836,13 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
 pub(crate) fn window_drag_rects(surface: &Surface) -> Vec<nsh_core::Bounds<nsh_core::Points>> {
     let mut drag = Vec::new();
     let mut block = Vec::new();
-    collect_drag(&surface.root, (0.0, 0.0), false, &mut drag, &mut block);
+    collect_drag(
+        &surface.input_root(),
+        (0.0, 0.0),
+        false,
+        &mut drag,
+        &mut block,
+    );
     for b in &block {
         drag = drag
             .into_iter()
@@ -806,12 +913,86 @@ fn collect_drag(
     });
 }
 
+/// Whether a secondary click at `(x, y)` (root coordinates) on a window
+/// drag area goes to the app instead of opening the window menu: the view
+/// under it, or one around it up to the nearest view that sets
+/// `windowDrag: true`, listens to `onContextMenu` (nearer than a text
+/// field). Listeners further out, the root's included, leave the window
+/// menu to the drag area.
+pub(crate) fn hears_context_menu(root: &NshView, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(root, x, y, true) else {
+        return false;
+    };
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if s.events.contains(EventKind::ContextMenu) {
+                return true;
+            }
+            if s.kind == ViewKind::Input || s.props.window_drag == Some(true) {
+                return false;
+            }
+        }
+        view = v.parent_view();
+    }
+    false
+}
+
+/// Whether `view` takes a context menu asked for without a pointer: it
+/// listens to `onContextMenu` (AccessKit's `ShowContextMenu` action).
+pub(crate) fn hears_show_menu(view: &NshView) -> bool {
+    view.state().events.contains(EventKind::ContextMenu)
+}
+
+/// A context menu asked for on `view` without a pointer (AccessKit's
+/// `ShowContextMenu`): the view, or the nearest around it that listens to
+/// `onContextMenu`, hears it with no pointer at its bottom-start corner
+/// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
+/// selectable text is nearer. True when a view heard it.
+pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+    let area = crate::selectable_view::area_of(view);
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        let (id, listens, stop, size) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input || crate::text::selectable(&s),
+                s.frame.size,
+            )
+        };
+        if listens {
+            let position = nsh_core::input::context_menu_anchor(size, rtl);
+            let (page_x, page_y) = v
+                .to_root()
+                .and_then(|m| m.map(position.x.0, position.y.0))
+                .unwrap_or((position.x.0, position.y.0));
+            let event = nsh_core::ContextMenuEvent::new(
+                position,
+                nsh_core::geometry::point(Points(page_x), Points(page_y)),
+                Default::default(),
+                None,
+            );
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if stop || area.as_ref() == Some(&v) {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
 /// menu.
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let area = crate::selectable_view::area_of(&hit.view);
@@ -828,11 +1009,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         };
         if listens {
             let (location_x, location_y) = local(&v, x, y);
-            let event = nsh_core::ContextMenuEvent {
-                position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
-                page_position: nsh_core::geometry::point(Points(x), Points(y)),
-                modifiers: modifiers.core(),
-            };
+            let event = nsh_core::ContextMenuEvent::new(
+                nsh_core::geometry::point(Points(location_x), Points(location_y)),
+                nsh_core::geometry::point(Points(x), Points(y)),
+                modifiers.core(),
+                Some(nsh_core::PointerType::Mouse),
+            );
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
         }
@@ -859,7 +1041,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
 /// The closest view under `(x, y)` (root points) that listens to
 /// `onFileDrop`, within its modal ([`crate::file_drop`]).
 pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    let mut view = pick(&surface.root, x, y, true)?.view;
+    let mut view = pick(&surface.input_root(), x, y, true)?.view;
     loop {
         if view.state().events.contains(EventKind::FileDrop) {
             return Some(view);
@@ -904,6 +1086,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             crate::selectable_view::window_pressed(surface, x, y);
             if mouse {
                 surface.input.last.set(Some((x, y)));
+                surface
+                    .input
+                    .last_window
+                    .set(crate::window::entered(surface));
                 match event.button {
                     0 => {}
                     // The mouse's back button goes back, as in browsers.
@@ -919,6 +1105,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
         PointerKind::Move => {
             if mouse {
                 surface.input.last.set(Some((x, y)));
+                surface
+                    .input
+                    .last_window
+                    .set(crate::window::entered(surface));
                 let button = surface.input.button.get();
                 let hit = hover(surface, x, y, event.modifiers, button);
                 mouse_moved(surface, hit.as_ref(), (x, y), event.modifiers, button);
@@ -948,6 +1138,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
     surface.input.last.set(Some((x, y)));
+    surface
+        .input
+        .last_window
+        .set(crate::window::entered(surface));
     surface.input.modifiers.set(event.modifiers);
     let (mut dx, mut dy) = (event.dx, event.dy);
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
@@ -961,7 +1155,7 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     // A multiline field under the pointer scrolls its own lines first, as
     // GTK's and AppKit's text views do.
     if dy.abs() > dx.abs()
-        && let Some(hit) = pick(&surface.root, x, y, true)
+        && let Some(hit) = pick(&surface.input_root(), x, y, true)
         && let Some(field) = chain(&hit.view)
             .into_iter()
             .find(|v| v.kind() == ViewKind::Input)
@@ -1109,7 +1303,8 @@ fn focus_stop(surface: &Rc<Surface>, view: &NshView) {
     }
 }
 
-/// The Tab stops shown under `view`, in tree order: enabled text fields and
+/// The Tab stops shown under `view`, in tree order (a scroll view's
+/// content as it is on screen): enabled text fields and
 /// the native components that take the keyboard.
 fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
     {
@@ -1126,7 +1321,7 @@ fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
             out.push(view.clone());
         }
     }
-    view.with_children(|children| {
+    view.with_children_in_reading_order(|children| {
         for child in children {
             collect_stops(surface, child, out);
         }
@@ -1306,7 +1501,7 @@ fn down(
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
     }
-    let Some(mut hit) = pick(&surface.root, x, y, true) else {
+    let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let touch = key != Key::Mouse;
@@ -1317,7 +1512,7 @@ fn down(
             item = Some(hosted);
         } else {
             // The item declined: the views below it get the press.
-            let Some(below) = pick(&surface.root, x, y, false) else {
+            let Some(below) = pick(&surface.input_root(), x, y, false) else {
                 return;
             };
             hit = below;
@@ -2058,7 +2253,7 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
     let mut t = match current {
         Some((t, _)) => t,
         None => {
-            let Some(hit) = pick(&surface.root, x, y, true) else {
+            let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
             let view = chain(&hit.view).into_iter().find(|v| {
@@ -2115,7 +2310,7 @@ fn hover(
     let input = &surface.input;
     let tracking = !input.hover_tracked.borrow().is_empty() || !input.hovered.borrow().is_empty();
     let pressed = input.pointers.borrow().iter().any(|p| p.key == Key::Mouse);
-    let hit = pick(&surface.root, x, y, true);
+    let hit = pick(&surface.input_root(), x, y, true);
     // The scroll views under the mouse show their indicators.
     if let Some(hit) = &hit {
         for v in chain(&hit.view)
@@ -2240,7 +2435,8 @@ pub(crate) fn modifiers_changed(surface: &Surface, modifiers: Modifiers) {
         return;
     }
     if let Some((x, y)) = input.last.get() {
-        let hit = pick(&surface.root, x, y, true);
+        let _in = crate::window::enter(surface, input.last_window.get());
+        let hit = pick(&surface.input_root(), x, y, true);
         mouse_moved(surface, hit.as_ref(), (x, y), modifiers, None);
     }
 }
@@ -2255,7 +2451,8 @@ pub(crate) fn rehover(surface: &Surface) {
     let Some((x, y)) = input.last.get() else {
         return;
     };
-    let views = match pick(&surface.root, x, y, true) {
+    let _in = crate::window::enter(surface, input.last_window.get());
+    let views = match pick(&surface.input_root(), x, y, true) {
         Some(hit) => chain(&hit.view).into_iter().filter(hoverable).collect(),
         None => Vec::new(),
     };
@@ -2303,7 +2500,7 @@ enum WheelInput {
 /// scrolls the page around it, as in browsers; horizontal views take
 /// vertical wheels only where nothing around scrolls vertically.
 fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<NshView> {
-    let hit = pick(&surface.root, x, y, true)?;
+    let hit = pick(&surface.input_root(), x, y, true)?;
     input::scroll_target(
         chain(&hit.view),
         Points(dx),
@@ -2551,7 +2748,7 @@ pub(crate) fn touchpad_pinch(
         if let Some((old, _)) = input.pinch.borrow_mut().take() {
             transform_end(surface, &old);
         }
-        let Some(hit) = pick(&surface.root, x, y, true) else {
+        let Some(hit) = pick(&surface.input_root(), x, y, true) else {
             return;
         };
         let view = chain(&hit.view).into_iter().find(|v| {
@@ -2598,7 +2795,7 @@ fn pinch_scale(scale: f32, absolute: f32, delta: f32) -> f32 {
 /// Fingers rest on the touchpad at `(x, y)`: the scroll view under them
 /// stops gliding, until they scroll or lift.
 fn touchpad_hold(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
-    let Some(hit) = pick(&surface.root, x, y, true) else {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
     let Some(view) = chain(&hit.view)
@@ -2680,6 +2877,76 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// A title bar 200 × 40 at (10, 10) that drags the window, inside
+    /// `parent`, with a text field at (100, 5) in it and a sibling view
+    /// below it at (10, 60): (bar, field, sibling).
+    fn title_bar(parent: &NshView) -> (NshView, NshView, NshView) {
+        let bar = view(parent, 2, ViewKind::View, rect(10.0, 10.0, 200.0, 40.0));
+        bar.state_mut().props.window_drag = Some(true);
+        let field = view(&bar, 4, ViewKind::Input, rect(100.0, 5.0, 80.0, 30.0));
+        let sibling = view(parent, 6, ViewKind::View, rect(10.0, 60.0, 200.0, 40.0));
+        (bar, field, sibling)
+    }
+
+    fn listens(view: &NshView) {
+        view.state_mut().events.set(EventKind::ContextMenu, true);
+    }
+
+    #[test]
+    fn a_drag_area_s_own_listener_hears_its_secondary_click() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        // So does a listener inside it.
+        let root = self::root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&view(&bar, 8, ViewKind::View, rect(0.0, 0.0, 50.0, 40.0)));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+        assert!(!hears_context_menu(&root, 80.0, 30.0));
+    }
+
+    #[test]
+    fn a_listener_around_a_drag_area_leaves_it_the_window_menu() {
+        let root = root();
+        let parent = view(&root, 10, ViewKind::View, rect(0.0, 0.0, 300.0, 200.0));
+        listens(&parent);
+        title_bar(&parent);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_root_listener_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        listens(&root);
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_field_in_a_listening_drag_area_keeps_its_edit_menu() {
+        let root = root();
+        let (bar, _, _) = title_bar(&root);
+        listens(&bar);
+        assert!(!hears_context_menu(&root, 130.0, 30.0));
+        assert!(hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_listening_sibling_leaves_a_drag_area_the_window_menu() {
+        let root = root();
+        let (_, _, sibling) = title_bar(&root);
+        listens(&sibling);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
+
+    #[test]
+    fn a_drag_area_with_no_listener_keeps_the_window_menu() {
+        let root = root();
+        title_bar(&root);
+        assert!(!hears_context_menu(&root, 30.0, 30.0));
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {

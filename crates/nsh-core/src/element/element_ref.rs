@@ -135,7 +135,7 @@ impl ElementRef {
             .flatten()
     }
 
-    fn send(&self, command: Command) {
+    pub(crate) fn send(&self, command: Command) {
         self.reach(|node, executor| executor.act(Action::Command(node, command)));
     }
 
@@ -265,6 +265,14 @@ impl ElementRef {
     /// ([`web_input_available`](super::web_input_available) tells).
     pub fn send_input(&self, input: crate::WebInput) {
         self.send(Command::SendInput(input));
+    }
+
+    /// Loads `load.src` in a web view with `load.headers` on the document
+    /// request only (not its subresources, later navigations or reloads),
+    /// as an `Authorization` header for a signed-in page. Its host must be
+    /// one the `webview` capability allows.
+    pub fn load(&self, load: crate::WebLoad) {
+        self.send(Command::Load(load));
     }
 
     /// Jumps a video to `seconds`.

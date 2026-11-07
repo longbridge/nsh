@@ -4,6 +4,16 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
+sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
+behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
+far from the screen waits for the end of the drag, so that commit does the measuring the drag skipped, on the engine
+thread. What remains scales with the page: Taffy and emitting frames over every node, and AppKit's walks over the view
+tree.
+
+The same on Linux (GTK 4 under Xvfb in a container, a page of 120 Markdown messages, `xdotool` setting about 115 sizes per
+second): sizes the app handled per second 41 → 60.
+
 Windows cursor refresh after a style batch, against main `a5036af4`, debug host, one native run per revision:
 `echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --target windows --trace`.
 Both runs produce 56 ops / 50 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes after the press.
@@ -263,6 +273,54 @@ main thread, so the work is held by counts the backend's tests check on Xvfb, no
   an upload and a shader frame. Each reader is listed once, however often its layer is sent (every uniform update
   sends it). Before, any change on the UI thread took every reader's backdrop again and gave it to its shader.
 
+## Continuous corners on Linux
+
+Measured on 2026-11-05 using the actual `NshView` snapshot implementation:
+GTK 4.24.1, Intel Arrow Lake-S GPU, Vulkan renderer, Wayland, 1200 × 800
+points at 2×, 60 Hz. The debug test moves and redraws 100 identical
+110 × 70 point cards (radius 20) every tick, warms up for 30 ticks and
+samples 180 frame-clock intervals. No screenshots or texture downloads
+occur during measurement. CPU is process CPU time / wall time, where
+100% means one core; it includes warm-up.
+
+```sh
+cargo test -p nsh-platform-linux --lib continuous_corner_frame_cost -- --ignored --nocapture
+```
+
+Before path reuse (`237dfd88` plus the background benchmark), continuous
+backgrounds averaged 33.33 ms / 30 updates per second; circular backgrounds
+averaged 16.67 ms / 60. Reusing paths alone restored backgrounds and clipped
+borders to about 60, but 100 blurred continuous shadows still averaged
+39.73 ms / 25.2 updates per second. Retaining their vector render nodes alone
+was insufficient (32.36 ms / 30.9).
+
+The final implementation retains equal paths and renders unchanged continuous
+shadows to GPU textures once, without readback. Shadows include all shape,
+color, offset, spread, blur and inset inputs in their cache key, together with
+device scale. Scaling, rotation and perspective transforms use the original
+vector drawing to preserve quality. Path retention is limited to 128 entries;
+shadow retention to 64 entries and 16 million pixels, with a 4 million pixel
+limit per shadow. Larger shadows use vector drawing.
+
+| Scene | Corners | Mean interval | p95 | p99 | Updates/s | CPU | Intervals >25 ms |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Background | Circular | 16.67 ms | 18.03 ms | 18.10 ms | 60.0 | 27.0% | 0 |
+| Background | Continuous | 16.67 ms | 18.30 ms | 18.46 ms | 60.0 | 31.8% | 0 |
+| Clipped child + 2 pt border | Circular | 16.66 ms | 18.23 ms | 18.52 ms | 60.0 | 37.5% | 0 |
+| Clipped child + 2 pt border | Continuous | 16.67 ms | 18.51 ms | 18.67 ms | 60.0 | 35.7% | 0 |
+| 8 pt blurred outer shadow | Circular | 16.66 ms | 18.30 ms | 18.47 ms | 60.0 | 33.7% | 0 |
+| 8 pt blurred outer shadow | Continuous | 16.67 ms | 18.41 ms | 18.66 ms | 60.0 | 33.7% | 0 |
+
+These are update intervals, not GPU execution times or confirmed presentation
+timestamps. GPU utilization, cold-cache cost, heterogeneous-card cache pressure,
+animated shape/blur changes, transformed shadows and 120 Hz were not measured.
+The test is explicit/ignored and does not impose timing assertions in CI.
+Pixel tests compare cached inset/outset shadows with vector rendering and check
+that changed radius, blur and color do not reuse stale images.
+
+The separate five-layer backdrop-blur probe (~15 FPS including full texture
+readback) is not this implementation. Linux `backdropFilter` remains unsupported.
+
 ## The browser engine (published web apps)
 
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
@@ -279,6 +337,52 @@ Headless Chromium over CDP, a published package (`nsh package --target web`), 20
   and draws only those that changed, and draws a canvas again when its size changes, not when it moves. The wheel,
   300 steps of 30pt: main thread ~3.8s instead of ~4.5s, median frame ~9.2ms instead of ~12.2ms; its scroll bar
   dragged 150 steps: script ~4.3ms per batch instead of ~5.6ms.
+- Shader views (`nsh.js`, `docs/dev/shaders.md` "The web"), the gallery's Shaders page in a Chrome window over CDP
+  (1200 × 713 points at 2×, 120 Hz, Apple M5 through ANGLE's Metal renderer, the development host), 2026-11-04:
+  two `nsh.time` shaders in sight, then the `ScreenEffect` (Duotone) turned on below them. With the screen effect,
+  each frame asked for two `shaderFrame` callbacks, so the frames doubled until one display frame took 9 to 24 s;
+  now it holds 120 fps (p50 8.3 ms, p95 9.5 ms), ~3.3 ms of `shaderFrame` a frame, ~3 ms of it the surface's picture
+  (`paintInputs`). Each view drawing into the corner of a shared canvas that fits the largest and copying it out,
+  instead of resizing the canvas to each view and transferring it whole: ~0.1 ms a view (`drawShader`) instead of
+  ~0.65 ms, and of ~1.6 ms with the screen effect, whose size the canvas took and gave back on every frame; the page
+  without the screen effect ~0.3 ms of `shaderFrame` a frame instead of ~2 ms.
+
+## Linux startup memory budget
+
+The startup target is 50 MB (50,000,000 bytes) **RSS**. Report PSS and USS alongside it; neither replaces the RSS
+criterion. On `e4cc287dd`, GTK 4.24.1, NVIDIA 615.78.08, Wayland at 1.6×, 480×640-point windows, two launches each,
+8 s after resizing: minimal TSX with the full GL runner 162 MiB RSS / 65–66 MiB USS; the TSX template 164 MiB RSS;
+gallery's phone-layout index 257 MiB RSS. A js-only Cairo runner gets minimal TSX to 97 MiB RSS / 31 MiB USS.
+The measured configurations do not satisfy the budget. Bare GTK with Cairo is already 82 MiB RSS on this host.
+The run is a resident snapshot, not a startup peak, and keeps page/driver caches between launches.
+
+What NSH itself adds is measured as private dirty memory over a bare GTK window, the same host, one batch
+(`docs/benchmarks/linux-memory-baseline-2026-11-05.json`): with GL the GTK window holds 36.7 MiB (129 MiB RSS), the
+Rust template 41.6 (150), the TSX template 45.4 (163); with Cairo 15.2, 19.1 and 24.3 (82, 101, 115). NSH adds 4–5 MiB
+for Rust and about 9 MiB for TSX; the 50 MB RSS target lies below the bare GTK window's own RSS with either renderer.
+GL launches vary by about 60 MiB of private dirty memory in the bare GTK window as well: the driver's, not NSH's.
+
+Reproduction and tradeoffs: `website/docs/performance-report.md`, Linux memory investigation.
+Samples: `docs/benchmarks/linux-memory-2026-11-05.json`. Tools: `examples/gallery/tools/memory.py` and its
+`memory-gtk.c` control. The sampler rejects logged startup errors; failed split bundles are excluded from results.
+
+Priorities for further implementation, with before/after measurements on the same page and renderer:
+
+1. Native gallery chunk delivery: `nsh build --split` shrinks the entry from ~1.3 MiB bytecode to 77 KiB, but the
+   Linux release runner does not provide its static/dynamic chunks. Wire trusted bundle chunks and async loading
+   through `Bundle` / `MountSink::load_chunk`, then verify loading/navigation/disposal before measuring savings.
+2. Source-map lifetime: `Bundle::read_trusted` loads a ~4 MiB gallery map immediately. Profile retained copies and
+   symbolication (`nsh-engine/src/symbolicate.rs`) before implementing lazy maps; exploratory map-removal runs
+   changed gallery state and establish no controlled saving.
+3. Attribute startup allocations: separate QuickJS context/module evaluation, UI registry construction, the
+   reactive/core trees, text/font caches and GPU initialization. A TSX-versus-Rust delta alone does not identify
+   QuickJS heap usage. Shader GPU creation is already lazy (`surface.rs::shader_renderer`); test first use separately.
+4. A low-memory GTK path needs renderer/driver residency evaluated as well as the Rust heap. Cairo and lean
+   features have measured benefits, but global renderer changes require animation, scrolling and feature checks.
+   `GDK_DISABLE=gl,vulkan,dmabuf` did not materially improve the minimal Cairo result here.
+
+Track first-frame and settled RSS, PSS, USS, process-tree memory where appropriate, image-cache costs and page
+identity. Keep fresh storage and equal dimensions across comparisons; retain launch ranges and rendering failures.
 
 ## The performance monitor (`nsh_engine::perf`)
 
@@ -335,6 +439,26 @@ draw a panel.
   charts redrawn every 2 s (a menu-bar panel's) hold ~83 MB of footprint asynchronously and ~21 MB at once, with
   ~30% less CPU time over 40 s. The gallery's tour is unchanged in frame time and CPU; peak memory on the pages with
   canvases drops (Canvas scrolling ~383 → ~310 MB, Animations ~290 → ~232, Gestures ~279 → ~221).
+
+  Small canvas animation surfaces (M2 Max, macOS 26.6.2, release, 120 Hz, 1200×800 pt Stocks; against
+  `f7afd23f`, the same unmodified gallery bytecode, four interleaved 20 s runs per version after 5 s warmup,
+  fresh data directories). Run the hosts with `--bundle <gallery.nshc> --window-size 1200x800 --fps --trace
+  --data-dir <fresh>`. Median process CPU (100% is one core) 38.34 → 23.63%, physical footprint 152.7 →
+  133.1 MB, main-thread p50 1.93 → 0.83 ms and p95 4.40 → 2.60 ms; both 119–120 fps. These are medians
+  across runs; each run's frame figures are medians of the HUD's rolling 120-frame percentiles, not pooled
+  frame percentiles. Live market updates seed themselves from wall-clock time, so each run has a different
+  quote sequence. Short drawings can retain their background while a small source-over animated suffix
+  redraws in a separate layer. Complex suffixes and long prefixes keep the existing path.
+
+  Controls (two interleaved 12 s runs per version, same warmup): Canvas demo CPU 2.93–3.56 → 3.41–3.49%;
+  a 10,000-point static path with an animated dot, CPU 7.42–8.41 → 8.39–8.99%, main p50 0.47–0.63 →
+  0.61–0.67 ms. The control medians are slightly higher; these small samples do not establish a speedup
+  or rule out overhead. The long-path guard preserves the existing prefix cache; an unrestricted split
+  had increased geometry-scanning work.
+  Fixed-clock headless `nsh test --trace` (three 1 s runs each): initial 4412 ops / 3708 mount items /
+  1249 nodes; 180 update commits per version, median 124 ops / 85 items / 1249 nodes, unchanged.
+  Initial commit times 4.9–6.4 → 4.9–6.9 ms, update medians 220 → 230.5 µs; the optimization is in the
+  platform's painting, and these engine timings establish unchanged work rather than an engine speedup.
 
   List binds while scrolling (release host, 120 Hz MacBook Pro; the list scrolled by chained native
   `scrollToOffset({ animated: true })` every 300 ms, no input; each display link refresh logged with its link
@@ -503,3 +627,40 @@ shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and
 The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
 Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f. Repeat the same command
 before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
+
+## TUI development startup
+
+Measure development compilation separately from host rendering:
+
+```sh
+cargo test -p nsh-cli bench_dev_startup -- --ignored --nocapture
+```
+
+The ignored benchmark runs the unchanged counter and gallery three times, splitting hot bundling,
+script/source-map assembly and QuickJS bytecode compilation. It checks that compilation produces bytecode;
+it reports timings rather than imposing a machine-dependent startup threshold.
+
+Linux x86_64, debug, revision `889872685`, three runs after building the CLI and TUI host:
+
+| App | Hot bundle | Script / source map | Bytecode |
+| --- | --- | --- | --- |
+| Counter | 8.6–14.5 ms | 0.12–0.13 ms | 0.54–0.94 ms |
+| Gallery | 1,014–1,059 ms | 82.8–83.3 ms | 70.9–72.3 ms |
+
+Gallery produces 2,330,102 source bytes and 11,103,922 bytecode bytes. Hot development includes the demo
+modules in the initial script even though the gallery executes their factories when first shown.
+
+Separately, `target/debug/nsh run examples/<app> --target tui --trace --port 18973` on a private
+200 × 60 PTY (three fresh processes, existing builds, terminal queries unanswered) reached visible
+Counter content in 629–635 ms and Gallery content in 1,864–1,899 ms. The TUI host's Cargo freshness
+check took about 288 ms. Gallery's engine first frame was about 77 ms: 3,172 operations,
+2,202 mount items, 997 nodes. These are local development measurements, including CLI preparation,
+not release-host startup numbers. Initial compilation and terminal query handling are separate costs;
+repeat on the reported command and machine before attributing a longer startup to rendering.
+
+Startup feedback: the CLI previously redirected output before app preparation, suppressing Cargo's spinner
+and crate status throughout a cold build. It now keeps preparation visible and opens the diagnostic log
+immediately before launching the TUI host. A private-PTY Gallery run with the change showed build progress
+at 52 ms, build completion before alternate-screen entry, and Gallery content at 5.436 s (including host
+recompilation). This verifies feedback during a build, not a startup speedup. The CLI integration test
+checks startup output and host-diagnostic isolation in ordinary and verbose modes.

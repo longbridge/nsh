@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -264,6 +264,47 @@ classes, name the tokens directly (`bg-primary`, `rounded-(--radius)`): [Theme t
 import { effect, token } from "nsh";
 
 effect(() => console.log("primary is", token("primary"), "radius", token("radius")));
+```
+
+## setTheme
+
+```ts
+function setTheme(theme: Theme | null): void;
+
+interface Theme {
+  cssVars: {
+    theme?: Record<string, string | number>;
+    light?: Record<string, string | number>;
+    dark?: Record<string, string | number>;
+  };
+}
+```
+
+Makes `theme` the app's theme while it runs, in place of `"theme"` in `nsh.json`: a theme of the same format, over
+shadcn/ui's tokens as the one in `nsh.json` is. It applies at once: `token()` reads the new tokens right after the call,
+and the classes naming tokens, `nsh/base` and Rust components' `theme()` follow with the next frame, in both
+appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. `null` gives
+back the theme the app was built with.
+
+The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz` or `lab()`, a `var()`
+that names no color, or a value that is no color in one appearance where the other's is), `setTheme` throws a
+`TypeError` that names each one, and the theme shown stays. Values of no kind a token has, such as shadows, are left
+out as they are from `nsh.json`'s. Build the new theme from the app's own, so the tokens its classes name keep a value
+(`bg-up` when `up` is in `nsh.json`'s theme), and change what differs. Rust: `set_tokens(theme.into())` of an
+`nsh_base::Theme` ([Theme tokens](../docs/tailwind.md#theme-tokens)).
+
+```tsx
+import { setTheme } from "nsh";
+import theme from "./theme.json"; // the file `"theme"` in nsh.json names
+
+// The app's theme with another primary color.
+function brand(color: string) {
+  const { light, dark } = theme.cssVars;
+  setTheme({ cssVars: { ...theme.cssVars, light: { ...light, primary: color }, dark: { ...dark, primary: color } } });
+}
+
+brand("#e11d48");
+setTheme(null); // the app's theme again
 ```
 
 ## View, Text, Scroll, Overlay
@@ -854,17 +895,17 @@ const toggle = () => {
 
 ## Device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density, leaving the app and coming back).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `locale_settings()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the locale settings and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size, the language or the region's settings, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Lifecycle, Os},
-    prelude::*, // window, dark, font_scale, locale, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
+    platform::{Appearance, HourCycle, Idiom, Lifecycle, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday},
+    prelude::*, // window, dark, font_scale, locale, locale_settings, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { colorScheme, fontScale, lifecycle, locale, localeSettings, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -923,6 +964,53 @@ const locale: Accessor<string>;
 
 The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. Rust: `locale() -> Locale` (`locale().as_str()` is the tag). `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
 
+### localeSettings
+
+```ts
+const localeSettings: Accessor<LocaleSettings>;
+
+interface LocaleSettings {
+  readonly languages: readonly string[];
+  readonly timeZone: string;
+  readonly hourCycle: "h11" | "h12" | "h23" | "h24";
+  readonly firstDayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  readonly measurementSystem: "metric" | "us" | "uk";
+  readonly temperatureUnit: "celsius" | "fahrenheit";
+}
+```
+
+The user's locale settings beside the locale: what the systems keep with the language and region and change
+together. Reactive: it changes when any of them does; read one of them in a `computed` to follow it alone. Rust:
+`locale_settings() -> LocaleSettings`, with the same fields in snake case (`languages`, `time_zone`, `hour_cycle`,
+`first_day_of_week`, `measurement_system`, `temperature_unit`). The names and values are `Intl`'s, so they pass into its
+options as they are ([Device and environment](../docs/device-and-environment.md#locale-settings)):
+
+- `languages`: the preferred languages as BCP 47 tags, most preferred first (`["de-DE", "en-US"]`): the system's list,
+  with the embedding app's own language first when it sets one. Never empty. Show the app's text in the first of them
+  it has a translation for: the others are its fallbacks. `locale()` is the region format, which can differ (English
+  text, German dates). Rust: `Languages` (`iter()`, `first()`, `as_slice()`, each a `Locale`).
+- `timeZone`: the device's time zone as the system names it: an IANA name (`"Europe/Berlin"`, `"America/New_York"`),
+  `"UTC"`, or an offset zone where the system has one (`"GMT+01:00"` on Android). It changes with the system's setting,
+  as when the user travels. `Date`'s local times follow the system's zone, and `Intl` names it the same
+  (`Intl.DateTimeFormat().resolvedOptions().timeZone`); read the name to show it, to store it with a date or to give it
+  to a time zone library. Rust: `TimeZone` (`as_str()` is the name).
+- `hourCycle`: 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"` (`12:30 PM`), `"h23"` (`00:30`), and the
+  rarer `"h11"` (`0:30 PM`) and `"h24"` (`24:30`). The system's setting, else the region's. `Intl` writes times in the
+  locale's own hour cycle: pass it as its `hourCycle` option to write them as the user reads them. `TimeField`'s and
+  `DatePicker`'s `hourCycle` is `"h12"` for `"h11"` and `"h12"`, `"h23"` for the others. Rust: `HourCycle`
+  (`twelve_hour()` for AM and PM).
+- `firstDayOfWeek`: the day weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s `firstDay`): 1 for Monday to
+  7 for Sunday. A calendar's first column. The system's setting, else the region's (7 in the US, 1 in Germany, 6 in
+  Egypt). `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for Sunday: pass `firstDayOfWeek % 7`. Rust:
+  `Weekday` (`number()`).
+- `measurementSystem`: the units of lengths, weights and volumes: `"metric"`, `"us"` (feet, miles, pounds, gallons) or
+  `"uk"` (metric, with miles and pints). The system's setting, else the region's. Rust: `MeasurementSystem`.
+- `temperatureUnit`: the unit of temperatures: `"celsius"` or `"fahrenheit"`. The system's setting, else the region's
+  (Fahrenheit in the US and a few others). Rust: `TemperatureUnit`.
+
+Headless tests have the locale's (it alone as the languages, its region's preferences) in UTC, unless `open` sets
+`localeSettings`; their local times stay the machine's.
+
 ### lifecycle
 
 ```ts
@@ -957,6 +1045,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 ```
 
 Shows the app in `scheme` whatever the system's appearance, at once: `colorScheme()`, `dark:` classes, the components' theme and the platform's controls (alerts, the status bar's default style) follow it; `"system"` follows the system again. `nsh.json` `"appearance"` sets it from the start. Rust: `set_color_scheme(Appearance::Dark)` (`Appearance::Light`, `Appearance::System`).
+
+### fpsEnabled and setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` turns on the performance monitor, `false` turns it off: on macOS a panel at the top right of the app ([macOS](../docs/macos.md#performance-monitor)), on iOS, Windows, Linux and GPUI one `nsh::perf` log line a second, on the terminal a status line ([Performance](../docs/performance.md#on-screen---fps)). `fpsEnabled()` is whether it measures, as the platform reports it (reactive), so a switch shows what the platform did; it is also on when the app was started with `--fps` or with the environment variable `NSH_FPS=1`. Where the platform has no monitor (Android, the web) `fpsEnabled()` stays `false`. Rust: `set_fps_enabled(true)`, `fps_enabled() -> bool`.
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
 
 ### platform
 
@@ -1117,6 +1218,18 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 
 - Safe area insets (Rust `safe_area()`; TSX `safeArea()`, `safeAreaInsets()`) and the software keyboard (Rust `keyboard_height()`; TSX `keyboardFrame()`) are in [Safe area and keyboard](#safe-area-and-keyboard).
 - Screen reader and reduced motion settings are in [Accessibility](#accessibility).
+
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<RegisteredFont>;
+
+interface RegisteredFont {
+  family: string;
+}
+```
+
+Registers a font while the app runs and resolves with `{ family }`, its family name, for `fontFamily`: a font the app downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data, or the URL of one (a file of the app's, `asset:/...`, or one on the network, read as `fetch` reads it: the `network` capability applies). Text that names the family is laid out with it from then on, and text shown before again. When the `network` capability does not grant the URL, or a URL it redirects to, it rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"network"` and `resource` the URL refused, as `fetch` does; it rejects with an `Error` when the URL does not load or the data is no font. Rust: `register_font(data) -> Answer<Result<String, String>>`, awaited in a task. Fonts the app ships are registered before the first frame instead ([Fonts](../docs/fonts.md#registering-a-font-while-the-app-runs)).
 
 ## PanResponder
 
@@ -1598,7 +1711,18 @@ import { Picker, type PickedImage } from "nsh";
 ```ts
 const Picker: {
   pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
+  pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 };
+
+interface PickFilesOptions {
+  multiple?: boolean; // let the user pick several (false: one)
+  limit?: number; // at most this many when multiple (up to 100)
+  filters?: { name: string; extensions: string[] }[]; // the types offered (none: any file)
+}
+
+interface PickedFile {
+  file: File; // name, type, size in bytes and the bytes, as they are
+}
 
 interface PickImagesOptions {
   multiple?: boolean; // let the user pick several (false: one)
@@ -1623,6 +1747,8 @@ interface PickedImage {
 | `format` | `request.format = PickFormat::Current` |
 | `image.file.name`, `.type`, `.size` | `file.name`, `file.mime`, `file.data.len()` |
 | `image.size` | `file.size` (`Size<DevicePixels>`) |
+| `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
+| `filters` | `FilePickRequest::new(multiple, limit).filter(FileFilter::new("Documents", ["pdf"]))` |
 
 ### Picker.pickImages
 
@@ -1726,13 +1852,50 @@ const images = await Picker.pickImages({ multiple: true, limit: 9, maxDimension:
 photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file))]);
 ```
 
+### Picker.pickFiles
+
+```ts
+pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
+```
+
+Shows the system's picker for files of any type and resolves with what the user picked, or `[]` when the user cancels.
+It rejects as `pickImages` does: a `RangeError` for options out of range (`limit: 0`, a filter without extensions) and
+`ERR_ACCESS_DENIED` without the `picker` capability. Rust: `pick_files(request)`.
+
+```tsx
+const picked = await Picker.pickFiles({
+  multiple: true,
+  filters: [{ name: "Documents", extensions: ["pdf", "md"] }],
+});
+for (const { file } of picked) {
+  const form = new FormData();
+  form.append("document", file);
+  await fetch("https://api.example.com/documents", { method: "POST", body: form });
+}
+```
+
+| Platform | Picker | Filters |
+|---|---|---|
+| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
+| Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
+| iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
+| Android | `ACTION_OPEN_DOCUMENT` | By media type; an extension Android knows no type of offers any file |
+| Web | `<input type=file>` | All the extensions at once |
+| GPUI | GPUI's open dialog, which offers any file | Files that do not pass are left out afterwards |
+
+None needs a permission. Files come as they are: nothing is converted, and each keeps its name. A file's whole bytes are
+read into memory, so a file larger than 512 MiB is left out of the answer and logged. A filter is what the picker
+offers, not a promise: check what you get.
+
 ### Embedding apps
 
 An app that embeds NSH and has a picker of its own (one with the app's own albums, say) answers the picks itself: in
 Rust, a `PickerBackend` (`nsh_core::picker`) given to the engine (`EngineConfig::picker`, or `AppView::set_picker` in
 GPUI and GPUI Kit apps) receives every pick's `PickRequest` and returns the files, and the system's picker is not
 shown. The files it returns are completed as the platform's are: cut to the request's limit, their sizes, types and
-extensions read from their bytes.
+extensions read from their bytes. `pick_files` answers `pickFiles` the same way; a backend that does not implement it
+cancels those picks, and the system's picker is still not shown.
 
 ### Tests
 
@@ -1741,9 +1904,113 @@ and without a handler a pick is cancelled. See [Testing](../docs/testing-and-tra
 
 > [!NOTE]
 > When your app declares `capabilities` in `nsh.json`, the picker must be granted with `"picker": true`. Without it
-> `pickImages` shows nothing and rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
-> `"picker"` and `resource` `""`. In Rust, `pick_images` answers no files and the refusal is logged. See
+> `pickImages` and `pickFiles` show nothing and reject with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
+> `"picker"` and `resource` `""`. In Rust, `pick_images` and `pick_files` answer no files and the refusal is logged. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+
+## Notifications
+
+`Notifications` shows system notifications and sets the app's icon badge, the Dock's on macOS. Ask for the permission
+when the user does something that needs it, then show:
+
+```tsx
+import { Notifications } from "nsh";
+
+Notifications.on("press", ({ id }) => openChat(id));
+
+async function notifyMe() {
+  if ((await Notifications.requestPermission()) !== "granted") return;
+  await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you coming?" });
+  Notifications.setBadge(1);
+}
+```
+
+Rust code calls `request_notification_permission`, `show_notification`, `close_notification`, `set_badge` and
+`next_notification_press` of `nsh_core::prelude`.
+
+| Platform | Notifications | Badge |
+| --- | --- | --- |
+| macOS | The notification center, in a signed app bundle; `unavailable` in `nsh run`'s unbundled host and in an app embedded without `AppOptions::notifications` | The Dock, without a permission |
+| iOS | The notification center | The home screen, with the permission |
+| Android | The system's, with `POST_NOTIFICATIONS` on Android 13 (`nsh package` declares it for apps granted `notifications`) | No count to set: launchers mark an app that has notifications showing, and the count goes with those shown after it |
+| Windows | A toast, shown unless the user turned the app's notifications off in Settings, which is `denied`. Windows has no prompt, so `requestPermission` asks nothing. An app embedded without `AppOptions::notifications` is `unavailable` | The count on the taskbar button, up to `99+`; not shown when the taskbar uses small buttons |
+| Linux | The desktop's notification daemon (`org.freedesktop.Notifications`): `granted` while one runs, with no prompt, `unavailable` otherwise | The Unity launcher API, on docks that read it (Plasma, Ubuntu's, Dash to Dock); elsewhere nothing shows |
+| Web | `Notification`, where the browser shows them from a page (not on Android) | The Badging API, in an installed app |
+| Terminal, GPUI | `unavailable` | None |
+
+### Notifications.show
+
+`show` resolves with whether the system took the notification, which it does not without the permission. A notification
+shows while the app is in front as it does behind it. Showing another with the same `id` replaces it, and
+`Notifications.close(id)` removes it.
+
+`silent: true` shows it without a sound or vibration, as the web's `Notification` does; by default it plays the
+system's sound. Apple platforms show it with no sound, Android in a group that does not alert (no sound, vibration or
+pop-up banner), Windows with a silent toast, Linux with the daemon's `suppress-sound` hint, and the web passes `silent`
+to the browser.
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.on
+
+`press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
+listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
+activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
+embedding app that has a notification center delegate keeps it, and its delegate gets the presses. On Linux a press reaches
+only the running app: one left on screen after the app exits does nothing.
+
+### Notifications.permission
+
+`permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
+
+## UrlScheme
+
+`UrlScheme` reports the links that open the app: URLs of the schemes the app claims in `nsh.json`, such as
+`myapp://orders/42` from a web page's "Open in the app" button or a browser that finishes a sign-in. The app claims its
+schemes once, and `nsh package` declares them to the system:
+
+```json
+{ "schemes": ["myapp"] }
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.host === "orders") openOrder(link.pathname.slice(1));
+});
+```
+
+`open` reports every link the system hands the app, at launch and while it runs. A link that comes while nothing
+listens, the one that launched the app included, waits for the next listener (up to 16, the oldest dropped), so listen
+when the app starts or once the screen that handles links is ready. Rust code awaits `next_url_scheme_open()` of
+`nsh_core::prelude`; a Rust app's generated code passes its schemes to its root (`Root::url_schemes`).
+
+A link is input from outside the app: any page or app can open `myapp://` with any path and query. Check what a
+link asks for before acting on it (an id that exists, an action the user confirms), as for any other input. NSH only
+lets through links of the app's own schemes, at most 16 KB long, and never navigates on its own: what a link opens is
+the app's.
+
+A scheme is a letter followed by letters, digits, `+`, `-` or `.`, compared in lower case. The schemes of the web,
+files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ...) are refused when the app is built.
+
+| Platform | How the app claims its schemes |
+| --- | --- |
+| macOS | `CFBundleURLTypes` in the app's `Info.plist`; the system opens the app, or hands the link to the one that runs |
+| iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
+| Android | An `ACTION_VIEW` intent filter in the manifest `nsh package` writes; the activity runs as `singleTask`, so a link reaches the running app |
+| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
+| Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
+
+`nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
+`app.openWithUrl(url)` opens one while it runs, both headless.
+
+An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
 ## Speech
 
@@ -1887,6 +2154,154 @@ app started. See [Testing](../docs/testing-and-trace.md).
 > When your app declares `capabilities` in `nsh.json`, speech must be granted with `"speech": true`. Without it
 > `Speech.start` throws an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"speech"` and `resource` `""`.
 > In Rust, the session ends with `not-allowed` and the refusal is logged. See
+> [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+
+## Sound
+
+Two primitives make sound, one for each kind of audio. A `Sound` is a short clip (a tap, a notice, an alert) decoded
+once into memory and played any number of times, overlapping, starting within a frame of the call: load it ahead,
+play it in the handler. An `AudioPlayer` streams long audio (a voice message, music, a recording) from its source as
+it plays, with a player's state: position, duration, pause, seek, rate and loop. macOS and iOS play with AVFoundation
+(`AVAudioEngine` for sounds, `AVPlayer` for players; on iOS the audio session is `ambient`, mixing with other apps'
+audio and following the silent switch), Windows with XAudio2 and Media Foundation, Android with `SoundPool` and
+`MediaPlayer`, Linux with GStreamer for sounds and GTK's media streams for players (which keep a player's rate at 1), and the web with the Web Audio API and an
+audio element (sound starts after the user's first gesture on the page). Check `Sound.available()` where the platform may have no sound; there `load`
+and `play()` fail with `"unavailable"`. Rust code calls `load_sound` and `audio_player` of `nsh_core::prelude`; TSX
+imports `Sound` and `AudioPlayer` from `nsh`.
+
+```rust tabs
+use nsh_core::prelude::*; // load_sound, audio_player, Sound, AudioPlayer
+```
+
+```tsx tabs
+import { AudioPlayer, Sound } from "nsh";
+```
+
+```ts
+declare class Sound {
+  static available(): Promise<boolean>;
+  static load(src: string): Promise<Sound>;
+  play(options?: { volume?: number; rate?: number }): void;
+  stop(): void;
+  readonly duration: number;
+  dispose(): void;
+}
+
+declare class AudioPlayer {
+  constructor(src: string, options?: { volume?: number; rate?: number; loop?: boolean });
+  static available(): Promise<boolean>;
+  on(event: "load", listener: (load: { duration: number }) => void): () => void;
+  on(event: "progress", listener: (progress: { currentTime: number; duration: number }) => void): () => void;
+  on(event: "buffer", listener: (buffer: { buffering: boolean }) => void): () => void;
+  on(event: "end", listener: () => void): () => void;
+  on(event: "error", listener: (error: { code: AudioErrorCode; message: string }) => void): () => void;
+  play(): Promise<void>;
+  preload(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  volume: number;
+  rate: number;
+  loop: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly state: "idle" | "loading" | "playing" | "paused" | "ended";
+  dispose(): void;
+}
+
+type AudioErrorCode =
+  | "not-allowed" | "network" | "decode" | "not-supported"
+  | "quota-exceeded" | "unavailable" | "failed";
+```
+
+| TSX | Rust |
+|---|---|
+| `await Sound.available()` | `audio_available().await -> bool` |
+| `await Sound.load(src)` | `load_sound(src).await -> Result<Sound, AudioFailure>` |
+| `sound.play({ volume, rate })` | `sound.play(volume, rate)` |
+| `new AudioPlayer(src, options)` | `audio_player(src, settings) -> AudioPlayer` |
+| `player.on("progress", ...)` | `player.next().await -> Option<AudioEvent>` |
+| `player.play()` / `pause()` / `seek(s)` | `player.play()` / `pause()` / `seek(duration)` (dropping it closes it) |
+
+### Sound.load
+
+Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
+`asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
+the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
+components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
+component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
+of decoded audio at once; past them `load` rejects with `code` `"ERR_NSH_QUOTA_EXCEEDED"`. Longer audio is an
+`AudioPlayer`'s.
+
+### Sound.play
+
+Starts a play over the ones playing (up to 32 at once; past them the oldest stops) at `volume` (0 to 1) and `rate`
+(0.5 to 2; the pitch goes with it). It returns nothing and never fails for a device that is muted or has no output:
+that is silence. A value out of range throws a `RangeError`. `stop()` stops every play of the sound.
+
+```tsx
+import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
+
+const tap = await Sound.load(tapFile);
+
+function Key(props: { label: string }) {
+  return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;
+}
+```
+
+### AudioPlayer
+
+A player loads nothing until `play()` or `preload()`. Its `state` and `currentTime` follow the platform's reports:
+`load` comes once it knows its duration (`Infinity` for a live stream), `progress` about four times a second while it
+plays and after a seek, `buffer` when it waits for data, `end` when it played to its end (a player that loops starts
+again instead). `play()` resolves once it plays and rejects as `error` reports a failure. A player stops with
+`dispose()`, or when what made it goes: keep it as long as it plays.
+
+```tsx
+import { AudioPlayer, signal } from "nsh";
+
+const position = signal(0);
+const voice = new AudioPlayer("https://example.com/messages/42.m4a");
+voice.on("progress", ({ currentTime }) => position.set(currentTime));
+voice.on("end", () => position.set(0));
+await voice.play();
+```
+
+```rust
+use nsh_core::{audio::{AudioEvent, PlayerSettings}, prelude::*};
+
+async fn play_message(url: &str) {
+    let mut player = audio_player(url, PlayerSettings::default());
+    player.play();
+    while let Some(event) = player.next().await {
+        if event == AudioEvent::Ended {
+            break;
+        }
+    }
+}
+```
+
+### Formats
+
+Sounds and players play what the platform decodes. WAV and AAC (`.m4a`) play everywhere and suit sounds; AAC and MP3
+suit players.
+
+### Embedding apps
+
+An app that embeds NSH and plays sound its own way gives the engine an `AudioBackend` (`nsh_core::audio`,
+`EngineConfig::audio`): it receives every `AudioCommand` with the `AudioSink` of the sound or player it is about,
+which it reports to from any thread. The platform plays nothing then.
+
+### Tests
+
+`nsh test` plays to a fake speaker in headless runs: sounds decode as WAV (their length from the header), players play
+a minute of their source at once, `app.endAudio()` brings the playing players to their end, and `app.audio()` lists
+what the app asked (`load`, `play`, `open`, `resume`, `seek`, ...). See [Testing](../docs/testing-and-trace.md).
+
+> [!NOTE]
+> When your app declares `capabilities` in `nsh.json`, sound must be granted with `"audio": true`. Without it
+> `Sound.load` rejects and `new AudioPlayer` throws an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
+> `"audio"` and `resource` the source. In Rust, the load or player fails with `not-allowed`. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ## Storage
