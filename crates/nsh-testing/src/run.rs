@@ -559,8 +559,13 @@ impl Session {
             ..default
         };
         settings.apply(&mut config.environment);
-        let mut app = Headless::start(config)
-            .map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
+        // The link that launched it, there before the app's code runs.
+        let started = match &launch.url_scheme {
+            Some(url) => Headless::start_with_link(config, url),
+            None => Headless::start(config),
+        };
+        let mut app =
+            started.map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
         if let Some(host) = page_host {
             host.attach(app.engine().control());
             app.on_host_call(move |id, name, args| host.call(id, name, args));
@@ -581,10 +586,6 @@ impl Session {
         app.answer_dialogs_myself();
         app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
-        // The link that launched it, there before the app listens.
-        if let Some(url) = &launch.url_scheme {
-            app.send_url_scheme(url);
-        }
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(app))));

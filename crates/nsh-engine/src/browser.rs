@@ -226,6 +226,7 @@ impl Script {
             .with_websocket(system.websocket)
             .with_refuse_connections(system.refuse_connections)
             .with_filesystem(system.filesystem)
+            .with_app_url(system.app_url)
             .with_os(environment.os);
             script.0.initialize(Services {
                 system: services,

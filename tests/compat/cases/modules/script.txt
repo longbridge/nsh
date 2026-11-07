@@ -110,6 +110,9 @@ tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
 expect Links: none
 expect Listener: listening
+expect Address: null
+tap id:set-url
+expect Address: compat://orders/42, wrong TypeError TypeError
 tap id:stop-links
 expect Listener: stopped
 covers [nsh] UrlScheme

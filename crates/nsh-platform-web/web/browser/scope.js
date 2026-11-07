@@ -15,6 +15,7 @@ export { createKeymap } from "./keymap.js";
 export { createEnvironment } from "./environment.js";
 export { installTesting } from "./testing.js";
 export { createHot } from "./hot.js";
+export { configureAddress } from "./address.js";
 
 
 // Public wrappers must share the app's Function/Error/Promise intrinsics.

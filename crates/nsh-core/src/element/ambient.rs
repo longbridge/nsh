@@ -55,6 +55,8 @@ pub(crate) struct Ambient {
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
+    /// The app's address (`set_app_url` resolves against its page base).
+    app_url: Option<crate::url_scheme::AppUrlCell>,
 }
 
 impl Ambient {
@@ -125,6 +127,12 @@ impl super::Runtime {
     pub(crate) fn set_services(&self, executor: Rc<Executor>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.executor = Some(executor));
+    }
+
+    /// The app's address, the core's (`set_app_url`).
+    pub(crate) fn set_app_url(&self, app_url: crate::url_scheme::AppUrlCell) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_url = Some(app_url));
     }
 
     /// Where the app's storage is kept.
@@ -810,6 +818,41 @@ pub fn next_url_scheme_open() -> Answer<String> {
     let (answer, slot) = Answer::new();
     act(Action::NextUrlSchemeOpen(slot));
     answer
+}
+
+/// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
+/// the native platforms the last link that opened the app; what
+/// [`set_app_url`] set after it; `None` when there is none
+/// ([`crate::url_scheme`]). To await in a task.
+pub fn app_url() -> Answer<Option<String>> {
+    let (answer, slot) = Answer::new();
+    act(Action::AppUrl(slot));
+    answer
+}
+
+/// Sets the app's address (TS: `UrlScheme.setUrl`): on the web it replaces
+/// the current history entry's; the native platforms keep it for
+/// [`app_url`] ([`crate::url_scheme`]). An address longer than
+/// [`crate::url_scheme::MAX_URL_LEN`] or with whitespace is an error, as
+/// TS's `TypeError`; on the web a URL is resolved against the page's base,
+/// as TS's is, and one of another origin than the page's is an error.
+pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
+    let mut url = url.into();
+    crate::url_scheme::check_address(&url)?;
+    // Where the app is the page (the web), as TS's `setUrl` there.
+    if try_os() == Some(Os::Web)
+        && let Some(base) = with_data(|d| d.ambient.app_url.as_ref().and_then(|a| a.page_base()))
+    {
+        url = crate::url_scheme::resolve_on_page(&url, &base)?;
+    }
+    act(Action::SetAppUrl(url));
+    Ok(())
+}
+
+/// `UrlScheme.setUrl`'s part in the core: the address again, in order with
+/// what came since the VM wrote it, and the web's history entry.
+pub(crate) fn set_app_url_from_js(url: String) {
+    act(Action::SetAppUrl(url));
 }
 
 /// Whether a web view's ref gives its page trusted input here (TS:

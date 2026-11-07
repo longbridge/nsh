@@ -68,6 +68,10 @@ pub(crate) struct Host {
     access: Mutex<Arc<nsh_engine::Access>>,
     /// The embedding app's theme overrides (`NshView.setThemeOverrides`).
     host_tokens: Mutex<Option<nsh_engine::Tokens>>,
+    /// Links the system opened the app with (`NshView.openUrl`) before an
+    /// engine started: the next one applies them before the app's code
+    /// first runs (`UrlScheme.url()`).
+    url_schemes: Mutex<Vec<EventPayload>>,
     /// Font files the embedding app registers (`NshView.registerFont`),
     /// applied to the running app and to every app loaded later.
     fonts: Mutex<Vec<Vec<u8>>>,
@@ -229,8 +233,11 @@ impl Host {
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
             model.set_up_engine(&mut config);
         }
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the links that came before are the app's address when its code
+        // first runs.
         let tokens = self.host_tokens.lock().expect("tokens").clone();
+        let links = std::mem::take(&mut *self.url_schemes.lock().expect("links"));
         let fonts = self.fonts.lock().expect("fonts").clone();
         let setup = move |control: &EngineControl| {
             if tokens.is_some() {
@@ -238,6 +245,9 @@ impl Host {
             }
             for font in fonts {
                 control.register_font(font);
+            }
+            for payload in links {
+                control.dispatch_event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload);
             }
         };
         match Engine::start_with(
@@ -597,6 +607,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         host_tokens: Mutex::new(None),
+        url_schemes: Mutex::default(),
         fonts: Mutex::new(Vec::new()),
         inline_images: Mutex::default(),
         cache: Mutex::default(),
@@ -1718,8 +1729,19 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             EventPayload::Map(fields)
         }
     };
-    if let Some(control) = host.control() {
-        control.dispatch_event(id as NodeId, kind, payload);
+    match host.control() {
+        Some(control) => control.dispatch_event(id as NodeId, kind, payload),
+        // A link before the app runs (the launch intent's): the engine
+        // that starts next applies it.
+        None if kind == EventKind::UrlScheme => {
+            let mut links = host.url_schemes.lock().expect("links");
+            // As many as the core keeps for a listener, the oldest dropped.
+            if links.len() == nsh_core::url_scheme::MAX_PENDING {
+                links.remove(0);
+            }
+            links.push(payload);
+        }
+        None => {}
     }
 }
 
