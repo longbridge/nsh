@@ -546,9 +546,18 @@ Things that were found the hard way. Read the section of the area you change bef
   children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
   `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
-  filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
-  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, the test agent's screenshot, shows them: WebKit
-  draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
+  filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
+  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages
+  and dialogs that leave as images take their live web views and videos along (`native::lend`). The test agent's
+  screenshots are the window server's instead (next item).
+- `CARenderer` (`rendererWithMTLTexture:options:`) renders only a layer tree in a context of its own: given a window's
+  content layer it rendered it offscreen and left the window's content blank on screen (macOS 27), so it cannot take a
+  picture of a shown window. It also renders nothing unless the layer is set inside a committed `CATransaction`.
+- `CGWindowListCreateImage` / `CGWindowListCreateImageFromArray` take pictures of the app's own windows without the
+  Screen Recording permission (`CGPreflightScreenCaptureAccess()` false, macOS 27): the window server's composite,
+  backdrop blur included. They are deprecated and gone from the SDK's headers since macOS 15 (still exported: look
+  them up with `dlsym`). The array lists window numbers as raw values (no CFNumbers, no callbacks), frontmost first.
+  The picture lags the last `CATransaction` commit by a frame or two: flush and wait (50 ms) before taking it.
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
 
