@@ -612,7 +612,10 @@ merging a pull request starts a run that runs nothing but takes its concurrency 
 has queued or running. The jobs that build (all but `CI paths`) are debounced: they name the environment
 `ci-debounce` with `deployment: false`, whose wait timer holds them a few minutes without a runner, so a push
 followed by another within that time cancels the first run before it starts. Each workflow's concurrency group is
-the ref, with `cancel-in-progress` (Website's pushes to `main` queue instead: each one deploys).
+the pull request's number, or the ref for pushes and queue runs (`github.event.pull_request.number || github.ref`):
+a merged pull request's `closed` event carries the base branch as its ref, so a group of the ref alone would cancel
+`main`'s run of the merge commit. Groups cancel in progress (Website's pushes to `main` queue instead: each one
+deploys).
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
