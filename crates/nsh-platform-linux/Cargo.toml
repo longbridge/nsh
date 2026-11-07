@@ -65,6 +65,7 @@ rustc-hash.workspace = true
 serde_json.workspace = true
 ttf-parser.workspace = true
 crossbeam-channel.workspace = true
+libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }
 webkit6 = { workspace = true, optional = true }
