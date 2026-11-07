@@ -81,6 +81,7 @@ jobs:
               - ".cargo/**"
               - "rust-toolchain.toml"
               - ".github/workflows/compat.yml"
+              - ".github/actions/cargo/**"
 
       - name: Decide
         id: run
@@ -107,13 +108,13 @@ jobs:
         if: steps.run.outputs.check == 'true'
         uses: dtolnay/rust-toolchain@stable
 
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
         if: steps.run.outputs.check == 'true'
-        uses: Swatinem/rust-cache@v2
+        uses: ./nsh/.github/actions/cargo
         with:
-          workspaces: nsh
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: compat
 
       - name: Build nsh
         if: steps.run.outputs.check == 'true'

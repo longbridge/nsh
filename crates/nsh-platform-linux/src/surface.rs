@@ -353,6 +353,15 @@ impl Surface {
         *self.test_model.borrow_mut() = model;
     }
 
+    /// Whether `nsh test` drives the app ([`Self::set_test_model`]): then
+    /// the agent's pointer is its only one (`input::install_on`).
+    pub(crate) fn testing(&self) -> bool {
+        #[cfg(feature = "dev")]
+        return self.test_model.borrow().is_some();
+        #[cfg(not(feature = "dev"))]
+        false
+    }
+
     /// Starts `config`'s app, replacing what ran.
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();

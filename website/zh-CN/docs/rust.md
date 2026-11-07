@@ -41,6 +41,8 @@ nsh run                        # 本机的后端；--target ios、android、web�
 nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows
 ```
 
+推荐用 [huacnlee/cargo](https://github.com/huacnlee/cargo) 构建，NSH 自己的开发也用它：一个可以直接替换官方 Cargo 的分支，每个依赖只为你所有的项目和 Git worktree 构建一次，构建目录自己控制在大小限制之内，不需要任何配置（[安装](./installation.md#从源码构建)）。
+
 `src/lib.rs` 包含整个应用：组件、状态、事件处理和任务。
 
 ```rust
@@ -163,7 +165,7 @@ fn window_bar() -> impl IntoElement {
 ```
 
 `TitleBarStyle::Default` 的标题栏恢复系统标题栏。带 `.window_control(..)` 的视图就是窗口的最小化、
-最大化或关闭按钮：平台执行它的按下动作，关闭遵循窗口的 `close_on_press`。`WindowHandle`
+最大化或关闭按钮：平台执行它的按下动作，关闭遵循窗口的 `close_on_press`。`WindowRef`
 有窗口的其他请求（`set_mode`、`minimize`、`set_bounds`、`close`……），`window()` 打开应用自己的窗口，
 这个模块还有菜单（`set_application_menu`、`popup_menu`）：见 [nsh/desktop](../modules/nsh-desktop.md)。
 

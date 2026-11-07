@@ -962,6 +962,19 @@ impl<M: TextEngine> Core<M> {
             child: id,
             before: None,
         });
+        // The windows `open_window` opens render beside the root (desktops).
+        let desktop = crate::element::os().is_desktop();
+        if desktop {
+            use crate::element::Component as _;
+            let host = crate::element::desktop::OpenedWindowsHost::element(()).into_element();
+            if let Some(host) = self.make_component(host, |_, _| {}) {
+                let _ = self.apply_op(Op::Insert {
+                    parent: ROOT_ID,
+                    child: host,
+                    before: None,
+                });
+            }
+        }
         self.own_direction();
     }
 
@@ -3947,9 +3960,20 @@ impl<M: TextEngine> Core<M> {
         let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
-            Some(p) => (
-                p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
-            ),
+            Some(mut p) => {
+                // Bindings may have changed the node since this element
+                // was applied. Diff against those latest values, even
+                // when the new element has no bindings.
+                if let Some(applied) = inst.bound.remove(&p.id) {
+                    p.attrs = applied.attrs;
+                    p.style = applied.style;
+                    p.classes = applied.classes;
+                    p.text = applied.text;
+                }
+                (
+                    p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
+                )
+            }
             None => {
                 let id = self.components.alloc();
                 let _ = self.apply_op(Op::Create { id, tag: el.tag });

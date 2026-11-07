@@ -31,6 +31,7 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-app.yml"
+      - ".github/actions/cargo/**"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -63,6 +64,7 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-app.yml"
+      - ".github/actions/cargo/**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -114,11 +116,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust-app
       - name: Clippy
         run: cargo clippy -p gallery-native --all-targets --locked -- -D warnings
       # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
@@ -163,11 +166,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust-app-web
       - name: Build the command line
         run: cargo build -p nsh-cli --locked
       - name: Publish the Rust gallery for the web

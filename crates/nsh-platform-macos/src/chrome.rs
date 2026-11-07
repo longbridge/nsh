@@ -7,7 +7,11 @@
 //!   The environment's `title_bar` reports the bar's height (the window's
 //!   frame above its content layout rectangle) and the traffic lights'
 //!   width; it is zero in full screen, where AppKit shows the bar over the
-//!   app only when the pointer reaches the top of the screen.
+//!   app only when the pointer reaches the top of the screen. With the
+//!   app's own bar height ([`TrafficLights`]) NSH centers the traffic lights
+//!   in it itself and reports that height. It attaches no toolbar for it:
+//!   from macOS 26 a window with a toolbar gets larger corners than one
+//!   with only a title bar.
 //! - **Drag regions**: a left press on a view marked `windowDrag`
 //!   ([`crate::input::window_drag`]) moves the window with
 //!   `performWindowDragWithEvent:` (AppKit's own drag, with snapping and
@@ -35,10 +39,12 @@
 
 use std::{
     cell::{Cell, RefCell},
+    ptr::NonNull,
     rc::Rc,
     sync::Arc,
 };
 
+use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use nsh_core::{
     EventKind, EventPayload, ImageSource, NodeId, PayloadValue, ROOT_ID,
@@ -52,17 +58,18 @@ use objc2::{
     AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class,
     msg_send,
     rc::{Retained, Weak},
-    runtime::Sel,
+    runtime::{ProtocolObject, Sel},
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
-    NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton, NSWindowStyleMask,
-    NSWindowTitleVisibility, NSWindowToolbarStyle,
+    NSApplication, NSButton, NSEvent, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
+    NSRunningApplication, NSScreen, NSView, NSViewFrameDidChangeNotification, NSWindow,
+    NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_core_graphics::CGImage;
 use objc2_foundation::{
-    NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
+    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
+    NSString, NSUserDefaults, ns_string,
 };
 
 use crate::surface::Surface;
@@ -146,8 +153,12 @@ pub(crate) struct TitleBar {
     /// Where the app put the window's buttons: the close button's top left
     /// corner from the window's.
     controls_offset: Cell<Option<(f32, f32)>>,
-    /// Only the toolbar NSH attached; dropping it restores the window.
-    toolbar: RefCell<Option<TitleBarToolbar>>,
+    /// The traffic lights placed in the app's bar; dropping it gives them
+    /// back to AppKit.
+    traffic_lights: RefCell<Option<TrafficLights>>,
+    /// Set while [`place_controls`] runs: the frames it sets post the
+    /// notifications that call it.
+    placing: Cell<bool>,
 }
 
 impl Drop for Chrome {
@@ -175,8 +186,14 @@ pub(crate) fn full_screen(window: &NSWindow) -> bool {
 /// Tells the app the main window's hidden title bar's area (after a style
 /// change, a resize, full screen).
 pub(crate) fn update_area(surface: &Surface) {
+    let bar = &surface.main_window.title_bar;
     let area = match window(surface) {
-        Some(window) => title_bar_area(&surface.main_window.title_bar, &window),
+        Some(window) => {
+            // The buttons are placed first: whether NSH holds them decides
+            // the height.
+            place_controls(surface, ROOT_ID, bar, &window);
+            title_bar_area(bar, &window)
+        }
         None => Edges::default(),
     };
     let mut env = surface.environment.get();
@@ -191,7 +208,6 @@ pub(crate) fn update_area(surface: &Surface) {
 /// bar, and in full screen, where AppKit shows the bar over the app only
 /// when the pointer reaches the top of the screen.
 pub(crate) fn title_bar_area(bar: &TitleBar, window: &NSWindow) -> Edges<Points> {
-    sync_toolbar_visibility(bar, window);
     if bar.style.get() != TitleBarStyle::Hidden || full_screen(window) {
         return Edges::default();
     }
@@ -200,17 +216,18 @@ pub(crate) fn title_bar_area(bar: &TitleBar, window: &NSWindow) -> Edges<Points>
     let content =
         NSWindow::contentRectForFrameRect_styleMask(frame, mask, MainThreadMarker::from(window));
     let natural = (frame.size.height - content.size.height) as f32;
-    // A toolbar's native height is determined by AppKit, not the
-    // requested height that selected its style. Include a host's
-    // toolbar too, so the app reserves its actual obscured area.
-    // The title bar view that holds the window's buttons and the
-    // toolbar has that height whatever the window's: the content
-    // layout rectangle is only laid out for the new frame later,
-    // so read during a resize it gives the old one's.
+    // A host's toolbar has the height AppKit gives it, and the app
+    // reserves that obscured area. The title bar view that holds the
+    // window's buttons and the toolbar has that height whatever the
+    // window's: the content layout rectangle is only laid out for the
+    // new frame later, so read during a resize it gives the old one's.
     let height = if window.toolbar().is_some() {
         title_bar_view_height(window).unwrap_or_else(|| {
             toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
         })
+    } else if bar.traffic_lights.borrow().is_some() {
+        // The app's bar, the traffic lights centered in it.
+        bar.height.get().unwrap_or(natural)
     } else {
         natural
     };
@@ -241,20 +258,6 @@ pub(crate) fn title_bar_area(bar: &TitleBar, window: &NSWindow) -> Edges<Points>
     }
 }
 
-/// Hides our empty toolbar in full screen and shows it again outside it.
-/// Full screen keeps a visible toolbar on screen as an opaque strip over the
-/// app's content; without one, AppKit reveals the title bar on hover instead.
-fn sync_toolbar_visibility(bar: &TitleBar, window: &NSWindow) {
-    let owned = bar.toolbar.borrow();
-    let Some(owned) = owned.as_ref().filter(|t| t.is_installed(window)) else {
-        return;
-    };
-    let visible = !full_screen(window);
-    if owned.toolbar.isVisible() != visible {
-        owned.toolbar.setVisible(visible);
-    }
-}
-
 /// The height of the title bar view around the window's buttons (with a
 /// toolbar, the toolbar's row too), when the window has one.
 fn title_bar_view_height(window: &NSWindow) -> Option<f32> {
@@ -273,38 +276,191 @@ fn toolbar_height(frame_height: f64, layout: NSRect, natural: f32) -> f32 {
     }
 }
 
-/// Owns an empty toolbar without retaining the embedding window.
-struct TitleBarToolbar {
+/// The traffic lights centered in the app's bar (`titleBar`'s `height`):
+/// the title bar's container (`NSTitlebarContainerView`, the close
+/// button's superview's superview) as tall as the bar, and the three
+/// buttons moved down to its middle, their `x` kept. AppKit lays them out
+/// again when the window resizes (every frame of a live resize), changes
+/// screen or leaves full screen: the frame-change notifications of the
+/// buttons and the container place them again at once, in the same layout
+/// pass, before anything is drawn. Nothing is placed in full screen, where
+/// AppKit shows the bar in a window of its own, nor with a toolbar: a
+/// host's lays the buttons out itself. Dropping it gives the container and
+/// the buttons back their frames.
+struct TrafficLights {
     window: Weak<NSWindow>,
-    toolbar: Retained<NSToolbar>,
-    previous_style: NSWindowToolbarStyle,
-    applied_style: NSWindowToolbarStyle,
+    container: Retained<NSView>,
+    /// The container's height before (the system title bar's).
+    container_height: f64,
+    /// The buttons and their `y` before.
+    buttons: Vec<(Retained<NSButton>, f64)>,
+    /// Frame-change observers (tokens of the default center).
+    observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
 }
 
-impl TitleBarToolbar {
-    /// Whether this window still has the toolbar we installed.
-    fn is_installed(&self, window: &NSWindow) -> bool {
+impl TrafficLights {
+    /// Places the buttons of window `id` of `surface`.
+    fn new(surface: &Surface, id: NodeId, window: &NSWindow) -> Option<Self> {
+        let close = window.standardWindowButton(NSWindowButton::CloseButton)?;
+        let bar = crate::view::superview(&close)?;
+        let container = crate::view::superview(&bar)?;
+        let buttons: Vec<_> = [
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
+        ]
+        .into_iter()
+        .filter_map(|kind| window.standardWindowButton(kind))
+        .map(|button| {
+            let y = button.frame().origin.y;
+            (button, y)
+        })
+        .collect();
+        let key = surface.key();
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            if let Some(surface) = Surface::with_key(key)
+                && let Some(window) = crate::window::window_of(&surface, id)
+            {
+                crate::window::with_title_bar(&surface, id, |bar| {
+                    place_controls(&surface, id, bar, &window)
+                });
+            }
+        });
+        let center = NSNotificationCenter::defaultCenter();
+        let views = std::iter::once(&*container)
+            .chain(buttons.iter().map(|(button, _)| -> &NSView { button }));
+        let observers = views
+            .map(|view| {
+                view.setPostsFrameChangedNotifications(true);
+                // SAFETY: AppKit posts it on the main thread, where the
+                // block runs (no queue: at once, inside the layout that
+                // moved the view); the observer is removed on drop.
+                unsafe {
+                    center.addObserverForName_object_queue_usingBlock(
+                        Some(NSViewFrameDidChangeNotification),
+                        Some(view),
+                        None,
+                        &block,
+                    )
+                }
+            })
+            .collect();
+        Some(Self {
+            window: Weak::from(window),
+            container_height: container.frame().size.height,
+            container,
+            buttons,
+            observers,
+        })
+    }
+
+    fn is_for(&self, window: &NSWindow) -> bool {
         self.window
             .load()
             .is_some_and(|w| std::ptr::eq(&*w, window))
-            && window.toolbar().is_some_and(|t| t == self.toolbar)
+    }
+
+    /// Makes the container `height` tall (at least the system's bar) at
+    /// the window's top and, with `center`, centers the buttons in the
+    /// bar's `height`.
+    fn place(&self, window: &NSWindow, height: f64, center: bool) {
+        let tall = height.max(self.container_height);
+        set_top(&self.container, window, tall);
+        if !center {
+            return;
+        }
+        for (button, _) in &self.buttons {
+            let Some(bar) = crate::view::superview(button) else {
+                continue;
+            };
+            let own = button.frame().size.height;
+            // The bar's `height` is the top of the container.
+            let from_top = ((height - own) / 2.0).round();
+            let y = if bar.isFlipped() {
+                from_top
+            } else {
+                bar.frame().size.height - from_top - own
+            };
+            let mut origin = button.frame().origin;
+            if origin.y != y {
+                origin.y = y;
+                button.setFrameOrigin(origin);
+            }
+        }
     }
 }
 
-impl Drop for TitleBarToolbar {
+/// Moves `view` to the top of its superview (the window's theme frame)
+/// with `height`, if it is not there.
+fn set_top(view: &NSView, window: &NSWindow, height: f64) {
+    let mut frame = view.frame();
+    let top =
+        crate::view::superview(view).map_or(window.frame().size.height, |s| s.frame().size.height);
+    let y = if crate::view::superview(view).is_some_and(|s| s.isFlipped()) {
+        0.0
+    } else {
+        top - height
+    };
+    if frame.size.height != height || frame.origin.y != y {
+        frame.size.height = height;
+        frame.origin.y = y;
+        view.setFrame(frame);
+    }
+}
+
+impl Drop for TrafficLights {
     fn drop(&mut self) {
+        let center = NSNotificationCenter::defaultCenter();
+        for observer in self.observers.drain(..) {
+            // SAFETY: an observer token of the default center.
+            unsafe { center.removeObserver(observer.as_ref()) };
+        }
+        // In full screen the bar is in AppKit's window of its own, which
+        // lays it out again when the window leaves full screen.
         let Some(window) = self.window.load() else {
             return;
         };
-        // A host may have replaced our toolbar or changed its style. Its
-        // later changes take precedence over the state we saved.
-        if self.is_installed(&window) {
-            let restore_style = window.toolbarStyle() == self.applied_style;
-            window.setToolbar(None);
-            if restore_style {
-                window.setToolbarStyle(self.previous_style);
-            }
+        if full_screen(&window) {
+            return;
         }
+        set_top(&self.container, &window, self.container_height);
+        for (button, y) in &self.buttons {
+            let mut origin = button.frame().origin;
+            origin.y = *y;
+            button.setFrameOrigin(origin);
+        }
+        self.container.setNeedsLayout(true);
+    }
+}
+
+/// Centers the traffic lights of window `id` in its app's bar, or gives
+/// them back to AppKit when there is none ([`TrafficLights`]); buttons the
+/// app put somewhere (`controlsOffset`) are only given the bar's height.
+fn place_traffic_lights(surface: &Surface, id: NodeId, bar: &TitleBar, window: &NSWindow) {
+    let height = bar
+        .height
+        .get()
+        .filter(|_| bar.style.get() == TitleBarStyle::Hidden)
+        .filter(|_| !full_screen(window) && window.toolbar().is_none());
+    let mut placed = bar.traffic_lights.borrow_mut();
+    let Some(height) = height else {
+        *placed = None;
+        return;
+    };
+    if placed.as_ref().is_some_and(|p| !p.is_for(window)) {
+        // Also gives the old window its buttons back when the surface
+        // moves to another.
+        *placed = None;
+    }
+    if placed.is_none() {
+        *placed = TrafficLights::new(surface, id, window);
+    }
+    if let Some(placed) = placed.as_ref() {
+        placed.place(
+            window,
+            f64::from(height),
+            bar.controls_offset.get().is_none(),
+        );
     }
 }
 
@@ -421,14 +577,13 @@ fn apply_title_bar(surface: &Surface, id: NodeId, bar: &TitleBar, window: &NSWin
         mask &= !NSWindowStyleMask::FullSizeContentView;
     }
     window.setStyleMask(mask);
-    apply_toolbar(bar, window, hidden);
     window.setTitlebarAppearsTransparent(hidden);
     window.setTitleVisibility(if hidden {
         NSWindowTitleVisibility::Hidden
     } else {
         NSWindowTitleVisibility::Visible
     });
-    place_controls(bar, window);
+    place_controls(surface, id, bar, window);
     title_bar_changed(surface, id);
     // AppKit can restore the old content size after setStyleMask returns.
     // Reconcile it after that pass, using the current window and style so
@@ -443,9 +598,11 @@ fn apply_title_bar(surface: &Surface, id: NodeId, bar: &TitleBar, window: &NSWin
             if content.frame().size != size {
                 content.setFrameSize(size);
             }
-            // Toolbar layout can settle after setToolbar/setStyleMask
-            // returns, even when the full-size content frame stays the same.
-            crate::window::with_title_bar(&surface, id, |bar| place_controls(bar, &window));
+            // The title bar's layout can settle after setStyleMask returns,
+            // even when the full-size content frame stays the same.
+            crate::window::with_title_bar(&surface, id, |bar| {
+                place_controls(&surface, id, bar, &window)
+            });
             title_bar_changed(&surface, id);
         }
     });
@@ -460,10 +617,21 @@ fn title_bar_changed(surface: &Surface, id: NodeId) {
     }
 }
 
-/// Puts the window's buttons where the app put them
-/// (`titleBar.controlsOffset`): AppKit lays them out again on resizes and
+/// Puts window `id`'s buttons in its app's bar: centered in its height
+/// ([`place_traffic_lights`]), or where the app put them
+/// (`titleBar.controlsOffset`). AppKit lays them out again on resizes and
 /// on leaving full screen, so this runs after those too.
-pub(crate) fn place_controls(bar: &TitleBar, window: &NSWindow) {
+pub(crate) fn place_controls(surface: &Surface, id: NodeId, bar: &TitleBar, window: &NSWindow) {
+    if bar.placing.replace(true) {
+        return;
+    }
+    place_traffic_lights(surface, id, bar, window);
+    place_at_offset(bar, window);
+    bar.placing.set(false);
+}
+
+/// Puts the window's buttons where the app put them, if it did.
+fn place_at_offset(bar: &TitleBar, window: &NSWindow) {
     let Some((x, y)) = bar.controls_offset.get() else {
         return;
     };
@@ -513,49 +681,6 @@ fn controls_origin(
     let top = f64::from(offset.1);
     let y = if flipped { top } else { height - top - button };
     NSPoint::new(x, y)
-}
-
-/// Lets AppKit lay out traffic lights on every live-resize frame. The
-/// height selects a native style; `update_area` reports the measured height.
-fn apply_toolbar(bar: &TitleBar, window: &NSWindow, hidden: bool) {
-    let height = bar.height.get().filter(|_| hidden);
-    let mut owned = bar.toolbar.borrow_mut().take();
-    if height.is_none() || owned.as_ref().is_some_and(|t| !t.is_installed(window)) {
-        // Also restores the old window when this surface moves to another.
-        owned = None;
-    }
-    let Some(height) = height else { return };
-    let style = if height <= 44.0 {
-        NSWindowToolbarStyle::UnifiedCompact
-    } else {
-        NSWindowToolbarStyle::Unified
-    };
-    match &mut owned {
-        Some(toolbar) => {
-            toolbar.applied_style = style;
-            if window.toolbarStyle() != style {
-                window.setToolbarStyle(style);
-            }
-        }
-        None if window.toolbar().is_none() => {
-            let toolbar = NSToolbar::initWithIdentifier(
-                NSToolbar::alloc(MainThreadMarker::from(window)),
-                ns_string!("nsh.title-bar"),
-            );
-            let previous_style = window.toolbarStyle();
-            window.setToolbar(Some(&toolbar));
-            window.setToolbarStyle(style);
-            owned = Some(TitleBarToolbar {
-                window: Weak::from(window),
-                toolbar,
-                previous_style,
-                applied_style: style,
-            });
-        }
-        // The embedding app owns this toolbar, including its style.
-        None => {}
-    }
-    *bar.toolbar.borrow_mut() = owned;
 }
 
 // --- Drag regions -----------------------------------------------------------------------
@@ -976,8 +1101,8 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
 pub(crate) fn window_changed(surface: &Surface) {
     let bar = &surface.main_window.title_bar;
     let Some(window) = window(surface) else {
-        let toolbar = bar.toolbar.borrow_mut().take();
-        drop(toolbar);
+        let placed = bar.traffic_lights.borrow_mut().take();
+        drop(placed);
         update_area(surface);
         return;
     };
