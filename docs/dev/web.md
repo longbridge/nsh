@@ -572,9 +572,10 @@ do not follow (`redirect: "manual"` gives an opaque response without status or `
 follows itself to check each one against restricted capabilities (`access.rs`).
 
 Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI` as the
-player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url` (the browser's own `fetch`
-resolves the app's against the page);
-native hosts have no base and keep rejecting them. `new URL("/x")` without a base throws,
+player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url`. The app's `fetch`, the
+browser's own run in the app realm, resolves them against that realm's `<base>`, which is `player.baseURL` too; a
+`fetch` in the page's own realm (the host module's) resolves against the page's address when it runs.
+Native hosts have no base and keep rejecting relative URLs. `new URL("/x")` without a base throws,
 as in browsers. Relative `<Image>` URLs resolve against `player.baseURL` too (`asset()`), so they load after the
 address moved to another directory.
 
