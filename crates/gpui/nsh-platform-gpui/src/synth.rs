@@ -6,29 +6,26 @@
 
 use std::{cell::Cell, rc::Rc, time::Duration};
 
-use gpui::{App, AsyncApp, Window, WindowHandle};
+use gpui::{AnyWindowHandle, App, AppContext as _, AsyncApp, Window};
 
 use crate::{
-    app::AppView,
     input::{KeyEvent, Modifiers},
     surface::Surface,
 };
 
-/// Runs `f` with the window's surface on the main thread, then redraws
-/// what changed. `None` when the window is gone.
-pub(crate) fn with_surface<R>(
-    window: WindowHandle<AppView>,
+/// Runs `f` in window `window` (the main one or one of the app's own) on
+/// the main thread, then redraws what changed. `None` when it is gone.
+fn in_window<R>(
+    window: AnyWindowHandle,
     cx: &mut AsyncApp,
-    f: impl FnOnce(&Rc<Surface>, &mut Window, &mut App) -> R,
+    f: impl FnOnce(&mut Window, &mut App) -> R,
 ) -> Option<R> {
-    window
-        .update(cx, |view, window, cx| {
-            let surface = view.surface().clone();
-            let r = f(&surface, window, cx);
-            crate::rt::flush(cx);
-            r
-        })
-        .ok()
+    cx.update_window(window, |_, window, cx| {
+        let r = f(window, cx);
+        crate::rt::flush(cx);
+        r
+    })
+    .ok()
 }
 
 pub(crate) async fn sleep(cx: &mut AsyncApp, ms: u64) {
@@ -40,12 +37,12 @@ pub(crate) async fn sleep(cx: &mut AsyncApp, ms: u64) {
 /// Waits until the window drew a frame with everything changed so far
 /// (false when the window closed). A window that draws no frames (hidden,
 /// minimized) is given up on after a second.
-pub(crate) async fn drawn(window: WindowHandle<AppView>, cx: &mut AsyncApp) -> bool {
+pub(crate) async fn drawn(window: AnyWindowHandle, cx: &mut AsyncApp) -> bool {
     // Next-frame callbacks run before their frame is drawn: the second
     // one runs once the frame the first one asked for is drawn.
     let done = Rc::new(Cell::new(false));
     let flag = done.clone();
-    let Some(()) = with_surface(window, cx, move |_, window, _| {
+    let Some(()) = in_window(window, cx, move |window, _| {
         window.refresh();
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |_, _| flag.set(true));
@@ -64,7 +61,10 @@ pub(crate) async fn drawn(window: WindowHandle<AppView>, cx: &mut AsyncApp) -> b
     true
 }
 
-pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
+/// Presses and releases key `vk` in the surface's input root, as GPUI's
+/// key events reach it; true when the press was taken.
+pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) -> bool {
+    let mut taken = false;
     for down in [true, false] {
         let handled = crate::input::key(
             surface,
@@ -75,6 +75,9 @@ pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
                 modifiers,
             },
         );
+        if down {
+            taken = handled;
+        }
         // Unhandled printable keys type their character, as GPUI's input
         // handler would get it.
         if down && !handled && !modifiers.ctrl && !modifiers.alt && !modifiers.meta {
@@ -89,17 +92,19 @@ pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
             }
         }
     }
+    taken
 }
 
-/// Draws what changed and takes the window's content, in device pixels,
-/// with its size in points. `None` when the window closed.
+/// Draws what changed in window `window` (the main one or one of the
+/// app's own) and takes its content, in device pixels, with its size in
+/// points. `None` when the window closed.
 pub(crate) async fn frame(
-    window: WindowHandle<AppView>,
+    window: AnyWindowHandle,
     cx: &mut AsyncApp,
 ) -> Option<anyhow::Result<(::image::RgbaImage, gpui::Size<gpui::Pixels>)>> {
     #[cfg(target_os = "linux")]
     {
-        let watch = match with_surface(window, cx, |_, window, _| x11::Watch::new(window))? {
+        let watch = match in_window(window, cx, |window, _| x11::Watch::new(window))? {
             Ok(watch) => watch,
             Err(err) => return Some(Err(err)),
         };
@@ -108,16 +113,14 @@ pub(crate) async fn frame(
         }
         watch.presented(cx).await;
         let frame = watch.capture();
-        with_surface(window, cx, |_, window, _| {
-            Ok((frame?, window.viewport_size()))
-        })
+        in_window(window, cx, |window, _| Ok((frame?, window.viewport_size())))
     }
     #[cfg(not(target_os = "linux"))]
     {
         if !drawn(window, cx).await {
             return None;
         }
-        with_surface(window, cx, |_, window, _| {
+        in_window(window, cx, |window, _| {
             Ok((capture(window)?, window.viewport_size()))
         })
     }

@@ -94,6 +94,8 @@ const FADE_OUT: f64 = 120.0;
 const CSS: &str = "
 .nsh-light { background-color: #ffffff; }
 .nsh-dark { background-color: #0a0a0a; }
+window.nsh-transparent, window.nsh-transparent .nsh-light, window.nsh-transparent .nsh-dark { background: none; }
+window.nsh-no-shadow, window.nsh-no-shadow.csd { box-shadow: none; }
 .nsh-dialog-backdrop { background-color: rgba(0, 0, 0, 0.4); }
 .nsh-dialog-card {
   border-radius: 12px; padding: 20px;
@@ -147,7 +149,8 @@ struct Appearance {
 
 /// A dialog over a surface.
 struct Overlay {
-    /// The surface's root view, which hosts it.
+    /// The root view that hosts it: the surface's, or that of the app's
+    /// window of its own the user was in.
     root: NshView,
     widget: gtk::Widget,
     kind: OverlayKind,
@@ -287,6 +290,15 @@ fn install() {
     watch_clock_format();
 }
 
+/// Whether the system is in dark mode (the portal's answer, or GTK's
+/// scheme at start), whatever the app's own appearance: the panels'.
+pub(crate) fn system_dark() -> bool {
+    SYSTEM.with(|s| {
+        let s = s.borrow();
+        s.portal_dark.unwrap_or(s.initial_dark)
+    })
+}
+
 /// The system's settings now.
 fn appearance() -> Appearance {
     let settings = gtk::Settings::default();
@@ -407,13 +419,16 @@ fn update(surface: &Surface, appearance: Appearance) {
 pub(crate) fn environment_applied(surface: &Surface) {
     let dark = surface.environment.get().color_scheme == ColorScheme::Dark;
     let root = &surface.root;
-    let (add, remove) = if dark {
+    // The main window's content: a `colorScheme` it fixes, else the app's.
+    let (add, remove) = if crate::window::main_dark(surface) {
         ("nsh-dark", "nsh-light")
     } else {
         ("nsh-light", "nsh-dark")
     };
     root.remove_css_class(remove);
     root.add_css_class(add);
+    // The app's windows of its own follow it.
+    crate::window::schemes_applied(surface);
     // The menu bar's menus are outside the root.
     if let Some(slot) = crate::chrome::menu_bar_slot(surface) {
         slot.remove_css_class(remove);
@@ -716,7 +731,8 @@ fn screen_reader(proxy: &gio::DBusProxy) {
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
-        Command::Announce(text) => crate::access::announce(&surface.root, text),
+        // In the window the user is in: a screen reader reads that one.
+        Command::Announce(text) => crate::access::announce(&crate::window::key_root(surface), text),
         Command::PerfMonitor(true) => surface.enable_fps(),
         Command::PerfMonitor(false) => surface.disable_fps(),
         Command::Desktop(command) => crate::chrome::command(surface, command),
@@ -794,13 +810,14 @@ pub(crate) fn end_batch(surface: &Surface) {
 
 /// The surface is `width` × `height`: overlays follow.
 pub(crate) fn surface_resized(surface: &Surface, width: f32, height: f32) {
+    root_resized(&surface.root, width, height);
+}
+
+/// Root view `root` (the surface's or a window's) is `width` ×
+/// `height`: the overlays in it follow.
+pub(crate) fn root_resized(root: &NshView, width: f32, height: f32) {
     SYSTEM.with(|s| {
-        for overlay in s
-            .borrow()
-            .overlays
-            .iter()
-            .filter(|o| o.root == surface.root)
-        {
+        for overlay in s.borrow().overlays.iter().filter(|o| &o.root == root) {
             place(overlay, width, height);
         }
     });
@@ -808,11 +825,14 @@ pub(crate) fn surface_resized(surface: &Surface, width: f32, height: f32) {
 
 /// The app stopped: its dialogs go too.
 pub(crate) fn clear(surface: &Surface) {
+    // Those in its windows of its own too (still open: they close after).
+    let mut roots = vec![surface.root.clone()];
+    roots.extend(crate::window::roots(surface).into_iter().map(|(_, r)| r));
     let removed: Vec<Overlay> = SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         let (removed, kept) = std::mem::take(&mut s.overlays)
             .into_iter()
-            .partition(|o| o.root == surface.root);
+            .partition(|o| roots.contains(&o.root));
         s.overlays = kept;
         removed
     });
@@ -844,22 +864,23 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
     }
 }
 
-/// Hosts `widget` over `surface`'s views and fades it in.
-fn add_overlay(surface: &Surface, widget: gtk::Widget, kind: OverlayKind) {
+/// Hosts `widget` over the views of root view `root` (a window's) and
+/// fades it in (at once with `reduce_motion`).
+fn add_overlay(root: &NshView, widget: gtk::Widget, kind: OverlayKind, reduce_motion: bool) {
     widget.add_css_class("nsh-overlay");
     let overlay = Overlay {
-        root: surface.root.clone(),
+        root: root.clone(),
         widget: widget.clone(),
         kind,
     };
-    let env = surface.environment.get();
-    place(&overlay, env.window.width.0, env.window.height.0);
+    let size = root.state().frame.size;
+    place(&overlay, size.width.0, size.height.0);
     SYSTEM.with(|s| s.borrow_mut().overlays.push(overlay));
     widget.set_opacity(0.0);
     fade(
         &widget,
         1.0,
-        if env.reduce_motion { 0.0 } else { FADE_IN },
+        if reduce_motion { 0.0 } else { FADE_IN },
         || {},
     );
 }
@@ -1002,7 +1023,9 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         .css_classes(["nsh-dialog-backdrop"])
         .build();
     let previous_focus = glib::WeakRef::new();
-    previous_focus.set(surface.root.root().and_then(|r| r.focus()).as_ref());
+    // Shown in the window the user is in.
+    let host = crate::window::key_root(surface);
+    previous_focus.set(host.root().and_then(|r| r.focus()).as_ref());
     let answer = Rc::new(DialogAnswer {
         id: dialog.id,
         surface: Rc::downgrade(surface),
@@ -1184,7 +1207,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     backdrop.add_controller(keys);
 
     add_overlay(
-        surface,
+        &host,
         backdrop.upcast(),
         OverlayKind::Dialog {
             sized,
@@ -1192,6 +1215,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
             gutter,
             dismiss: cancelable.then(|| answer.clone()),
         },
+        surface.environment.get().reduce_motion,
     );
     if let Some(focus) = focus {
         focus.grab_focus();
@@ -1255,7 +1279,7 @@ fn descendants(widget: &gtk::Widget) -> impl Iterator<Item = gtk::Widget> {
 /// otherwise), parented to the surface's window, and reports whether it
 /// did ([`EventKind::OpenUrl`]).
 fn open_url(surface: &Rc<Surface>, id: u32, url: &str) {
-    let window = surface.root.root().and_downcast::<gtk::Window>();
+    let window = crate::window::key_window(surface);
     let surface = Rc::downgrade(surface);
     gtk::UriLauncher::new(url).launch(window.as_ref(), gio::Cancellable::NONE, move |result| {
         if let Err(err) = &result {
@@ -1457,7 +1481,8 @@ fn pick_images(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::PickRe
     let dialog = gtk::FileDialog::builder().modal(true).build();
     dialog.set_filters(Some(&filters));
     dialog.set_default_filter(Some(&filter));
-    let window = surface.root.root().and_downcast::<gtk::Window>();
+    // Over the window the user is in.
+    let window = crate::window::key_window(surface);
     let read = move |paths: Vec<std::path::PathBuf>| {
         std::thread::spawn(move || {
             let files = nsh_core::picker::read_files(&paths, &request);

@@ -21,7 +21,7 @@ group: delivery
 
 > [!NOTE]
 > NSH 只负责验证和运行包，不负责分发。包从哪里来（你的更新服务器、CDN、小程序商店）以及应用何时下载，都由宿主应用
-> 自行决定。
+> 自行决定。打包的 NSH 应用更新自己的 TSX 是例外：[OTA 更新](./ota-updates.md)替它获取、验证、运行和回滚包。
 
 ## 为什么要签名
 
@@ -361,4 +361,5 @@ adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity 
 
 - [沙箱与能力](./sandbox-and-capabilities.md)
 - [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)
+- [OTA 更新](./ota-updates.md)：以签名包下发打包应用自己的 TSX
 - [CLI](./cli.md)

@@ -19,9 +19,9 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSBackingStoreType, NSEvent,
-    NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSResponder, NSScreen, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
+    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
+    NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -381,6 +381,8 @@ impl AppView {
             picker: None,
             speech: None,
             audio: None,
+            // The app's windows of its own are this backend's.
+            windows: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -540,25 +542,6 @@ fn url_scheme(url: String) {
 }
 
 define_class!(
-    /// [`run_app`]'s window when [`AppOptions::keep_size`] is set: AppKit
-    /// leaves its frame as it is, the window may be taller or wider than its
-    /// screen.
-    #[unsafe(super(NSWindow, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "NshKeptSizeWindow"]
-    struct KeptSizeWindow;
-
-    unsafe impl NSObjectProtocol for KeptSizeWindow {}
-
-    impl KeptSizeWindow {
-        #[unsafe(method(constrainFrameRect:toScreen:))]
-        fn constrain_frame_rect(&self, rect: NSRect, _screen: Option<&NSScreen>) -> NSRect {
-            rect
-        }
-    }
-);
-
-define_class!(
     /// Closes the app with its window.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
@@ -635,18 +618,21 @@ define_class!(
     }
 
     unsafe impl NSWindowDelegate for Delegate {
+        // The user's close press: the app's `closeOnPress` says whether it
+        // closes ([`crate::window`]), which closes it later.
         #[unsafe(method(windowShouldClose:))]
         fn should_close(&self, window: &NSWindow) -> bool {
-            let keep_alive = RUNNING.with(|running| {
+            let surface = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .is_some_and(|running| running.keep_alive_on_close)
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
             });
-            if keep_alive {
-                window.orderOut(None);
+            match surface {
+                Some(surface) => crate::window::main_should_close(&surface, window),
+                None => true,
             }
-            !keep_alive
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -662,6 +648,28 @@ define_class!(
         }
     }
 );
+
+/// Closes the standalone app's main window (surface `key`'s) without
+/// asking the app again: hidden with [`AppOptions::keep_alive_on_close`],
+/// else closed, which ends the app. Whether the surface is that window's.
+pub(crate) fn close_main_window(key: u64) -> bool {
+    let target = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .filter(|running| running.view.surface().key() == key)
+            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+    });
+    let Some((window, keep_alive)) = target else {
+        return false;
+    };
+    if keep_alive {
+        window.orderOut(None);
+    } else {
+        window.close();
+    }
+    true
+}
 
 /// Quits the standalone runner, including a retained hidden window.
 /// Stops its engine and returns from [`run_app`]. May be called from any thread;
@@ -779,39 +787,52 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.setMainMenu(Some(&main_menu(mtm, &options.title)));
 
-    let frame = NSRect::new(
-        NSPoint::new(0.0, 0.0),
+    // nsh.json `window`: known before the window is made, so its first
+    // frame has it.
+    #[cfg(feature = "dev")]
+    let dev_server = match &source {
+        AppSource::DevServer(url) => Some(url.clone()),
+        _ => None,
+    };
+    // A dev server's app comes later (its window options with it).
+    let loaded = match source {
+        AppSource::Rust(root) => Some(App::Rust(root)),
+        AppSource::Bundle(bundle) => Some(App::Js(bundle)),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(_) => None,
+    };
+    let launch = loaded
+        .as_ref()
+        .and_then(App::main_window)
+        .cloned()
+        .unwrap_or_default();
+    // With `restoreBounds`, where it was last (the engine keeps it in the
+    // app's storage as the window changes), fitted on the displays there
+    // are now.
+    let kept = match &loaded {
+        Some(app) if launch.restore_bounds => EngineConfig {
+            data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+            storage: options.storage.clone(),
+            ..EngineConfig::new(app.clone())
+        }
+        .main_window_placement(&crate::window_state::displays(mtm)),
+        _ => None,
+    };
+    let size = launch.default_size.map_or(
         NSSize::new(options.size.0 as f64, options.size.1 as f64),
+        |s| {
+            NSSize::new(
+                f64::from(s.width.0.max(1.0)),
+                f64::from(s.height.0.max(1.0)),
+            )
+        },
     );
+    let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
     let style = NSWindowStyleMask::Titled
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable
         | NSWindowStyleMask::Resizable;
-    let window = if options.keep_size {
-        // SAFETY: NSWindow's designated initializer, sent to a subclass
-        // that adds no state of its own.
-        let window: Retained<KeptSizeWindow> = unsafe {
-            msg_send![
-                KeptSizeWindow::alloc(mtm),
-                initWithContentRect: frame,
-                styleMask: style,
-                backing: NSBackingStoreType::Buffered,
-                defer: false
-            ]
-        };
-        Retained::into_super(window)
-    } else {
-        // SAFETY: NSWindow's designated initializer.
-        unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                frame,
-                style,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        }
-    };
+    let window = crate::window::new_window(mtm, frame, style, true, options.keep_size);
     // SAFETY: the window is kept in `RUNNING` until it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&options.title));
@@ -820,26 +841,39 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     let view = AppView::new(mtm, options.clone());
     view.surface().standalone.set(true);
     window.setContentView(Some(&view.view()));
-    window.center();
-    if let Some(display) = options.display {
+    // Nothing is focused until the user or the app focuses it: the root
+    // holds the keyboard, so becoming key never lets AppKit pick the first
+    // key view (a field, its text selected).
+    window.setInitialFirstResponder(Some(view.surface().root.ns()));
+    crate::window::launch_main(view.surface(), &window, &launch, kept);
+    if kept.is_none()
+        && launch.display.is_none()
+        && launch.default_position.is_none()
+        && let Some(display) = options.display
+    {
         center_on_display(&window, display);
     }
-    match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
-        #[cfg(feature = "dev")]
-        AppSource::DevServer(url) => crate::dev::start(&view, url),
+    if let Some(app) = loaded {
+        view.load(app);
+    }
+    #[cfg(feature = "dev")]
+    if let Some(url) = dev_server {
+        crate::dev::start(&view, url);
     }
     if options.background {
         // Shown without activating the app (it never is: its window is
         // never key, and the test agent's input goes to it directly).
         window.orderFrontRegardless();
         window.makeFirstResponder(Some(view.surface().root.ns()));
+        // The window that would be key: its state says it has the
+        // keyboard, which the test agent's keys go to.
+        crate::window::became_key(view.surface(), &window);
     } else {
         window.makeKeyAndOrderFront(None);
         window.makeFirstResponder(Some(view.surface().root.ns()));
         app.activate();
     }
+    let view_surface = view.surface().clone();
     RUNNING.with(|r| {
         *r.borrow_mut() = Some(Running {
             window,
@@ -847,6 +881,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
+    // The mode it opens in, once it shows.
+    crate::window::launched_main(&view_surface, kept.map(|p| p.mode).or(launch.default_mode));
     for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
         url_scheme(url);
     }
