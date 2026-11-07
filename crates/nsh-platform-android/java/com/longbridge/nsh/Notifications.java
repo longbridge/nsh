@@ -37,6 +37,8 @@ final class Notifications {
     private static final String ASKED = "asked";
     /** The id of every notification, the app's id being its tag. */
     private static final int NOTIFICATION_ID = 1;
+    /** The group of silent notifications, which has no summary to alert. */
+    private static final String SILENT_GROUP = "com.longbridge.nsh.silent";
 
     /** The mounter that listens to presses, once the app does. UI thread. */
     private static Mounter listener;
@@ -69,7 +71,8 @@ final class Notifications {
                 String id = (String) objects[b.getInt()];
                 String title = (String) objects[b.getInt()];
                 String body = (String) objects[b.getInt()];
-                boolean shown = show(context, id, title, body);
+                boolean silent = b.getInt() != 0;
+                boolean shown = show(context, id, title, body, silent);
                 mounter.eventMap(1, Native.NOTIFICATION, new String[] {"id", "shown"}, new Object[] {(double) request, shown});
                 return;
             }
@@ -155,7 +158,7 @@ final class Notifications {
     }
 
     @SuppressWarnings("deprecation")
-    private static boolean show(Context context, String id, String title, String body) {
+    private static boolean show(Context context, String id, String title, String body, boolean silent) {
         if (!permission(context).equals("granted")) return false;
         NotificationManager manager = manager(context);
         Notification.Builder builder;
@@ -169,7 +172,12 @@ final class Notifications {
         } else {
             builder = new Notification.Builder(context);
             builder.setPriority(Notification.PRIORITY_HIGH);
-            builder.setDefaults(Notification.DEFAULT_ALL);
+            builder.setDefaults(silent ? Notification.DEFAULT_LIGHTS : Notification.DEFAULT_ALL);
+        }
+        if (silent && Build.VERSION.SDK_INT >= 26) {
+            // The channel's sound and vibration are for every notification in it. A child of a group that alerts
+            // only for its summary makes neither, as NotificationCompat's setSilent does it.
+            builder.setGroup(SILENT_GROUP).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY);
         }
         int icon = context.getApplicationInfo().icon;
         builder.setSmallIcon(icon != 0 ? icon : android.R.drawable.ic_dialog_info)

@@ -67,8 +67,12 @@ keyboard stays with the app you type in (`--foreground` lets them become the act
 ### Performance monitor
 
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
-`nsh run App.tsx --target macos --fps`, the host's `--fps`, or a packaged TSX app's `open -a MyApp --args --fps`) shows a panel at the top right of the
-app that updates twice a second:
+`nsh run App.tsx --target macos --fps`, the host's `--fps`, a packaged TSX app's `open -a MyApp --args --fps`, the
+environment variable `NSH_FPS=1`, or the app's own `setFpsEnabled(true)`) shows a panel at the top right of the app that
+updates twice a second. A packaged TSX app can also set `NSHPerformanceMonitor` to `true` in its `Info.plist` to show
+the panel however the app is opened. Add this key through `nsh.json`'s `macos.infoPlist`
+([Packaging](./packaging.md#infoplist-keys-and-entitlements)). A packaged app can also take `NSH_FPS` from its
+`Info.plist`'s `LSEnvironment`.
 
 | Row | Measures |
 |---|---|
@@ -152,15 +156,18 @@ For an app that is only an NSH app, `run_app(source, options)` (`AppSource::Rust
 (About, Hide, Quit, Edit, Minimize, Zoom, Enter Full Screen, Close), which the app can replace with
 `Menu.setApplicationMenu` ([`nsh/desktop`](../modules/nsh-desktop.md)), and runs until the window closes.
 By default, closing the window or choosing Quit stops the engine and returns from `run_app`;
-the caller can then finish cleanup or relaunch its executable.
+the caller can then finish cleanup or restart its executable.
 
 Set `AppOptions { keep_alive_on_close: true, ..Default::default() }` to keep the
 standalone session alive when its window closes. Closing hides the window;
 reopening from the Dock shows that same window and engine. For an explicit Exit
-or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
+or update restart, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while
-`nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
+`current_window().close()` (`nsh_core::element::desktop`) follows the chosen window-close policy.
+`nsh_core::element::desktop::restart()` (TS: `Application.restart()`) quits the same way, and once the process has
+exited `run_app`'s runner starts the app again with the same arguments: inside an `.app` bundle through Launch Services
+(`open -n`), as when the user opens it.
 
 
 `AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
@@ -199,6 +206,14 @@ that shows the app's popup and backdrop. Pages show their `header` at the top. A
 point. `AlertDialog` shows an `NSAlert` sheet on the window: up to two alert actions in a row (the cancel
 action leftmost, the last regular one the default for Return), more actions and an action sheet's actions stacked in
 their order with the cancel action last and no default; Escape chooses the cancel action.
+
+### Table accessibility
+
+VoiceOver and UI automation read `Table` and `Grid` as `AXTable`, `Row` as `AXRow`, and `Cell` and
+`ColumnHeader` as `AXCell`. The table exposes its mounted rows and columns, visible rows and cells, and headers.
+Row and cell indices follow tree order, starting at zero and including header rows, with each cell spanning one
+row and column. Column headers are linked from their table, column and cells. Rows with `onPress` keep their
+press action and their row role, and labels and text children remain available to accessibility clients.
 
 ### Keyboard
 

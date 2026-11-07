@@ -264,6 +264,7 @@ impl DevSession {
                         nsh_dev::AppInfo {
                             capabilities,
                             id: crate::package::app_id(&self.entry).ok(),
+                            window: crate::package::window_json(&self.entry),
                         },
                         None,
                         built.ui_sets,
@@ -302,6 +303,7 @@ impl DevSession {
                     nsh_dev::AppInfo {
                         capabilities,
                         id: crate::package::app_id(&self.entry).ok(),
+                        window: crate::package::window_json(&self.entry),
                     },
                     patch,
                     built.ui_sets,

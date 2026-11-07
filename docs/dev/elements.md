@@ -314,7 +314,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   offset logic stays left to right.
 - **Environment** (reactive accessors; `nsh` (`safeArea()`, `safeAreaInsets()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
-  `colorScheme()`, `fontScale()`, `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
+  `colorScheme()`, `fontScale()`, `localeSettings()` (`Environment::locale_settings`, `LocaleSettings`, one value and
+  one signal, as the systems change these together; a `computed` of one field reruns only its readers; the
+  locale's (it alone as the languages, its region's preferences) in UTC headless unless a test sets them): `languages`
+  (`Languages`: the system's preferred languages, most preferred first, at most 8, never empty, an embedding app's own
+  language first; the web the browser's), `timeZone` (`TimeZone`: the zone's name as the system gives it, an IANA name
+  or an offset zone; the platforms write the system's, the web the browser's, read again when the page shows or gets
+  the focus), and the regional preferences `hourCycle`, `firstDayOfWeek`, `measurementSystem`, `temperatureUnit` (the
+  system's settings, else the region's, CLDR 48's (`LocaleSettings::of`); `LocaleSettings::parse` reads a platform
+  identifier's region and its `-u-` / `@` keywords (`hc`, `fw`, `ms`, `mu`, `rg`); the web the browser's hour cycle
+  and first day for its language, its likely region's units; both are `#[doc(hidden)]` plumbing for the platforms, as
+  are `Languages::parse` / `one`, `TimeZone::posix` and `HourCycle::of_pattern`), `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
   `background`, React Native's states; the platforms write it as the system reports the app's, the web from the
   page's `visibilityState` and focus, iOS from the notifications of the scene of the surface's window
   (`UIScene`'s `didActivate` / `willDeactivate` / `didEnterBackground` / `willEnterForeground`, filtered by the view's

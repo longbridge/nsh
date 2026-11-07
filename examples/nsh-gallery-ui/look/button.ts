@@ -1,8 +1,9 @@
 // What a button looks like, shared by the gallery's `Button`, `RoundButton`
 // and icon buttons and by the website's demos (`button()` in `demo.ts`).
 import type { TextStyle, ViewStyle } from "nsh";
-import { platform, reduceMotion, token } from "nsh";
+import { platform, token } from "nsh";
 import { alpha, colors, finish, focusRing, ghostFill, hovered, radius, terminal, TERMINAL_COLUMN, TERMINAL_ROW, tints } from "../theme";
+import { pressSink, pressTransition } from "./press";
 
 /**
  * `primary` and `accent`: the citrus fill (the one main action of a
@@ -25,8 +26,8 @@ export interface ButtonLookOptions {
   /** Default `regular`. */
   size?: Live<ButtonSize | undefined>;
   /** Shown as chosen: what it opens is open (a menu's or a popover's
-   * trigger), or it is the current one of a few. A raised button keeps its
-   * pressed look, a ghost the neutral `accent` fill, a filled one its
+   * trigger), or it is the current one of a few. A raised button takes the
+   * `on` fill, a ghost the neutral `accent` fill, a filled one its
    * pressed shade; no hover while selected. */
   selected?: Live<boolean | undefined>;
   /** No hover and no press feedback; dimmed to 40% (`disabledStyle`). */
@@ -60,15 +61,11 @@ const TOUCH_TARGET = 44;
 const slop = (height: number) => (pointer || terminal ? undefined : Math.max(0, (TOUCH_TARGET - height) / 2) || undefined);
 
 /** How far a press sinks a button (`activeStyle`): none with reduced motion. */
-const sink = (scale: number): ViewStyle => (reduceMotion() ? {} : { transform: [{ scale }] });
+const sink = (scale: number): ViewStyle => pressSink(scale).activeStyle;
 
 /** The properties a button's states change, eased over 150 ms: the press's
  * sink (Design Guides, "Motion") and the hover's and press's colors. */
-const transition: ViewStyle = {
-  transitionProperty: "background-color, border-color, box-shadow, opacity, transform",
-  transitionDuration: 150,
-  transitionTimingFunction: "ease-out",
-};
+const transition = pressTransition("background-color, border-color, box-shadow, opacity");
 
 const read = <T,>(v: Live<T> | undefined): T | undefined => (typeof v === "function" ? (v as () => T)() : v);
 
@@ -87,7 +84,9 @@ function rest(kind: ButtonKind, selected: boolean): ViewStyle {
     };
   }
   if (kind === "ghost") return { backgroundColor: selected ? token("accent") : ghostFill(), borderColor: "transparent" };
-  return selected ? finish.pressed : finish.raised;
+  // Selected stays on: `on`, apart from rest and from hover in both
+  // appearances (a sunk `pressed` is a press's, too faint to hold).
+  return selected ? finish.on : finish.raised;
 }
 
 /**

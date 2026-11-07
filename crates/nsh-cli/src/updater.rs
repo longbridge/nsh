@@ -1,7 +1,8 @@
 //! The toolchain's side of app updates (`docs/dev/updater.md`): `nsh.json`'s
 //! `"updater"` goes into the package, packages also leave an archive named
 //! for their platform, and `nsh update-manifest` writes the manifest
-//! describing the archives of one version.
+//! describing the archives of one version and a signed package of the app's
+//! code (`--package`).
 
 use std::{
     fs,
@@ -10,14 +11,16 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
-use nsh_updater::{Asset, CONFIG_ASSET, Config, MANIFEST, Manifest, SIGNATURE};
+use nsh_updater::{
+    Asset, CONFIG_ASSET, Config, MANIFEST, Manifest, PackageAsset, Packages, SIGNATURE,
+};
 use serde::Deserialize;
 
 use crate::{package::AppConfig, ui};
 
 /// `nsh.json`'s `"updater"`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct UpdaterConfig {
     /// `owner/repo`: updates from its GitHub Releases.
     pub(crate) github: Option<String>,
@@ -25,6 +28,17 @@ pub(crate) struct UpdaterConfig {
     pub(crate) url: Option<String>,
     /// The manifests' Ed25519 key (`nsh keygen`'s `.pub`).
     pub(crate) public_key: Option<String>,
+    /// Signed packages of the app's code the app runs over the air.
+    pub(crate) packages: Option<PackagesConfig>,
+}
+
+/// `nsh.json`'s `"updater": { "packages": … }`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PackagesConfig {
+    /// The roots (`nsh keygen`'s `root.pub`, base64) whose certified
+    /// release keys sign the app's packages.
+    pub(crate) roots: Vec<String>,
 }
 
 /// The app's version, as packages have it.
@@ -43,6 +57,12 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     runtime.github = updater.github.clone();
     runtime.url = updater.url.clone();
     runtime.public_key = updater.public_key.clone();
+    runtime.build = Some(config.build.unwrap_or(1).into());
+    runtime.packages = updater.packages.as_ref().map(|packages| {
+        let mut runtime = Packages::default();
+        runtime.roots = packages.roots.iter().map(|r| r.trim().to_owned()).collect();
+        runtime
+    });
     runtime.validate().context("nsh.json")?;
     Ok(Some(runtime))
 }
@@ -137,6 +157,7 @@ pub(crate) fn archive_macos_app(
 /// Options of `nsh update-manifest`.
 pub(crate) struct ManifestOptions<'a> {
     pub(crate) archives: &'a [PathBuf],
+    pub(crate) package: Option<&'a Path>,
     pub(crate) entry: &'a Path,
     pub(crate) key: Option<&'a Path>,
     pub(crate) notes: Option<&'a Path>,
@@ -200,6 +221,13 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
         asset.url = url.to_owned();
         platforms.insert(platform.to_owned(), asset);
     }
+    let package = options
+        .package
+        .map(|path| package_asset(path, &runtime, options.base_url))
+        .transpose()?;
+    if options.archives.is_empty() && package.is_none() && options.links.is_empty() {
+        bail!("nothing to describe: pass archives, --package or --link");
+    }
     let notes = options
         .notes
         .map(fs::read_to_string)
@@ -210,6 +238,7 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
     manifest.version = version.to_owned();
     manifest.notes = notes;
     manifest.platforms = platforms;
+    manifest.package = package;
     let bytes = serde_json::to_vec_pretty(&manifest)?;
     fs::create_dir_all(options.out)?;
     let path = options.out.join(MANIFEST);
@@ -236,6 +265,57 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The manifest's entry of the signed package at `path`: checked as the
+/// app will (its roots in `nsh.json`, its id), so a release cannot offer a
+/// package every app refuses.
+fn package_asset(
+    path: &Path,
+    runtime: &Config,
+    base_url: Option<&str>,
+) -> anyhow::Result<PackageAsset> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let file = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .with_context(|| format!("{} has no file name", path.display()))?;
+    let header = nsh_package::verify_signature(&bytes)
+        .with_context(|| format!("{file} is not a signed package"))?;
+    let app = header.app();
+    if app.id != runtime.id {
+        bail!(
+            "{file} is a package of {}, the app is {}",
+            app.id,
+            runtime.id
+        );
+    }
+    let roots = runtime.package_roots();
+    if roots.is_empty() {
+        ui::warn(
+            "nsh.json has no updater.packages.roots: apps of this build run no packages, newer \
+             ones will",
+        );
+    } else {
+        let mut trust = nsh_package::TrustStore::new();
+        for root in roots {
+            trust.add_root(nsh_package::PublicKey::from_base64(root)?);
+        }
+        trust.verify(&bytes, "").with_context(|| {
+            format!("{file}: the app's roots (updater.packages.roots) refuse it")
+        })?;
+    }
+    let mut asset = PackageAsset::default();
+    asset.version = app.version.clone();
+    asset.build = app.build;
+    asset.url = match base_url {
+        Some(base) => format!("{}/{file}", base.trim_end_matches('/')),
+        None => file.to_owned(),
+    };
+    asset.sha256 = nsh_updater::sha256(&bytes);
+    asset.size = Some(bytes.len() as u64);
+    asset.min_runtime = header.min_runtime().to_owned();
+    Ok(asset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +335,72 @@ mod tests {
             None
         );
         assert_eq!(archive_platform("App-1.2.0-linux.dmg", "1.2.0"), None);
+    }
+
+    /// A package of `id` signed by a release key `root` certifies, in `dir`.
+    fn signed_package(dir: &Path, root: &nsh_package::SecretKey, id: &str) -> PathBuf {
+        let release = nsh_package::SecretKey::generate().unwrap();
+        let cert = nsh_package::certify(root, &release.public(), &["*".into()], 0, u64::MAX);
+        let contents = nsh_package::Contents {
+            app: nsh_package::App {
+                id: id.into(),
+                name: "App".into(),
+                version: "1.2.1".into(),
+                build: 7,
+            },
+            capabilities: None,
+            source: "1".into(),
+            bytecode: None,
+            source_map: None,
+            assets: Vec::new(),
+            min_runtime: Some("0.1.0".into()),
+        };
+        let bytes = nsh_package::build(&contents, &release, &cert).unwrap();
+        let path = dir.join(format!("{id}-7.nshpkg"));
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn manifests_offer_a_package_the_app_trusts() {
+        let dir = std::env::temp_dir().join(format!("nsh-updater-package-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let root = nsh_package::SecretKey::generate().unwrap();
+        let mut runtime = Config::default();
+        runtime.id = "com.example.app".into();
+        runtime.version = "1.2.0".into();
+        runtime.github = Some("owner/repo".into());
+        let mut packages = Packages::default();
+        packages.roots = vec![root.public().to_base64()];
+        runtime.packages = Some(packages);
+        let path = signed_package(&dir, &root, "com.example.app");
+
+        let asset = package_asset(&path, &runtime, None).unwrap();
+        assert_eq!((asset.version.as_str(), asset.build), ("1.2.1", 7));
+        assert_eq!(asset.url, "com.example.app-7.nshpkg");
+        assert_eq!(asset.min_runtime, "0.1.0");
+        assert_eq!(asset.sha256, nsh_updater::sha256(&fs::read(&path).unwrap()));
+        assert_eq!(asset.size, Some(fs::metadata(&path).unwrap().len()));
+        let hosted = package_asset(&path, &runtime, Some("https://x.dev/r/")).unwrap();
+        assert_eq!(hosted.url, "https://x.dev/r/com.example.app-7.nshpkg");
+        let mut manifest = Manifest::default();
+        manifest.package = Some(asset);
+        let json = serde_json::to_value(&manifest).unwrap();
+        assert_eq!(json["package"]["minRuntime"], "0.1.0");
+        assert_eq!(json["platforms"], serde_json::json!({}));
+
+        // Another app's, signed under another root, tampered with.
+        let other = signed_package(&dir, &root, "com.example.other");
+        assert!(package_asset(&other, &runtime, None).is_err());
+        let stranger = nsh_package::SecretKey::generate().unwrap();
+        let untrusted = signed_package(&dir, &stranger, "com.example.app");
+        assert!(package_asset(&untrusted, &runtime, None).is_err());
+        let mut bytes = fs::read(&path).unwrap();
+        let at = bytes.len() / 2;
+        bytes[at] ^= 1;
+        fs::write(&path, bytes).unwrap();
+        assert!(package_asset(&path, &runtime, None).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

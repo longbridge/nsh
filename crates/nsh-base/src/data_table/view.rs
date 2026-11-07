@@ -907,6 +907,7 @@ fn cell(
     };
     let left_dt = dt.clone();
     let width_dt = dt.clone();
+    let height_dt = dt.clone();
     let col_dt = dt.clone();
     let el = column_parts(
         view()
@@ -915,9 +916,11 @@ fn cell(
                 selected: flags.get().selected || flags.get().column_selected,
                 ..AccessibilityState::default()
             })
+            // Out of flow at a size of fixed points, as the row is: a text
+            // that changes as the table scrolls lays out its cell alone.
             .absolute()
             .top_0()
-            .bottom_0()
+            .h(move || Length::from(px(height_dt.row_height())))
             .style_when(move || def.get().is_none(), |s| s.hidden())
             .left(move || {
                 left_dt.layout_rev.get();
@@ -985,14 +988,28 @@ fn cell(
         }))
     } else {
         let text_dt = dt;
-        el.child(
-            text(move || match (row.get(), def.get()) {
-                (Some(row), Some(def)) => text_dt.cell_text(row, def),
-                _ => SharedString::default(),
-            })
-            .number_of_lines(1)
-            .min_w(px(0.0)),
+        let line_dt = text_dt.clone();
+        let label = text(move || match (row.get(), def.get()) {
+            (Some(row), Some(def)) => text_dt.cell_text(row, def),
+            _ => SharedString::default(),
+        })
+        .number_of_lines(1)
+        // The cell's whole box, its one line as tall as the row: a text
+        // never resizes it, so a cell whose text changes as the table
+        // scrolls is neither measured nor laid out again, only drawn.
+        .w_full()
+        .h_full()
+        .min_w(px(0.0))
+        .line_height(move || nsh_core::LineHeight::from(px(line_dt.row_height())))
+        .style_when(
+            move || align.get() == DataTableAlign::Center,
+            |s| s.text_center(),
         )
+        .style_when(
+            move || align.get() == DataTableAlign::End,
+            |s| s.text_right(),
+        );
+        el.child(label)
     }
 }
 

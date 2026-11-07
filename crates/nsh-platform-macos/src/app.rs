@@ -2,7 +2,7 @@
 //! standalone app ([`run_app`]: one `AppView` filling a window).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -19,9 +19,9 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSBackingStoreType, NSEvent,
-    NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSResponder, NSScreen, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
+    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
+    NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -310,7 +310,13 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
-        if view.options.borrow().fps {
+        let weak = Rc::downgrade(&view);
+        *view.surface.perf_toggle.borrow_mut() = Some(Box::new(move |show| {
+            if let Some(view) = weak.upgrade() {
+                view.set_fps_monitor(show);
+            }
+        }));
+        if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.set_fps_monitor(true);
         }
         view
@@ -375,6 +381,8 @@ impl AppView {
             picker: None,
             speech: None,
             audio: None,
+            // The app's windows of its own are this backend's.
+            windows: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -502,6 +510,9 @@ thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Links that came before the app's engine started.
     static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The app asked to start again when its run ends
+    /// ([`DesktopCommand::Restart`](nsh_core::desktop::DesktopCommand)).
+    static RESTART: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Hands `url`, a link the system opened the app with, to the running
@@ -529,25 +540,6 @@ fn url_scheme(url: String) {
         URL_SCHEMES.with(|links| links.borrow_mut().push(url));
     }
 }
-
-define_class!(
-    /// [`run_app`]'s window when [`AppOptions::keep_size`] is set: AppKit
-    /// leaves its frame as it is, the window may be taller or wider than its
-    /// screen.
-    #[unsafe(super(NSWindow, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "NshKeptSizeWindow"]
-    struct KeptSizeWindow;
-
-    unsafe impl NSObjectProtocol for KeptSizeWindow {}
-
-    impl KeptSizeWindow {
-        #[unsafe(method(constrainFrameRect:toScreen:))]
-        fn constrain_frame_rect(&self, rect: NSRect, _screen: Option<&NSScreen>) -> NSRect {
-            rect
-        }
-    }
-);
 
 define_class!(
     /// Closes the app with its window.
@@ -626,18 +618,21 @@ define_class!(
     }
 
     unsafe impl NSWindowDelegate for Delegate {
+        // The user's close press: the app's `closeOnPress` says whether it
+        // closes ([`crate::window`]), which closes it later.
         #[unsafe(method(windowShouldClose:))]
         fn should_close(&self, window: &NSWindow) -> bool {
-            let keep_alive = RUNNING.with(|running| {
+            let surface = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .is_some_and(|running| running.keep_alive_on_close)
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
             });
-            if keep_alive {
-                window.orderOut(None);
+            match surface {
+                Some(surface) => crate::window::main_should_close(&surface, window),
+                None => true,
             }
-            !keep_alive
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -654,6 +649,28 @@ define_class!(
     }
 );
 
+/// Closes the standalone app's main window (surface `key`'s) without
+/// asking the app again: hidden with [`AppOptions::keep_alive_on_close`],
+/// else closed, which ends the app. Whether the surface is that window's.
+pub(crate) fn close_main_window(key: u64) -> bool {
+    let target = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .filter(|running| running.view.surface().key() == key)
+            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+    });
+    let Some((window, keep_alive)) = target else {
+        return false;
+    };
+    if keep_alive {
+        window.orderOut(None);
+    } else {
+        window.close();
+    }
+    true
+}
+
 /// Quits the standalone runner, including a retained hidden window.
 /// Stops its engine and returns from [`run_app`]. May be called from any thread;
 /// the request is dispatched to AppKit's main thread. With no standalone runner
@@ -663,6 +680,20 @@ pub fn quit_app() {
         if RUNNING.with(|running| running.borrow().is_some())
             && let Some(mtm) = MainThreadMarker::new()
         {
+            finish_running(&NSApplication::sharedApplication(mtm));
+        }
+    });
+}
+
+/// Quits the standalone runner as [`quit_app`] does, and starts the app
+/// again once this process has exited ([`nsh_core::restart`]). With no
+/// standalone runner this has no effect.
+pub(crate) fn restart_app() {
+    dispatch2::DispatchQueue::main().exec_async(|| {
+        if RUNNING.with(|running| running.borrow().is_some())
+            && let Some(mtm) = MainThreadMarker::new()
+        {
+            RESTART.set(true);
             finish_running(&NSApplication::sharedApplication(mtm));
         }
     });
@@ -737,7 +768,7 @@ fn name_app(name: &str) {
 /// Runs `source` in a window until it is closed. Must be called on the
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
-/// The caller can finish cleanup or relaunch after this function returns.
+/// The caller can finish cleanup or restart after this function returns.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
@@ -756,66 +787,93 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.setMainMenu(Some(&main_menu(mtm, &options.title)));
 
-    let frame = NSRect::new(
-        NSPoint::new(0.0, 0.0),
+    // nsh.json `window`: known before the window is made, so its first
+    // frame has it.
+    #[cfg(feature = "dev")]
+    let dev_server = match &source {
+        AppSource::DevServer(url) => Some(url.clone()),
+        _ => None,
+    };
+    // A dev server's app comes later (its window options with it).
+    let loaded = match source {
+        AppSource::Rust(root) => Some(App::Rust(root)),
+        AppSource::Bundle(bundle) => Some(App::Js(bundle)),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(_) => None,
+    };
+    let launch = loaded
+        .as_ref()
+        .and_then(App::main_window)
+        .cloned()
+        .unwrap_or_default();
+    // With `restoreBounds`, where it was last (the engine keeps it in the
+    // app's storage as the window changes), fitted on the displays there
+    // are now.
+    let kept = match &loaded {
+        Some(app) if launch.restore_bounds => EngineConfig {
+            data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+            storage: options.storage.clone(),
+            ..EngineConfig::new(app.clone())
+        }
+        .main_window_placement(&crate::window_state::displays(mtm)),
+        _ => None,
+    };
+    let size = launch.default_size.map_or(
         NSSize::new(options.size.0 as f64, options.size.1 as f64),
+        |s| {
+            NSSize::new(
+                f64::from(s.width.0.max(1.0)),
+                f64::from(s.height.0.max(1.0)),
+            )
+        },
     );
+    let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
     let style = NSWindowStyleMask::Titled
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable
         | NSWindowStyleMask::Resizable;
-    let window = if options.keep_size {
-        // SAFETY: NSWindow's designated initializer, sent to a subclass
-        // that adds no state of its own.
-        let window: Retained<KeptSizeWindow> = unsafe {
-            msg_send![
-                KeptSizeWindow::alloc(mtm),
-                initWithContentRect: frame,
-                styleMask: style,
-                backing: NSBackingStoreType::Buffered,
-                defer: false
-            ]
-        };
-        Retained::into_super(window)
-    } else {
-        // SAFETY: NSWindow's designated initializer.
-        unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                frame,
-                style,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        }
-    };
+    let window = crate::window::new_window(mtm, frame, style, true, options.keep_size);
     // SAFETY: the window is kept in `RUNNING` until it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&options.title));
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
+    view.surface().standalone.set(true);
     window.setContentView(Some(&view.view()));
-    window.center();
-    if let Some(display) = options.display {
+    // Nothing is focused until the user or the app focuses it: the root
+    // holds the keyboard, so becoming key never lets AppKit pick the first
+    // key view (a field, its text selected).
+    window.setInitialFirstResponder(Some(view.surface().root.ns()));
+    crate::window::launch_main(view.surface(), &window, &launch, kept);
+    if kept.is_none()
+        && launch.display.is_none()
+        && launch.default_position.is_none()
+        && let Some(display) = options.display
+    {
         center_on_display(&window, display);
     }
-    match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
-        #[cfg(feature = "dev")]
-        AppSource::DevServer(url) => crate::dev::start(&view, url),
+    if let Some(app) = loaded {
+        view.load(app);
+    }
+    #[cfg(feature = "dev")]
+    if let Some(url) = dev_server {
+        crate::dev::start(&view, url);
     }
     if options.background {
         // Shown without activating the app (it never is: its window is
         // never key, and the test agent's input goes to it directly).
         window.orderFrontRegardless();
         window.makeFirstResponder(Some(view.surface().root.ns()));
+        // The window that would be key: its state says it has the
+        // keyboard, which the test agent's keys go to.
+        crate::window::became_key(view.surface(), &window);
     } else {
         window.makeKeyAndOrderFront(None);
         window.makeFirstResponder(Some(view.surface().root.ns()));
         app.activate();
     }
+    let view_surface = view.surface().clone();
     RUNNING.with(|r| {
         *r.borrow_mut() = Some(Running {
             window,
@@ -823,6 +881,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
+    // The mode it opens in, once it shows.
+    crate::window::launched_main(&view_surface, kept.map(|p| p.mode).or(launch.default_mode));
     for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
         url_scheme(url);
     }
@@ -830,6 +890,17 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     stop_running();
     app.setDelegate(None);
     drop(delegate);
+    // The new process waits for this one to exit, so the caller's cleanup
+    // after `run_app` returns still comes first.
+    if RESTART.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on restart; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::restart::spawn_after_exit() {
+            log::error!("cannot restart the app: {err}");
+        }
+    }
     std::process::ExitCode::SUCCESS
 }
 

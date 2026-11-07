@@ -13,8 +13,8 @@
 //!   `performWindowDragWithEvent:` (AppKit's own drag, with snapping and
 //!   Mission Control), and a double click does what the user chose in
 //!   System Settings (`AppleActionOnDoubleClick`: zoom, minimize or
-//!   nothing). The press never reaches the app. This works with the
-//!   system's title bar too.
+//!   nothing). A single click without dragging reaches the app on release,
+//!   so overlays can close. This works with the system's title bar too.
 //! - **Menus** are `NSMenu`s: the application menu is the app's main menu
 //!   (its first submenu is the app menu, which AppKit titles with the app's
 //!   name), context menus pop up in the root view. Items with a role use
@@ -41,10 +41,10 @@ use std::{
 
 use dispatch2::DispatchQueue;
 use nsh_core::{
-    EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
+    EventKind, EventPayload, ImageSource, NodeId, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
-        WindowLevel, menu_icon,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarOptions,
+        TitleBarStyle, WindowFrame, menu_icon,
     },
     geometry::{DevicePixels, Edges, Points, size},
 };
@@ -56,12 +56,11 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSImage, NSMenu,
-    NSMenuItem, NSNormalWindowLevel, NSRunningApplication, NSScreen, NSToolbar, NSWindow,
-    NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility,
-    NSWindowToolbarStyle,
+    NSApplication, NSEvent, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
+    NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton, NSWindowStyleMask,
+    NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
-use objc2_core_graphics::{CGImage, kCGDesktopIconWindowLevel};
+use objc2_core_graphics::CGImage;
 use objc2_foundation::{
     NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
@@ -130,16 +129,24 @@ define_class!(
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
-    style: Cell<TitleBarStyle>,
-    /// The app's title bar's height (`Window.setTitleBar`'s).
-    height: Cell<Option<f32>>,
     /// The target of its menu items (made with the first menu).
     target: RefCell<Option<Retained<MenuTarget>>>,
     /// The main menu it set (`setApplicationMenu`).
     menu: RefCell<Option<Retained<NSMenu>>>,
     /// The loads of the icons of that menu, given up with it.
     menu_icons: RefCell<Vec<crate::image::Load>>,
-    /// Only the toolbar this surface attached; dropping it restores the window.
+}
+
+/// A window's title bar as the app set it (`titleBar`).
+#[derive(Default)]
+pub(crate) struct TitleBar {
+    pub(crate) style: Cell<TitleBarStyle>,
+    /// The app's title bar's height.
+    height: Cell<Option<f32>>,
+    /// Where the app put the window's buttons: the close button's top left
+    /// corner from the window's.
+    controls_offset: Cell<Option<(f32, f32)>>,
+    /// Only the toolbar NSH attached; dropping it restores the window.
     toolbar: RefCell<Option<TitleBarToolbar>>,
 }
 
@@ -165,56 +172,12 @@ pub(crate) fn full_screen(window: &NSWindow) -> bool {
     window.styleMask().contains(NSWindowStyleMask::FullScreen)
 }
 
-/// Tells the app the hidden title bar's area (after a style change, a
-/// resize, full screen).
+/// Tells the app the main window's hidden title bar's area (after a style
+/// change, a resize, full screen).
 pub(crate) fn update_area(surface: &Surface) {
-    sync_toolbar_visibility(surface);
     let area = match window(surface) {
-        Some(window)
-            if surface.chrome.style.get() == TitleBarStyle::Hidden && !full_screen(&window) =>
-        {
-            let frame = window.frame();
-            let mask = window.styleMask() & !NSWindowStyleMask::FullSizeContentView;
-            let content = NSWindow::contentRectForFrameRect_styleMask(
-                frame,
-                mask,
-                MainThreadMarker::from(&*window),
-            );
-            let natural = (frame.size.height - content.size.height) as f32;
-            // A toolbar's native height is determined by AppKit, not the
-            // requested height that selected its style. Include a host's
-            // toolbar too, so the app reserves its actual obscured area.
-            // The title bar view that holds the window's buttons and the
-            // toolbar has that height whatever the window's: the content
-            // layout rectangle is only laid out for the new frame later,
-            // so read during a resize it gives the old one's.
-            let height = if window.toolbar().is_some() {
-                title_bar_view_height(&window).unwrap_or_else(|| {
-                    toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
-                })
-            } else {
-                natural
-            };
-            let left = window
-                .standardWindowButton(NSWindowButton::ZoomButton)
-                .map(|zoom| {
-                    let f = zoom.frame();
-                    (f.origin.x + f.size.width) as f32 + 8.0
-                })
-                .filter(|w| *w > 8.0)
-                .unwrap_or(TRAFFIC_LIGHTS_WIDTH);
-            Edges {
-                top: Points(if height > 0.0 {
-                    height
-                } else {
-                    TITLE_BAR_HEIGHT
-                }),
-                left: Points(left),
-                right: Points(0.0),
-                bottom: Points(0.0),
-            }
-        }
-        _ => Edges::default(),
+        Some(window) => title_bar_area(&surface.main_window.title_bar, &window),
+        None => Edges::default(),
     };
     let mut env = surface.environment.get();
     if env.title_bar != area {
@@ -223,18 +186,70 @@ pub(crate) fn update_area(surface: &Surface) {
     }
 }
 
+/// The area of `window`'s hidden title bar `bar` over its content: its
+/// height and the window's buttons' width; nothing for the system's title
+/// bar, and in full screen, where AppKit shows the bar over the app only
+/// when the pointer reaches the top of the screen.
+pub(crate) fn title_bar_area(bar: &TitleBar, window: &NSWindow) -> Edges<Points> {
+    sync_toolbar_visibility(bar, window);
+    if bar.style.get() != TitleBarStyle::Hidden || full_screen(window) {
+        return Edges::default();
+    }
+    let frame = window.frame();
+    let mask = window.styleMask() & !NSWindowStyleMask::FullSizeContentView;
+    let content =
+        NSWindow::contentRectForFrameRect_styleMask(frame, mask, MainThreadMarker::from(window));
+    let natural = (frame.size.height - content.size.height) as f32;
+    // A toolbar's native height is determined by AppKit, not the
+    // requested height that selected its style. Include a host's
+    // toolbar too, so the app reserves its actual obscured area.
+    // The title bar view that holds the window's buttons and the
+    // toolbar has that height whatever the window's: the content
+    // layout rectangle is only laid out for the new frame later,
+    // so read during a resize it gives the old one's.
+    let height = if window.toolbar().is_some() {
+        title_bar_view_height(window).unwrap_or_else(|| {
+            toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
+        })
+    } else {
+        natural
+    };
+    let left = window
+        .standardWindowButton(NSWindowButton::ZoomButton)
+        .map(|zoom| {
+            let f = zoom.frame();
+            (f.origin.x + f.size.width) as f32 + 8.0
+        })
+        .filter(|w| *w > 8.0)
+        .unwrap_or(TRAFFIC_LIGHTS_WIDTH);
+    let mut top = if height > 0.0 {
+        height
+    } else {
+        TITLE_BAR_HEIGHT
+    };
+    // Buttons the app moved down take as much room under them as above.
+    if let Some((_, y)) = bar.controls_offset.get()
+        && let Some(close) = window.standardWindowButton(NSWindowButton::CloseButton)
+    {
+        top = top.max(2.0 * y + close.frame().size.height as f32);
+    }
+    Edges {
+        top: Points(top),
+        left: Points(left),
+        right: Points(0.0),
+        bottom: Points(0.0),
+    }
+}
+
 /// Hides our empty toolbar in full screen and shows it again outside it.
 /// Full screen keeps a visible toolbar on screen as an opaque strip over the
 /// app's content; without one, AppKit reveals the title bar on hover instead.
-fn sync_toolbar_visibility(surface: &Surface) {
-    let Some(window) = window(surface) else {
+fn sync_toolbar_visibility(bar: &TitleBar, window: &NSWindow) {
+    let owned = bar.toolbar.borrow();
+    let Some(owned) = owned.as_ref().filter(|t| t.is_installed(window)) else {
         return;
     };
-    let owned = surface.chrome.toolbar.borrow();
-    let Some(owned) = owned.as_ref().filter(|t| t.is_installed(&window)) else {
-        return;
-    };
-    let visible = !full_screen(&window);
+    let visible = !full_screen(window);
     if owned.toolbar.isVisible() != visible {
         owned.toolbar.setVisible(visible);
     }
@@ -295,98 +310,20 @@ impl Drop for TitleBarToolbar {
 
 // --- Commands ---------------------------------------------------------------------------
 
-/// A desktop command (on the root).
+/// A desktop command on the root: the app's menus, tray and shortcuts, and
+/// the main window's attributes and requests.
 pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     match command {
-        DesktopCommand::SetTitle(title) => {
-            if let Some(window) = window(surface) {
-                window.setTitle(&NSString::from_str(title));
-            }
-        }
-        DesktopCommand::SetTitleBar { style, height } => {
-            surface.chrome.height.set(height.map(|h| h.0));
-            surface.chrome.style.set(*style);
-            apply_title_bar(surface);
-        }
-        DesktopCommand::Minimize => {
-            if let Some(window) = window(surface) {
-                window.miniaturize(None);
-            }
-        }
-        DesktopCommand::ToggleMaximize => {
-            if let Some(window) = window(surface) {
-                window.zoom(None);
-            }
-        }
-        DesktopCommand::ToggleFullScreen => {
-            if let Some(window) = window(surface) {
-                window.toggleFullScreen(None);
-            }
-        }
-        DesktopCommand::SetFrame(frame) => {
-            if let Some(window) = window(surface) {
-                set_frame(&window, frame);
-            }
-        }
-        DesktopCommand::SetBounds(bounds) => {
-            if let Some(window) = window(surface) {
-                crate::window_state::set_bounds(surface, &window, *bounds);
-            }
-        }
-        DesktopCommand::SetLevel(level) => {
-            if let Some(window) = window(surface) {
-                window.setLevel(match level {
-                    WindowLevel::Normal => NSNormalWindowLevel,
-                    WindowLevel::Floating => NSFloatingWindowLevel,
-                    WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
-                });
-                // A desktop widget is a part of the desktop, not a window:
-                // it sits on every space, Mission Control does not list it
-                // (it could never be raised above normal windows anyway)
-                // and Cmd+` cycles past it. Ordinary levels stay managed.
-                window.setCollectionBehavior(match level {
-                    WindowLevel::DesktopIcon => {
-                        NSWindowCollectionBehavior::Stationary
-                            | NSWindowCollectionBehavior::CanJoinAllSpaces
-                            | NSWindowCollectionBehavior::IgnoresCycle
-                    }
-                    _ => NSWindowCollectionBehavior::MoveToActiveSpace,
-                });
-            }
-        }
-        // The Dock shows apps, not windows (an app leaves it with
-        // `LSUIElement`).
-        DesktopCommand::SetSkipTaskbar(_) => {}
-        DesktopCommand::OrderFront => {
-            if let (Some(window), Some(mtm)) = (window(surface), MainThreadMarker::new()) {
-                window.deminiaturize(None);
-                // activate() first: ordering a window front in an inactive
-                // app leaves it behind the front app's windows.
-                NSApplication::sharedApplication(mtm).activate();
-                window.makeKeyAndOrderFront(None);
-            }
-        }
-        // Windows of the app's own (`Window.open`) are not on this backend yet:
-        // the runtime does not send these here.
-        DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
-        DesktopCommand::Close => {
-            // Close after the batch, as Windows posts WM_CLOSE and GTK
-            // waits for idle: performClose runs windowWillClose: at once,
-            // which stops the surface while this batch still holds its
-            // mounter.
-            let key = surface.key();
-            DispatchQueue::main().exec_async(move || {
-                if let Some(surface) = Surface::with_key(key)
-                    && let Some(window) = window(&surface)
-                {
-                    window.performClose(None);
-                }
-            });
-        }
+        // The main window's: its attributes and requests.
+        DesktopCommand::OpenWindow(_)
+        | DesktopCommand::SetAttributes(_)
+        | DesktopCommand::Request(_) => crate::window::command(surface, ROOT_ID, None, command),
         // As the Quit item: the standalone runner stops and returns, also
         // with its window kept hidden; an embedding app keeps its own
         // lifecycle.
         DesktopCommand::Quit => crate::app::quit_app(),
+        // Quits as above, then the runner starts the app again.
+        DesktopCommand::Restart => crate::app::restart_app(),
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
         // The menu bar is the system's.
         DesktopCommand::SetMenuBar(_) => {}
@@ -423,7 +360,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
 }
 
 /// Moves and sizes the window: a field left out keeps its value.
-fn set_frame(window: &NSWindow, frame: &WindowFrame) {
+pub(crate) fn set_frame(window: &NSWindow, frame: &WindowFrame) {
     let primary_height = NSScreen::screens(MainThreadMarker::from(window))
         .firstObject()
         .map_or(0.0, |s| s.frame().size.height);
@@ -459,12 +396,24 @@ fn flip_y(y: f64, primary_height: f64) -> f64 {
     primary_height - y
 }
 
-/// The window's style for the title bar's.
-pub(crate) fn apply_title_bar(surface: &Surface) {
-    let Some(window) = window(surface) else {
-        return;
-    };
-    let hidden = surface.chrome.style.get() == TitleBarStyle::Hidden;
+/// The app set window `id`'s title bar (`titleBar`).
+pub(crate) fn set_title_bar(
+    surface: &Surface,
+    id: NodeId,
+    bar: &TitleBar,
+    window: &NSWindow,
+    options: &TitleBarOptions,
+) {
+    bar.style.set(options.style);
+    bar.height.set(options.height.map(|h| h.0));
+    bar.controls_offset
+        .set(options.controls_offset.map(|p| (p.x.0, p.y.0)));
+    apply_title_bar(surface, id, bar, window);
+}
+
+/// Window `id`'s style for its title bar `bar`'s.
+fn apply_title_bar(surface: &Surface, id: NodeId, bar: &TitleBar, window: &NSWindow) {
+    let hidden = bar.style.get() == TitleBarStyle::Hidden;
     let mut mask = window.styleMask();
     if hidden {
         mask |= NSWindowStyleMask::FullSizeContentView;
@@ -472,21 +421,22 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
         mask &= !NSWindowStyleMask::FullSizeContentView;
     }
     window.setStyleMask(mask);
-    apply_toolbar(surface, &window, hidden);
+    apply_toolbar(bar, window, hidden);
     window.setTitlebarAppearsTransparent(hidden);
     window.setTitleVisibility(if hidden {
         NSWindowTitleVisibility::Hidden
     } else {
         NSWindowTitleVisibility::Visible
     });
-    update_area(surface);
+    place_controls(bar, window);
+    title_bar_changed(surface, id);
     // AppKit can restore the old content size after setStyleMask returns.
     // Reconcile it after that pass, using the current window and style so
     // another title bar change in the same batch takes precedence.
     let key = surface.key();
     DispatchQueue::main().exec_async(move || {
         if let Some(surface) = Surface::with_key(key)
-            && let Some(window) = surface.root.ns().window()
+            && let Some(window) = crate::window::window_of(&surface, id)
             && let Some(content) = window.contentView()
         {
             let size = window.contentRectForFrameRect(window.frame()).size;
@@ -495,16 +445,81 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
             }
             // Toolbar layout can settle after setToolbar/setStyleMask
             // returns, even when the full-size content frame stays the same.
-            update_area(&surface);
+            crate::window::with_title_bar(&surface, id, |bar| place_controls(bar, &window));
+            title_bar_changed(&surface, id);
         }
     });
 }
 
+/// Window `id`'s title bar area may have changed.
+fn title_bar_changed(surface: &Surface, id: NodeId) {
+    if id == ROOT_ID {
+        update_area(surface);
+    } else {
+        crate::window::state_changed(surface, id);
+    }
+}
+
+/// Puts the window's buttons where the app put them
+/// (`titleBar.controlsOffset`): AppKit lays them out again on resizes and
+/// on leaving full screen, so this runs after those too.
+pub(crate) fn place_controls(bar: &TitleBar, window: &NSWindow) {
+    let Some((x, y)) = bar.controls_offset.get() else {
+        return;
+    };
+    if full_screen(window) {
+        return;
+    }
+    let buttons = [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ]
+    .map(|b| window.standardWindowButton(b));
+    let Some(close) = &buttons[0] else {
+        return;
+    };
+    let Some(holder) = crate::view::superview(close) else {
+        return;
+    };
+    let from = close.frame().origin.x;
+    let height = holder.frame().size.height;
+    for button in buttons.iter().flatten() {
+        let f = button.frame();
+        let origin = controls_origin(
+            (x, y),
+            f.origin.x - from,
+            f.size.height,
+            height,
+            holder.isFlipped(),
+        );
+        if f.origin != origin {
+            button.setFrameOrigin(origin);
+        }
+    }
+}
+
+/// Where a window button `dx` right of the close button goes, its top left
+/// corner at `offset` from the window's, in its holder `height` tall
+/// (flipped or not).
+fn controls_origin(
+    offset: (f32, f32),
+    dx: f64,
+    button: f64,
+    height: f64,
+    flipped: bool,
+) -> NSPoint {
+    let x = f64::from(offset.0) + dx;
+    let top = f64::from(offset.1);
+    let y = if flipped { top } else { height - top - button };
+    NSPoint::new(x, y)
+}
+
 /// Lets AppKit lay out traffic lights on every live-resize frame. The
 /// height selects a native style; `update_area` reports the measured height.
-fn apply_toolbar(surface: &Surface, window: &NSWindow, hidden: bool) {
-    let height = surface.chrome.height.get().filter(|_| hidden);
-    let mut owned = surface.chrome.toolbar.borrow_mut().take();
+fn apply_toolbar(bar: &TitleBar, window: &NSWindow, hidden: bool) {
+    let height = bar.height.get().filter(|_| hidden);
+    let mut owned = bar.toolbar.borrow_mut().take();
     if height.is_none() || owned.as_ref().is_some_and(|t| !t.is_installed(window)) {
         // Also restores the old window when this surface moves to another.
         owned = None;
@@ -540,7 +555,7 @@ fn apply_toolbar(surface: &Surface, window: &NSWindow, hidden: bool) {
         // The embedding app owns this toolbar, including its style.
         None => {}
     }
-    *surface.chrome.toolbar.borrow_mut() = owned;
+    *bar.toolbar.borrow_mut() = owned;
 }
 
 // --- Drag regions -----------------------------------------------------------------------
@@ -552,7 +567,8 @@ pub(crate) fn mouse_down(surface: &Surface, event: &NSEvent, x: f32, y: f32) -> 
     if !crate::input::window_drag(surface, x, y) {
         return false;
     }
-    let Some(window) = window(surface) else {
+    // The window the press is in: the main one or one of the app's own.
+    let Some(window) = crate::input::event_root(surface).ns().window() else {
         return false;
     };
     if event.clickCount() == 2 {
@@ -912,9 +928,12 @@ pub(crate) fn close_open_menu() -> Result<(), String> {
     Ok(())
 }
 
-/// Shows a context menu at `at` (root coordinates) or at the mouse.
+/// Shows a context menu at `at` (root coordinates) or at the mouse, in
+/// the window the last pointer event was in (the main one, or a window of
+/// the app's own, whose content `at` is in then).
 fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>) {
-    let root = surface.root.ns();
+    let root = crate::input::event_root(surface);
+    let root = root.ns();
     // Kept while the menu is open: an icon that arrives then shows at once.
     let mut loads = Vec::new();
     let menu = menu(surface, "", items, &mut loads);
@@ -955,14 +974,15 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
 /// The root view moved to a window, or the window changed: a hidden title
 /// bar applies to it (a window keeps its own style otherwise).
 pub(crate) fn window_changed(surface: &Surface) {
-    if window(surface).is_none() {
-        let toolbar = surface.chrome.toolbar.borrow_mut().take();
+    let bar = &surface.main_window.title_bar;
+    let Some(window) = window(surface) else {
+        let toolbar = bar.toolbar.borrow_mut().take();
         drop(toolbar);
         update_area(surface);
         return;
-    }
-    if surface.chrome.style.get() == TitleBarStyle::Hidden {
-        apply_title_bar(surface);
+    };
+    if bar.style.get() == TitleBarStyle::Hidden {
+        apply_title_bar(surface, ROOT_ID, bar, &window);
     } else {
         update_area(surface);
     }
@@ -971,6 +991,21 @@ pub(crate) fn window_changed(surface: &Surface) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_buttons_go_where_the_app_put_them() {
+        // The close button's top left 12 points in, 16 down, in a 52 tall
+        // title bar view whose `y` goes up.
+        assert_eq!(
+            controls_origin((12.0, 16.0), 0.0, 14.0, 52.0, false),
+            NSPoint::new(12.0, 22.0)
+        );
+        // The zoom button keeps its distance from the close button.
+        assert_eq!(
+            controls_origin((12.0, 16.0), 40.0, 14.0, 52.0, true),
+            NSPoint::new(52.0, 16.0)
+        );
+    }
 
     #[test]
     fn toolbar_area_uses_native_geometry_including_its_origin() {

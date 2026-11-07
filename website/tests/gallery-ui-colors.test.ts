@@ -15,11 +15,21 @@ const scanned = [
   'examples/nsh-gallery-ui/demo.ts',
   'examples/nsh-gallery-ui/palette.ts',
   'examples/nsh-gallery-ui/look',
+  // The overlays' demos, on the shared overlay and menu looks.
+  'website/demos/el-alert-dialog.tsx',
+  'website/demos/el-dialog.tsx',
+  'website/demos/el-hover-card.tsx',
+  'website/demos/el-menu.tsx',
+  'website/demos/el-popover.tsx',
+  'website/demos/el-sheet.tsx',
+  'website/demos/el-toast.tsx',
+  'website/demos/el-tooltip.tsx',
 ];
 
 /** Files the guard skips, each with why its colors are content rather than
  * the interface's look (a canvas's drawing, a shader, a color picker's
- * swatches). Empty while only the shared layer is scanned. */
+ * swatches). Empty while only the shared layer and the demos on it are
+ * scanned. */
 const allowed: Record<string, string> = {};
 
 /** Color literals and spliced token values, by what each is. */
@@ -32,11 +42,14 @@ const rules: [string, RegExp][] = [
   ['a value spliced into a class', /-\[\$\{/],
 ];
 
+/** The sources under `path` (or `path` itself, a file): `.ts` and `.tsx`
+ * files, not declarations, and nothing under a hidden directory (the
+ * `.nsh/types` a type check writes beside an app). */
 function files(path: string): string[] {
   const full = join(root, path);
   try {
     return readdirSync(full, { recursive: true, encoding: 'utf8' })
-      .filter((name) => /\.(?:ts|tsx)$/.test(name))
+      .filter((name) => /\.(?:ts|tsx)$/.test(name) && !name.endsWith('.d.ts') && !name.split('/').some((part) => part.startsWith('.')))
       .map((name) => `${path}/${name}`);
   } catch {
     return [path];
@@ -86,14 +99,17 @@ test('every allowed file still exists and says why', () => {
   }
 });
 
-// The demos' switches take the shared look (`switchLook`): a track and a
-// thumb styled in place would be another copy of it, as the nine inline
-// ones were (their knob ran 2 points past the track with a pointer).
+// The demos' switches and toggles take the shared looks (`switchLook`,
+// `toggleLook`): parts or an on state styled in place would be another copy
+// of them, as the inline ones were (a switch's knob ran 2 points past the
+// track with a pointer; light, a raised or sunk on state was all but the
+// color of the surface under it).
 
-/** Each `<Switch ...>` opening tag in a source: up to the `>` outside braces. */
-function switchTags(source: string): string[] {
+/** Each opening tag of the element `name` in a source (`<Toggle ...>`, not
+ * `<ToggleGroup ...>`): up to the `>` outside braces, past `//` comments. */
+function openingTags(source: string, name: string): string[] {
   const tags: string[] = [];
-  for (const match of source.matchAll(/<Switch\b/g)) {
+  for (const match of source.matchAll(new RegExp(`<${name}\\b`, 'g'))) {
     let depth = 0;
     let i = match.index + match[0].length;
     for (; i < source.length; i++) {
@@ -117,18 +133,95 @@ function switchViolations(tag: string): string[] {
 
 test('the switch guard finds styled parts and a missing look', () => {
   const styled = '<Switch checked={on()} trackClass="w-9" thumbStyle={{ x: 1 }}>\n  <Text>a</Text>\n</Switch>';
-  expect(switchTags(styled)).toHaveLength(1);
-  expect(switchViolations(switchTags(styled)[0])).toEqual(['sets trackClass', 'sets thumbStyle', 'does not spread switchLook(..)']);
+  expect(openingTags(styled, 'Switch')).toHaveLength(1);
+  expect(switchViolations(openingTags(styled, 'Switch')[0])).toEqual(['sets trackClass', 'sets thumbStyle', 'does not spread switchLook(..)']);
   const shared = '<Switch\n  onChange={({ checked }) => on.set(checked)}\n  {...switchLook(() => on())}\n  // a note > here\n  hitSlop={0}\n>';
-  expect(switchTags(shared)).toEqual([shared]);
+  expect(openingTags(shared, 'Switch')).toEqual([shared]);
   expect(switchViolations(shared)).toEqual([]);
 });
 
 test('the demos\' switches spread the shared look', () => {
   const report: string[] = [];
   for (const file of files('website/demos')) {
-    for (const tag of switchTags(readFileSync(join(root, file), 'utf8'))) {
+    for (const tag of openingTags(readFileSync(join(root, file), 'utf8'), 'Switch')) {
       for (const what of switchViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+/** What is wrong with a toggle's tag: no shared look. */
+function toggleViolations(tag: string): string[] {
+  return /\{\.\.\.toggleLook\(/.test(tag) ? [] : ['does not spread toggleLook(..)'];
+}
+
+test('the toggle guard finds a toggle without the shared look', () => {
+  const styled = '<Toggle pressed={on()} pressedStyle={ui().raised} style={{ width: 28 }}>\n  <Text>B</Text>\n</Toggle>';
+  expect(openingTags(styled, 'Toggle')).toHaveLength(1);
+  expect(toggleViolations(openingTags(styled, 'Toggle')[0])).toEqual(['does not spread toggleLook(..)']);
+  const shared = '<Toggle\n  pressed={on()}\n  onChange={({ pressed }) => on.set(pressed)}\n  // a note > here\n  {...toggleLook({ variant: "outline" })}\n>';
+  expect(openingTags(shared, 'Toggle')).toEqual([shared]);
+  expect(toggleViolations(shared)).toEqual([]);
+  expect(openingTags('<ToggleGroup style={track}>', 'Toggle')).toEqual([]);
+});
+
+test('the demos\' toggles spread the shared look', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    for (const tag of openingTags(readFileSync(join(root, file), 'utf8'), 'Toggle')) {
+      for (const what of toggleViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+// The demos' menus and overlays take the shared looks (`look/menu.tsx`,
+// `look/overlay.ts`): a menu's rows highlighted in place lost the
+// keyboard's highlight (no `focusStyle`), and the scrims, tooltips and
+// surfaces styled in place each dimmed, inverted or floated differently.
+
+/** What is wrong with a menu item's tag: no shared look. */
+function menuItemViolations(tag: string): string[] {
+  return /\{\.\.\.menuItemLook\(/.test(tag) ? [] : ['does not spread menuItemLook(..)'];
+}
+
+/** What is wrong with a modal's tag: a scrim of its own. */
+function backdropViolations(tag: string): string[] {
+  const style = /\bbackdropStyle=\{([^}]*\}?)\}/.exec(tag);
+  if (/\bbackdropClass=/.test(tag)) return ['sets backdropClass'];
+  return style && style[1].trim() !== 'backdrop()' ? [`sets backdropStyle={${style[1].trim()}}`] : [];
+}
+
+test('the overlay guards find a menu item without its look and a scrim of its own', () => {
+  const own = '<MenuItem onSelect={go} hoverStyle={{ backgroundColor: tint(ui().accent, 0.08) }} style={row()}>';
+  expect(menuItemViolations(openingTags(own, 'MenuItem')[0])).toEqual(['does not spread menuItemLook(..)']);
+  const shared = '<MenuItem\n  onSelect={go}\n  // a note > here\n  {...menuItemLook()}\n>';
+  expect(openingTags(shared, 'MenuItem')).toEqual([shared]);
+  expect(menuItemViolations(shared)).toEqual([]);
+  expect(openingTags('<MenuItems>', 'MenuItem')).toEqual([]);
+  expect(backdropViolations('<Dialog open={a()} backdropStyle={{ backgroundColor: tint("#000000", 0.45) }} style={card}>')).toHaveLength(1);
+  expect(backdropViolations('<Sheet backdropClass="bg-black/40">')).toEqual(['sets backdropClass']);
+  expect(backdropViolations('<Menu popupStyle={menuSheet()} backdropStyle={backdrop()} trigger={t}>')).toEqual([]);
+  expect(backdropViolations('<Popover trigger={t}>')).toEqual([]);
+});
+
+test('the demos\' menus and overlays spread the shared looks', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    const source = readFileSync(join(root, file), 'utf8');
+    for (const tag of openingTags(source, 'MenuItem')) {
+      for (const what of menuItemViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+    for (const name of ['Dialog', 'Sheet', 'Menu', 'ContextMenu']) {
+      for (const tag of openingTags(source, name)) {
+        for (const what of backdropViolations(tag)) report.push(`${file}: <${name}> ${what}`);
+      }
+    }
+    // A tooltip's bubble, a popover's surface and a toast are the shared ones.
+    if (/<Tooltip\b/.test(source) && !/\btooltipLook\(/.test(source)) report.push(`${file}: a Tooltip without tooltipLook(..)`);
+    if (/<PopIn\b/.test(source) && !/\bpopoverLook\(/.test(source)) report.push(`${file}: a PopIn without popoverLook(..)`);
+    for (const tag of openingTags(source, 'Toast')) {
+      if (!/\bstyle=\{toastLook\(\)\}/.test(tag)) report.push(`${file}: a Toast without style={toastLook()}`);
     }
   }
   expect(report).toEqual([]);
