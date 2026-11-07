@@ -4,7 +4,7 @@
 // rows and a command palette pops up over everything. One engine renders
 // every window, so they all read and write the same signals: the inspector
 // edits the document's title and the document window shows it at once.
-import { cleanup, effect, type JSX, keymap, platform, Scroll, signal, Text, View } from "nsh";
+import { cleanup, effect, type JSX, keymap, LayoutAnimation, type LayoutAnimationConfig, platform, reduceMotion, Scroll, signal, Text, untracked, View } from "nsh";
 import { Button as BaseButton, Command, type CommandItem, Input, Toolbar } from "nsh/base";
 import { currentWindow, isAvailable, Window, type WindowMode, type WindowRef, type WindowState, windows } from "nsh/desktop";
 import {
@@ -307,7 +307,23 @@ function WindowRow(props: { win: WindowRef; first: boolean }) {
   );
 }
 
+/** A window's row leaving: it fades while the rows under it close up. */
+const ROW_EXIT: LayoutAnimationConfig = {
+  duration: 220,
+  update: { type: "easeInEaseOut" },
+  delete: { type: "easeInEaseOut", property: "opacity", duration: 160 },
+};
+
 function OpenWindows() {
+  // Rows come in with `Appear`; a window that closes (from its row, its own
+  // close button or the system) leaves through the commit that removes its
+  // row, which this layout animation covers.
+  let shown = untracked(windows).map((w) => w.id);
+  effect(() => {
+    const ids = windows().map((w) => w.id);
+    if (shown.some((id) => !ids.includes(id)) && !reduceMotion()) LayoutAnimation.configureNext(ROW_EXIT);
+    shown = ids;
+  });
   return (
     <Card
       icon="layers"
