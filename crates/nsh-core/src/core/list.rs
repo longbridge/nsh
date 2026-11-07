@@ -338,6 +338,9 @@ pub(super) struct ListState {
     /// `content_len - viewport` when the offset was last anchored
     /// (inverted lists and `follow_end`; NaN before the first layout).
     anchored_end: f32,
+    /// What this layout's measurements asked to scroll so far (the `kept`
+    /// that `anchor_end` gets), not yet in `offset`.
+    measured_scroll: f32,
     /// Scrolls issued to the platform (`ScrollBy` items and `ScrollTo`
     /// commands); platforms count the ones they applied.
     issued: u32,
@@ -425,6 +428,7 @@ impl ListState {
             loads_at_start: false,
             moved_by_scroll: false,
             anchored_end: f32::NAN,
+            measured_scroll: 0.0,
             issued: 0,
             pending: Vec::new(),
             moved: Vec::new(),
@@ -662,10 +666,27 @@ impl ListState {
     /// away from it: at the start they keep showing item 0 (a chat's newest
     /// message).
     fn keeps_visible_rows(&self) -> bool {
+        self.keeps_visible_rows_at(self.natural_offset())
+    }
+
+    /// [`ListState::keeps_visible_rows`] with the viewport at `natural`.
+    fn keeps_visible_rows_at(&self, natural: f32) -> bool {
         !self.inverted
-            || (self.loads_at_start
-                && !self.anchored_end.is_nan()
-                && self.natural_offset() > PIN_SLACK)
+            || (self.loads_at_start && !self.anchored_end.is_nan() && natural > PIN_SLACK)
+    }
+
+    /// Where the viewport starts in natural coordinates while a layout
+    /// measures its cells. An inverted list's `content_len` already holds
+    /// what this layout changed (a page spliced at its end, rows measured
+    /// above the viewport) before `anchor_end` moves the offset to match,
+    /// so it counts from the end it last anchored to, plus what the
+    /// measurements so far moved the visible rows by.
+    fn measuring_natural_offset(&self) -> f32 {
+        if self.inverted && !self.anchored_end.is_nan() {
+            self.anchored_end - self.offset - self.measured_scroll
+        } else {
+            self.natural_offset()
+        }
     }
 
     /// The scroll a splice asked for, once.
@@ -1218,16 +1239,18 @@ impl ListState {
         let row = self.row_of(i);
         let before = self.row_size(row);
         let row_start = self.item_at(i);
-        let natural = self.natural_offset();
+        let natural = self.measuring_natural_offset();
         let above_viewport = row_start < natural && row_start + before <= natural;
-        let keep = above_viewport && self.keeps_visible_rows();
+        let keep = above_viewport && self.keeps_visible_rows_at(natural);
         self.sizes[idx] = size;
         let delta = self.row_size(row) - before;
         if delta != 0.0 {
             self.rows.add(row as usize, delta as f64);
         }
         self.dirty = true;
-        self.before_viewport_changed(keep, delta, natural)
+        let scroll = self.before_viewport_changed(keep, delta, natural);
+        self.measured_scroll += scroll;
+        scroll
     }
 
     /// The scroll that keeps the visible rows in place after something
@@ -1247,8 +1270,8 @@ impl ListState {
     /// [`ListState::measured`] does.
     pub(super) fn measured_extra(&mut self, kind: ExtraKind, size: f32) -> f32 {
         let blocks = self.blocks();
-        let natural = self.natural_offset();
-        let keeps = self.keeps_visible_rows();
+        let natural = self.measuring_natural_offset();
+        let keeps = self.keeps_visible_rows_at(natural);
         let extra = &mut self.extras[kind as usize];
         if extra.size == size {
             return 0.0;
@@ -1266,7 +1289,9 @@ impl ListState {
         // their start keep their distance from the end (`anchor_end`).
         let old_end = at + size - delta;
         let keep = keeps && at < natural && old_end <= natural;
-        self.before_viewport_changed(keep, delta, natural)
+        let scroll = self.before_viewport_changed(keep, delta, natural);
+        self.measured_scroll += scroll;
+        scroll
     }
 
     /// Inverted lists keep their distance from the end of the content:
@@ -1281,6 +1306,7 @@ impl ListState {
     /// the visible rows in place: that move says nothing about where the user
     /// is, so a list at its end is still at its end.
     pub(super) fn anchor_end(&mut self, kept: f32) -> f32 {
+        self.measured_scroll = 0.0;
         if self.viewport <= 0.0 {
             return 0.0;
         }
@@ -2733,5 +2759,95 @@ mod tests {
         binds.clear();
         l.update_window(&mut binds);
         assert!(!bound(&l, 3));
+    }
+
+    /// An inverted chat scrolled into its history (rows 84..92 on screen),
+    /// laid out as the core lays it out: measurements, then the splice's
+    /// scroll, then `anchor_end`. Returns where row 84 is on screen.
+    fn inverted_history(loads_at_start: bool) -> ListState {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_inverted(true);
+        l.loads_at_start = loads_at_start;
+        l.anchor_end(0.0);
+        l.reported(400.0, 0);
+        l
+    }
+
+    fn lay_out(l: &mut ListState, measured: &[(u32, f32)]) {
+        let mut kept = 0.0;
+        for &(i, size) in measured {
+            kept += l.measured(i, size);
+        }
+        l.offset += kept;
+        l.offset += l.take_splice_anchor();
+        l.anchor_end(kept);
+    }
+
+    fn on_screen(l: &ListState, i: u32) -> f32 {
+        l.to_content(l.item_at(i), 50.0) - l.offset
+    }
+
+    #[test]
+    fn inverted_page_and_row_above_viewport_measured_in_one_layout() {
+        // #1238: a page of older rows and a row above the viewport (in the
+        // overscan) taking its height in the same layout.
+        let mut l = inverted_history(true);
+        let before = on_screen(&l, 84);
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[(93, 80.0)]);
+        assert_eq!(on_screen(&l, 84), before);
+    }
+
+    #[test]
+    fn inverted_page_and_row_above_viewport_in_separate_layouts() {
+        let mut l = inverted_history(true);
+        let before = on_screen(&l, 84);
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[]);
+        assert_eq!(on_screen(&l, 84), before);
+        lay_out(&mut l, &[(93, 80.0)]);
+        assert_eq!(on_screen(&l, 84), before);
+    }
+
+    #[test]
+    fn inverted_page_with_rows_below_and_above_viewport_in_one_layout() {
+        // A row below the viewport grows too: the visible rows still stay.
+        let mut l = inverted_history(true);
+        let before = on_screen(&l, 84);
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[(80, 80.0), (93, 80.0)]);
+        assert_eq!(on_screen(&l, 84), before);
+    }
+
+    #[test]
+    fn inverted_without_load_more_at_start_keeps_its_distance_from_the_end() {
+        let mut l = inverted_history(false);
+        let distance = l.content_len() - l.offset;
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[(93, 80.0), (80, 80.0)]);
+        // Row 80, below the viewport, moves the visible rows up by its
+        // growth, as a list that keeps its distance from the end does.
+        assert_eq!(l.content_len() - l.offset, distance);
+    }
+
+    #[test]
+    fn inverted_at_its_start_follows_the_newest_row() {
+        let mut l = inverted_history(true);
+        l.reported(l.anchored_end, 0);
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[(0, 80.0), (8, 80.0)]);
+        // Still at the end: item 0 shows at the bottom.
+        assert_eq!(l.offset, l.content_len() - l.viewport);
+    }
+
+    #[test]
+    fn list_not_inverted_keeps_rows_when_rows_above_are_measured() {
+        let mut l = list(100, 50.0, 400.0);
+        l.reported(1000.0, 0);
+        let at = |l: &ListState| l.item_at(25) - l.offset;
+        let before = at(&l);
+        l.splice(100, 0, 10);
+        lay_out(&mut l, &[(15, 80.0), (30, 80.0)]);
+        assert_eq!(at(&l), before);
     }
 }
