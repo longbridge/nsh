@@ -1219,6 +1219,7 @@ pub struct HttpHead {
 /// however it arrives. Browsers need it to load scripts, WebAssembly
 /// (compiled while it streams only as `application/wasm`), images, fonts
 /// and media.
+#[doc(hidden)]
 pub fn content_type(path: &str) -> &'static str {
     match std::path::Path::new(path)
         .extension()
