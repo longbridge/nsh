@@ -34,6 +34,8 @@
 //! ([`Applied`]): `ViewProps` also carries touch properties, and `Text`
 //! items come again on every relayout.
 
+pub(crate) mod table;
+
 use std::sync::Arc;
 
 use nsh_core::{
@@ -65,6 +67,8 @@ pub(crate) struct Applied {
     /// all fifteen attributes per changed text is what a ticking table
     /// spends most of its main-thread time on.
     ax: AxState,
+    /// Stable, non-view columns, created only when an AX client asks.
+    columns: Vec<Retained<table::Column>>,
 }
 
 /// Which of its children VoiceOver reaches through a view.
@@ -274,6 +278,8 @@ enum Ax {
     /// An option of a listbox.
     Option,
     Grid,
+    Row,
+    Cell,
     Search,
     Alert,
     Status,
@@ -692,7 +698,11 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             // columns and row index), and its menu items a menu's; an option
             // of a list is static text that reports `AXSelected`.
             Ax::Option => (constant(NSAccessibilityStaticTextRole), None),
-            Ax::Grid => (constant(NSAccessibilityGridRole), None),
+            // VoiceOver navigates tables by row and column. Like WebKit,
+            // use AXTable for both table and grid semantics.
+            Ax::Grid => (constant(NSAccessibilityTableRole), None),
+            Ax::Row => (constant(NSAccessibilityRowRole), None),
+            Ax::Cell => (constant(NSAccessibilityCellRole), None),
             Ax::Search => (
                 constant(NSAccessibilityTextFieldRole),
                 constant(NSAccessibilitySearchFieldSubrole),
@@ -844,8 +854,11 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::List | Role::Listbox => Ax::List,
         Role::Option => Ax::Option,
         Role::Grid | Role::Table => Ax::Grid,
-        // Groups that read their children, a cell's text among them.
-        Role::Row | Role::Cell | Role::ColumnHeader | Role::RowGroup | Role::Group => Ax::Group,
+        Role::Row => Ax::Row,
+        // AppKit has no separate column-header role: a header is a cell
+        // referenced by the table's and column's header attributes.
+        Role::Cell | Role::ColumnHeader => Ax::Cell,
+        Role::RowGroup | Role::Group => Ax::Group,
         Role::Region => Ax::Region,
         Role::Navigation => Ax::Navigation,
         // A tree is a list of its items, as a listbox is (see `TreeItem`).
