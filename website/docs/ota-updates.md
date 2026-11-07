@@ -274,13 +274,18 @@ export function UpdateBanner() {
 `restartToPackage()` restarts the app as `Application.restart()` does: this run quits as when the user quits it, and
 the app starts again into the package. A user who does not restart gets the package the next time they open the app.
 
-`runningPackage()` says what this run's code is, for an About screen or error reports:
+`runningPackage()` says what this run's code is, and `shellInfo()` what runs it: the installed app's own version and
+build and its NSH runtime. Both are for an About screen or error reports:
 
 ```tsx
-import { runningPackage } from "nsh/updater";
+import { runningPackage, shellInfo } from "nsh/updater";
 
 const running = runningPackage(); // { version, build }, or null for the code the app was built with
+const shell = shellInfo(); // { version, build, nshVersion, packages }: the installed app
 ```
+
+An app installed before it took packages (or built with a runtime without them) never gets one: `packages` is false
+there, or `shellInfo` itself is missing on runtimes older than it, and only installing the whole app again helps.
 
 [nsh/updater](../modules/nsh-updater.md#ota-updates) has every function and its errors.
 
