@@ -59,6 +59,7 @@ use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
     Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, MouseEvent, NodeId,
     PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
         self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, ZOOM_IDLE, has_press, laid_out,
@@ -69,7 +70,7 @@ use nsh_core::{
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
     NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSWindow,
 };
 use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -112,6 +113,9 @@ pub(crate) struct Input {
     /// window of the app's own (`Window.open`, [`crate::window`]), or
     /// `None` for the surface's root ([`enter`]).
     window_root: RefCell<Option<NshView>>,
+    /// The `windowControl` view pressed, which acts when the press ends
+    /// over it.
+    window_control: RefCell<Option<(NshView, WindowControl)>>,
     /// The mouse, while its left button is down.
     pointer: RefCell<Option<Pointer>>,
     /// A trackpad pinch.
@@ -252,6 +256,7 @@ pub(crate) fn reset(surface: &Surface) {
     let input = &surface.input;
     input.window_press.borrow_mut().take();
     input.window_root.borrow_mut().take();
+    input.window_control.borrow_mut().take();
     input.pointer.borrow_mut().take();
     input.pinch.borrow_mut().take();
     input.rotation.borrow_mut().take();
@@ -467,6 +472,7 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .find_map(|v| {
             let s = v.state();
             cursor_of(s.style.cursor)
+                .or_else(|| s.props.window_resize.map(resize_cursor))
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
                     (v == &hit.view && crate::selectable_view::is_area_text(v, &s))
@@ -656,6 +662,15 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     ) {
         input.last.set(Some((x, y)));
     }
+    // A press in a window gives it the keyboard (AppKit does it itself, but
+    // for an app in the background).
+    if matches!(
+        ty,
+        NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
+    ) && let Some(window) = event.window(surface.mtm)
+    {
+        crate::window::became_key(surface, &window);
+    }
     match ty {
         // Control-click is the secondary click on macOS.
         NSEventType::LeftMouseDown
@@ -668,6 +683,9 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
+            if window_part_press(surface, event, x, y) {
+                return;
+            }
             if window_press(surface, event, x, y, time) {
                 return;
             }
@@ -699,6 +717,13 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
             input.last.set(Some((x, y)));
             up(surface, x, y, time);
             update_cursor(surface, x, y);
+            let control = input.window_control.borrow_mut().take();
+            if let Some((view, control)) = control
+                && pick(&event_root(surface), x, y)
+                    .is_some_and(|hit| chain(&hit.view).contains(&view))
+            {
+                crate::window::control(surface, control, event);
+            }
         }
         NSEventType::MouseMoved | NSEventType::MouseEntered => {
             input.last.set(Some((x, y)));
@@ -941,6 +966,9 @@ fn activate(surface: &Surface, view: &NshView, from: &str) {
 pub(crate) fn takes_accessibility_press(surface: &Surface, view: &NshView) -> bool {
     {
         let s = view.state();
+        if s.props.window_control.is_some() && !s.props.accessibility.state.disabled {
+            return true;
+        }
         if !s.events.contains(EventKind::Press) || s.props.accessibility.state.disabled {
             return false;
         }
@@ -957,6 +985,15 @@ pub(crate) fn takes_accessibility_press(surface: &Surface, view: &NshView) -> bo
 pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
     if !takes_accessibility_press(surface, view) {
         return false;
+    }
+    // A view standing for a window button acts as that button.
+    let control = view.state().props.window_control;
+    if let Some(control) = control
+        && let Some(window) = view.ns().window()
+        && let Some(surface) = Surface::with_key(surface.key())
+    {
+        crate::window::control_window(&surface, &window, control, false);
+        return true;
     }
     activate(surface, view, "accessibility");
     true
@@ -1616,6 +1653,162 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
     }
     surface.input.window_press.borrow_mut().take();
     true
+}
+
+/// What part of its window a view the app drew stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowPart {
+    /// One of the window's buttons (`windowControl`).
+    Control(WindowControl),
+    /// An edge or corner it is resized by (`windowResize`).
+    Resize(ResizeEdge),
+}
+
+/// The window part at `(x, y)` (root coordinates): the nearest view that
+/// sets `windowControl` or `windowResize`, unless a text field, a hosted
+/// AppKit view or a view with press or touch handlers is nearer.
+fn window_part(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
+    let hit = pick(&event_root(surface), x, y)?;
+    if hit.native {
+        return None;
+    }
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if let Some(control) = s.props.window_control {
+                return Some((v.clone(), WindowPart::Control(control)));
+            }
+            if let Some(edge) = s.props.window_resize {
+                return Some((v.clone(), WindowPart::Resize(edge)));
+            }
+            if s.kind == ViewKind::Input
+                || has_press(s.events)
+                || s.events.contains(EventKind::Touch)
+            {
+                return None;
+            }
+        }
+        view = v.parent_view();
+    }
+    None
+}
+
+/// A left press on a window part: a `windowControl` view acts as the
+/// window's button when the press ends over it (the press still reaches
+/// the app, for its pressed look); a `windowResize` view resizes the
+/// window by its edge while the button is down. True when the press is not
+/// the app's.
+fn window_part_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
+    match window_part(surface, x, y) {
+        Some((view, WindowPart::Control(control))) => {
+            *surface.input.window_control.borrow_mut() = Some((view, control));
+            false
+        }
+        Some((_, WindowPart::Resize(edge))) => {
+            let Some(window) = event_root(surface).ns().window() else {
+                return false;
+            };
+            cancel_pointer(surface);
+            let _ = event;
+            resize_window(&window, edge);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Resizes `window` by `edge` with the mouse until its button goes up,
+/// within the window's content size limits.
+fn resize_window(window: &NSWindow, edge: ResizeEdge) {
+    let start = window.frame();
+    let from = NSEvent::mouseLocation();
+    let limits = |size: objc2_foundation::NSSize| {
+        window
+            .frameRectForContentRect(objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(0.0, 0.0),
+                size,
+            ))
+            .size
+    };
+    let min = limits(window.contentMinSize());
+    let max = window.contentMaxSize();
+    let max = if max.width >= f64::from(f32::MAX) || max.height >= f64::from(f32::MAX) {
+        objc2_foundation::NSSize::new(f64::MAX, f64::MAX)
+    } else {
+        limits(max)
+    };
+    // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
+    let mode = unsafe { NSEventTrackingRunLoopMode };
+    while let Some(next) = window.nextEventMatchingMask_untilDate_inMode_dequeue(
+        NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp,
+        Some(&NSDate::distantFuture()),
+        mode,
+        true,
+    ) {
+        let at = NSEvent::mouseLocation();
+        let frame = resized_frame(start, edge, at.x - from.x, at.y - from.y, min, max);
+        if frame != window.frame() {
+            window.setFrame_display(frame, true);
+        }
+        if next.r#type() == NSEventType::LeftMouseUp {
+            break;
+        }
+    }
+}
+
+/// `start` (Cocoa screen coordinates, `y` up) resized by `edge` moved by
+/// `(dx, dy)`, its size kept within `min` and `max`: the opposite edges stay.
+pub(crate) fn resized_frame(
+    start: objc2_foundation::NSRect,
+    edge: ResizeEdge,
+    dx: f64,
+    dy: f64,
+    min: objc2_foundation::NSSize,
+    max: objc2_foundation::NSSize,
+) -> objc2_foundation::NSRect {
+    let (left, right, top, bottom) = match edge {
+        ResizeEdge::Left => (true, false, false, false),
+        ResizeEdge::Right => (false, true, false, false),
+        ResizeEdge::Top => (false, false, true, false),
+        ResizeEdge::Bottom => (false, false, false, true),
+        ResizeEdge::TopLeft => (true, false, true, false),
+        ResizeEdge::TopRight => (false, true, true, false),
+        ResizeEdge::BottomLeft => (true, false, false, true),
+        ResizeEdge::BottomRight => (false, true, false, true),
+    };
+    let clamp = |v: f64, lo: f64, hi: f64| v.max(lo).min(hi.max(lo));
+    let mut x = start.origin.x;
+    let mut y = start.origin.y;
+    let mut width = start.size.width;
+    let mut height = start.size.height;
+    if right {
+        width = clamp(start.size.width + dx, min.width, max.width);
+    } else if left {
+        width = clamp(start.size.width - dx, min.width, max.width);
+        x = start.origin.x + start.size.width - width;
+    }
+    // `y` goes up: the top edge is the frame's maximum.
+    if top {
+        height = clamp(start.size.height + dy, min.height, max.height);
+    } else if bottom {
+        height = clamp(start.size.height - dy, min.height, max.height);
+        y = start.origin.y + start.size.height - height;
+    }
+    objc2_foundation::NSRect::new(
+        objc2_foundation::NSPoint::new(x, y),
+        objc2_foundation::NSSize::new(width, height),
+    )
+}
+
+/// The cursor over a `windowResize` view.
+fn resize_cursor(edge: ResizeEdge) -> Cursor {
+    match edge {
+        ResizeEdge::Left | ResizeEdge::Right => Cursor::ColResize,
+        ResizeEdge::Top | ResizeEdge::Bottom => Cursor::RowResize,
+        ResizeEdge::TopLeft | ResizeEdge::BottomRight => Cursor::NwseResize,
+        ResizeEdge::TopRight | ResizeEdge::BottomLeft => Cursor::NeswResize,
+    }
 }
 
 fn up(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
@@ -2603,6 +2796,30 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_resize_by_their_edge_within_their_limits() {
+        use objc2_foundation::{NSPoint, NSRect};
+        let start = NSRect::new(NSPoint::new(100.0, 100.0), NSSize::new(400.0, 300.0));
+        let min = NSSize::new(200.0, 150.0);
+        let max = NSSize::new(f64::MAX, f64::MAX);
+        // The right edge follows the mouse; the left one stays.
+        assert_eq!(
+            resized_frame(start, ResizeEdge::Right, 50.0, 0.0, min, max),
+            NSRect::new(NSPoint::new(100.0, 100.0), NSSize::new(450.0, 300.0))
+        );
+        // The top left corner: `y` goes up, so the bottom edge stays.
+        assert_eq!(
+            resized_frame(start, ResizeEdge::TopLeft, -20.0, 30.0, min, max),
+            NSRect::new(NSPoint::new(80.0, 100.0), NSSize::new(420.0, 330.0))
+        );
+        // The bottom edge moving up stops at the minimum height, the top
+        // edge where it was.
+        assert_eq!(
+            resized_frame(start, ResizeEdge::Bottom, 0.0, 400.0, min, max),
+            NSRect::new(NSPoint::new(100.0, 250.0), NSSize::new(400.0, 150.0))
+        );
+    }
 
     #[test]
     fn typing_keys_follow_the_us_layout() {

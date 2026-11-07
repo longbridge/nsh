@@ -180,8 +180,9 @@ app.connect_activate(|app| {
 });
 ```
 
-A TSX app opens its windows with [`Window.open`](../modules/nsh-desktop.md#windowopen): they run in the app's one JS
-runtime, so they share its signals and modules directly.
+A TSX app opens its windows with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): they run in the
+app's one JS runtime, so they share its signals and modules directly. Dialogs, panels and popups are transient for
+their parent window, and the window manager places every window.
 
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'

@@ -374,6 +374,10 @@ fn run_rust_app(
         if let Some(appearance) = &config.appearance {
             info["appearance"] = appearance.as_str().into();
         }
+        // The main window's launch options, as a package's `app.json`.
+        if let Some(window) = &config.window {
+            info["window"] = window.clone();
+        }
         fs::write(dir.join("app.json"), info.to_string())?;
         Ok(())
     };

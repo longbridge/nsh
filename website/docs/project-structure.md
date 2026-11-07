@@ -130,11 +130,12 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
 | `theme` | string or object | every build | The app's design tokens (shadcn/ui's `cssVars`, over the default `neutral` theme), which token classes, `token()` and Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme), [Theme tokens](./tailwind.md#theme-tokens)). |
 | `statusBar` | object | every build, `package` | The status bar's default under every page and dialog (iOS and Android): `{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`, both optional. Packaged iOS apps show it from the launch screen on ([Status bar](../modules/nsh-base.md#status-bar)). |
-| `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
+| `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar, windows of its own ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
+| `window` | object | every build, `package` | The main window's launch settings on the desktops, which it has from its first frame: `title`, `defaultSize`, `minSize`, `titleBar`, `backdrop` and the other options and attributes of a window, as `nsh/desktop`'s `WindowOptions` spells them (`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`) ([The main window](../modules/nsh-desktop.md#the-main-window)). |
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `web` | object | `package` | What a web package adds to its page. `web.host`: a JS module relative to `nsh.json` exporting `createHost(player)`, which answers the app's [`host`](../modules/nsh.md#host) calls; `web.connect`: the hosts that module's own requests reach, as patterns of `capabilities.network.hosts`, which the page's Content-Security-Policy allows ([Web](./web.md#the-hosts-functions)); `web.base`: the path the site is served under (`"/apps/counter/"`), the page's `<base href>`, so that it loads at the app's own paths ([Web](./web.md#deploy-it)). |
-| `updater` | object | `package` | Where the packaged app gets its updates: `{ "github": "owner/repo" }` or `{ "url": "https://…/latest.json", "publicKey": "…" }`, `publicKey` optional with `github` ([App Updates](./app-updates.md), [nsh/updater](../modules/nsh-updater.md#nshjson)). |
+| `updater` | object | `package` | Where the packaged app gets its updates: `{ "github": "owner/repo" }` or `{ "url": "https://…/latest.json", "publicKey": "…" }`, `publicKey` optional with `github`, and `"packages": { "roots": [...] }` for [OTA updates](./ota-updates.md) ([App Updates](./app-updates.md), [nsh/updater](../modules/nsh-updater.md#nshjson)). |
 | `ios` | object | `package` | What iOS packages add: `infoPlist`, keys of the app's `Info.plist`, and `entitlements`, which device builds check against the provisioning profile. NSH's own keys are refused ([Packaging](./packaging.md#infoplist-keys-and-entitlements)). |
 | `android` | object | `package` | What Android packages set: `targetSdk`, the API level the app targets and compiles against (default 35) ([Packaging](./packaging.md#target-api-level)). |
 | `macos` | object | `package` | What macOS packages add: `infoPlist` and `entitlements`, as `ios`'s ([Packaging](./packaging.md#infoplist-keys-and-entitlements)). |
@@ -142,12 +143,15 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `schemes` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+Every key is checked when the app is built. What NSH cannot read, a key it does not know or a value of a form it does
+not know, is reported as a warning and left out, entry by entry, and the rest of the file applies. So an app written
+for a newer NSH builds and runs with an older one, and a typo shows up in the build's output:
 
 ```text
-error building App.tsx failed
-nsh.json: tailwind: unknown theme key `colours`
+warn nsh.json: tailwind: unknown key `colours`, ignored (one of a newer NSH, or a typo)
 ```
+
+A capability NSH cannot read is not granted, so nothing left out ever widens what the app may do.
 
 
 ### capabilities
@@ -237,7 +241,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; the primitives `View`, `Text`, `Scroll`, `Image`, `List`, `Canvas`, `WebView`, `Video` (`View`'s `selectable` for text selection); safe area insets (`safeArea`, `safeAreaInsets`) and the software keyboard (`Keyboard`, `keyboardFrame`); native animations; `PanResponder`; the environment (`platform`, `windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale`); screen reader and reduce motion state, announcements; the clipboard, the photo picker, storage, the host channel, keyboard shortcuts; components and functions the embedding app registers ([reference](../modules/nsh.md)) |
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`) and the system's alert dialog (`AlertDialog`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/mobile` | What iOS and Android have: `TabBar`, `InputAccessoryView` (iOS), `BackHandler` (Android) ([reference](../modules/nsh-mobile.md)) |
-| `nsh/desktop` | What macOS, Windows and Linux have: `Window`, `titleBar`, `Menu` ([reference](../modules/nsh-desktop.md)) |
+| `nsh/desktop` | What macOS, Windows and Linux have: windows (`Window`, `currentWindow`, `windows`), `titleBar`, `displays`, `Menu`, `Tray`, `GlobalShortcut` ([reference](../modules/nsh-desktop.md)) |
 | `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart` ([reference](../modules/nsh-updater.md)) |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.

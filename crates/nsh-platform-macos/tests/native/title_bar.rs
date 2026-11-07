@@ -7,7 +7,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nsh_core::{desktop::TitleBarStyle, element::desktop, prelude::*};
+use nsh_core::{
+    desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes},
+    element::desktop,
+    prelude::*,
+};
 use nsh_platform_macos as platform;
 use platform::{
     objc2::{MainThreadMarker, MainThreadOnly},
@@ -27,11 +31,14 @@ fn Bar() -> impl IntoElement {
         let want = WANT.load(Ordering::SeqCst);
         if want != applied.get_untracked() {
             applied.set(want);
-            if want == 0 {
-                desktop::set_title_bar(TitleBarStyle::Default, None);
-            } else {
-                desktop::set_title_bar(TitleBarStyle::Hidden, Some(Points(want as f32)));
+            let mut bar = TitleBarOptions::default();
+            if want != 0 {
+                bar.style = TitleBarStyle::Hidden;
+                bar.height = Some(Points(want as f32));
             }
+            let mut attributes = WindowAttributes::default();
+            attributes.title_bar = Some(bar);
+            desktop::main_window().set(attributes);
         }
     });
     effect(|| TOP.store(desktop::title_bar().top.0 as u32, Ordering::SeqCst));
@@ -82,8 +89,38 @@ fn set_bar(bar: u32, top: u32) {
     pump(100);
 }
 
+/// Whether a click at the middle of each traffic light reaches it: a
+/// button moved outside its superview's bounds still draws, but AppKit's
+/// hit-testing never finds it.
+fn assert_clickable(window: &NSWindow, when: &str) {
+    let frame_view = window
+        .contentView()
+        // SAFETY: read on the main thread; the content view is in the
+        // window, so its superview is the window's live theme frame.
+        .and_then(|content| unsafe { content.superview() })
+        .expect("the window's theme frame");
+    for kind in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        let button = window.standardWindowButton(kind).expect("a traffic light");
+        let rect = button.convertRect_toView(button.bounds(), None);
+        let middle = NSPoint::new(
+            rect.origin.x + rect.size.width / 2.0,
+            rect.origin.y + rect.size.height / 2.0,
+        );
+        let hit = frame_view.hitTest(middle);
+        assert!(
+            hit.is_some_and(|view| view.isDescendantOf(&button)),
+            "{when}: a click at a traffic light's middle reaches it"
+        );
+    }
+}
+
 fn assert_centered(window: &NSWindow, system: &[(f64, f64)], bar: f64, when: &str) {
     assert!(window.toolbar().is_none(), "{when}: no toolbar");
+    assert_clickable(window, when);
     for (light, (x, _)) in lights(window).into_iter().zip(system) {
         assert_eq!(light.0, *x, "{when}: the traffic lights keep AppKit's x");
         assert!(

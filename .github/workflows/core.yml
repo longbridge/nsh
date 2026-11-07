@@ -61,7 +61,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: core-${{ github.ref }}
+  group: core-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

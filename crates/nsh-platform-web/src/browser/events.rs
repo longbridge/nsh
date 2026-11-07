@@ -82,7 +82,8 @@ fn strings(items: &[String]) -> Result<Value, PropError> {
 }
 pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, PropError> {
     Ok(match payload {
-        EventPayload::None => Value(0),
+        // The web opens no windows of the app's own.
+        EventPayload::None | EventPayload::Window(_) => Value(0),
         EventPayload::Value(v) => scalar(v)?,
         EventPayload::Map(fields) => object(
             fields

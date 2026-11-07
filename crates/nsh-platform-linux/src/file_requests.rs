@@ -18,7 +18,8 @@ use crate::surface::Surface;
 
 /// Carries out request `id`.
 pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &FileRequest) {
-    let window = surface.root.root().and_downcast::<gtk::Window>();
+    // Over the window the user is in.
+    let window = crate::window::key_window(surface);
     let surface = Rc::downgrade(surface);
     let request = request.clone();
     glib::spawn_future_local(async move {
@@ -119,7 +120,8 @@ pub(crate) fn pick_files(
     let mut control = None;
     surface.control(|c| control = Some(c.clone()));
     let Some(control) = control else { return };
-    let window = surface.root.root().and_downcast::<gtk::Window>();
+    // Over the window the user is in.
+    let window = crate::window::key_window(surface);
     let request = request.clone();
     glib::spawn_future_local(async move {
         let paths = pick_paths(&request.dialog(), window)

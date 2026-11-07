@@ -730,7 +730,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // ends the sessions first.
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
-                    | Command::SendInput(_) => e.int(-1),
+                    | Command::SendInput(_)
+                    // No performance monitor on Android yet.
+                    | Command::PerfMonitor(_) => e.int(-1),
                     // `Audio.java`: the sub-opcode, then the command's
                     // fields (see `audio_command`).
                     Command::Audio(command) => {

@@ -14,6 +14,9 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    /// The app turned the performance line on or off
+    /// (`setFpsEnabled`), for the app to apply.
+    pub(crate) perf_monitor: Option<bool>,
     pub(crate) keymap: std::sync::Arc<nsh_core::keymap::Keymap>,
     pub(crate) scrolled: Vec<NodeId>,
     pub(crate) dirty_stacks: Vec<NodeId>,
@@ -50,6 +53,7 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            perf_monitor: None,
             keymap: Default::default(),
             scrolled: Vec::new(),
             dirty_stacks: Vec::new(),
@@ -451,6 +455,10 @@ impl Mounter {
                     command: Command::ExitApp,
                     ..
                 } => self.exit = true,
+                MountItem::Command {
+                    command: Command::PerfMonitor(enabled),
+                    ..
+                } => self.perf_monitor = Some(enabled),
                 // `Application.quit()`: the app ends, as with a menu's quit role.
                 MountItem::Command {
                     command: Command::Desktop(ref desktop),

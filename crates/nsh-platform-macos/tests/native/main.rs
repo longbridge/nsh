@@ -6,11 +6,11 @@ mod window_press;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
         println!("Native AppKit checks skipped; run with --ignored in a desktop session.");
-        return;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        window_press::run();
-        title_bar::run();
+    } else {
+        #[cfg(target_os = "macos")]
+        {
+            window_press::run();
+            title_bar::run();
+        }
     }
 }

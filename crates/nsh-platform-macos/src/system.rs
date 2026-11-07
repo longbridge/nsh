@@ -43,9 +43,11 @@
 //! it hosts (text fields, scroll bars) match the app. The surface's
 //! background, under the root view (which has none of its own), is the
 //! app's: the opaque background of its top view when that fills the root,
-//! else white / neutral-950 by the scheme (as the Linux backend's). It
-//! shows where the app has not drawn yet, as in the area a window grows
-//! by before the layout at its new size arrives.
+//! else, in the standalone runner's window, white / neutral-950 by the
+//! scheme (as the Linux backend's), and in a host app's view none: an
+//! embedded `AppView` shows its host through, as on iOS. It shows where
+//! the app has not drawn yet, as in the area a window grows by before the
+//! layout at its new size arrives.
 //!
 //! The status bar has no desktop equivalent. The clipboard is the general
 //! pasteboard; `hasText` only looks at the types on offer.
@@ -307,6 +309,7 @@ fn screens_changed() {
         let displays = crate::window_state::displays(surface.mtm);
         surface.control(|c| c.set_displays(displays));
         crate::window_state::changed(&surface);
+        crate::window::screens_changed(&surface);
     }
 }
 
@@ -314,6 +317,13 @@ fn screens_changed() {
 /// ([`crate::AppView::set_locale`]): the system's settings are read again,
 /// with the host's over them.
 pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface);
+}
+
+/// `nsh test --target macos` started driving the surface: its lifecycle
+/// no longer follows a locked screen (`lifecycle`).
+#[cfg(feature = "dev")]
+pub(crate) fn testing_started(surface: &Surface) {
     update(surface);
 }
 
@@ -335,7 +345,7 @@ fn update(surface: &Surface) {
     env.idiom = Idiom::Desktop;
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
-    env.lifecycle = lifecycle(surface.mtm);
+    env.lifecycle = lifecycle(surface.mtm, surface.testing());
     env.window_state = crate::window_state::read(surface);
     surface.set_environment(env);
 }
@@ -347,20 +357,57 @@ fn time_zone() -> TimeZone {
 
 /// Whether the app is in use: `background` while none of it shows (hidden,
 /// or its windows minimized or covered), `active` while it is the active
-/// app, `inactive` otherwise.
-fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
+/// app, `inactive` otherwise. A test's app (`testing`) is not in the
+/// background because the screen is locked: it runs as it does on screen
+/// (`Surface::keep_deadline`), so its tests see what they see unlocked.
+fn lifecycle(mtm: MainThreadMarker, testing: bool) -> Lifecycle {
     let app = NSApplication::sharedApplication(mtm);
-    if app.isHidden()
-        || !app
-            .occlusionState()
-            .contains(NSApplicationOcclusionState::Visible)
-    {
+    let occluded = !app
+        .occlusionState()
+        .contains(NSApplicationOcclusionState::Visible);
+    if app.isHidden() || (occluded && !(testing && screen_locked())) {
         Lifecycle::Background
     } else if app.isActive() {
         Lifecycle::Active
     } else {
         Lifecycle::Inactive
     }
+}
+
+/// Whether the user's session cannot show windows now: the screen is
+/// locked, or the session is not the console's (another user switched in).
+/// The window server then draws no window, the display link stops and the
+/// app cannot become active, while its windows, posted events and
+/// in-process drawing still work. One call to the window server; without
+/// a session at all, it counts as locked.
+pub(crate) fn screen_locked() -> bool {
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+
+    // Declared here: `objc2-core-graphics` has it behind its `CGSession`
+    // feature, which the workspace does not turn on.
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGSessionCopyCurrentDictionary() -> Option<NonNull<CFDictionary>>;
+    }
+    // SAFETY: CoreGraphics' public function: no arguments, and it returns
+    // a dictionary the caller owns (the Copy rule), or null without a
+    // window server session.
+    let Some(raw) = (unsafe { CGSessionCopyCurrentDictionary() }) else {
+        return true;
+    };
+    // SAFETY: an owned reference, as the Copy rule hands it over.
+    let session = unsafe { CFRetained::from_raw(raw) };
+    let flag = |name: &'static str| -> Option<bool> {
+        let key = CFString::from_static_str(name);
+        // SAFETY: the dictionary's keys are `CFString`s, as `key` is.
+        let value = unsafe { session.value((&*key as *const CFString).cast()) };
+        // SAFETY: a value of the dictionary (a CF object) or null; it
+        // lives as long as the dictionary, which outlives this use.
+        let value = unsafe { value.cast::<CFType>().as_ref() }?;
+        value.downcast_ref::<CFBoolean>().map(CFBoolean::value)
+    };
+    // The first key is there only while the screen is locked.
+    flag("CGSSessionScreenIsLocked") == Some(true) || flag("kCGSSessionOnConsoleKey") == Some(false)
 }
 
 /// The surface's environment changed: its background follows the scheme.
@@ -386,23 +433,26 @@ fn follow_background(surface: &Surface) {
             let color = s.background();
             (fills && color.0 & 0xff == 0xff).then_some(color)
         });
-    let color = app.unwrap_or(
-        if surface.environment.get().color_scheme == ColorScheme::Dark {
-            nsh_core::Color::rgba(10, 10, 10, 255)
-        } else {
-            nsh_core::Color::rgba(255, 255, 255, 255)
-        },
-    );
+    let color = app.unwrap_or(if !surface.standalone.get() {
+        nsh_core::Color::rgba(0, 0, 0, 0)
+    } else if surface.environment.get().color_scheme == ColorScheme::Dark {
+        nsh_core::Color::rgba(10, 10, 10, 255)
+    } else {
+        nsh_core::Color::rgba(255, 255, 255, 255)
+    });
     if surface.background.replace(Some(color)) == Some(color) {
         return;
     }
     crate::window::set_background(surface, color);
     // The root's own layer is the app's (its style); the view holding it
-    // is the surface's.
+    // is the surface's. A main window that shows through keeps it clear.
     let Some(layer) = crate::view::superview(surface.root.ns()).and_then(|v| v.layer()) else {
         surface.background.set(None);
         return;
     };
+    if surface.main_window.transparent() {
+        return;
+    }
     crate::surface::quiet(|| layer.setBackgroundColor(Some(&crate::text::cg_color(color))));
 }
 
@@ -505,8 +555,13 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
         Command::Desktop(command) => crate::chrome::command(surface, command),
+        Command::PerfMonitor(show) => {
+            if let Some(toggle) = &*surface.perf_toggle.borrow() {
+                toggle(*show);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
-            surface.root.ns(),
+            crate::window::key_root(surface).ns(),
             text,
             NSAccessibilityPriorityLevel::Medium,
         ),
@@ -613,7 +668,9 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
 }
 
 /// The AppKit appearance of `appearance` (`None`: the system's).
-fn ns_appearance(appearance: nsh_core::platform::Appearance) -> Option<Retained<NSAppearance>> {
+pub(crate) fn ns_appearance(
+    appearance: nsh_core::platform::Appearance,
+) -> Option<Retained<NSAppearance>> {
     use nsh_core::platform::Appearance;
     // SAFETY: immutable AppKit constants.
     let name = match appearance {
@@ -671,7 +728,9 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         surface: Rc::downgrade(surface),
         answered: Cell::new(false),
     });
-    let Some(window) = surface.root.ns().window() else {
+    // The window the user is in: a window of the app's own when it has the
+    // keyboard.
+    let Some(window) = crate::window::sheet_window(surface) else {
         log::warn!("macos: a dialog needs the surface in a window");
         return answer.answer(-1);
     };
@@ -781,7 +840,7 @@ pub(crate) fn answer_dialog(surface: &Rc<Surface>, button: Option<&str>) -> Resu
             unsafe { found.performClick(None) };
         }
         None => {
-            let window = surface.root.ns().window().ok_or("the window is gone")?;
+            let window = alert.window().sheetParent().ok_or("the window is gone")?;
             window.endSheet_returnCode(&alert.window(), objc2_app_kit::NSModalResponseCancel);
         }
     }
