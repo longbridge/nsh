@@ -44,6 +44,9 @@ export function createEnvironment(reactive, invoke, dom) {
     safeArea: () => fields.safeArea(), safeAreaInsets: () => insets(), keyboardFrame: () => fields.keyboard(),
     screenReader: () => fields.screenReader(),
     token(name) { tokens(); return invoke(402, [name, fields.colorScheme() === "dark"]); },
+    // nsh-js's `setTheme` (`env.rs`): the engine checks and applies it, or
+    // throws its `TypeError`; what read a token follows once it took.
+    setTheme(theme) { invoke(406, [theme]); tokens.update(value => value + 1); },
   };
   return {
     api, insets, host: () => fields.host(), titleBar: () => fields.titleBar(),

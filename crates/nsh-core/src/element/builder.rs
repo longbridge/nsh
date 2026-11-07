@@ -1797,6 +1797,13 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The native material the view draws with on macOS
+    /// (`macos={{ backdrop }}`): an `NSVisualEffectView`, or none.
+    fn macos_backdrop(mut self, backdrop: impl IntoReactive<Option<crate::MacOsBackdrop>>) -> Self {
+        super::host::bind_prop(self.node(), backdrop, Prop::MacOsBackdrop);
+        self
+    }
+
     /// The id UI tests find it by.
     fn test_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::TestId(Some(id.into())));

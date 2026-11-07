@@ -12,7 +12,7 @@ order: 12.7
 
 ```tsx
 import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
-import { checkForPackage, downloadPackage, restartToPackage, runningPackage } from "nsh/updater";
+import { checkForPackage, downloadPackage, restartToPackage, runningPackage, shellInfo } from "nsh/updater";
 ```
 
 这个模块在所有平台上都可以导入：
@@ -21,7 +21,7 @@ import { checkForPackage, downloadPackage, restartToPackage, runningPackage } fr
 | --- | --- | --- | --- |
 | macOS、Windows、Linux（打包后） | 检查来源 | 下载并替换应用 | 检查、下载，`restartToPackage` 重启进入新包 |
 | iOS、Android | 检查来源；`url` 是应用商店链接（`nsh update-manifest --link`） | 拒绝：引导用户打开 `url` | 检查并下载；包在下次启动时运行 |
-| Web、开发运行、没有 `"updater"` 的应用 | 返回 `null` | 拒绝 | `checkForPackage` 返回 `null`，`runningPackage()` 为 `null` |
+| Web、开发运行、没有 `"updater"` 的应用 | 返回 `null` | 拒绝 | `checkForPackage` 返回 `null`，`runningPackage()` 为 `null`，`shellInfo()` 没有 `version` |
 
 它不需要任何能力声明，`capabilities.network` 对它不生效，因为应用代码无法决定这些请求发往哪里。请求走平台自己的网络栈，和 `fetch` 一样。
 
@@ -124,6 +124,25 @@ interface RunningPackage {
 ```
 
 本次运行的代码所来自的包；运行应用自带的代码时为 `null`。
+
+### shellInfo
+
+```ts
+function shellInfo(): ShellInfo;
+
+interface ShellInfo {
+  version: string | null;
+  build: number | null;
+  nshVersion: string;
+  packages: boolean;
+}
+```
+
+本次代码所运行在的已安装应用，即它的外壳：打包时的 `version` 和 `build`（来自 `nsh.json`；在 iOS 上就是它的
+`CFBundleShortVersionString` 和 `CFBundleVersion`）、外壳内置的 NSH 运行时版本，以及它能否运行签名包。包替换的是应用的代码，
+不是外壳：`runningPackage()` 说明运行的是哪份代码，`shellInfo()` 说明由什么来运行它，所以需要更新运行时（`minRuntime`）的包，
+可以据此提示用户安装完整的新应用。没有在 `nsh.json` 中配置 `"updater"` 的应用，以及 Web 和开发运行时，`version` 和
+`build` 为 `null`，`packages` 为 `false`。
 
 ### 下次启动时
 

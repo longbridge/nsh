@@ -403,9 +403,6 @@ pub struct WindowsGrant {
     pub max: Option<u32>,
     /// Overlays and click-through windows (`pointerEvents: "none"`).
     pub overlay: bool,
-    /// Windows left out of screenshots and screen sharing
-    /// (`contentProtected`).
-    pub content_protected: bool,
 }
 
 impl WindowsGrant {
@@ -813,7 +810,7 @@ impl Capabilities {
                     if check(
                         grant,
                         "capabilities.windows",
-                        &["kinds", "levels", "max", "overlay", "contentProtected"],
+                        &["kinds", "levels", "max", "overlay"],
                         "capabilities.windows",
                     )? {
                         caps.windows = Some(windows_grant(grant)?);
@@ -821,7 +818,7 @@ impl Capabilities {
                 }
                 _ => {
                     return Err(
-                        "capabilities.windows must be a boolean or an object of `kinds`, `levels`, `max`, `overlay` and `contentProtected`"
+                        "capabilities.windows must be a boolean or an object of `kinds`, `levels`, `max` and `overlay`"
                             .into(),
                     );
                 }
@@ -888,9 +885,6 @@ impl Capabilities {
             }
             if w.overlay {
                 o.insert("overlay".into(), true.into());
-            }
-            if w.content_protected {
-                o.insert("contentProtected".into(), true.into());
             }
             obj.insert("windows".into(), Value::Object(o));
         }
@@ -1241,15 +1235,10 @@ fn windows_grant(grant: &Map<String, Value>) -> Result<WindowsGrant, String> {
                 .ok_or("capabilities.windows.max must be a whole number")?,
         );
     }
-    for (key, target) in [
-        ("overlay", &mut out.overlay),
-        ("contentProtected", &mut out.content_protected),
-    ] {
-        if let Some(v) = grant.get(key) {
-            *target = v
-                .as_bool()
-                .ok_or_else(|| format!("capabilities.windows.{key} must be a boolean"))?;
-        }
+    if let Some(v) = grant.get("overlay") {
+        out.overlay = v
+            .as_bool()
+            .ok_or("capabilities.windows.overlay must be a boolean")?;
     }
     Ok(out)
 }
@@ -1617,8 +1606,8 @@ impl Access {
     }
 
     /// Leaves out of `attributes` what the app's capabilities do not grant
-    /// a window (an ungranted level, click-through without `overlay`,
-    /// capture protection without `contentProtected`) and returns their
+    /// a window (an ungranted level, click-through without `overlay`) and
+    /// returns their
     /// names, for a warning. The main window needs no `windows` grant for
     /// the rest.
     pub fn deny_window_attributes(
@@ -1643,10 +1632,6 @@ impl Access {
         if attributes.passes_pointer() && !grant(&|w| w.overlay) {
             attributes.pointer_events = None;
             denied.push("pointerEvents");
-        }
-        if attributes.content_protected == Some(true) && !grant(&|w| w.content_protected) {
-            attributes.content_protected = None;
-            denied.push("contentProtected");
         }
         denied
     }
@@ -1808,11 +1793,6 @@ mod tests {
             all.check_window(WindowKind::Normal, &click_through, 0)
                 .is_err()
         );
-        let protected = WindowAttributes {
-            content_protected: Some(true),
-            ..Default::default()
-        };
-        assert!(all.check_window(WindowKind::Normal, &protected, 0).is_err());
         // Declared without `windows`: none.
         let declared = |json: &str| Access {
             declared: caps(json),
@@ -1834,28 +1814,19 @@ mod tests {
             ..Default::default()
         };
         assert!(limited.check_window(WindowKind::Normal, &above, 0).is_err());
-        let overlay = declared(r#"{"windows":{"overlay":true,"contentProtected":true}}"#);
+        let overlay = declared(r#"{"windows":{"overlay":true}}"#);
         assert!(
             overlay
                 .check_window(WindowKind::Overlay, &click_through, 0)
-                .is_ok()
-        );
-        assert!(
-            overlay
-                .check_window(WindowKind::Normal, &protected, 0)
                 .is_ok()
         );
         // `set()` keeps what is granted and leaves out the rest.
         let mut asked = WindowAttributes {
             title: Some("Notes".into()),
             level: Some(WindowLevel::AboveDock),
-            content_protected: Some(true),
             ..Default::default()
         };
-        assert_eq!(
-            limited.deny_window_attributes(&mut asked),
-            ["level", "contentProtected"]
-        );
+        assert_eq!(limited.deny_window_attributes(&mut asked), ["level"]);
         assert_eq!(asked.title.as_deref(), Some("Notes"));
         assert_eq!(asked.level, None);
     }

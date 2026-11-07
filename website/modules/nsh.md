@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -264,6 +264,47 @@ classes, name the tokens directly (`bg-primary`, `rounded-(--radius)`): [Theme t
 import { effect, token } from "nsh";
 
 effect(() => console.log("primary is", token("primary"), "radius", token("radius")));
+```
+
+## setTheme
+
+```ts
+function setTheme(theme: Theme | null): void;
+
+interface Theme {
+  cssVars: {
+    theme?: Record<string, string | number>;
+    light?: Record<string, string | number>;
+    dark?: Record<string, string | number>;
+  };
+}
+```
+
+Makes `theme` the app's theme while it runs, in place of `"theme"` in `nsh.json`: a theme of the same format, over
+shadcn/ui's tokens as the one in `nsh.json` is. It applies at once: `token()` reads the new tokens right after the call,
+and the classes naming tokens, `nsh/base` and Rust components' `theme()` follow with the next frame, in both
+appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. `null` gives
+back the theme the app was built with.
+
+The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz` or `lab()`, a `var()`
+that names no color, or a value that is no color in one appearance where the other's is), `setTheme` throws a
+`TypeError` that names each one, and the theme shown stays. Values of no kind a token has, such as shadows, are left
+out as they are from `nsh.json`'s. Build the new theme from the app's own, so the tokens its classes name keep a value
+(`bg-up` when `up` is in `nsh.json`'s theme), and change what differs. Rust: `set_tokens(theme.into())` of an
+`nsh_base::Theme` ([Theme tokens](../docs/tailwind.md#theme-tokens)).
+
+```tsx
+import { setTheme } from "nsh";
+import theme from "./theme.json"; // the file `"theme"` in nsh.json names
+
+// The app's theme with another primary color.
+function brand(color: string) {
+  const { light, dark } = theme.cssVars;
+  setTheme({ cssVars: { ...theme.cssVars, light: { ...light, primary: color }, dark: { ...dark, primary: color } } });
+}
+
+brand("#e11d48");
+setTheme(null); // the app's theme again
 ```
 
 ## View, Text, Scroll, Overlay

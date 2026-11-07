@@ -159,8 +159,8 @@ go elsewhere under these rules rather than into them.
   system feature (a system gesture, a system material) goes in that platform's object; when several platforms have
   it, each object carries it under one name (WebView's `allowsBackForwardNavigationGestures` in `ios={{…}}` and
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
-  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
-  so a key no platform has fails the type check.
+  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `MacOSProps`, `DesktopProps`, an element's own
+  extending them), so a key no platform has fails the type check.
 - **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux), the web in the desktop idiom or
   a terminal (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it
   runs the iOS backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`,
@@ -309,8 +309,10 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
 | `Window.setTitleBar(style, height?)` | `WindowRef.set({ titleBar: { style, height? } })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object; 2026-11-06: an attribute of `set` |
-| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowHandle`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
+| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowRef`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
 | `Window.setTitle(t)`, `setTitleBar(o)`, `setLevel(l)` | `set({ title, titleBar, level })` | Shapes that can grow | One `set(partial)` for every attribute, no per-attribute setters |
+| Rust `WindowHandle`, `window().handle(slot)` | `WindowRef` (one name in Rust and TS); `open_window(window()...) -> Option<WindowRef>` | Where names come from | 2026-11-07: GPUI's `WindowHandle` is another type in the same process; Rust opens windows imperatively as GPUI's `cx.open_window` and TS's `Window.open` do |
+| `aspectRatio`, `colorScheme`, `contentProtected`, `edited`, `representedFile`, `tabGroup` (window attributes), `capabilities.windows.contentProtected` | removed | Speculative configuration | 2026-11-07: single-platform or without a use case yet; the app's `setColorScheme` covers every window. Added back when an app needs one |
 | `Window.toggleMaximize()`, `toggleFullScreen()` | `setMode("maximized" \| "fullScreen" \| "normal")`, `minimize()`, `restore()` | States | Intents, not toggles; minimized is apart from the mode |
 | `Window.setFrame(frame)` | `WindowRef.setBounds({ origin?, size?, animated? })` | Where names come from | It moves and sizes the window's bounds |
 | `Window.setBounds(bounds)` | `WindowRef.setPlacement(placement)` | Where names come from | It restores a saved placement (Win32's `WINDOWPLACEMENT`) |
