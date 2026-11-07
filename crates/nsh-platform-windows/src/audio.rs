@@ -533,9 +533,11 @@ impl Speaker {
     ) {
         self.inner.borrow_mut().loading.insert(id);
         let control = control.clone();
+        // The decoded sound goes back to the surface's UI thread, this one.
+        let ui = crate::window::UiThread::current();
         let job: Job = Box::new(move || {
             let decoded = decode(&bytes, &hint, max);
-            crate::window::invoke(move || {
+            ui.invoke(move || {
                 if let Some(surface) = Surface::by_key(key) {
                     surface.audio.decoded(&control, id, decoded);
                 }
