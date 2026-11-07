@@ -183,6 +183,12 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
+`base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
+one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
+named …"). The macro checks at compile time that it lists every part, so a new part of `nsh/base` adds its line
+there.
+
 ### Historical QuickJS package sizes
 
 The web ran QuickJS in WebAssembly until 2026-10; those measurements do not apply to the current runtimes.
