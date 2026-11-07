@@ -309,7 +309,7 @@ pub mod parts {
         RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
         Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
         TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
-        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, toast,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
     #[cfg(feature = "editor")]
     use crate::{DiffView, Editor};
@@ -320,6 +320,12 @@ pub mod parts {
     /// Every part by its name, the order [`crate::registry`] registers them.
     pub const ALL: &[(&str, Part)] = &[
         ("core", core),
+        ("menu", menu),
+        ("overlays", overlays),
+        ("select", select),
+        ("command", command),
+        ("combobox", combobox),
+        ("toast", toast),
         ("pickers", pickers),
         ("color_picker", color_picker),
         ("carousel", carousel),
@@ -342,12 +348,12 @@ pub mod parts {
         ("term", term),
     ];
 
-    /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// links, checkboxes, radios, switches, toggles, toolbars, sliders,
-    /// scroll bars, paginations, tabs, collapsibles, accordions, avatars,
-    /// progress, menus, popovers, hover cards, sheets, tooltips, toasts and
-    /// system alerts. The larger controls are parts of their own, so a web
-    /// runtime linked for an app leaves out those it does not use.
+    /// The controls every app may use: buttons, links, checkboxes, radios,
+    /// switches, toggles, toolbars, sliders, scroll bars, paginations,
+    /// tabs, collapsibles, accordions, avatars, progress and system
+    /// alerts. It also draws the built-in scroll bars. Menus, popups,
+    /// pickers, the command palette and toasts are parts of their own, so a
+    /// web runtime linked for an app leaves out those it does not use.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -359,15 +365,6 @@ pub mod parts {
             .register::<AvatarGroup>()
             .register::<Button>()
             .register::<Link>()
-            .register::<ContextMenu>()
-            .register::<Menu>()
-            .register::<MenuItem>()
-            .register::<MenuSeparator>()
-            .register::<Submenu>()
-            .register::<Popover>()
-            .register::<HoverCard>()
-            .register::<Sheet>()
-            .register::<Tooltip>()
             .register::<Checkbox>()
             .register::<Collapsible>()
             .register::<Pagination>()
@@ -378,10 +375,6 @@ pub mod parts {
             .module::<Scrollbar>()
             .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
-            // Lists to pick from: in every app's forms, so never apart.
-            .register::<Select>()
-            .register::<Combobox>()
-            .register::<Command>()
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
@@ -390,10 +383,49 @@ pub mod parts {
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
+            .module::<AlertDialog>();
+    }
+
+    /// `Menu`, `ContextMenu` and their items.
+    pub fn menu(registry: &mut Registry) {
+        registry
+            .register::<ContextMenu>()
+            .register::<Menu>()
+            .register::<MenuItem>()
+            .register::<MenuSeparator>()
+            .register::<Submenu>();
+    }
+
+    /// `Popover`, `HoverCard`, `Sheet` and `Tooltip`.
+    pub fn overlays(registry: &mut Registry) {
+        registry
+            .register::<Popover>()
+            .register::<HoverCard>()
+            .register::<Sheet>()
+            .register::<Tooltip>();
+    }
+
+    /// `Select`.
+    pub fn select(registry: &mut Registry) {
+        registry.register::<Select>();
+    }
+
+    /// `Command`: a command palette.
+    pub fn command(registry: &mut Registry) {
+        registry.register::<Command>();
+    }
+
+    /// `Combobox`.
+    pub fn combobox(registry: &mut Registry) {
+        registry.register::<Combobox>();
+    }
+
+    /// `Toast`, `ToastStack` and the toast manager.
+    pub fn toast(registry: &mut Registry) {
+        registry
             .register::<Toast>()
             .register::<ToastStack>()
-            .class::<toast::ToastManagerClass>()
-            .module::<AlertDialog>();
+            .class::<crate::toast::ToastManagerClass>();
     }
 
     /// `Calendar`, `DatePicker` and `TimeField`: dates and times.
