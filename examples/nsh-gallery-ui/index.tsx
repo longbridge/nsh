@@ -14,6 +14,7 @@ import { switchLook } from "./look/switch";
 import { play } from "./sound";
 import { backdrop, sheetGrabber, sheetPanel, tooltipLook, tooltipNote, tooltipText } from "./look/overlay";
 import { density, sectionSurface } from "./look/surface";
+import { progressFill, progressGlide, progressRail, progressRemaining } from "./look/meter";
 
 export * from "./theme";
 export * from "./look/button";
@@ -27,6 +28,11 @@ export * from "./look/choice";
 export * from "./look/tabs";
 export * from "./look/field";
 export * from "./look/listbox";
+export * from "./look/meter";
+export * from "./look/disclosure";
+export * from "./look/nav";
+export * from "./look/plot";
+export * from "./look/workspace";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -36,15 +42,6 @@ export * from "./scrollbar-theme";
 export * from "./tree";
 export * from "./command";
 export * from "./avatar";
-
-/**
- * The thumb of a resize handle (`handleThumbClass`), as gpui-component
- * draws it: none at rest, so the hairlines stay quiet; a faint pill
- * grows in under the pointer, and a long solid one while pressed or
- * dragged.
- */
-export const handleThumb =
-  "h-11 w-[3px] rounded-full bg-muted-foreground opacity-0 scale-y-0 transition duration-150 ease-out group-hover:opacity-40 group-hover:scale-y-[0.45] group-active:opacity-90 group-active:scale-y-100";
 
 /**
  * Instructions for the device's input: `touch` on phones and tablets,
@@ -587,20 +584,24 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
   );
 }
 
-/** A horizontal meter with an optional marker (a limit); half a row in the
- * terminal, so its fill is a solid bar rather than a rule. */
+/** A horizontal meter with an optional marker (a limit), `value` from 0
+ * to 1: a progress bar's rail and fill (`look/meter.ts`), the fill gliding
+ * to each new value; half a row in the terminal, so its fill is a solid bar
+ * rather than a rule. */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
-  const height = terminal ? TERMINAL_ROW / 2 : 6;
   return (
-    <View style={{ height: terminal ? height : 6, borderRadius: 3, backgroundColor: colors.track, ...(terminal ? {} : { borderWidth: 1, ...finish.track }) }}>
-      <View
-        style={{
-          width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: terminal ? height : 4,
-          borderRadius: 2,
-          backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill,
-        }}
-      />
+    // The marker stands past the rail, which clips its fill: they sit side
+    // by side in a view of the rail's height.
+    <View style={{ height: terminal ? TERMINAL_ROW / 2 : 6 }}>
+      {terminal ? (
+        <View style={{ height: TERMINAL_ROW / 2, backgroundColor: colors.track }}>
+          <View style={{ width: `${Math.max(0, Math.min(1, props.value)) * 100}%`, height: TERMINAL_ROW / 2, backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill }} />
+        </View>
+      ) : (
+        <View style={progressRail(6)}>
+          <View class={progressGlide} style={{ ...progressFill(6, props.tone), translate: progressRemaining(props.value * 100) }} />
+        </View>
+      )}
       <If when={props.marker !== undefined}>
         <View style={{ position: "absolute", left: `${(props.marker ?? 0) * 100}%`, top: -4, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.text }} />
       </If>

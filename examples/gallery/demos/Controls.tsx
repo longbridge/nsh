@@ -1,9 +1,9 @@
-import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, Easing, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
+import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
 import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook } from "../ui";
+import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -191,16 +191,8 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
   );
 }
 
-/** A determinate bar's fill: the whole track's width, slid back by what is
- * left to do (`remaining`) so a new value glides there, on gpui-kit's 180 ms
- * `easing_move` curve (and a new tone fades in); the track clips it. */
-const glide = "w-full transition duration-180 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none";
-/** The fill's `translate` for `value` percent. */
-const remaining = (value: number) => `${Math.max(0, Math.min(100, value)) - 100}% 0`;
-/** A bar's rail, `height` points tall: the slider's. */
-const rail = (height = 6) => ({ height, borderRadius: height / 2, overflow: "hidden" as const, backgroundColor: colors.track, boxShadow: `inset 0 0 0 1px ${finish.track.borderColor}, ${finish.track.boxShadow}` });
-/** A bar's fill: the slider's citrus run, or a tone's color. */
-const fillOf = (height = 6, tone?: Tone) => (tone ? { height, borderRadius: height / 2, backgroundColor: toneColor(tone) } : { height, borderRadius: height / 2, ...sliderFill(0, 1) });
+// A bar's rail and fill, the fill gliding to each value, and the
+// indeterminate sweep: `look/meter.ts`'s (`progressLook`).
 
 /**
  * The widths of a row of tab titles without their icons (`TabTitle`'s
@@ -812,7 +804,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
         <View>
           <Each of={TASKS}>{(task, i) => <Task task={task()} first={i() === 0} />}</Each>
         </View>
-        <Progress value={(done().length / TASKS.length) * 100} accessibilityLabel="Release readiness" trackStyle={rail(4)} indicatorClass={glide} indicatorStyle={{ ...fillOf(4), translate: remaining((done().length / TASKS.length) * 100) }} />
+        <Progress value={(done().length / TASKS.length) * 100} accessibilityLabel="Release readiness" {...progressLook(() => (done().length / TASKS.length) * 100, { height: 4 })} />
         <Caption label={left() === 0 ? "Ready to ship" : `${left()} to go before the release`} />
       </Card>
     );
@@ -2233,17 +2225,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           props.set(next);
           last.set(`${props.label}: ${next ? "expanded" : "collapsed"}`);
         }}
-        {...listRow({ first: props.first })}
+        {...disclosureTriggerLook({ first: props.first })}
       >
         <RowDivider show={!props.first} />
         <RowLabel label={props.label} detail={props.detail} />
-        {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
-        <View
-          class="transition-transform duration-150 motion-reduce:transition-none"
-          style={{ width: size.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
-        >
-          <Icon name="chevron" size={size.check} tint={colors.muted} />
-        </View>
+        {/* A lane as wide as the chevron's stroke, so the chevron ends where the values below it end. */}
+        <DisclosureChevron open={props.open} />
       </View>
     );
   }
@@ -2346,16 +2333,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     };
     cleanup(stop);
     // The indeterminate bar's sweep: a third of the track crossing it and
-    // back (`sweep` from 0 to 1, times `travel`: the two thirds it crosses,
-    // from the bar's layout), looped natively, so no JS runs per crossing;
-    // it rests in the middle with reduced motion.
-    const sweep = createAnimatedValue(0);
-    const travel = createAnimatedValue(0);
-    effect(() => {
-      if (reduceMotion()) sweep.set(0.5);
-      else sweep.keyframes([0, 1], { duration: 800, easing: Easing.bezier(0.42, 0, 0.58, 1), iterations: "infinite", direction: "alternate" });
-    });
-    cleanup(() => void sweep.stop());
+    // back, looped natively; it rests in the middle with reduced motion.
+    const sweep = progressSweep();
     const start = () => {
       if (sent() >= 100) sent.set(0);
       running.set(true);
@@ -2375,17 +2354,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           value={props.value}
           indeterminate={props.indeterminate}
           // The track spans the bar: the sweep crosses two thirds of it.
-          onLayout={props.indeterminate ? ({ bounds }) => travel.set((bounds.size.width * 2) / 3) : undefined}
+          onLayout={props.indeterminate ? sweep.onLayout : undefined}
           // The label row first: the children follow the track.
           style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
-          // The slider's rail and fill, so a level and a transfer read alike.
-          trackStyle={rail()}
-          // Determinate, the fill glides to each new value (`glide`).
-          indicatorClass={props.indeterminate ? "w-1/3" : glide}
-          indicatorStyle={{
-            ...fillOf(),
-            ...(props.indeterminate ? { transform: [{ translateX: sweep.mul(travel) }] } : { translate: remaining(props.value) }),
-          }}
+          // The slider's rail and fill, so a level and a transfer read alike;
+          // determinate, the fill glides to each new value.
+          {...progressLook(() => props.value, { indeterminate: () => props.indeterminate, sweep })}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <RowLabel label={props.label} detail={props.detail} />
@@ -2470,9 +2444,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
         <Progress
           value={props.value}
           style={{ ...row(props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
-          trackStyle={rail(4)}
-          indicatorClass={glide}
-          indicatorStyle={{ ...fillOf(4, props.value >= 100 ? "up" : undefined), translate: remaining(props.value) }}
+          {...progressLook(() => props.value, { height: 4, tone: () => (props.value >= 100 ? "up" : undefined) })}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Icon name={props.icon} size={size.control} tint={colors.muted} />
@@ -2546,7 +2518,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             (a terminal's first and last start and end at theirs, off the card's border). */}
         <View style={{ height: DOT + 24, marginHorizontal: 24 }}>
           <View style={{ position: "absolute", left: DOT / 2, right: DOT / 2, top: (DOT - 4) / 2 }}>
-            <Progress value={value()} accessibilityLabel="Setup" trackStyle={rail(4)} indicatorClass={glide} indicatorStyle={{ ...fillOf(4), translate: remaining(value()) }} />
+            <Progress value={value()} accessibilityLabel="Setup" {...progressLook(() => value(), { height: 4 })} />
           </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
             <Each of={STEPS}>
@@ -2611,9 +2583,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 value={values()[i()]}
                 accessibilityLabel={m().name}
                 style={{ flexDirection: "column-reverse", alignItems: "stretch", gap: 6 }}
-                trackStyle={rail(m().height)}
-                indicatorClass={glide}
-                indicatorStyle={{ ...fillOf(m().height, tone(i(), values()[i()])), translate: remaining(values()[i()]) }}
+                {...progressLook(() => values()[i()], { height: m().height, tone: () => tone(i(), values()[i()]) })}
               >
                 <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                   <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{m().name}</Text>
@@ -2956,9 +2926,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           <Progress
             value={reached()}
             accessibilityLabel="Toward free shipping"
-            trackStyle={rail(4)}
-            indicatorClass={glide}
-            indicatorStyle={{ ...fillOf(4, toFree() === 0 ? "up" : undefined), translate: remaining(reached()) }}
+            {...progressLook(() => reached(), { height: 4, tone: () => (toFree() === 0 ? "up" : undefined) })}
           />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <If when={toFree() === 0}>

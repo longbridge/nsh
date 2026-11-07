@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, RichEditor, type RichCommand, StarterKit, command, createRichEditor, redo, Toggle, ToggleGroup, Toolbar, ToolbarSeparator, undo } from "nsh/base";
-import { desktop, Log, Panel, Split, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, wide, sectionSurface } from "./palette";
+import { desktop, Icon, Log, Panel, Split, toggleGlyph, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, wide, sectionSurface, richEditorClasses } from "./palette";
 
 const CONTENT = `# A document
 
@@ -10,8 +10,10 @@ Type **Markdown** as you go: \`#\` makes a heading, \`-\` a list, \`[ ]\` a task
 - Undo and redo keep every step
 `;
 
-/** The toolbar's tools: small, each its label. */
+/** The toolbar's formats: small, each its label. */
 const tool = { size: "small", text: true } as const;
+/** Its actions: small and square, an icon each, so the bar fits a phone's width. */
+const iconTool = { size: "small" } as const;
 
 // The session owns the document; the view renders it and turns input into
 // transactions. The toolbar runs Tiptap's named commands on the session; its
@@ -43,10 +45,19 @@ function App() {
       <Text style={toggleLabel(on, tool)}>{label}</Text>
     </Toggle>
   );
-  /** An action (undo, redo): a `Button` in the same look, enabled while it can run. */
-  const action = (label: string, cmd: () => RichCommand) => (
-    <Button disabled={!can(cmd())} onPress={() => run(cmd())} {...toggleLook({ ...tool, disabled: () => !can(cmd()) })}>
-      <Text style={toggleLabel(() => true, tool)}>{label}</Text>
+  /** An action (undo, redo): a `Button` in the same look, its icon named
+   * for screen readers, enabled while it can run. Redo is undo's arrow
+   * mirrored. */
+  const action = (label: string, cmd: () => RichCommand, mirrored?: boolean) => (
+    <Button
+      accessibilityLabel={label}
+      disabled={!can(cmd())}
+      onPress={() => run(cmd())}
+      {...toggleLook({ ...iconTool, disabled: () => !can(cmd()) })}
+    >
+      <View style={mirrored ? { transform: [{ scaleX: -1 }] } : undefined}>
+        <Icon name="undo" {...toggleGlyph(() => false, iconTool)} />
+      </View>
     </Button>
   );
 
@@ -82,14 +93,14 @@ function App() {
           </ToggleGroup>
           <ToolbarSeparator style={toolbarRule()} />
           {action("Undo", undo)}
-          {action("Redo", redo)}
+          {action("Redo", redo, true)}
         </Toolbar>
         <View style={{ height: wide() ? 360 : 300, ...sectionSurface(), overflow: "hidden" }}>
           <RichEditor
             editor={editor}
             accessibilityLabel="Document"
             placeholder="Write something"
-            classes={CLASSES}
+            classes={richEditorClasses}
             style={{ flex: 1 }}
           />
         </View>
@@ -97,31 +108,5 @@ function App() {
     </View>
   );
 }
-
-/** The document's look: NSH's editor draws nothing of its own. */
-const CLASSES = {
-  content: "p-4 gap-3",
-  taskCheckbox: "size-4 mr-2 mt-0.5 rounded border border-border checked:bg-primary checked:border-primary",
-  listMarker: "text-muted-foreground",
-  nodes: {
-    "heading[level=1]": "text-2xl font-bold",
-    "heading[level=2]": "text-xl font-semibold",
-    "heading[level=3]": "text-lg font-semibold",
-    blockquote: "border-l-4 border-border pl-3 text-muted-foreground",
-    codeBlock: "font-mono text-sm bg-muted rounded-md px-3 py-2",
-    bulletList: "gap-1 pl-5",
-    orderedList: "gap-1 pl-5",
-    taskList: "gap-1",
-    taskItem: "flex-row",
-    horizontalRule: "h-px bg-border my-2",
-  },
-  marks: {
-    bold: "font-semibold",
-    italic: "italic",
-    strike: "line-through",
-    code: "font-mono text-sm bg-muted rounded px-1",
-    link: "text-brand underline",
-  },
-};
 
 mount(App);

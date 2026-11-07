@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { DiffView, type DiffViewRef } from "nsh/base";
-import { button, buttonText, desktop, Log, Panel, Segmented, size, Split, ui, wide, sectionSurface } from "./palette";
+import { button, buttonText, desktop, DiffHunkActions, Log, Panel, Segmented, size, Split, ui, wide, sectionSurface } from "./palette";
 
 const OLD = `fn greet(name: &str) -> String {
     format!("Hello, {}", name)
@@ -29,7 +29,7 @@ fn main() {
 // The texts are the app's: a change reverted or kept is reported
 // (`onChange`) and set back as `oldValue` and `newValue`.
 function App() {
-  const layout = signal<"split" | "unified">(desktop ? "split" : "unified");
+  const layout = signal<"split" | "unified">(wide() ? "split" : "unified");
   const inline = signal<"wordAlt" | "char" | "none">("wordAlt");
   const oldValue = signal(OLD);
   const newValue = signal(NEW);
@@ -41,12 +41,6 @@ function App() {
     const s = await diff?.stats();
     stats.set(s ? `+${s.added} −${s.deleted} · ${s.hunks} changes` : "");
   };
-
-  const action = (label: string, onPress: () => void, primary?: boolean) => (
-    <View onPress={onPress} role="button" accessibilityLabel={label} {...button(primary ? "accent" : "secondary", { size: "sm" })}>
-      <Text style={buttonText(primary ? "accent" : "secondary", { size: "sm" })}>{label}</Text>
-    </View>
-  );
 
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
@@ -95,10 +89,12 @@ function App() {
             inline={inline()}
             contextLines={1}
             renderHunkActions={(hunk) => (
-              <View style={{ flexDirection: "row", gap: 4 }}>
-                {action("Revert", () => diff?.revertHunk(hunk.index))}
-                {action("Keep", () => diff?.acceptHunk(hunk.index), true)}
-              </View>
+              <DiffHunkActions
+                index={hunk.index}
+                iconOnly={!wide()}
+                onRevert={() => diff?.revertHunk(hunk.index)}
+                onKeep={() => diff?.acceptHunk(hunk.index)}
+              />
             )}
             onChange={({ change }) => {
               oldValue.set(change.oldValue);
