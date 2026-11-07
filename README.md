@@ -69,6 +69,12 @@ Install the `nsh` command ([other ways](https://nsh.dev/docs/installation)):
 curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
+The nightly build of the latest `main`, rebuilt every night that it changes:
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
+```
+
 Build and install the latest `main` from source (Git, Rust and the
 [platform build dependencies](https://nsh.dev/docs/installation) required):
 
