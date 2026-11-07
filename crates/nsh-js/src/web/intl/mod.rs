@@ -14,11 +14,11 @@
 //! (Persian's `arabext`). A locale without data resolves to the next
 //! requested one, then the device's (`Environment::locale`), then `en-US`.
 //! Local time is `Date`'s, and is named as the zone it is computed in: as
-//! the C library
-//! computing it reads that zone (`TZ`, `/etc/localtime`; the browser's on
-//! the web), or where that is out of its sight (Windows, Android) as the
-//! platform reports it (`LocaleSettings::time_zone`, `localeSettings()`'s
-//! `timeZone`), so on a device `localeSettings()` names it too.
+//! the C library computing it reads that zone (`TZ`, `/etc/localtime`; the
+//! browser's on the web), or where that is out of its sight (Windows,
+//! Android) as the platform reports it (`LocaleSettings::time_zone`,
+//! `localeSettings()`'s `timeZone`), so on a device `localeSettings()` names
+//! it too.
 //! `resolvedOptions().timeZone` gives the name and a `timeZone` naming it
 //! is local time; a `TZ` holding a POSIX rule
 //! (`CET-1CEST,M3.5.0,M10.5.0/3`) is named by its text, so its daylight
@@ -30,7 +30,8 @@
 //! Not there: `Collator`, `PluralRules`, `RelativeTimeFormat`,
 //! `ListFormat`, `DisplayNames`, `Segmenter`, `Intl.Locale`; time zones
 //! other than the device's, UTC and fixed offsets (no zone database);
-//! calendars other than the Gregorian, `currencySign:
+//! calendars other than the Gregorian; a numbering system the locale's own
+//! (`fa-u-nu-latn` still writes `arabext`); `currencySign:
 //! "accounting"` (written as `standard`) and currency names (written as
 //! codes); unit names are English everywhere. The constructors need `new`.
 
