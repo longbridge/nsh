@@ -57,7 +57,7 @@ pub(crate) struct Dom {
     next_id: Cell<NodeId>,
     /// Live nodes by `id >> 1` (the root is 0); weak: a node's object owns
     /// its data.
-    nodes: RefCell<Vec<*mut NodeData>>,
+    nodes: RefCell<nsh_core::id_table::IdTable<*mut NodeData>>,
     /// The root view's object (owned).
     root: Cell<JsValue>,
     /// The platform: `ios={{…}}` / `android={{…}}` / `web={{…}}` props
@@ -242,7 +242,7 @@ impl Dom {
             shared,
             classes,
             next_id: Cell::new(2),
-            nodes: RefCell::new(Vec::new()),
+            nodes: RefCell::new(nsh_core::id_table::IdTable::new()),
             root: Cell::new(UNDEFINED),
             os: Cell::new(Os::Ios),
             desktop: Cell::new(false),
@@ -592,11 +592,7 @@ fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsV
         obj
     };
     let index = (id >> 1) as usize;
-    let mut nodes = d.nodes.borrow_mut();
-    if nodes.len() <= index {
-        nodes.resize(index + 1, ptr::null_mut());
-    }
-    nodes[index] = data;
+    d.nodes.borrow_mut().insert(index, data);
     obj
 }
 
@@ -858,11 +854,11 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
         // SAFETY: a projection of the live state's renderer.
         let d = unsafe { &(*state).dom };
         let index = (data.id >> 1) as usize;
-        if let Some(slot) = d.nodes.borrow_mut().get_mut(index)
-            && *slot == p
-        {
-            *slot = ptr::null_mut();
+        let mut nodes = d.nodes.borrow_mut();
+        if nodes.get(index) == Some(&p) {
+            nodes.remove(index);
         }
+        drop(nodes);
         if data.id != ROOT {
             // Not the op queue: a finalizer may run while it is borrowed.
             d.shared.releases.borrow_mut().push(data.id);
