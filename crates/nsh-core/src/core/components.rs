@@ -26,6 +26,7 @@ use crate::{
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
+        services::FetchFailure,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
     },
@@ -478,7 +479,7 @@ impl ClipboardAnswer {
 struct PendingFetch {
     /// What arrived so far.
     response: crate::element::HttpResponse,
-    answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
+    answer: AnswerSlot<Result<crate::element::HttpResponse, FetchFailure>>,
 }
 
 /// What notifications wait for ([`crate::notifications`]).
@@ -842,7 +843,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Registry::tokens_from`]); set before the first op. Runs the
     /// sets' setup functions ([`Registry::setup`]).
     pub fn set_components(&mut self, registry: Registry) {
-        if let Some(Ok(tokens)) = registry.tokens(None) {
+        if let Some(Ok((tokens, _))) = registry.tokens(None) {
             self.set_tokens(tokens);
         }
         {
@@ -865,11 +866,18 @@ impl<M: TextEngine> Core<M> {
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
-    /// UI set that reads themes makes tokens of.
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
+    /// which the UI set that reads themes makes tokens of. What it cannot
+    /// read is left out and the rest applies, so a bundle made by a newer
+    /// NSH keeps its theme here.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
         match self.components.registry.tokens(Some(json)) {
-            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Ok((tokens, left_out))) => {
+                for what in left_out {
+                    log::warn!("theme: {what}, ignored");
+                }
+                self.set_tokens(tokens);
+            }
             Some(Err(e)) => log::warn!("theme: {e}"),
             None => log::warn!("theme: no UI set reads themes"),
         }
@@ -998,6 +1006,12 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
+    /// Whether the platform's performance monitor measures
+    /// (`fpsEnabled()`): what read it runs again.
+    pub fn set_perf_monitor(&mut self, enabled: bool) {
+        self.components.runtime.set_perf_monitor(enabled);
+    }
+
     /// The displays components read ([`crate::element::desktop::displays`]),
     /// as the platform reports them: what read them runs again.
     pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
@@ -1022,6 +1036,10 @@ impl<M: TextEngine> Core<M> {
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
+        }
+        // A main window that keeps its placement saves it as it changes.
+        if let Some(state) = environment.window_state {
+            self.keep_window_placement(crate::ROOT_ID, &state);
         }
     }
 
@@ -2707,6 +2725,24 @@ impl<M: TextEngine> Core<M> {
             let _ = self.apply_op(Op::Draw {
                 id,
                 drawing: Box::new((**drawing).clone()),
+            });
+        }
+        if new.window != old.window
+            && let Some(window) = &new.window
+        {
+            // Opened once; then only its attributes follow (the record sends
+            // what changed).
+            let command = if old.window.is_none() {
+                crate::desktop::DesktopCommand::OpenWindow(Box::new(crate::desktop::OpenWindow {
+                    options: (**window).clone(),
+                    ..Default::default()
+                }))
+            } else {
+                crate::desktop::DesktopCommand::SetAttributes(Box::new(window.attributes.clone()))
+            };
+            let _ = self.apply_op(Op::Command {
+                id,
+                command: crate::Command::Desktop(Box::new(command)),
             });
         }
     }
@@ -5233,14 +5269,7 @@ impl<M: TextEngine> Core<M> {
 
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, mut command) => {
-                // Saved bounds go onto the displays there are now, whichever
-                // side (Rust or JS) restores them.
-                if let Command::Desktop(desktop) = &mut command
-                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
-                {
-                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
-                }
+            Action::Command(id, command) => {
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -5313,6 +5342,12 @@ impl<M: TextEngine> Core<M> {
                     },
                 );
                 self.components.fetch_requests.push((id, *request));
+            }
+            Action::RegisterFont(data, answer) => {
+                // The family is the answer: a font without one is refused.
+                let family = crate::text::font_family(&data)
+                    .and_then(|family| self.register_font(&data).map(|()| family));
+                answer.borrow_mut().deliver(family);
             }
             Action::PickImages(request, answer) => {
                 if !self.access.allows_picker() {
@@ -5603,12 +5638,29 @@ impl<M: TextEngine> Core<M> {
             }
             FetchEvent::Failed(error) => {
                 if let Some(pending) = self.components.fetches.remove(&id) {
-                    pending.answer.borrow_mut().deliver(Err(error));
+                    pending
+                        .answer
+                        .borrow_mut()
+                        .deliver(Err(FetchFailure::Failed(error)));
                 }
                 return false;
             }
         }
         true
+    }
+
+    /// Fails the tasks' request `id`, which the app's capabilities do not
+    /// grant: `url` is the URL refused, the request's or a redirect's (the
+    /// engine checks every hop), `message` why. A task's
+    /// [`fetch`](crate::element::fetch) fails with the message; a module
+    /// function's call rejects with `ERR_ACCESS_DENIED`, `permission`
+    /// `"network"` and `resource` the URL, as JS's `fetch` does
+    /// (`registerFont`).
+    pub fn fetch_refused(&mut self, id: u32, message: String, url: String) {
+        if let Some(pending) = self.components.fetches.remove(&id) {
+            let refused = FetchFailure::Refused { message, url };
+            pending.answer.borrow_mut().deliver(Err(refused));
+        }
     }
 
     /// Resolves clipboard read `id` with the platform's answer (an empty
@@ -5666,6 +5718,26 @@ impl<M: TextEngine> Core<M> {
             _ => None,
         };
         match kind {
+            // A window that keeps its placement saves it as it changes; the
+            // event goes on to the app.
+            EventKind::Window => {
+                if let EventPayload::Window(event) = payload {
+                    match event.as_ref() {
+                        crate::desktop::WindowEvent::State(state) => {
+                            self.keep_window_placement(id, state);
+                        }
+                        // Rust listeners of the main window's; JS's hear it
+                        // from the event.
+                        crate::desktop::WindowEvent::ClosePress { reason }
+                            if id == crate::ROOT_ID =>
+                        {
+                            self.components.runtime.main_close_pressed(*reason);
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
             EventKind::Dialog => {
                 let Some(dialog) = number("id") else {
                     return false;

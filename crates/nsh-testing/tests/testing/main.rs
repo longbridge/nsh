@@ -158,6 +158,15 @@ fn open_sets_the_environment_and_routes_answer_requests() {
 }
 
 #[test]
+fn fonts_registered_while_the_app_runs_name_their_family() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/fonts");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
     use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};
 
@@ -276,6 +285,15 @@ fn the_page_s_host_answers_the_apps_tests_open() {
     assert_eq!(run(Some("host.js"), "Host.test.tsx"), 7);
     assert_eq!(run(None, "NoHost.test.tsx"), 1);
     assert_eq!(run(Some("none.js"), "Broken.test.tsx"), 1);
+}
+
+#[test]
+fn headless_desktops_play_the_platform_s_windows() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/windows");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 7);
 }
 
 #[test]

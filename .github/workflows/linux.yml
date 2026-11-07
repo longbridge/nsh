@@ -1,12 +1,14 @@
 name: Linux
 
 # Builds, lints and tests the Linux backend (GTK 4) and the tooling that runs
-# it (`nsh run --target linux`, `nsh package --target linux`).
+# it (`nsh run --target linux`, `nsh package --target linux`), and runs the
+# gallery's real-platform tests in GPUI windows on a virtual X11 display.
 
 on:
   push:
     branches: [main]
     paths:
+      - "crates/gpui/**"
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
@@ -30,7 +32,11 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/linux.yml"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
+      - "crates/gpui/**"
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
@@ -61,7 +67,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: linux-${{ github.ref }}
+  group: linux-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -73,7 +79,73 @@ env:
   RUSTUP_TOOLCHAIN: stable
 
 jobs:
+  gpui-gallery:
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    environment:
+      name: ci-debounce
+      deployment: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Wry embeds GTK 3 web views in X11 child windows. Mesa's software
+      # Vulkan driver draws GPUI on the runner without a physical GPU.
+      GDK_BACKEND: x11
+      WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up temporary directories outside the checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
+
+      - name: Install GPUI, Vulkan and Xvfb dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang libclang-dev build-essential pkg-config \
+            libasound2-dev libfontconfig-dev libfreetype-dev libssl-dev \
+            libvulkan1 mesa-vulkan-drivers libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libzstd-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good xvfb xauth
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            . -> target
+            crates/gpui -> ../../target
+          key: gpui-gallery
+
+      - name: Build the CLI and GPUI host
+        run: |
+          cargo build -p nsh-cli
+          cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host
+
+      # Match the GTK job's gallery coverage. No allowed failures: each
+      # invocation must pass, and Bash stops at the first failing suite.
+      - name: Run the gallery's tests in GPUI windows
+        run: |
+          run() { env -u WAYLAND_DISPLAY dbus-run-session -- xvfb-run -a -s '-screen 0 1280x1024x24' ./target/debug/nsh test "$@" --target gpui; }
+          for file in context-menu device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
+            run "examples/gallery/tests/$file.test.tsx"
+          done
+          run examples/gallery/tests/environment.test.tsx --filter appearance
+
   check:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs.
     runs-on: ubuntu-24.04
     steps:

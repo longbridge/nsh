@@ -75,10 +75,13 @@ pub(crate) enum Action {
     /// its failure) resolves the slot.
     Fetch(
         Box<crate::platform::HttpRequest>,
-        AnswerSlot<Result<super::services::HttpResponse, String>>,
+        AnswerSlot<Result<super::services::HttpResponse, super::services::FetchFailure>>,
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Registers a font (TrueType, OpenType, WOFF or WOFF2 data); its family
+    /// name, or why it is no font, resolves the slot.
+    RegisterFont(Vec<u8>, AnswerSlot<Result<String, String>>),
     /// Shows the system's picker for images; the files picked (none when
     /// cancelled) resolve the slot.
     PickImages(

@@ -352,7 +352,10 @@ fn notify_args(
         notification.body.clone()
     };
     // The daemon finds the app's name and icon in the `.desktop` file.
-    let hints = HashMap::from([("desktop-entry", app_id.to_variant())]);
+    let mut hints = HashMap::from([("desktop-entry", app_id.to_variant())]);
+    if notification.silent {
+        hints.insert("suppress-sound", true.to_variant());
+    }
     // "default" is the press on the notification itself, so it has no label.
     let actions = vec!["default", ""];
     let expire = -1i32;
@@ -472,6 +475,18 @@ mod tests {
             hints["desktop-entry"].get::<String>().as_deref(),
             Some("com.example.app")
         );
+        assert!(!hints.contains_key("suppress-sound"));
+    }
+
+    #[test]
+    fn a_silent_notification_asks_the_daemon_for_no_sound() {
+        let notification = Notification::new("a", "T", "").silent(true);
+        let args = notify_args("id", "App", 0, &notification, false);
+        let hints = args
+            .child_value(6)
+            .get::<HashMap<String, glib::Variant>>()
+            .expect("hints");
+        assert_eq!(hints["suppress-sound"].get::<bool>(), Some(true));
     }
 
     #[test]

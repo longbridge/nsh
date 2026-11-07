@@ -44,6 +44,7 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+mod windows;
 
 pub use audio::AudioCall;
 mod stub;
@@ -136,7 +137,7 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config).map(|launched| (launched.engine, launched.batches))
+    launch(config, Vec::new()).map(|launched| (launched.engine, launched.batches))
 }
 
 /// A started engine and what it sends.
@@ -148,7 +149,12 @@ struct Launched {
     wanted: Option<Arc<AtomicBool>>,
 }
 
-fn launch(config: EngineConfig) -> std::io::Result<Launched> {
+/// [`start`], the platform reporting `displays` before the app first
+/// renders.
+fn launch(
+    config: EngineConfig,
+    displays: Vec<nsh_core::desktop::Display>,
+) -> std::io::Result<Launched> {
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
@@ -159,7 +165,16 @@ fn launch(config: EngineConfig) -> std::io::Result<Launched> {
         control: control.clone(),
         wanted: wanted.clone(),
     };
-    let engine = Engine::start(config, || ApproxTextEngine, sink)?;
+    let engine = Engine::start_with(
+        config,
+        || ApproxTextEngine,
+        sink,
+        |control| {
+            if !displays.is_empty() {
+                control.set_displays(displays);
+            }
+        },
+    )?;
     let _ = control.set(engine.control());
     Ok(Launched {
         engine,
@@ -311,6 +326,9 @@ pub struct Headless {
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
+    /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
+    /// when the config gives its own windows (`EngineConfig::windows`).
+    windows: Option<windows::Windows>,
 }
 
 impl Headless {
@@ -324,6 +342,16 @@ impl Headless {
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
         }
+        // A desktop's windows: the main one, focused, on one display, and
+        // those the app opens.
+        let windows = (config.environment.os.is_desktop() && config.windows.is_none())
+            .then(|| windows::Windows::new(config.viewport));
+        if let Some(windows) = &windows
+            && config.environment.window_state.is_none()
+        {
+            config.environment.window_state = Some(windows.main());
+        }
+        let displays = windows.as_ref().map(|w| w.displays()).unwrap_or_default();
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -333,7 +361,7 @@ impl Headless {
             batches,
             errors,
             wanted,
-        } = launch(config)?;
+        } = launch(config, displays)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         Ok(Headless {
@@ -364,6 +392,7 @@ impl Headless {
             last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
+            windows,
         })
     }
 
@@ -535,6 +564,11 @@ impl Headless {
         self.viewport = size;
         self.screen.set_viewport(size);
         self.environment.window = size;
+        if let Some(windows) = &mut self.windows {
+            windows.resize_main(size);
+            self.environment.window_state = Some(windows.main());
+            windows.take_reports();
+        }
         self.engine.control().resize(size);
         self.engine.control().set_environment(self.environment);
         self.done()
@@ -779,6 +813,18 @@ impl Headless {
         for item in &batch.items {
             self.animator.apply(item);
         }
+        if let Some(windows) = &mut self.windows {
+            for item in &batch.items {
+                match item {
+                    MountItem::Command {
+                        id,
+                        command: Command::Desktop(command),
+                    } => windows.command(*id, command),
+                    MountItem::Remove { id } | MountItem::Delete { id } => windows.removed(*id),
+                    _ => {}
+                }
+            }
+        }
         #[cfg(feature = "js")]
         if let Some(calls) = &mut self.host_calls {
             for item in &batch.items {
@@ -868,7 +914,100 @@ impl Headless {
         if self.screen.take_back_asked() {
             self.go_back(false);
         }
+        self.report_windows();
         self.report_finished();
+    }
+
+    /// Reports what changed of the app's windows, as a platform does: a
+    /// window of the app's own on its root, the main window in the
+    /// environment; the views of a window off the screen are not found.
+    fn report_windows(&mut self) {
+        let Some(windows) = &mut self.windows else {
+            return;
+        };
+        let control = self.engine.control();
+        let mut environment = false;
+        for report in windows.take_reports() {
+            match report {
+                windows::Report::Main(state) => {
+                    self.environment.window_state = Some(state);
+                    environment = true;
+                }
+                windows::Report::Window(root, event) => control.dispatch_event(
+                    root,
+                    EventKind::Window,
+                    EventPayload::Window(Box::new(event)),
+                ),
+                windows::Report::Hidden(root, hidden) => {
+                    self.screen.set_window_hidden(root, hidden);
+                }
+                windows::Report::RootSize(root, size) => {
+                    control.set_root_size(root, size, Default::default());
+                }
+            }
+        }
+        if environment {
+            control.set_environment(self.environment);
+        }
+        // `sizeToContent` on the main window: its viewport becomes that size.
+        if let Some(size) = self.windows.as_mut().and_then(|w| w.take_main_resize())
+            && size != self.viewport
+        {
+            self.viewport = size;
+            self.screen.set_viewport(size);
+            self.environment.window = size;
+            if let Some(windows) = &mut self.windows {
+                windows.resize_main(size);
+                self.environment.window_state = Some(windows.main());
+                windows.take_reports();
+            }
+            control.resize(size);
+            control.set_environment(self.environment);
+        }
+    }
+
+    /// A pointer acts in the window view `id` is in: the platform activates
+    /// that window first (the one that had the focus loses it).
+    fn activate_window_of(&mut self, id: NodeId) {
+        let window = self.screen.window_of(id);
+        if let Some(windows) = &mut self.windows {
+            windows.pressed_in(window);
+        }
+        self.report_windows();
+    }
+
+    /// The state of the app's window `id` (`"main"`, or the id it opened
+    /// one with) as the platform reports it; `None` while it is not open
+    /// (`app.window(id).state()`).
+    pub fn window_state(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        self.catch_up();
+        let windows = self.windows.as_ref().ok_or_else(no_windows)?;
+        Ok(self
+            .screen
+            .window_root(id)
+            .and_then(|root| windows.state(root)))
+    }
+
+    /// The step `window(<id>).pressClose()`: the user presses the close
+    /// button of the app's window `id`: the window reports the press
+    /// (`onClosePress`, reason `closeButton`) and closes when its
+    /// `closeOnPress` lets it; then waits until the app is quiet.
+    pub fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        self.step(format!("window({id}).pressClose"));
+        self.catch_up();
+        let root = self
+            .screen
+            .window_root(id)
+            .ok_or_else(|| format!("no window {id:?} is open"))?;
+        let windows = self.windows.as_mut().ok_or_else(no_windows)?;
+        windows
+            .press_close(root)
+            .map_err(|e| format!("cannot press the close button of window {id:?}: {e}"))?;
+        self.report_windows();
+        self.done()
     }
 
     fn report_finished(&mut self) {
@@ -1423,6 +1562,7 @@ impl Headless {
                     .bounds_in_root(canvas)
                     .map(|b| b.origin + center)
             });
+        self.activate_window_of(id);
         // The finger, as platforms report it to the views around it that
         // listen to touches (an overlay's `onPressOutside` among them).
         let path = self.screen.touch_path(id);
@@ -1472,6 +1612,7 @@ impl Headless {
             (Some(page), Some(target)) => page - target.origin,
             _ => at,
         };
+        self.activate_window_of(id);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
@@ -1542,6 +1683,7 @@ impl Headless {
         let pick = self.screen.long_pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
+        self.activate_window_of(id);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
@@ -1879,6 +2021,11 @@ impl Headless {
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
         self.done()
     }
+}
+
+/// Why a step on windows fails off the desktops.
+fn no_windows() -> String {
+    "the app has no windows of its own here: open it as a desktop app (`platform: \"macos\"`, \"windows\" or \"linux\")".into()
 }
 
 /// How a dialog is answered when the test says nothing, as a user backing
