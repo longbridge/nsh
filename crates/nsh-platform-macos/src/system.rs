@@ -43,9 +43,11 @@
 //! it hosts (text fields, scroll bars) match the app. The surface's
 //! background, under the root view (which has none of its own), is the
 //! app's: the opaque background of its top view when that fills the root,
-//! else white / neutral-950 by the scheme (as the Linux backend's). It
-//! shows where the app has not drawn yet, as in the area a window grows
-//! by before the layout at its new size arrives.
+//! else, in the standalone runner's window, white / neutral-950 by the
+//! scheme (as the Linux backend's), and in a host app's view none: an
+//! embedded `AppView` shows its host through, as on iOS. It shows where
+//! the app has not drawn yet, as in the area a window grows by before the
+//! layout at its new size arrives.
 //!
 //! The status bar has no desktop equivalent. The clipboard is the general
 //! pasteboard; `hasText` only looks at the types on offer.
@@ -430,13 +432,13 @@ fn follow_background(surface: &Surface) {
             let color = s.background();
             (fills && color.0 & 0xff == 0xff).then_some(color)
         });
-    let color = app.unwrap_or(
-        if surface.environment.get().color_scheme == ColorScheme::Dark {
-            nsh_core::Color::rgba(10, 10, 10, 255)
-        } else {
-            nsh_core::Color::rgba(255, 255, 255, 255)
-        },
-    );
+    let color = app.unwrap_or(if !surface.standalone.get() {
+        nsh_core::Color::rgba(0, 0, 0, 0)
+    } else if surface.environment.get().color_scheme == ColorScheme::Dark {
+        nsh_core::Color::rgba(10, 10, 10, 255)
+    } else {
+        nsh_core::Color::rgba(255, 255, 255, 255)
+    });
     if surface.background.replace(Some(color)) == Some(color) {
         return;
     }

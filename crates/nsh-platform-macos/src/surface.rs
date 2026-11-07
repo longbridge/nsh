@@ -261,6 +261,9 @@ pub(crate) struct Surface {
     resized: RefCell<Vec<NshView>>,
     /// The background set under the root ([`crate::system`]).
     pub(crate) background: Cell<Option<nsh_core::Color>>,
+    /// The surface fills the standalone runner's window ([`crate::run_app`]),
+    /// not a view of a host app.
+    pub(crate) standalone: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
@@ -350,6 +353,7 @@ impl Surface {
             revisited: Cell::new(0),
             resized: RefCell::default(),
             background: Cell::new(None),
+            standalone: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),
