@@ -1165,6 +1165,13 @@ pub(crate) fn render_effect(cx: *mut JsContext, func: JsValue) -> JsValue {
     unsafe { qjs::JS_DupValue(cx, *graph(cx).value(id)) }
 }
 
+/// Makes a user effect (`createEffect`) running `func` (owned) under the
+/// current owner, after the render; `func` gets the value its last run
+/// returned (`undefined` at first).
+pub(crate) fn user_effect(cx: *mut JsContext, func: JsValue) {
+    r::effect(Js(cx), Kind::UserEffect, func, UNDEFINED);
+}
+
 /// A new signal object holding `value` (borrowed).
 pub(crate) fn new_signal(cx: *mut JsContext, value: JsValue) -> JsValue {
     let mut args = [value];

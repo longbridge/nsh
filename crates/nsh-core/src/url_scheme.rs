@@ -25,6 +25,30 @@ pub const MAX_PENDING: usize = 16;
 /// the URL.
 pub const URL: &str = "url";
 
+/// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
+/// marking the address of the page the app is (the web): an `http(s)` URL
+/// of the page's own, which needs no scheme the app claims. Only the
+/// platform sends root events.
+pub(crate) const PAGE: &str = "page";
+
+/// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
+/// that, `true`, only takes the URL as the app's address (the page's
+/// address at start), with no `open` event.
+pub(crate) const QUIET: &str = "quiet";
+
+/// The app's address as the core has it, for a VM's copy
+/// (`UrlScheme.url()`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct AppUrl {
+    /// Counts the address's changes.
+    pub(crate) version: u64,
+    /// The address.
+    pub(crate) address: Option<String>,
+    /// The number of the last `UrlScheme.setUrl` the core took: a VM whose
+    /// later calls the core has not taken yet keeps its own copy.
+    pub(crate) js: u64,
+}
+
 /// Schemes an app may not claim: the web's, files', other apps' and those
 /// that run code or reach the app's own data.
 const RESERVED_SCHEMES: &[&str] = &[
@@ -134,9 +158,81 @@ pub fn check_url(url: &str, schemes: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Checks an address the app sets (`UrlScheme.setUrl`, which may be
+/// relative): at most [`MAX_URL_LEN`] bytes, no whitespace or control
+/// characters.
+pub(crate) fn check_address(url: &str) -> Result<(), String> {
+    if url.len() > MAX_URL_LEN {
+        return Err(format!(
+            "an address has at most {MAX_URL_LEN} bytes (this one has {})",
+            url.len()
+        ));
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("an address has no whitespace or control characters".into());
+    }
+    Ok(())
+}
+
+/// Checks the address of the page the app is (the web, [`PAGE`]): an
+/// `http(s)` URL that passes [`check_address`].
+pub(crate) fn check_page_url(url: &str) -> Result<(), String> {
+    check_address(url)?;
+    let parsed = url::Url::parse(url).map_err(|e| format!("a page's address is not a URL: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "a page's address is http(s), not `{}:`",
+            parsed.scheme()
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `url` is of the origin of `page`, the page's address (the web):
+/// true while the page has none, or one that is not a URL.
+pub(crate) fn same_origin(page: Option<&str>, url: &str) -> bool {
+    let Some(page) = page.and_then(|p| url::Url::parse(p).ok()) else {
+        return true;
+    };
+    url::Url::parse(url).is_ok_and(|u| u.origin() == page.origin())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_on_the_web_keeps_the_pages_origin() {
+        let page = Some("https://a.test/app/?m=1");
+        assert!(same_origin(page, "https://a.test/other"));
+        assert!(!same_origin(page, "https://b.test/app/"));
+        assert!(!same_origin(page, "/relative"));
+        assert!(same_origin(None, "anything"));
+    }
+
+    #[test]
+    fn an_address_has_no_spaces_and_a_bounded_length() {
+        assert!(check_address("?message=a").is_ok());
+        assert!(check_address("https://example.com/a").is_ok());
+        assert!(check_address("a b").is_err());
+        assert!(check_address("a\nb").is_err());
+        assert!(check_address(&"a".repeat(MAX_URL_LEN + 1)).is_err());
+    }
+
+    #[test]
+    fn a_pages_address_is_an_http_url() {
+        assert!(check_page_url("https://example.com/debugger/logs/3?tab=a#x").is_ok());
+        assert!(check_page_url("http://127.0.0.1:8790/").is_ok());
+        for wrong in [
+            "myapp://orders/42",
+            "javascript:alert(1)",
+            "/debugger",
+            "about:blank",
+        ] {
+            assert!(check_page_url(wrong).is_err(), "{wrong}");
+        }
+        assert!(check_page_url(&format!("https://a.test/{}", "x".repeat(MAX_URL_LEN))).is_err());
+    }
 
     fn schemes(json: &str) -> Result<Vec<String>, Vec<String>> {
         match schemes_from_json_lenient(&serde_json::from_str(json).unwrap()) {

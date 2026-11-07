@@ -508,6 +508,26 @@ struct UrlScheme {
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
     next: Option<AnswerSlot<String>>,
+    /// The app's address: the last link taken, the page's on the web, or
+    /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy:
+    /// `UrlScheme.url()` follows it through `watchers`.
+    address: Option<String>,
+    /// Counts the address's changes, for the watchers.
+    version: u64,
+    /// The number of the last `UrlScheme.setUrl` taken.
+    js: u64,
+    /// Those waiting for an address after the version they know.
+    watchers: Vec<AnswerSlot<crate::url_scheme::AppUrl>>,
+}
+
+impl UrlScheme {
+    fn app_url(&self) -> crate::url_scheme::AppUrl {
+        crate::url_scheme::AppUrl {
+            version: self.version,
+            address: self.address.clone(),
+            js: self.js,
+        }
+    }
 }
 
 /// The speech recognition session running ([`crate::speech`]).
@@ -4991,14 +5011,41 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
+    /// Makes `url` the app's address (`js`: `UrlScheme.setUrl`'s call
+    /// number) and tells the watchers.
+    fn set_app_address(&mut self, url: String, js: Option<u64>) {
+        let links = &mut self.components.url_schemes;
+        links.address = Some(url);
+        links.version += 1;
+        if let Some(js) = js {
+            links.js = js;
+        }
+        let state = links.app_url();
+        for watcher in links.watchers.drain(..) {
+            watcher.borrow_mut().deliver(state.clone());
+        }
+    }
+
     /// Hands `url`, a link the system gave the app, to the listener, or
     /// keeps it for the next; drops it when the app does not claim it.
-    fn url_scheme(&mut self, url: String) {
+    /// `page`: the address of the page the app is (the web), which needs
+    /// no scheme of the app's; `quiet` only takes it as the address.
+    fn url_scheme(&mut self, url: String, page: bool, quiet: bool) {
         let links = &mut self.components.url_schemes;
-        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+        let checked = if page {
+            crate::url_scheme::check_page_url(&url)
+        } else {
+            crate::url_scheme::check_url(&url, &links.schemes)
+        };
+        if let Err(dropped) = checked {
             log::warn!("link dropped: {dropped}");
             return;
         }
+        self.set_app_address(url.clone(), None);
+        if quiet {
+            return;
+        }
+        let links = &mut self.components.url_schemes;
         if let Some(answer) = links.next.take() {
             answer.borrow_mut().deliver(url);
             return;
@@ -5463,6 +5510,41 @@ impl<M: TextEngine> Core<M> {
                     None => links.next = Some(answer),
                 }
             }
+            Action::AppUrl(answer) => {
+                let address = self.components.url_schemes.address.clone();
+                answer.borrow_mut().deliver(address);
+            }
+            Action::SetAppUrl { url, js } => {
+                // Checked where the app called (`set_app_url`, `setUrl`);
+                // on the web the address stays of the page's origin (TS's
+                // `setUrl` refuses others first).
+                let web = self.components.environment.os == crate::platform::Os::Web;
+                if web
+                    && !crate::url_scheme::same_origin(
+                        self.components.url_schemes.address.as_deref(),
+                        &url,
+                    )
+                {
+                    log::warn!("set_app_url: {url} is not of the page's origin");
+                    return;
+                }
+                self.set_app_address(url.clone(), js);
+                // Only the web shows an address (its history entries).
+                if web {
+                    let _ = self.apply_op(Op::Command {
+                        id: crate::ROOT_ID,
+                        command: Command::SetAppUrl(url),
+                    });
+                }
+            }
+            Action::WatchAppUrl(known, answer) => {
+                let links = &mut self.components.url_schemes;
+                if links.version == known {
+                    links.watchers.push(answer);
+                } else {
+                    answer.borrow_mut().deliver(links.app_url());
+                }
+            }
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
@@ -5857,7 +5939,15 @@ impl<M: TextEngine> Core<M> {
                 let Some(url) = url else {
                     return false;
                 };
-                self.url_scheme(url.clone());
+                let flag = |key: &str| {
+                    entries.iter().find_map(|(k, v)| match v {
+                        crate::PayloadValue::Bool(b) if *k == key => Some(*b),
+                        _ => None,
+                    })
+                };
+                let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
+                let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
+                self.url_scheme(url.clone(), page, quiet);
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

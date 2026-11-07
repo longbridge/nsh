@@ -84,6 +84,8 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The address the next app starts at ([`nsh_set_page_url`]).
+    static PAGE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next start ([`nsh_start_rust`], `nsh_browser_start`).
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
@@ -713,6 +715,15 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     // crate, through wasm-bindgen) asks the page to pump, as input does.
     engine.set_wake(std::sync::Arc::new(ffi::request_pump));
     let control = engine.control();
+    // The core has the app's address before the app's code asks for it.
+    if let Some(url) = PAGE_URL.with(|u| u.borrow_mut().take()) {
+        let payload = serde_json::json!({ "url": url, "page": true, "quiet": true });
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            event::payload(EventKind::UrlScheme, payload),
+        );
+    }
     // The test moves its clock through the engine.
     #[cfg(feature = "dev")]
     TEST_MODEL.with(|m| {
@@ -765,6 +776,19 @@ pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
     #[cfg(feature = "browser-core")]
     browser::extend_registries(&sets);
     pump()
+}
+
+/// Sets the address the app started next starts at (`UrlScheme.url()`,
+/// `app_url`): the page's, when the app is the page.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_page_url(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    PAGE_URL.with(|u| *u.borrow_mut() = Some(url));
 }
 
 /// Sets the page's URL (`document.baseURI`): relative request URLs

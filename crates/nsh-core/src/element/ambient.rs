@@ -800,6 +800,46 @@ pub fn next_url_scheme_open() -> Answer<String> {
     answer
 }
 
+/// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
+/// the native platforms the last link that opened the app; what
+/// [`set_app_url`] set after it; `None` when there is none
+/// ([`crate::url_scheme`]). To await in a task.
+pub fn app_url() -> Answer<Option<String>> {
+    let (answer, slot) = Answer::new();
+    act(Action::AppUrl(slot));
+    answer
+}
+
+/// Sets the app's address (TS: `UrlScheme.setUrl`): on the web it replaces
+/// the current history entry's; the native platforms keep it for
+/// [`app_url`] ([`crate::url_scheme`]). An address longer than
+/// [`crate::url_scheme::MAX_URL_LEN`] or with whitespace is an error, as
+/// TS's `TypeError`, and so on the web is one that is not absolute (TS
+/// resolves its own against the page); there one of another origin than
+/// the page's is dropped with a warning.
+pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
+    let url = url.into();
+    crate::url_scheme::check_address(&url)?;
+    if try_os() == Some(Os::Web) {
+        url::Url::parse(&url)
+            .map_err(|e| format!("on the web an address is an absolute URL: {e}"))?;
+    }
+    act(Action::SetAppUrl { url, js: None });
+    Ok(())
+}
+
+/// `UrlScheme.setUrl`'s part in the core: its call number `js`.
+pub(crate) fn set_app_url_from_js(url: String, js: u64) {
+    act(Action::SetAppUrl { url, js: Some(js) });
+}
+
+/// The app's address once it is not version `known`'s.
+pub(crate) fn watch_app_url(known: u64) -> Answer<crate::url_scheme::AppUrl> {
+    let (answer, slot) = Answer::new();
+    act(Action::WatchAppUrl(known, slot));
+    answer
+}
+
 /// Whether a web view's ref gives its page trusted input here (TS:
 /// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
 /// the platform delivers it (macOS) and the app's capabilities grant

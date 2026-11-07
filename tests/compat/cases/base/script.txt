@@ -423,6 +423,17 @@ covers [props] NavPage.headerStyle
 covers [props] NavPage.headerClass
 covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
+# base-nav-stack-change
+tap id:case-base-nav-stack-change
+# onChange: not for the first routes, then once per change with the routes after it.
+expect Changes: 0 none
+tap text:Push
+expect Changes: 1 home>p1
+tap text:Push
+expect Changes: 2 home>p1 | home>p1>p2
+tap text:Pop
+expect Changes: 3 home>p1 | home>p1>p2 | home>p1
+covers [events] onChange
 # base-nav-stack
 tap id:case-base-nav-stack
 # Only the top page is on screen; the controls sit outside the stack.

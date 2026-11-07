@@ -1,8 +1,8 @@
-import { effect, type JSX, Scroll, signal, Text, View } from "nsh";
+import { effect, type JSX, Scroll, signal, Text, UrlScheme, View } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { BackHandler } from "nsh/mobile";
 import { platform } from "nsh";
-import { AlertDialog, Dialog, NavPage, Input } from "nsh/base";
+import { AlertDialog, Dialog, NavPage, NavStack, Input, createNavStack } from "nsh/base";
 import { safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
@@ -375,6 +375,60 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
   );
 }
 
+/** A stack's pages and the app's address, the same code on every
+ * platform: the app maps its own routes to an address
+ * (`#/messages/Invoice`), opens at `UrlScheme.url()`, gives each page its
+ * address as the stack changes (`onChange` → `UrlScheme.setUrl`, the
+ * browser's back included, which pops the stack) and hears links
+ * (`UrlScheme.on("open")`). Only the web shows the address. */
+function Addressed() {
+  const prefix = "#/messages/";
+  const opened = (UrlScheme.url() ?? "").split("#")[1] ?? "";
+  const start = `#${opened}`.startsWith(prefix) ? ["Inbox", decodeURIComponent(`#${opened}`.slice(prefix.length))] : ["Inbox"];
+  const messages = createNavStack<string>(start);
+  const changes = signal(0);
+  const opens = signal(0);
+  const address = signal(UrlScheme.url() ?? "");
+  UrlScheme.on("open", ({ url }) => {
+    opens.set(opens() + 1);
+    address.set(url);
+  });
+  // The address without the app's part, then the open message's.
+  const addressOf = (top: string) => `${(UrlScheme.url() ?? "").split("#")[0]}${top === "Inbox" ? "" : prefix + encodeURIComponent(top)}`;
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ height: 200, borderRadius: radius.inset, overflow: "hidden", borderWidth: 1, borderColor: colors.line }}>
+        <NavStack
+          state={messages}
+          style={{ flex: 1 }}
+          onChange={({ routes }) => {
+            changes.set(changes() + 1);
+            UrlScheme.setUrl(addressOf(routes[routes.length - 1]));
+            address.set(UrlScheme.url() ?? "");
+          }}
+        >
+          {(route) => (
+            <NavPage header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}>
+              <View style={{ padding: 12, gap: 8 }}>
+                {route === "Inbox" ? (
+                  <Each of={["Welcome", "Invoice", "Travel"]}>
+                    {(name) => <Button label={`Open ${name()}`} variant="secondary" onPress={() => messages.push(name())} />}
+                  </Each>
+                ) : (
+                  <Button label="Back to the inbox" variant="secondary" onPress={() => messages.pop()} />
+                )}
+              </View>
+            </NavPage>
+          )}
+        </NavStack>
+      </View>
+      <Text style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
+        {`${changes()} changes, ${opens()} opens: ${address() || "no address"}`}
+      </Text>
+    </View>
+  );
+}
+
 export function Navigation() {
   const sheet = signal<Sheet>(null);
   const intercept = signal(false);
@@ -429,6 +483,11 @@ export function Navigation() {
             <View>
               <Each of={modals}>{(m, i) => <LinkRow first={i() === 0} icon={m().icon} title={m().title} note={m().note} onPress={() => sheet.set(m().key)} />}</Each>
             </View>
+          </Card>
+        ),
+        () => (
+          <Card title="Address" subtitle="onChange, UrlScheme.setUrl">
+            <Addressed />
           </Card>
         ),
         () => (

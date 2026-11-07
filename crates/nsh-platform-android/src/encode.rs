@@ -701,6 +701,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
+                    // The web's history entries; the core sends it there only.
+                    | Command::SetAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }

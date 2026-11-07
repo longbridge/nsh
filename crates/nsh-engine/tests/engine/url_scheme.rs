@@ -1,6 +1,6 @@
 //! `UrlScheme` of `nsh` from JS: the links the platform reports reach the
 //! `open` listener, those that came before it first, and only those of the
-//! schemes the app claims.
+//! schemes the app claims; `url()` follows the core's address.
 
 use std::time::Duration;
 
@@ -26,11 +26,37 @@ function App() {
 mount(App);
 "#;
 
+/// Reads `url()` at the start, after the launch link, after a `setUrl` and
+/// after an address the platform gives with no `open` (`quiet`).
+const ADDRESS_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  note(`start:${UrlScheme.url()}`);
+  UrlScheme.on("open", ({ url }) => note(`open:${url}`));
+  setTimeout(() => note(`link:${UrlScheme.url()}`), 300);
+  setTimeout(() => {
+    UrlScheme.setUrl("myapp://set");
+    note(`set:${UrlScheme.url()}`);
+  }, 500);
+  setTimeout(() => note(`later:${UrlScheme.url()}`), 800);
+  setTimeout(() => note(`quiet:${UrlScheme.url()}`), 1200);
+  setTimeout(() => note("done"), 1500);
+  return <Text>{`url:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
 fn bundle() -> Bundle {
-    let dir = crate::temporary_root().join(format!("nsh-deep-links-{}", std::process::id()));
+    bundle_of(APP, "nsh-deep-links")
+}
+
+fn bundle_of(app: &str, name: &str) -> Bundle {
+    let dir = crate::temporary_root().join(format!("{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
-    std::fs::write(&entry, APP).unwrap();
+    std::fs::write(&entry, app).unwrap();
     let ui_sets = [nsh_base::registry()];
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
@@ -63,10 +89,19 @@ fn open(control: &EngineControl, url: &str) {
 /// Runs the app claiming `schemes`, reporting `launch` at once and `later`
 /// once the app heard something; the text once it says `done`.
 fn run(schemes: &[&str], launch: &[String], later: &str) -> String {
+    run_app(bundle(), schemes, launch, |control| open(control, later))
+}
+
+fn run_app(
+    bundle: Bundle,
+    schemes: &[&str],
+    launch: &[String],
+    later: impl Fn(&EngineControl),
+) -> String {
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(600.0)),
         ui_sets: vec![nsh_base::registry()],
-        ..EngineConfig::new(bundle().with_url_schemes(schemes.iter().copied()))
+        ..EngineConfig::new(bundle.with_url_schemes(schemes.iter().copied()))
     };
     let (tx, rx) = crossbeam_channel::unbounded();
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
@@ -86,9 +121,9 @@ fn run(schemes: &[&str], launch: &[String], later: &str) -> String {
                 text = t.text.to_string();
             }
         }
-        if !sent_later && text != "links:" {
+        if !sent_later && (text.starts_with("links: ") || text.contains("later:")) {
             sent_later = true;
-            open(&control, later);
+            later(&control);
         }
         if text.contains("done") {
             return text;
@@ -127,4 +162,36 @@ fn links_wait_for_the_listener_sixteen_at_most() {
 fn an_app_that_claims_no_scheme_hears_no_link() {
     let text = run(&[], &["myapp://launch".to_owned()], "myapp://later");
     assert_eq!(text, "links: done");
+}
+
+#[test]
+fn url_follows_the_cores_address_and_reads_back_what_set_url_set() {
+    // `quiet`: an address with no `open` (the page's on the web).
+    let quiet = |control: &EngineControl| {
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::UrlScheme,
+            EventPayload::Map(vec![
+                (
+                    nsh_core::url_scheme::URL,
+                    PayloadValue::Str("myapp://quiet".into()),
+                ),
+                ("quiet", PayloadValue::Bool(true)),
+            ]),
+        );
+    };
+    let text = run_app(
+        bundle_of(ADDRESS_APP, "nsh-app-url"),
+        &["myapp"],
+        &["myapp://launch".to_owned()],
+        quiet,
+    );
+    // The copy follows the core from the turn after the first call;
+    // `setUrl` reads back at once; a quiet address opens nothing.
+    assert!(
+        text.starts_with(
+            "url: start:null open:myapp://launch link:myapp://launch set:myapp://set later:myapp://set quiet:myapp://quiet done"
+        ),
+        "{text}"
+    );
 }

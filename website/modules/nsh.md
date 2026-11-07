@@ -1971,6 +1971,72 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
 (Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
+### UrlScheme.url
+
+`url()` is the app's address and `setUrl(url)` sets it, so an app gives its pages addresses on every platform:
+
+```ts
+const UrlScheme: {
+  on(event: "open", listener: (event: { url: string }) => void): () => void;
+  /** The app's address, or null when it has none. */
+  url(): string | null;
+  /** Sets the address of the page shown; the app's pages stay as they are. */
+  setUrl(url: string): void;
+};
+```
+
+| Platform | `url()` | `setUrl(url)` |
+| --- | --- | --- |
+| The web, the app the whole page | The page's address: the one it loaded, what `setUrl` set, or the entry's the browser's back went back to | Replaces the current history entry's address, resolved as `history.replaceState` resolves it (against the page's `<base href>`), after the entries of the pages pushed or popped in the same turn |
+| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()` |
+
+A URL that is not a string, longer than 16 KiB or with whitespace is a `TypeError`, and so on the web, when the app is
+the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too: `url()` is a copy that shows a change
+made elsewhere (a link, Rust's `set_app_url`) from the next turn on, and what `setUrl` sets at once. Every page pushed
+on a shown stack keeps its own history entry on the web, so the browser's back goes back in the app: the stack's pages
+go back and the address becomes the entry's, with no `open`, as for any page the app pops (a page the app keeps, with
+`popOnBack={false}` or `onBackPress`, keeps its entry and address). A forward to a page already gone stays where the
+app is. An app that builds its first routes from `url()`, sets the top
+page's address in its stack's [`onChange`](../elements/nav-stack.md) and shows the pages a link names has addresses for
+its pages everywhere:
+
+```tsx
+import { UrlScheme } from "nsh";
+import { NavStack, createNavStack } from "nsh/base";
+
+// A route is "" (the inbox) or a message's id: strings, so the routes of an address equal those shown.
+type Route = string;
+
+function routesOf(url: string | null): Route[] {
+  const id = url && new URL(url, "https://app.invalid/").searchParams.get("message");
+  return id ? ["", id] : [""];
+}
+
+// "." is the page's own path, without a query.
+const urlOf = (route: Route) => (route ? `?message=${encodeURIComponent(route)}` : ".");
+
+const nav = createNavStack<Route>(routesOf(UrlScheme.url()));
+
+// A link of the app's scheme.
+UrlScheme.on("open", ({ url }) => nav.setRoutes(routesOf(url)));
+
+export function App() {
+  return (
+    <NavStack
+      state={nav}
+      style={{ flex: 1 }}
+      onChange={({ routes }) => UrlScheme.setUrl(urlOf(routes[routes.length - 1]))}
+    >
+      {(route) => (route ? <Message id={route} /> : <Inbox onOpen={(id) => nav.push(id)} />)}
+    </NavStack>
+  );
+}
+```
+
+Rust code awaits `app_url()` and calls `set_app_url(url)` of `nsh_core::prelude`, beside `next_url_scheme_open()`; the
+same address as `url()` and `setUrl`, and `set_app_url` returns an error for the URLs `setUrl` throws for. On the web it
+takes an absolute URL, and drops one of another origin than the page's with a warning.
+
 ## Speech
 
 The speech API turns what the user says into text (dictation): the app starts a session, the platform listens to the

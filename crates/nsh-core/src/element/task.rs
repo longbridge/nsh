@@ -118,6 +118,17 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The app's address resolves the slot ([`crate::url_scheme`]).
+    AppUrl(AnswerSlot<Option<String>>),
+    /// The app sets its address ([`crate::url_scheme`]); `js`: the number
+    /// of `UrlScheme.setUrl`'s call (counted per VM), `None` from Rust.
+    SetAppUrl {
+        url: String,
+        js: Option<u64>,
+    },
+    /// The app's address once it differs from version `known` resolves the
+    /// slot (`UrlScheme.url()`'s copy).
+    WatchAppUrl(u64, AnswerSlot<crate::url_scheme::AppUrl>),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here
