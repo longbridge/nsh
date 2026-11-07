@@ -606,3 +606,119 @@ fn js_popovers_in_a_window_are_placed_in_it() {
         "{inserted:?}"
     );
 }
+
+const WINDOW_LATE_DIALOG_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+const shown = signal(false);
+const asked = signal(false);
+
+mount(() => {
+  setTimeout(() => shown.set(true), 50);
+  setTimeout(() => asked.set(true), 200);
+  return (
+    <View>
+      <Window id="settings" open={shown()} onOpenChange={(e) => shown.set(e.open)}>
+        <View>
+          <Text>in window</Text>
+          <If when={asked()}>
+            <Dialog open onOpenChange={(e) => asked.set(e.open)}>
+              <Text>late dialog</Text>
+            </Dialog>
+          </If>
+        </View>
+      </Window>
+    </View>
+  );
+});
+"#;
+
+/// A dialog that mounts in a window of the app's own once it is open gets
+/// its config, which names that window, before its insertion: platforms
+/// present a dialog when it is inserted, over the window its config names.
+#[test]
+fn js_dialogs_mounted_in_an_open_window_name_it_before_they_show() {
+    use nsh_core::{Command, NodeId, desktop::DesktopCommand};
+    let dir = std::env::temp_dir().join(format!("nsh-window-late-dialog-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, WINDOW_LATE_DIALOG_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ui_sets: vec![nsh_base::registry()],
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let _engine = Engine::start_with(config, || ApproxTextEngine, ChannelSink(tx), |_| {}).unwrap();
+    let mut window: Option<NodeId> = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id,
+                command: Command::Desktop(command),
+            } = item
+                && matches!(**command, DesktopCommand::OpenWindow(_))
+            {
+                window = Some(*id);
+            }
+        }
+        let Some(text) = batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id, text, .. } if &*text.text == "late dialog" => Some(*id),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let window = window.expect("the window opens before its dialog");
+        // The dialog's root: the modal its text is in.
+        let parent_of = |child: NodeId| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+        };
+        let modal = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::Modal,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the dialog's root");
+        let mut node = text;
+        while node != modal {
+            node = parent_of(node).expect("the text is in the dialog");
+        }
+        let position = |wanted: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(wanted);
+        let config = position(&|i| matches!(i, MountItem::ModalConfig { id, .. } if *id == modal))
+            .expect("the dialog's config");
+        let inserted =
+            position(&|i| matches!(i, MountItem::Insert { child, .. } if *child == modal))
+                .expect("the dialog's insertion");
+        assert!(config < inserted, "{:?}", batch.items);
+        let MountItem::ModalConfig { config, .. } = &batch.items[config] else {
+            unreachable!()
+        };
+        assert_eq!(config.window, window);
+        return;
+    }
+    panic!("the dialog never showed");
+}
