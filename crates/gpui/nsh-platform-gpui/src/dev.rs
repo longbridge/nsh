@@ -469,6 +469,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             capabilities,
             app_id,
             limits,
+            window,
         } => {
             // A bundle reached through a hot update keeps its "Updated".
             if dev.running != Some((session, version)) {
@@ -496,6 +497,9 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
+            // nsh.json `window`: the engine applies its attributes to the
+            // window the host opened before the app was known.
+            bundle = bundle.with_main_window(window.as_deref());
             bundle = match bundle
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())

@@ -305,6 +305,24 @@ public class NshView extends FrameLayout {
         }
     }
 
+    /**
+     * Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host
+     * ships, so every app this view loads can name its family in
+     * {@code fontFamily} without bundling the file. Call it before or after
+     * loading: a font registered before a load is in that app's first frame,
+     * and one registered while an app runs is used from the next layout.
+     * Registering the same file again does nothing.
+     *
+     * @param data the font file
+     * @throws IllegalArgumentException when {@code data} is not a font
+     */
+    public void registerFont(byte[] data) {
+        String error = Native.registerFont(handle, data);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
+    }
+
     /** The contents of {@code file}, or null when it does not exist. */
     private static String readText(File file) throws java.io.IOException {
         return file.exists() ? new String(Net.readAll(new FileInputStream(file)), StandardCharsets.UTF_8) : null;
@@ -368,7 +386,7 @@ public class NshView extends FrameLayout {
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
-            Native.load(handle, code, false, map, capabilities, app);
+            Native.load(handle, code, false, map, capabilities, app, null);
             return true;
         } catch (Exception e) {
             reportError("cannot read bundle " + file + ": " + e);
@@ -384,15 +402,27 @@ public class NshView extends FrameLayout {
      * @return false (reported to the error listener) if it cannot be read
      */
     public boolean loadAssetBundle(String dir) {
+        return loadAssetBundle(dir, false);
+    }
+
+    /**
+     * {@link #loadAssetBundle(String)} for the activity of packaged apps
+     * ({@link AppActivity}): with {@code packages}, a newer signed package of
+     * the app's code it downloaded ({@code nsh/updater}'s
+     * {@code downloadPackage}) runs instead, when the app's
+     * {@code assets/nsh-updater.json} trusts package roots.
+     */
+    boolean loadAssetBundle(String dir, boolean packages) {
         try {
             byte[] code = Net.readAll(getContext().getAssets().open(dir + "/bundle.nshc"));
             // Null when the app declares no capabilities / has no id.
             String capabilities = readAssetText(dir + "/capabilities.json");
             String app = readAssetText(dir + "/app.json");
+            String updater = packages ? readAssetText(dir + "/assets/nsh-updater.json") : null;
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
-            Native.load(handle, code, true, null, capabilities, app);
+            Native.load(handle, code, true, null, capabilities, app, updater);
             return true;
         } catch (Exception e) {
             reportError("cannot read the app bundle: " + e);

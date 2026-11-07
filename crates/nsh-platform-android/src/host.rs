@@ -60,7 +60,7 @@ pub(crate) struct Host {
     limits: Mutex<nsh_engine::Limits>,
     /// Where loaded apps keep their data, each in a directory named by its
     /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
-    data_dir: Option<std::path::PathBuf>,
+    pub(crate) data_dir: Option<std::path::PathBuf>,
     /// The directory loaded apps keep their storage in, overriding their own
     /// (`NshView.setStorageDirectory`); `None`: theirs.
     storage: Mutex<Option<std::path::PathBuf>>,
@@ -68,6 +68,9 @@ pub(crate) struct Host {
     access: Mutex<Arc<nsh_engine::Access>>,
     /// The embedding app's theme overrides (`NshView.setThemeOverrides`).
     host_tokens: Mutex<Option<nsh_engine::Tokens>>,
+    /// Font files the embedding app registers (`NshView.registerFont`),
+    /// applied to the running app and to every app loaded later.
+    fonts: Mutex<Vec<Vec<u8>>>,
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
@@ -130,6 +133,21 @@ impl Host {
         if let Some(control) = self.control() {
             control.set_tokens(tokens);
         }
+    }
+
+    /// Registers a font file (TrueType, OpenType, WOFF or WOFF2) for the
+    /// running app and every app loaded later. The family name is the one
+    /// in the file.
+    fn register_font(&self, data: Vec<u8>) -> Result<(), String> {
+        nsh_core::font_family(&data)?;
+        let mut fonts = self.fonts.lock().expect("fonts");
+        if !nsh_core::keep_font(&mut fonts, &data) {
+            return Ok(());
+        }
+        if let Some(control) = self.control() {
+            control.register_font(data);
+        }
+        Ok(())
     }
 
     /// Runs `app`, replacing the running app.
@@ -202,6 +220,7 @@ impl Host {
             picker: None,
             speech: None,
             audio: None,
+            windows: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone());
@@ -212,9 +231,13 @@ impl Host {
         }
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.lock().expect("tokens").clone();
-        let setup = |control: &EngineControl| {
+        let fonts = self.fonts.lock().expect("fonts").clone();
+        let setup = move |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            for font in fonts {
+                control.register_font(font);
             }
         };
         match Engine::start_with(
@@ -574,6 +597,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         host_tokens: Mutex::new(None),
+        fonts: Mutex::new(Vec::new()),
         inline_images: Mutex::default(),
         cache: Mutex::default(),
         system_cache_dir: cache_dir,
@@ -864,6 +888,34 @@ extern "system" fn Java_com_longbridge_nsh_Native_setThemeOverrides<'local>(
     }
 }
 
+/// Registers a font file (TrueType, OpenType, WOFF or WOFF2) for the
+/// running app and every app loaded later. Returns why it is not a font
+/// (nothing is registered), or null.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_registerFont<'local>(
+    env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    bytes: JByteArray<'local>,
+) -> JString<'local> {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let data = match env.convert_byte_array(&bytes) {
+        Ok(data) => data,
+        Err(err) => {
+            return env
+                .new_string(err.to_string())
+                .unwrap_or_else(|_| JString::from(JObject::null()));
+        }
+    };
+    match host.register_font(data) {
+        Ok(()) => JString::from(JObject::null()),
+        Err(err) => env
+            .new_string(err)
+            .unwrap_or_else(|_| JString::from(JObject::null())),
+    }
+}
+
 /// Whether the running app's web views may navigate to `url`.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_allowsWebview(
@@ -961,6 +1013,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     source_map: JString<'_>,
     capabilities: JString<'_>,
     app: JString<'_>,
+    updater: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -992,10 +1045,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
         let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
         bundle = bundle.with_app_id(id);
     }
-    match bundle.with_capabilities_json(declared.as_deref()) {
-        Ok(bundle) => host.load(bundle),
-        Err(err) => log::error!("cannot load the bundle: {err}"),
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+    let mut bundle = match bundle.with_capabilities_json(declared.as_deref()) {
+        Ok(bundle) => bundle,
+        Err(err) => return log::error!("cannot load the bundle: {err}"),
+    };
+    // A packaged app (`AppActivity`) runs a newer signed package of its code
+    // it downloaded instead.
+    #[cfg(feature = "js")]
+    if bytecode != 0
+        && !updater.is_null()
+        && let Some(run) = crate::package::downloaded(&mut env, host, &mut bundle, &updater)
+    {
+        return host.load(run);
     }
+    #[cfg(not(feature = "js"))]
+    let _ = updater;
+    host.load(bundle);
 }
 
 /// Runs a Rust app's root in the `NshView` with native handle `handle`

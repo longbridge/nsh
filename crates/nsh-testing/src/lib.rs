@@ -51,6 +51,8 @@ mod storage;
 mod trace;
 #[cfg(feature = "js")]
 mod values;
+#[cfg(any(feature = "agent", feature = "js"))]
+mod window_json;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};

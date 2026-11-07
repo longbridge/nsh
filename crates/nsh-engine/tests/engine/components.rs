@@ -108,6 +108,7 @@ fn app_config(
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     }
 }
 

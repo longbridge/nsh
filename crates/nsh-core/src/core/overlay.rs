@@ -1026,8 +1026,13 @@ impl<M: TextEngine> Core<M> {
         if host == ROOT_ID {
             return Some((self.viewport, self.safe_area));
         }
-        let root = self.nodes[self.key(host).ok()? as usize].root.as_ref()?;
-        Some((root.reported.unwrap_or(self.viewport), root.insets))
+        let key = self.key(host).ok()?;
+        let root = self.nodes[key as usize].root.as_ref()?;
+        // A window whose size is not known yet: as large as its content.
+        let size = self
+            .root_view_size(key)
+            .unwrap_or(self.nodes[key as usize].frame.size);
+        Some((size, root.insets))
     }
 
     /// Lays out shown overlay `key` in a box the size of its root view,
