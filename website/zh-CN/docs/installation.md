@@ -106,6 +106,17 @@ nsh --version
 发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 开发宿主。它们都包含
 Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）。
 
+## 安装 nightly 版本
+
+`main` 有新提交的每一天，夜间都会构建并发布为 [nightly release](https://github.com/longbridge/nsh/releases/tag/nightly)，包含和正式版相同的发行包。在 macOS 和 Linux 上用安装脚本安装：
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+它和正式版一样安装到 `~/.nsh`，再次运行即可更新到最新的 nightly；不带参数的命令则回到最新正式版。`-V` 显示构建所用的 `main` 提交。用 Rust 编写的应用会用 crates.io 上与 CLI 同版本号的 NSH crate 构建 runner，也就是上一个正式版的 crate；这类应用请使用正式版或源码版。
+
 ## 安装最新源码版
 
 在 macOS 和 Linux 上，准备好 Git、Rust 和下文的平台构建依赖后，可以安装最新 `main`：

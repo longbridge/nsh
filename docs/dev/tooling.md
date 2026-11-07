@@ -948,7 +948,15 @@ names carry no version, so `releases/latest/download/<asset>` always resolves; t
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
 workflow by hand without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to
-check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`). Pull
+check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`).
+
+Every night (18:00 UTC) the same workflow builds the latest `main` and publishes it as the release `nightly`, a
+prerelease never marked latest, so `releases/latest` and the package managers keep the stable release. A night
+whose `main` the nightly already has builds nothing (the `plan` job compares the commits). There is one `nightly`
+tag: each build deletes the previous nightly release and its tag and creates them again at the new commit (moving
+the tag through the refs API would need the `workflows` permission when the commits change workflows), so tags do
+not pile up. Running the workflow by hand with *nightly* publishes one at once. `install.sh --nightly` installs
+it; the CLI keeps the workspace version, and `-V` shows the commit. Pull
 requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
@@ -970,6 +978,7 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
+- `install.sh --nightly` installs the `nightly` release the same way (`NSH_VERSION=nightly` does too).
 - `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
   Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
   are preserved and rejected. The checkout stays available for on-demand native runtime builds.
