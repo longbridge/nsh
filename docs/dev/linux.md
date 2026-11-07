@@ -291,12 +291,12 @@ agent screenshot on the left and the window capture on the right.
 
 | Renderer | Section / comparison | Changed pixels | Pixels >1 | MAE | Max channel difference |
 | --- | --- | ---: | ---: | ---: | ---: |
-| NGL | [Progressive blur](assets/linux-shot/ngl-blur.png) | 7 | 0 | 0.000002 | 1 |
-| NGL | [Shadows and glow](assets/linux-shot/ngl-shadows.png) | 48 | 0 | 0.000016 | 1 |
-| NGL | [3D transforms](assets/linux-shot/ngl-3d.png) | 2,196 | 1,229 | 0.043830 | 190 |
-| Vulkan | [Progressive blur](assets/linux-shot/vulkan-blur.png) | 1 | 0 | 0.0000003 | 1 |
-| Vulkan | [Shadows and glow](assets/linux-shot/vulkan-shadows.png) | 17 | 0 | 0.000009 | 1 |
-| Vulkan | [3D transforms](assets/linux-shot/vulkan-3d.png) | 2,163 | 1,224 | 0.043265 | 187 |
+| NGL | Progressive blur | 7 | 0 | 0.000002 | 1 |
+| NGL | Shadows and glow | 48 | 0 | 0.000016 | 1 |
+| NGL | 3D transforms | 2,196 | 1,229 | 0.043830 | 190 |
+| Vulkan | Progressive blur | 1 | 0 | 0.0000003 | 1 |
+| Vulkan | Shadows and glow | 17 | 0 | 0.000009 | 1 |
+| Vulkan | 3D transforms | 2,163 | 1,224 | 0.043265 | 187 |
 
 The 3D demo's native Y-axis sway keeps running between the two captures; a manual
 engine clock does not freeze the platform animator. All differences greater than
