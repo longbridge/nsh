@@ -332,17 +332,17 @@ fn pan_permission_filters_native_values_and_events_without_losing_them() {
 /// The tokens of a theme file of the tests' own format, `{ "key":
 /// "#rrggbb", … }` over the sample's (`None`: the sample's): the core reads
 /// `uiTheme` with what a UI set brings.
-fn test_tokens(json: Option<&str>) -> Result<crate::element::Tokens, String> {
+fn test_tokens(json: Option<&str>) -> Result<(crate::element::Tokens, Vec<String>), String> {
     let mut tokens = crate::element::tokens::sample();
     let Some(json) = json else {
-        return Ok(tokens);
+        return Ok((tokens, Vec::new()));
     };
     let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     for (key, value) in value.as_object().ok_or("not an object")? {
         let color = value.as_str().and_then(Color::parse).ok_or("not a color")?;
         tokens.set_color(key, color.into());
     }
-    Ok(tokens)
+    Ok((tokens, Vec::new()))
 }
 
 /// Tokens with just `colors`.
@@ -9643,7 +9643,7 @@ mod components {
             })
         };
         let themed = |hex: u32| {
-            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap())
+            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap().0)
         };
         c.commit().unwrap();
         c.set_host_tokens(Some(themed(0x00ff00)));
