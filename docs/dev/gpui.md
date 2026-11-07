@@ -270,9 +270,9 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 comes before the first bundle.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
-again, whatever covers it. On Linux GPUI cannot read a frame back, so the window is read from the X server: the host
-runs under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a window covering this one
-shows in the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
+again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
+pixmap after requesting a fresh frame. The host runs under X11 or Xwayland (see "Looking at a change on Linux");
+covering windows do not affect the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
 and Windows.
 
 ## Not implemented, or different
