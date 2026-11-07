@@ -5,7 +5,6 @@ import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
-import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
 import { alpha, colors, finish, focusRing, mono, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
@@ -13,12 +12,15 @@ import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type Butt
 import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
 import { play } from "./sound";
+import { backdrop, sheetGrabber, sheetPanel, tooltipLook, tooltipNote, tooltipText } from "./look/overlay";
 
 export * from "./theme";
 export * from "./look/button";
 export * from "./look/press";
 export * from "./look/switch";
 export * from "./look/tool";
+export * from "./look/menu";
+export * from "./look/overlay";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -588,9 +590,10 @@ export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
 
 /**
  * A panel at the bottom over a dimmed backdrop while `open` (`nsh/base`'s
- * `Sheet`, in the gallery's look); a press on the backdrop, Escape or the
- * back button closes it (`onClose`: set `open` to false). It comes in with
- * `open` and goes with `close`, quietly.
+ * `Sheet`, in the gallery's look: `sheetPanel("bottom")` with its
+ * `sheetGrabber`, over `backdrop()`); a press on the backdrop, Escape or
+ * the back button closes it (`onClose`: set `open` to false). It comes in
+ * with `open` and goes with `close`, quietly.
  */
 export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
   let was = props.open;
@@ -600,21 +603,8 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
     was = open;
   });
   return (
-    <BaseSheet
-      open={props.open}
-      onOpenChange={({ open }) => !open && props.onClose()}
-      backdropStyle={{ backgroundColor: "rgba(0,0,0,0.4)" }}
-      popupStyle={{
-        gap: 12,
-        paddingTop: 8,
-        paddingHorizontal: 16,
-        paddingBottom: safeArea().bottom + 16,
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        backgroundColor: colors.surface,
-      }}
-    >
-      <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
+    <BaseSheet open={props.open} onOpenChange={({ open }) => !open && props.onClose()} backdropStyle={backdrop()} popupStyle={sheetPanel("bottom")}>
+      <View style={sheetGrabber()} />
       {props.children}
     </BaseSheet>
   );
@@ -624,7 +614,7 @@ export { Icon, IconLabel, type IconName } from "./icons";
 
 /**
  * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
- * small bubble of the theme's `popover` tokens that comes in with `popIn`
+ * small bubble of the theme's `popover` tokens (`tooltipLook`) that comes in with `popIn`
  * from its side (`placement`, default above), with the keys of a
  * `shortcut` after the text. In the terminal the tooltip is a line of the
  * status line: the text and its keys, no bubble.
@@ -645,10 +635,10 @@ export function Tip(props: { label: string; shortcut?: string; placement?: Popup
   const presence = createPresence(props.placement ?? "top");
   return (
     <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>
-      <View class="flex-row items-center gap-2 rounded-md border border-border bg-popover px-2 py-1" style={presence.style}>
-        <Text class="text-xs text-popover-foreground">{props.label}</Text>
+      <View class={tooltipLook().class} style={presence.style}>
+        <Text class={tooltipText}>{props.label}</Text>
         <If when={props.shortcut}>
-          <Text class="text-xs text-muted-foreground" style={{ fontVariant: ["tabular-nums"] }}>
+          <Text class={tooltipNote} style={{ fontVariant: ["tabular-nums"] }}>
             {props.shortcut}
           </Text>
         </If>

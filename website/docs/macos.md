@@ -67,7 +67,9 @@ keyboard stays with the app you type in (`--foreground` lets them become the act
 ### Performance monitor
 
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
-`nsh run App.tsx --target macos --fps`, the host's `--fps`, or a packaged TSX app's `open -a MyApp --args --fps`) shows a panel at the top right of the
+`nsh run App.tsx --target macos --fps`, the host's `--fps`, a packaged TSX app's `open -a MyApp --args --fps`, or `NSHPerformanceMonitor` set to `true` in its `Info.plist`, which
+`nsh.json`'s `macos.infoPlist` adds ([Packaging](./packaging.md#infoplist-keys-and-entitlements)): it then shows however
+the app is opened) shows a panel at the top right of the
 app that updates twice a second:
 
 | Row | Measures |
