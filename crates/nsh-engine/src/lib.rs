@@ -802,6 +802,10 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         Some(version)
     }
 
+    fn runs_packages(&self) -> bool {
+        cfg!(all(feature = "js-core", not(target_arch = "wasm32")))
+    }
+
     #[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
     fn verify_package(
         &self,

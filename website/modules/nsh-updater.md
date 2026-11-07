@@ -17,7 +17,7 @@ runs from its next start on every native platform, iOS and Android included ([OT
 
 ```tsx
 import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
-import { checkForPackage, downloadPackage, restartToPackage, runningPackage } from "nsh/updater";
+import { checkForPackage, downloadPackage, restartToPackage, runningPackage, shellInfo } from "nsh/updater";
 ```
 
 The module can be imported on every platform:
@@ -26,7 +26,7 @@ The module can be imported on every platform:
 | --- | --- | --- | --- |
 | macOS, Windows, Linux (packaged) | Checks the source | Download and replace the app | Check, download, `restartToPackage` restarts into it |
 | iOS, Android | Checks the source; `url` is the store link (`nsh update-manifest --link`) | Reject: send the user to `url` | Check and download; the package runs from the next start |
-| Web, development runs, apps without `"updater"` | Resolves `null` | Reject | `checkForPackage` resolves `null`, `runningPackage()` is `null` |
+| Web, development runs, apps without `"updater"` | Resolves `null` | Reject | `checkForPackage` resolves `null`, `runningPackage()` is `null`, `shellInfo()` has no `version` |
 
 It needs no capability: `capabilities.network` does not apply, since the app's code cannot choose where these requests
 go. Its requests use the platform's own network stack, as `fetch` does.
@@ -156,6 +156,26 @@ interface RunningPackage {
 ```
 
 The package this run's code came from, or `null` when the app runs the code it shipped with.
+
+### shellInfo
+
+```ts
+function shellInfo(): ShellInfo;
+
+interface ShellInfo {
+  version: string | null;
+  build: number | null;
+  nshVersion: string;
+  packages: boolean;
+}
+```
+
+The installed app this code runs in, its shell: the `version` and `build` it was packaged with (`nsh.json`'s; on iOS
+its `CFBundleShortVersionString` and `CFBundleVersion`), the version of the NSH runtime built into it, and whether it
+runs signed packages. A package replaces the app's code, not its shell: `runningPackage()` says which code runs,
+`shellInfo()` what runs it, so a package that needs a newer runtime (`minRuntime`) tells the user to install the
+whole app. `version` and `build` are `null` for an app without `"updater"` in `nsh.json`, and on the web and in
+development runs, where `packages` is `false`.
 
 ### At the next start
 
