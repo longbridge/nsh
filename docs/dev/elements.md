@@ -18,7 +18,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange({ open, reason })` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange({ open: false, reason })` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
-| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`; ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)` |
+| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS: `WKDownload` into the app's data directory's `downloads/<id>/`, only with a listener), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -80,11 +80,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 
 ## Interaction and the environment
 
-- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`,
-  `checkedStyle`, `indeterminateStyle`, `expandedStyle`, `pressedStyle` (and a `Button`'s `selectedStyle`) on any view
-  (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` / `disabled:` / `selected:` /
-  `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:` classes: the core restyles the view while the
-  platform reports it pressed, hovered or focused, and while its accessibility state is selected, checked, mixed,
+- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `focusWithinStyle`,
+  `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`, `pressedStyle` (and a `Button`'s
+  `selectedStyle`) on any view (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` /
+  `focus-within:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:`
+  classes: the core restyles the view while the platform reports it pressed, hovered or focused, while the focus is on
+  it or a view inside it (the content of an overlay is inside the view the overlay is in; `docs/dev/styles.md`), and
+  while its accessibility state is selected, checked, mixed,
   expanded (a `Popover`'s or `Menu`'s trigger while its popup is open), pressed (a toggle button that is on) or busy; a Rust component's touch responder stays pressed from its grant until its
   touches end, wherever they go (CSS's `:active` until the button is released: a resize handle dragged off its band
   keeps its `group-active:` look; `Core::hold_pressed`); later
@@ -95,7 +97,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   with `selectable` makes its texts select together (`text.md` "Selectable views").
 - **Platform modules**: `platform` (`nsh`'s environment, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
   `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
-  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`: `Environment::reported_idiom()`, `desktop` exactly where `Environment::desktop()` holds, else the platform's idiom, so a test's `Os::Linux` + `Idiom::Phone` reports `desktop`), `desktop` (`Environment::desktop()`), `catalyst` (`Os::is_catalyst()`: an iOS build for `target_abi = "macabi"`, in the iPad and the Mac idiom alike), `select` (the OS, then `desktop` / `mobile` by `Environment::desktop()`, `native` (not on the web), `default`); NSH's one definition of desktop (`api-naming.md`): `Environment::desktop()`, a desktop OS, or the web in the desktop idiom, which `platform.desktop`, the `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow; Mac Catalyst is mobile (the iOS backend, `ios={{…}}`, its idiom `pad` or `mac`); `nsh/desktop`'s `isAvailable` is `Os::is_desktop()`, where its window and menu APIs work), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
+  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop` / `terminal`: `Environment::reported_idiom()`, `terminal` in the terminal idiom, else `desktop` exactly where `Environment::desktop()` holds, else the platform's idiom, so a test's `Os::Linux` + `Idiom::Phone` reports `desktop`), `desktop` (`Environment::desktop()`), `catalyst` (`Os::is_catalyst()`: an iOS build for `target_abi = "macabi"`, in the iPad and the Mac idiom alike), `select` (the OS, then `desktop` / `mobile` by `Environment::desktop()`, `native` (not on the web), `default`); NSH's one definition of desktop (`api-naming.md`): `Environment::desktop()`, a desktop OS, the web in the desktop idiom, or the terminal idiom, which `platform.desktop`, the `desktop` idiom (outside a terminal), `select`'s `desktop` and `desktop={{…}}` all follow; Mac Catalyst is mobile (the iOS backend, `ios={{…}}`, its idiom `pad` or `mac`); `nsh/desktop`'s `isAvailable` is `Os::is_desktop()`, where its window and menu APIs work), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
   `announce(message)` and `setAccessibilityFocus(ref)` (Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
@@ -132,7 +134,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   always before the next other event, so a view hears where the mouse went before it hears it leave; mice report up to
   1000 moves a second, and a crosshair needs one per frame.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
-  macOS, in GPUI on macOS too; the browser's `contextmenu`, which its keyboard menu key raises too). The platform
+  macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
   view that listens hears it (`EventPayload::ContextMenu`, the same shape: `position` in it, `pagePosition` in its
   root view, which is where `Menu.popup` takes its point, and the `modifiers`); a text field nearer, or selectable
@@ -140,7 +142,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
   mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
   Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
-- **Keyboard focus**: on macOS and the web, Tab (the keyboard focus) moves between stops, in tree order; a click
+  Without a pointer: the keyboard's Menu key and Shift+F10 on the focused view (the web and Linux, `key_focus.rs`, and the headless
+  driver's `keyboard.press("shift+f10")` there) and a screen reader's "show menu" action (macOS `AXShowMenu` on a view that
+  listens, VoiceOver's VO-Shift-M; Windows UI Automation's `ShowContextMenu`) raise it too, walking out from that
+  view as a click does.
+  The payload's `pointerType` (`PointerType`: `"mouse"`, `"pen"`, `"touch"`, the DOM's) is `null` then, and the
+  positions are the view's bottom-start corner (`nsh_core::input::context_menu_anchor`, by the surface's direction),
+  so a menu opened below it starts where the view does; `ContextMenu` puts the keyboard focus on its first enabled
+  item then.
+- **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
   presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus, and
   `focus-visible:` is the same variant. Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
@@ -156,13 +166,21 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
   / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
-  recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows, Linux and GPUI
+  recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  A link in text (a nested `<Text>` that takes presses, `AttributedText::links`) is a stop of its own: the core marks
+  each `TextLink` with `focus_stop` (the span's `ViewProps::focus_stop(true)`: unless `focusable={false}` or
+  disabled), Tab reaches it after its text view, in text order (nested links inside the one around them), the
+  platform reports the span's node `FOCUSED` (`set_states`, so `focus:` and `focus-within` follow) and `Focus` /
+  `Blur`, and Return presses it (`PressDown` / `PressUp` / `Press` to the span, as a click on its characters). The
+  headless driver walks links (`Screen::tab_stops`); the TUI is next; macOS, the web, Windows, Linux and GPUI follow
+  in a later change, drawing their focus cue over the link's rects.
   A ref's `focus()` on a stop moves the keyboard focus to it as Tab does (`focus:`, `onFocus`; a popup gives it back to
   its trigger), and `blur()` takes it off: `Command::Focus` / `Blur` reach the platforms for any view, and AppKit makes
   the view first responder (`input::focus_control`, past a field that edits), the browser focuses the element with
   `focusVisible` and treats it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the
-  headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Windows, Linux and
+  headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Linux grabs the
+  stop's widget (`key_focus::focus`). Windows and
   GPUI leave `focus()` on views to them; iOS and Android focus inputs only.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
@@ -232,7 +250,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (Android: resource id). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
   `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`; `accessibilityState.pressed` (`aria-pressed`:
   a button that has one is a toggle button) and `current` (`aria-current`: `true`, `page`, `step`, `location`, `date`,
-  `time`); `accessibilityLevel` (`aria-level`: a heading's level, a tree item's depth). Per platform: macOS a toggle is
+  `time`), `hasPopup` (`aria-haspopup`: the element opens a popup, a menu or a list, and its `expanded` says whether
+  it is open; `nsh-base`'s `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their
+  triggers; an `expanded` element without it is a disclosure that shows its content in place; the web sets
+  `aria-haspopup`, the terminal marks a disclosure `▸` / `▾` and a popup trigger not; elsewhere it is not exposed yet);
+  `accessibilityLevel` (`aria-level`: a heading's level, a tree item's depth). Per platform: macOS a toggle is
   `AXCheckBox` / `AXToggle` with its pressed value, `region` / `navigation` are `AXGroup` with WebKit's landmark
   subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
@@ -257,7 +279,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard shortcuts** (`nsh`'s `keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
-  Linux pages' "Keyboard"). iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
+  Linux pages' "Keyboard"). A binding that passes its key through (`passThrough`, Rust's
+  `KeyOptions::pass_through`; `KeyMatch::Notify`) is reported and the key goes on as if nothing were bound: Tab
+  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
   inputs (before UIKit's text system) and of the root view (presses nothing inside handled), keys named by their HID
   usage (`Key::from_hid_usage`) and the character they type, a `repeat` binding firing on a timer of its own while
   the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused
@@ -290,7 +314,28 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   offset logic stays left to right.
 - **Environment** (reactive accessors; `nsh` (`safeArea()`, `safeAreaInsets()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
-  `colorScheme()`, `fontScale()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  `colorScheme()`, `fontScale()`, `localeSettings()` (`Environment::locale_settings`, `LocaleSettings`, one value and
+  one signal, as the systems change these together; a `computed` of one field reruns only its readers; the
+  locale's (it alone as the languages, its region's preferences) in UTC headless unless a test sets them): `languages`
+  (`Languages`: the system's preferred languages, most preferred first, at most 8, never empty, an embedding app's own
+  language first; the web the browser's), `timeZone` (`TimeZone`: the zone's name as the system gives it, an IANA name
+  or an offset zone; the platforms write the system's, the web the browser's, read again when the page shows or gets
+  the focus), and the regional preferences `hourCycle`, `firstDayOfWeek`, `measurementSystem`, `temperatureUnit` (the
+  system's settings, else the region's, CLDR 48's (`LocaleSettings::of`); `LocaleSettings::parse` reads a platform
+  identifier's region and its `-u-` / `@` keywords (`hc`, `fw`, `ms`, `mu`, `rg`); the web the browser's hour cycle
+  and first day for its language, its likely region's units; both are `#[doc(hidden)]` plumbing for the platforms, as
+  are `Languages::parse` / `one`, `TimeZone::posix` and `HourCycle::of_pattern`), `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
+  `background`, React Native's states; the platforms write it as the system reports the app's, the web from the
+  page's `visibilityState` and focus, iOS from the notifications of the scene of the surface's window
+  (`UIScene`'s `didActivate` / `willDeactivate` / `didEnterBackground` / `willEnterForeground`, filtered by the view's
+  `window.windowScene`, its `activationState` read when the view moves to a window), UIApplication's
+  (`didBecomeActive` / `willResignActive` / `didEnterBackground` / `willEnterForeground`) while it is in no window
+  with a scene, by the notification: the scene and `applicationState` still say active during `willDeactivate` /
+  `willResignActive`; Android from `NshView`'s activity: resumed is `active`, paused or started again
+  `inactive`, stopped `background`, through one `ActivityLifecycleCallbacks` per application, registered by the first
+  view attached and kept, which remembers each activity's last state: a view attached again starts from it). The change reaches JS through the engine's thread, and iOS may suspend the
+  process seconds after `didEnterBackground` (Android's `onStop` is looser): `background` is for pausing work, and
+  the user-facing docs say to save as changes are made. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved.
   Both move as one with the keyboard: `LayoutCurve::Keyboard` (`type: "keyboard"`) is the system keyboard's own curve,
@@ -352,7 +397,7 @@ Text, styles, scrolling and lists, animation, canvases and images have their own
 ## Overlays
 
 `<Overlay>` (`nsh`; Rust `overlay()`) shows its children on top of the root view it is in: the surface, or the
-dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/base`'s `Popover`, `Menu`,
+dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/base`'s `Popover`, `HoverCard`, `Menu`,
 `ContextMenu`, `Tooltip`, `Sheet`: `components.md`); it draws nothing and closes nothing itself.
 
 - **Where it stays and where it shows** (`core/overlay.rs`): the node stays its parent's child for everything but its
@@ -370,12 +415,24 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin`. The anchor's frame is
+  moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
+  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
+  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
+  `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
+  what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
+  (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a TSX or a
+  Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:
   the room on that side, what a menu may grow to). A view inside an overlay measures in the root
   view's coordinates.
+- **Covering the anchor** (`OverlayConfig::cover`, `OverlayProp::Cover`; Rust `overlay().cover(&element_ref, shown)`;
+  no JS prop): instead of on a side, the overlay starts where the anchor does, with a view inside it centered on the
+  anchor vertically (a select's selected row over its trigger, title on title: shadcn/ui's `item-aligned`), then moved
+  to stay inside the safe area less `margin`. The view's frame in the overlay is kept while the overlay keeps its size
+  and the view its place in its parent (`Core::covering`, `OverlayState::covered`), so the overlay stays put while
+  its rows scroll; without the view (not rendered, nothing selected) the overlay is placed on its side as usual.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
   touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or
@@ -389,15 +446,26 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. The overlay hears what the pointer asks for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`), and
+  it. In every idiom the keyboard focus shows it too (WAI-ARIA's tooltip pattern; the focus is keyboard focus, a click
+  moves none): `Core::focus_hints`, after `update_focus_within`, shows the hint of the nearest anchor on the focus
+  chain (up to the overlay the focus is in, so a popup's focus is not on its trigger's hint) at once and hides it when
+  the focus leaves. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same `ESCAPE_BINDING`):
+  Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint (`overlay_escape`); a hint
+  Escape or a press hid shows for the focus again only once the focus comes back. The overlay hears what the pointer
+  and the focus ask for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`,
+  `Escape`, `View`), and
   `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
-  is controlled or not). Touch screens never watch: a hint shows there only when `open` says so. The overlay should
+  is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
+  so. The overlay should
   not take the pointer (`pointerEvents: "none"`).
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
   placement never moves it), placed on top with a 4 pt gap, holding the element JS made (retained by the node, moved
-  into the overlay, detached again when the prop changes). The prop takes elements only: the core draws no bubble, the
-  look is the app's. An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
+  into the overlay, detached again when the prop changes). The core takes elements only: it draws no bubble, the look
+  is the app's. A function given as the prop (in a development bundle an app's component is its hot proxy's memo) is
+  followed by each renderer with a binding of its own (`followed` in nsh-js' `dom.rs`, `prop` in the browser runtime's
+  `browser/dom.js`), so the core gets the element it gives, again whenever that changes. An element that is a hint
+  overlay itself (`nsh/base`'s `Tooltip`, once its view
   made its root one) replaces the core's overlay, with its own placement, delay, look and events
   (`adopt_hint_tooltips`, each commit before the overlays are shown). Released with the element. It counts for nothing else: text skips overlays, and
   positional classes (`first:`, `last:`) skip a tooltip's overlay. Rust's element tooltips are an overlay child of the

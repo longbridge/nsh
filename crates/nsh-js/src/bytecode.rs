@@ -20,7 +20,7 @@ pub const BYTECODE_VERSION: &str = "quickjs-ng-0.16.2+0fdea21/bc28/le";
 /// version). The test `engines_build_the_named_quickjs` holds them to the
 /// lockfile.
 #[cfg(test)]
-const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.1")];
+const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.2")];
 
 /// Recognizes the linked QuickJS bytecode header. This is format detection,
 /// not validation: loading the bytes still requires the trusted-input contract.

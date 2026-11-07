@@ -93,6 +93,9 @@ pub(crate) struct CanvasState {
     redrawn: Cell<u32>,
     /// How often it paints ([`CanvasState::draws_asynchronously`]).
     cadence: Cadence,
+    /// A bounded, source-over animated suffix that can draw in its own layer.
+    layer_split: Option<usize>,
+    layer_scan: RefCell<DamageScan>,
 }
 
 /// How many paints a second make a canvas draw on Core Animation's threads.
@@ -178,6 +181,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
             }
         }
         c.split = first_animated(&drawing.ops);
+        c.layer_split = layer_split(&drawing.ops, c.split);
         // Short static parts replay faster than a layer draws.
         if c.split < MIN_PREFIX || !drawing.ops[..c.split].iter().any(CanvasOp::paints) {
             c.split = 0;
@@ -262,24 +266,150 @@ fn slot_number(args: &[Option<AnimationValue>], s: u16) -> f32 {
         .map_or(0.0, AnimationValue::number)
 }
 
+/// Which retained layer is being painted.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum LayerPart {
+    Whole { asynchronous: bool },
+    Prefix,
+    Suffix,
+}
+
+/// A small, simple suffix over a substantial static drawing. Keep complex
+/// compositing and geometry on the existing whole-canvas path.
+fn layer_split(ops: &[CanvasOp], split: usize) -> Option<usize> {
+    // Long static prefixes already have their own cache. Keep their path
+    // rather than scanning their geometry once more on every animation frame.
+    if !(32..MIN_PREFIX).contains(&split)
+        || split == ops.len()
+        || ops.len() - split > 64
+        || !ops[..split].iter().any(CanvasOp::paints)
+    {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (i, op) in ops.iter().enumerate() {
+        if i == split && depth != 0 {
+            return None;
+        }
+        match op {
+            CanvasOp::Save => depth += 1,
+            CanvasOp::Restore => depth = depth.saturating_sub(1),
+            CanvasOp::ShadowBlur(blur) if blur.0 != 0.0 => return None,
+            _ => {}
+        }
+    }
+    if depth != 0
+        || ops[split..].iter().any(|op| match op {
+            CanvasOp::ClearRect(_)
+            | CanvasOp::FillText { .. }
+            | CanvasOp::StrokeText { .. }
+            | CanvasOp::DrawImage { .. } => true,
+            CanvasOp::Composite(c) => *c != Composite::SourceOver,
+            CanvasOp::Fill(Some(path), _)
+            | CanvasOp::Stroke(Some(path))
+            | CanvasOp::Clip(Some(path), _) => path.len() > 64,
+            _ => false,
+        })
+    {
+        return None;
+    }
+    Some(split)
+}
+
 /// Draws a canvas view's drawing (in its content layer's
 /// `drawLayer:inContext:`; the context is y down, in points, `size` points
 /// at `scale` pixels each) where it is `dirty`: Core Graphics skips the
-/// rest.
+/// rest. `base` takes the view's space to the context's base space, in
+/// which Core Graphics takes shadow offsets and blurs (no transform
+/// reaches them).
 pub(crate) fn draw(
     cx: &CGContext,
     state: &ViewState,
     dirty: CGRect,
     size: CGSize,
     scale: f64,
-    asynchronous: bool,
+    base: CGAffineTransform,
+    part: LayerPart,
 ) {
     if let Some(canvas) = state.canvas.as_ref() {
-        canvas.paint(cx, dirty, size, scale, asynchronous);
+        if let LayerPart::Whole { asynchronous } = part {
+            canvas.paint(cx, dirty, size, scale, asynchronous, base);
+        } else {
+            canvas.paint_layer(cx, dirty, part, base);
+        }
     }
 }
 
 impl CanvasState {
+    /// Bounds in canvas coordinates, rounded out to stable 32-point tiles.
+    /// A growing ring then keeps its backing store through most frames.
+    pub(crate) fn layer_bounds(&self, size: CGSize) -> Option<CGRect> {
+        let split = self.layer_split?;
+        let drawing = self.drawing.as_ref()?;
+        let Damage::Rect(rect) =
+            self.layer_scan
+                .borrow_mut()
+                .painted_after(&drawing.ops, split, |s| slot_number(&self.args, s))
+        else {
+            return None;
+        };
+        let x = ((f64::from(rect.origin.x.0) / 32.0).floor() * 32.0).max(0.0);
+        let y = ((f64::from(rect.origin.y.0) / 32.0).floor() * 32.0).max(0.0);
+        let right =
+            ((f64::from(rect.origin.x.0 + rect.size.width.0) / 32.0).ceil() * 32.0).min(size.width);
+        let bottom = ((f64::from(rect.origin.y.0 + rect.size.height.0) / 32.0).ceil() * 32.0)
+            .min(size.height);
+        let (w, h) = (right - x, bottom - y);
+        if w <= 0.0
+            || h <= 0.0
+            || w > 128.0
+            || h > 128.0
+            || w * h >= size.width * size.height * 0.75
+        {
+            return None;
+        }
+        Some(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)))
+    }
+
+    fn paint_layer(&self, cx: &CGContext, dirty: CGRect, part: LayerPart, base: CGAffineTransform) {
+        let (Some(split), Some(drawing)) = (self.layer_split, &self.drawing) else {
+            return;
+        };
+        let suffix = part == LayerPart::Suffix;
+        self.cadence.paint(Instant::now());
+        let ops = if suffix {
+            &drawing.ops[..]
+        } else {
+            &drawing.ops[..split]
+        };
+        let path = prefix_path_needed(ops, split);
+        let isolated = !suffix
+            && ops.iter().any(|op| {
+                matches!(op, CanvasOp::ClearRect(_))
+                    || matches!(op, CanvasOp::Composite(c) if *c != Composite::SourceOver)
+            });
+        CGContext::save_g_state(Some(cx));
+        CGContext::clip_to_rect(Some(cx), dirty);
+        if isolated {
+            // SAFETY: no auxiliary info; ended before restoring the state.
+            unsafe { CGContext::begin_transparency_layer(Some(cx), None) };
+        }
+        let mut replay = Replay::new(cx, self, base);
+        for (i, op) in ops.iter().enumerate() {
+            if suffix
+                && i < split
+                && (op.paints() || (!path && matches!(op, CanvasOp::BeginPath | CanvasOp::Path(_))))
+            {
+                continue;
+            }
+            replay.op(op);
+        }
+        if isolated {
+            CGContext::end_transparency_layer(Some(cx));
+        }
+        CGContext::restore_g_state(Some(cx));
+    }
+
     /// Whether the static part is (or is about to be) kept as a layer:
     /// long, painted unchanged [`STABLE`] times. Such a canvas draws at once
     /// (`drawsAsynchronously` off), where its layer is made.
@@ -295,7 +425,15 @@ impl CanvasState {
 
     /// [`draw`]'s replay; `asynchronous`: `cx` records for Core Animation's
     /// drawing threads.
-    fn paint(&self, cx: &CGContext, dirty: CGRect, size: CGSize, scale: f64, asynchronous: bool) {
+    fn paint(
+        &self,
+        cx: &CGContext,
+        dirty: CGRect,
+        size: CGSize,
+        scale: f64,
+        asynchronous: bool,
+        base: CGAffineTransform,
+    ) {
         self.cadence.paint(Instant::now());
         let canvas = self;
         let Some(drawing) = canvas.drawing.as_ref() else {
@@ -309,7 +447,7 @@ impl CanvasState {
         let prefix = (0 < split && split < ops.len())
             .then(|| canvas.prefix(cx, drawing, split, size, scale, asynchronous))
             .flatten();
-        let mut replay = Replay::new(cx, canvas);
+        let mut replay = Replay::new(cx, canvas, base);
         // Clearing and composite operations combine with what the canvas drew,
         // as on a canvas bitmap: never with what is behind it (AppKit may draw
         // views into one context, as when caching a display for a snapshot).
@@ -402,7 +540,16 @@ impl CanvasState {
         // y down, in points, as the layer's context.
         CGContext::translate_ctm(Some(&context), 0.0, px.1 as CGFloat);
         CGContext::scale_ctm(Some(&context), scale, -scale);
-        let mut replay = Replay::new(&context, self);
+        // The layer's base space: its pixels, y up.
+        let base = CGAffineTransform {
+            a: scale,
+            b: 0.0,
+            c: 0.0,
+            d: -scale,
+            tx: 0.0,
+            ty: 0.0,
+        };
+        let mut replay = Replay::new(&context, self, base);
         for op in &drawing.ops[..split] {
             replay.op(op);
         }
@@ -513,6 +660,8 @@ struct Replay<'a> {
     stack: Vec<State>,
     /// The current path, in the view's space.
     path: CFRetained<CGMutablePath>,
+    /// The view's space in the context's base space ([`draw`]).
+    base: CGAffineTransform,
 }
 
 /// What fills or strokes.
@@ -523,7 +672,7 @@ enum Mode {
 }
 
 impl<'a> Replay<'a> {
-    fn new(c: &'a CGContext, canvas: &'a CanvasState) -> Self {
+    fn new(c: &'a CGContext, canvas: &'a CanvasState, base: CGAffineTransform) -> Self {
         Replay {
             c,
             args: &canvas.args,
@@ -531,6 +680,7 @@ impl<'a> Replay<'a> {
             state: State::default(),
             stack: Vec::new(),
             path: CGMutablePath::new(),
+            base,
         }
     }
 
@@ -845,9 +995,12 @@ impl<'a> Replay<'a> {
         let (color, blur, x, y) = s.shadow;
         if self.shadowed() {
             let color = crate::text::cg_color(color);
-            // Shadow offsets are in the layer's base space, which is y up
-            // under AppKit's flipped context: a positive offset goes down.
-            CGContext::set_shadow_with_color(c, CGSize::new(x, -y), blur, Some(&color));
+            // Shadow offsets and blurs are in the context's base space, which
+            // no transform reaches: taken there from the view's space.
+            let m = self.base;
+            let offset = CGSize::new(m.a * x + m.c * y, m.b * x + m.d * y);
+            let scale = (m.a * m.d - m.b * m.c).abs().sqrt();
+            CGContext::set_shadow_with_color(c, offset, blur * scale, Some(&color));
         }
     }
 
@@ -1374,6 +1527,19 @@ mod tests {
 
     /// `canvas` painted into a fresh 100 × 40 point bitmap at scale 2.
     fn pixels(canvas: &CanvasState) -> Vec<u8> {
+        pixels_in(canvas, true)
+    }
+
+    /// `canvas` painted into a fresh 100 × 40 point bitmap at scale 2, the
+    /// view's space y down over the bitmap's y up base space (as AppKit's
+    /// flipped views over a window's), or (`flipped` false) as a
+    /// layer-backed view's, whose base space is y down already: drawn
+    /// upside down in the bitmap's rows.
+    fn pixels_in(canvas: &CanvasState, flipped: bool) -> Vec<u8> {
+        pixels_partitioned(canvas, flipped, false)
+    }
+
+    fn pixels_partitioned(canvas: &CanvasState, flipped: bool, partitioned: bool) -> Vec<u8> {
         let (w, h, scale) = (100.0, 40.0, 2.0);
         let (pw, ph) = (200, 80);
         let space = CGColorSpace::new_device_rgb().unwrap();
@@ -1389,10 +1555,40 @@ mod tests {
                 CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
             )
             .unwrap();
-            CGContext::translate_ctm(Some(&cx), 0.0, ph as CGFloat);
-            CGContext::scale_ctm(Some(&cx), scale, -scale);
+            if flipped {
+                CGContext::translate_ctm(Some(&cx), 0.0, ph as CGFloat);
+                CGContext::scale_ctm(Some(&cx), scale, -scale);
+            } else {
+                CGContext::scale_ctm(Some(&cx), scale, scale);
+            }
+            // The bitmap's base space: its pixels, y up.
+            let base = CGContext::ctm(Some(&cx));
             let size = CGSize::new(w, h);
-            canvas.paint(&cx, CGRect::new(CGPoint::ZERO, size), size, scale, false);
+            if partitioned {
+                canvas.paint_layer(
+                    &cx,
+                    CGRect::new(CGPoint::ZERO, size),
+                    LayerPart::Prefix,
+                    base,
+                );
+                CGContext::begin_transparency_layer(Some(&cx), None);
+                canvas.paint_layer(
+                    &cx,
+                    canvas.layer_bounds(size).unwrap(),
+                    LayerPart::Suffix,
+                    base,
+                );
+                CGContext::end_transparency_layer(Some(&cx));
+            } else {
+                canvas.paint(
+                    &cx,
+                    CGRect::new(CGPoint::ZERO, size),
+                    size,
+                    scale,
+                    false,
+                    base,
+                );
+            }
             let data = CGBitmapContextGetData(Some(&cx)).cast::<u8>();
             std::slice::from_raw_parts(data, pw * ph * 4).to_vec()
         }
@@ -1412,6 +1608,70 @@ mod tests {
             Some(AnimationValue::Number(0.4)),
         ];
         canvas
+    }
+
+    #[test]
+    fn layer_split_rejects_unsafe_suffixes() {
+        let mut ops = vec![CanvasOp::BeginPath; 32];
+        ops.extend([
+            CanvasOp::FillRect([Num::Const(0.0); 4]),
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::FillRect([Num::Const(4.0); 4]),
+        ]);
+        assert_eq!(layer_split(&ops, first_animated(&ops)), Some(33));
+        let mut long = vec![CanvasOp::BeginPath; MIN_PREFIX];
+        long.extend(ops.clone());
+        assert!(layer_split(&long, first_animated(&long)).is_none());
+        for unsafe_op in [
+            CanvasOp::ClearRect([Num::Const(0.0); 4]),
+            CanvasOp::Composite(Composite::Copy),
+            CanvasOp::ShadowBlur(Points(2.0)),
+            CanvasOp::Save,
+        ] {
+            let mut drawing = ops.clone();
+            drawing.push(unsafe_op);
+            assert!(layer_split(&drawing, first_animated(&drawing)).is_none());
+        }
+        ops.insert(0, CanvasOp::Save);
+        ops.push(CanvasOp::Restore);
+        assert!(layer_split(&ops, first_animated(&ops)).is_none());
+    }
+
+    #[test]
+    fn split_surfaces_preserve_sparkline_pixels() {
+        for flipped in [false, true] {
+            for radius in [0.0, 2.5, 7.0, 12.0] {
+                let mut canvas = sparkline_canvas(radius);
+                let drawing = Arc::make_mut(canvas.drawing.as_mut().unwrap());
+                drawing.ops.extend([
+                    CanvasOp::GlobalAlpha(Num::Const(1.0)),
+                    CanvasOp::BeginPath,
+                    CanvasOp::Path(PathOp::Arc {
+                        x: Num::Const(90.0),
+                        y: Num::Const(18.0),
+                        radius: Num::Const(3.0),
+                        start: Num::Const(0.0),
+                        end: Num::Const(TAU as f32),
+                        ccw: false,
+                    }),
+                    CanvasOp::Fill(None, FillRule::NonZero),
+                ]);
+                canvas.layer_split = Some(first_animated(&drawing.ops));
+                canvas.redrawn.set(0);
+                let expected = pixels_in(&canvas, flipped);
+                let actual = pixels_partitioned(&canvas, flipped, true);
+                let max_delta = expected
+                    .iter()
+                    .zip(&actual)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap();
+                assert!(
+                    max_delta <= 1,
+                    "radius {radius}, flipped {flipped}: {max_delta}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1478,5 +1738,52 @@ mod tests {
         );
         whole.args[0] = Some(AnimationValue::Number(8.0));
         assert_eq!(grown, pixels(&whole));
+    }
+
+    /// The bytes (BGRA) of the pixel at `(x, y)` in the view's points of
+    /// what [`pixels_in`] painted.
+    fn pixel(bytes: &[u8], flipped: bool, x: f64, y: f64) -> [u8; 4] {
+        let (px, py) = ((x * 2.0) as usize, (y * 2.0) as usize);
+        // Rows run down from the bitmap's top, its base space's y up.
+        let row = if flipped { py } else { 79 - py };
+        let at = (row * 200 + px) * 4;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    #[test]
+    fn a_shadow_falls_by_its_offset_in_the_views_points_in_any_context() {
+        // A black square at (10, 10), 10 points wide, casting a hard red
+        // shadow 20 points right and 15 down: the shadow's middle is at
+        // (35, 30).
+        let c = Num::Const;
+        let canvas = CanvasState {
+            drawing: Some(Arc::new(Drawing {
+                ops: vec![
+                    CanvasOp::ShadowColor(Color(0xff0000ff)),
+                    CanvasOp::ShadowBlur(Points(0.0)),
+                    CanvasOp::ShadowOffset(Point::new(Points(20.0), Points(15.0))),
+                    CanvasOp::FillStyle(Paint::Color(Color(0x000000ff))),
+                    CanvasOp::FillRect([c(10.0), c(10.0), c(10.0), c(10.0)]),
+                ],
+                ..Drawing::default()
+            })),
+            ..CanvasState::default()
+        };
+        for flipped in [true, false] {
+            let bytes = pixels_in(&canvas, flipped);
+            assert_eq!(
+                pixel(&bytes, flipped, 15.0, 15.0),
+                [0, 0, 0, 255],
+                "the square"
+            );
+            assert_eq!(
+                pixel(&bytes, flipped, 35.0, 30.0),
+                [0, 0, 255, 255],
+                "its shadow"
+            );
+            // Not cast the other way, nor half as far (base space pixels).
+            assert_eq!(pixel(&bytes, flipped, 35.0, 0.5)[3], 0);
+            assert_eq!(pixel(&bytes, flipped, 25.0, 22.5)[3], 0);
+        }
     }
 }

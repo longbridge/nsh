@@ -26,6 +26,7 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod audio;
 mod blur;
 mod canvas;
 mod chrome;
@@ -35,6 +36,7 @@ pub mod dev;
 mod file_drop;
 mod file_requests;
 mod fps;
+mod global_shortcut;
 mod gpu;
 mod image;
 mod input;
@@ -48,6 +50,9 @@ mod screen_color;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod sight;
+// Shared with iOS.
+use nsh_platform_apple::{notifications, speech};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -55,8 +60,11 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
 mod visual;
+mod window;
+mod window_state;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{
@@ -69,7 +77,10 @@ pub use objc2_foundation;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
     text::CoreTextEngine,

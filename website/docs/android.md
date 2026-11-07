@@ -50,6 +50,22 @@ A release APK carries `libnsh.so` without its symbol tables and debug info. The 
 runtime in `symbols/<abi>/libnsh.so` (a Rust app's in `.nsh/rust/android-rust-release/symbols/<abi>/`): give it to
 `ndk-stack` or upload it to Play Console as native debug symbols to read native crash stacks.
 
+## Upload to Google Play
+
+`nsh publish android` uploads an Android App Bundle (`.aab`) to Google Play's internal testing track
+([CLI](./cli.md#nsh-publish-android)):
+
+```sh
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # never commit it
+nsh publish android .nsh/out/App.aab
+```
+
+Once per app: create the app in Play Console, create a service account in Google Cloud with the Google Play Android
+Developer API enabled, download its JSON key, and invite the service account's email under **Users and permissions**
+with permission to release to testing tracks. Until the app's first release is made in Play Console, pass `--draft`.
+The bundle's version code must be higher than any uploaded before. Promoting a release beyond internal testing stays a
+step in Play Console.
+
 ## Embedding in an Android app
 
 An existing Android app can show NSH apps inside its own UI. The runtime ships as an Android library, `nsh.aar`: you

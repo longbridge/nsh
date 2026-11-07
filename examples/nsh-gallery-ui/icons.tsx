@@ -1,4 +1,5 @@
-import { Canvas, Image, type CanvasRenderingContext2D } from "nsh";
+import { Canvas, Image, Text, type CanvasRenderingContext2D } from "nsh";
+import { terminal } from "./theme";
 
 /** Line glyphs drawn in a 20 × 20 box with the tint as stroke. */
 export type IconName =
@@ -42,8 +43,10 @@ export type IconName =
   | "sidebar"
   | "sun"
   | "moon"
+  | "undo"
   | "volume-low"
   | "volume-high"
+  | "volume-off"
   | "code"
   | "sliders"
   | "stepper"
@@ -84,7 +87,12 @@ export type IconName =
   | "tooltip"
   | "sheet"
   | "button"
-  | "external";
+  | "external"
+  | "folder"
+  | "folder-open"
+  | "file"
+  | "tree"
+  | "hamburger";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -140,6 +148,28 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [9, 4, 4, 4, 4, 16, 16, 16, 16, 11]);
     line(c, [11.5, 3.5, 16.5, 3.5, 16.5, 8.5]);
     line(c, [16.5, 3.5, 9.5, 10.5]);
+  },
+  folder: (c) => {
+    // A tab on the left of the back.
+    line(c, [2.5, 6, 2.5, 15, 3.5, 16, 16.5, 16, 17.5, 15, 17.5, 7.5, 16.5, 6.5, 9.5, 6.5, 8, 4.5, 3.5, 4.5, 2.5, 6]);
+  },
+  "folder-open": (c) => {
+    // The back, and its front tipped open.
+    line(c, [2.5, 15, 2.5, 6, 3.5, 4.5, 8, 4.5, 9.5, 6.5, 15.5, 6.5, 16.5, 7.5, 16.5, 9]);
+    line(c, [2.5, 15, 5, 9.5, 18, 9.5, 15.5, 16, 3.5, 16, 2.5, 15]);
+  },
+  file: (c) => {
+    // A sheet with its corner folded.
+    line(c, [5, 2.5, 11.5, 2.5, 15.5, 6.5, 15.5, 17.5, 5, 17.5, 5, 2.5]);
+    line(c, [11.5, 2.5, 11.5, 6.5, 15.5, 6.5]);
+  },
+  tree: (c) => {
+    // A root, two branches off its stem.
+    rect(c, 3, 3, 5, 4, 1);
+    rect(c, 11, 8.5, 6, 3.5, 1);
+    rect(c, 11, 14, 6, 3.5, 1);
+    line(c, [5.5, 7, 5.5, 15.75, 11, 15.75]);
+    line(c, [5.5, 10.25, 11, 10.25]);
   },
   checkbox: (c) => {
     rect(c, 3.5, 3.5, 13, 13, 3);
@@ -208,6 +238,12 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [2.5, 8, 17.5, 8]);
     line(c, [2.5, 12.5, 17.5, 12.5]);
     line(c, [8, 3.5, 8, 16.5]);
+  },
+  // Three bars: a menu of the app's own settings.
+  hamburger: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [3.5, 10, 16.5, 10]);
+    line(c, [3.5, 14.5, 16.5, 14.5]);
   },
   menu: (c) => {
     rect(c, 3.5, 2.5, 13, 15, 2.5);
@@ -560,6 +596,11 @@ const glyphs: Record<IconName, Draw> = {
     wave(c, 3.2);
     wave(c, 6.2);
   },
+  "volume-off": (c) => {
+    speaker(c);
+    line(c, [13, 7.5, 18, 12.5]);
+    line(c, [18, 7.5, 13, 12.5]);
+  },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.
     c.beginPath();
@@ -568,11 +609,24 @@ const glyphs: Record<IconName, Draw> = {
     c.closePath();
     c.stroke();
   },
+  undo: (c) => {
+    // An arrowhead pointing back and the path it came by, turning down and back.
+    line(c, [7.5, 11.5, 3.5, 7.5, 7.5, 3.5]);
+    c.beginPath();
+    c.moveTo(3.5, 7.5);
+    c.lineTo(12, 7.5);
+    c.arc(12, 11.75, 4.25, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(9, 16);
+    c.stroke();
+  },
 };
 
 /** A glyph, stroked with `tint`; `weight` is the stroke in the glyphs' 20-unit box (1.6 by default). */
 export function Icon(props: { name: IconName; size?: number; tint: string; weight?: number }) {
   const size = props.size ?? 20;
+  // The terminal draws no icons; a check is a mark there too (a chosen
+  // option, the command in effect, a step done), so it keeps its glyph.
+  if (terminal && props.name === "check") return <Text style={{ color: props.tint }}>✓</Text>;
   return (
     <Canvas
       style={{ pointerEvents: "none", width: size, height: size }}
@@ -587,6 +641,15 @@ export function Icon(props: { name: IconName; size?: number; tint: string; weigh
       }}
     />
   );
+}
+
+/**
+ * An icon-only control's content: the icon, or in the terminal, which draws
+ * no icons, `label` as text in the icon's tint (a short word: the control's
+ * accessibility label keeps its full name).
+ */
+export function IconLabel(props: { name: IconName; label: string; size?: number; tint: string; weight?: number }) {
+  return terminal ? <Text style={{ color: props.tint }}>{props.label}</Text> : <Icon name={props.name} size={props.size} tint={props.tint} weight={props.weight} />;
 }
 
 /** The check mark as an SVG in one color, recolored by `tintColor`: the same stroke as the `check` glyph. */

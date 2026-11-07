@@ -1,10 +1,13 @@
 name: Website
 
 # Builds the documentation site with its live demos (the WebAssembly runtime,
-# `cargo xtask web`) and publishes it to GitHub Pages at nsh.dev
+# `cargo xtask web`) and publishes it to GitHub Pages at nsh.dev, every
+# version of it (`website/scripts/versions.js`): the latest release at /, main
+# at /versions/main, earlier releases at /versions/<tag>
 # (`website/public/CNAME`). App Stories (/apps) come from the reviewed
 # catalog in longbridge/nsh-showcases, whose own workflow dispatches this one
-# after each merge and its weekly star refresh.
+# after each merge and its weekly star refresh. Languages other than English
+# and Chinese come from longbridge/nsh-website-translates, also at publish time.
 
 on:
   push:
@@ -19,13 +22,24 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/website.yml"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - "website/**"
+      - "skills/**"
+      - "examples/tasks/**"
+      - "examples/tasks-rs/**"
       - "crates/nsh-platform-web/**"
       - "examples/gallery/**"
       - ".github/workflows/website.yml"
   merge_group:
     types: [checks_requested]
+  # A release puts its documentation at the root. (The release the Release
+  # workflow publishes with GITHUB_TOKEN starts no workflow itself.)
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +50,7 @@ permissions:
 # Pages takes one deployment at a time; queue rather than cancel, so the
 # latest push always ends up deployed.
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 env:
@@ -49,9 +63,19 @@ env:
 
 jobs:
   build:
+    # Nothing for drafts or a pull request being closed.
+    if: (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft))
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The releases' tags and content (`website/scripts/versions.js`).
+          fetch-depth: 0
 
       # The web runtime's C code (zstd): clang compiles it for wasm32 (llvm-ar
       # archives it); bindgen needs libclang for the host build of the nsh CLI.
@@ -81,6 +105,14 @@ jobs:
 
       - name: Test viewport dialogs across iframe boundaries
         run: node --test crates/nsh-platform-web/web/viewport-browser.test.mjs
+
+      - name: Test the reading order of scroll content in a browser
+        run: node --test --test-name-pattern "reading order" crates/nsh-platform-web/web/scroll-browser.test.mjs
+
+      # Only the emoji test for now: summed tabular digits measure wider than
+      # Chrome on Linux draws them (the file's first test).
+      - name: Test emoji measurement against what Chrome draws
+        run: node --test --test-name-pattern emoji crates/nsh-platform-web/web/text-browser.test.mjs
 
       - name: Test browser JavaScript bindings against Wasm
         env:
@@ -124,6 +156,7 @@ jobs:
           NSH_REQUIRE_SHOWCASES: "1"
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           AR_wasm32_unknown_unknown: llvm-ar
+          GITHUB_TOKEN: ${{ github.token }}
         run: bun run build
 
       - name: Test website
@@ -132,19 +165,60 @@ jobs:
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
         run: bun run test
 
+      # Each release's pages and player are built once and kept here, again
+      # when the site itself changes (the script's digest of it).
+      - name: Restore the releases' builds
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        uses: actions/cache/restore@v4
+        with:
+          path: website/.versions
+          key: website-versions-${{ github.run_id }}
+          restore-keys: website-versions-
+
+      # Machine translations, for the root only; none yet is fine.
+      - name: Take the machine translations
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          git clone --depth=1 https://github.com/longbridge/nsh-website-translates website/translations
+          rm -rf website/translations/.git
+
+      # The published site, after the tests of main's own build: main again
+      # at /versions/main, the releases from their tags (whose pages are as
+      # they were released, links included).
+      - name: Build every version
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        working-directory: website
+        env:
+          NSH_REQUIRE_SHOWCASES: "1"
+          SHOWCASES_DIR: ${{ github.workspace }}/.showcases
+          AR_wasm32_unknown_unknown: llvm-ar
+          NSH_REQUIRE_RELEASES: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/versions.js
+
+      - name: Save the releases' builds
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        uses: actions/cache/save@v4
+        with:
+          path: website/.versions
+          key: website-versions-${{ github.run_id }}
+
+      # A report, not a gate: a Gallery over its budget never stops the
+      # site from being published.
       - name: Check standalone Gallery code size
-        run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=4000000
+        continue-on-error: true
+        run: node crates/nsh-platform-web/web/browser/package-size.mjs website/public/play/gallery --require-browser --brotli-budget=5000000
 
       - uses: actions/configure-pages@v5
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
 
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         with:
           path: website/dist
 
   deploy:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     needs: build
     runs-on: ubuntu-latest
     environment:

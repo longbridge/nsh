@@ -3,7 +3,8 @@
 - **Text**: `<Text>`; styles `numberOfLines`, `textOverflow` (`ellipsis|clip|ellipsis-start|ellipsis-middle`: `EllipsizeMode`'s
   `Tail|Clip|Head|Middle`), `fontFamily` (system or imported fonts:
   `import Inter from "./Inter.ttf"` evaluates to the family name and registers the font before the first frame), `fontWeight`,
-  `fontStyle`, `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,
+  `fontStyle` (italic runs leave color emoji upright, in runs of their own: `AttributedText::push`, as WebKit does;
+  Chrome and Android would slant them), `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,
   `textAlignVertical` (the core moves the content box down). `adjustsFontSizeToFit` shrinks the fonts (down to
   `minimumFontScale`, at least 0.1) until the text fits its box and lines (`Paragraph::fit`, a binary search in the core).
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
@@ -19,6 +20,18 @@
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
   Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
   font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
+- A text engine whose lines take all that fits and whose `measure` reports the widest line's width says so
+  (`TextEngine::breaks_lines_greedily`: macOS, Linux). The core then reuses a measurement for every maximum width from
+  that width to the one measured (`measure_text`, `SameLines`), and measures a growing width a little ahead to cover
+  the next ones, until a text's lines change within that margin. Limits on lines are measured at every width. A
+  window's resize changes the width of every text of a page on every size.
+  Another width with the same lines also keeps the final layout when every line starts at the box's left
+  (`flush_text`, `keeps_lines`), so the platform has nothing to typeset and macOS nothing to draw.
+  During a burst of resizes (`Core::set_resizing`, the engine's `RESIZE_BURST_GAP`), text more than a screen away from
+  the screen (`Core::mark_near_screen`, from the last commit's frames) is neither measured nor laid out at new widths:
+  it keeps its height, and catches up as it comes near or in the commit after the burst ends. Content below the
+  viewport's height therefore settles when the drag ends; a page scrolled past text that grows keeps what it shows
+  (`core/resize_anchor.rs`).
   A text out of the layout (`display: none` on it or on a view around it, `hidden`) is sent with an empty layout (its
   text unchanged, for tests and screen readers): its box is zero, and the web, which does not clip text to its box,
   would still draw the glyphs laid out in it.
@@ -45,12 +58,9 @@
   OHOS (`text/selection/controller.rs`): the engine retains Unicode grapheme/word boundaries and visual-run boxes from
   `ohos-drawing-binding::Typography::range_boxes`; long-pressing selects a word, dragging or moving the two handles
   adjusts the range (auto-scrolling near scroll edges on VSync), and `@nsh/ohos` shows a Copy / Select All menu.
-  GPUI (`nsh-platform-gpui` `text.rs`): the same desktop selection
-  (Cmd instead of Ctrl on macOS), plus a right-click menu (Copy, Select All: `chrome::popup_actions`). Its engine
-  shapes each paragraph once with GPUI's text system, in segments of one bidi level and font size, and does the rest
-  itself: lines break at UAX #14 opportunities (`unicode-linebreak`), measuring at another width only re-breaks, and
-  each line's clusters are ordered by their bidi levels (`unicode-bidi`); a blurred text shadow is the glyphs painted
-  faintly around the blur radius (GPUI blurs no glyphs). GPUI loads variable fonts at their default weight only, so on
+  GPUI (`nsh-platform-gpui` `text.rs`): the same selection
+  (Cmd instead of Ctrl on macOS), plus a right-click menu (Copy, Select All: `chrome::popup_actions`). Its text engine is
+  built on GPUI's text system (`nsh-platform-gpui` `text.rs`). GPUI loads variable fonts at their default weight only, so on
   Linux the UI font is the first of a list that GPUI can set in bold (GNOME's Adwaita Sans is variable: Noto Sans or
   DejaVu Sans take its place, with Adwaita Sans's ascent and descent, so lines are as tall as GTK's). Symbols that are
   text by default (♥, ✓) take a text font when the fallback would draw them as color emoji, so the text's color applies.
@@ -62,7 +72,13 @@
   boxes in the area's coordinates with scroll offsets applied, its text engine's hit test), feeds `SelectionModel` its
   gestures (press with the click count and Shift, drag, long press, a handle's drag, select all) and draws what
   `ranges` says with its own highlight (each text's `selectionColor`), handles and menu; Copy takes `text` (attachments
-  left out, texts on one row joined by a tab, the others by a line break). Positions are (text index, UTF-16 offset),
+  left out, texts on one row joined by a tab, the others by a line break, a text that continues the one before it by
+  nothing). A component that lays one line out as several texts (a code view's soft-wrapped line: `DiffView`) marks
+  the later parts with `Element::continues_text` (`ViewProps::continues_text`, the internal `Prop::ContinuesText`;
+  `SelectionTexts::continues` reads it): a copy gives the line whole, a triple click selects the whole line, and a
+  double click takes a word the wrap cut across its parts. Every backend reads it from its text views' props (Android
+  passes it to the model with the texts, `nativeSetTexts`); the web's copy joins such texts by nothing (the browser's
+  own selection takes the clicks). Positions are (text index, UTF-16 offset),
   never inside a surrogate pair. A point outside every text is hit-tested in reading order: the horizontally nearest
   text on its row, above every text the first text's start, below every text the last one's end, between rows the
   nearer of the end of the text above and the start of the text below. Words are runs of letters, digits and `_`, runs
@@ -101,8 +117,8 @@
   it wraps with the text. Its style key `verticalAlign` (`VerticalAlign`, CSS `vertical-align` of a replaced inline
   box, `align-*` classes; a node field like `zIndex`, a change rebuilds the block) places it in its line:
   `AttachmentAlignments` keeps alignment separately from the legacy `TextAttachment` and
-  `AttributedText` structs. The core stores it in its private text context and includes it in measurement-cache
-  keys; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing engines.
+  `AttributedText` structs; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing
+  engines.
   `TextAttachment::ascent(font, align)` is how far its top is above the baseline (`baseline` the height, the default and the only
   value before; `text-top` the font's ascent, `text-bottom` the height minus the descent, `middle` half the height
   plus the x height), `extent` what the line reserves above and below (each at least 0), both from the
@@ -111,13 +127,20 @@
   Java with `Paint.getFontMetrics` and the bounds of `x`; Pango a shape whose logical rectangle is the extent and ink
   the box; DirectWrite and GPUI their line boxes; the web its line box, taking the extents only when an attachment
   reaches below the baseline so baseline-only lines keep their height) and places its top `ascent` above the
-  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. CSS's
+  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. With a fixed
+  `lineHeight` a line holding an attachment is at least as tall as its text's lines (the font with the line height
+  spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
+  line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children; a text inside them built after the block
   resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
-  placeholders out.
+  placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
+  spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the
+  attachment's view), unless it sets its own; the rest of its text style (font, size, line height) is not passed in,
+  so the attachment's box is sized by its own content (`Core::inherited_text_style`). A color change on the text
+  rebuilds the texts inside its attachments.
 
 - **Rust components** nest texts the same way: `text("a ").child(text("b").underline().on_press(..)).child(view())` is
   one block; a plain string child is a raw text node (as JS's strings), a text's own content its first piece

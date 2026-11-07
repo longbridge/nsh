@@ -1,13 +1,13 @@
 ---
 title: Platform overview
-description: "Where NSH runs: iOS, Android, OHOS, macOS, Windows, Linux, GPUI and the web, each with its own backend; how to run, package and embed a Rust or TSX app on each, and what each needs."
+description: "Where NSH runs: iOS, Android, OHOS, macOS, Windows, Linux, GPUI, the terminal and the web, each with its own backend; how to run, package and embed a Rust or TSX app on each, and what each needs."
 order: 10
 group: platforms
 ---
 
 # Platform overview
 
-NSH runs on phones, desktops and the web: iOS, Android, OHOS, macOS, Windows, Linux, GPUI and web pages. Each has a backend of its own that draws with the platform's own UI, so an app is UIKit views on an iPhone, ArkUI custom nodes on OHOS, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: the reactive graph, the renderer, Taffy layout, the components and the native modules are the same Rust code everywhere, so one app runs on all of them. An app written in Rust is that code and your crate, with no JavaScript VM; a TSX app runs its modules on QuickJS on top of it ([Building with Rust](./rust.md)).
+NSH runs on phones, desktops, terminals and the web: iOS, Android, OHOS, macOS, Windows, Linux, GPUI, the terminal and web pages. Each has a backend of its own that draws with the platform's own UI, so an app is UIKit views on an iPhone, ArkUI custom nodes on OHOS, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app, character Cells in a terminal and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: the reactive graph, the renderer, Taffy layout, the components and the native modules are the same Rust code everywhere, so one app runs on all of them. An app written in Rust is that code and your crate, with no JavaScript VM; a TSX app runs its modules on QuickJS on top of it ([Building with Rust](./rust.md)).
 
 On every platform, an app is used the same two ways: packaged as an installable app of that platform (`nsh package`), or embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop it with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates). OHOS uses the [DevEco embedding workflow](./ohos.md).
 
@@ -23,8 +23,10 @@ On every platform, an app is used the same two ways: packaged as an installable 
 | [Linux](./linux.md) | GTK 4 widgets; Pango | GTK 4.14+ | `nsh run` (the default on Linux) | a directory and a `.tar.gz` |
 | [GPUI](./gpui.md) | GPUI; GPUI's text system | macOS, Windows, Linux (Vulkan) | in your GPUI app; TSX also with `nsh run --target gpui` | inside the GPUI app that embeds it |
 | [Web](./web.md) | HTML and CSS; the browser's fonts | modern browsers, desktop and phone | `nsh run --target web` | a static site |
+| [TUI](./tui.md) | ratatui on the terminal's Cell grid; the terminal's font | terminals on macOS, Windows and Linux | `nsh run --target tui` | inside the terminal app that embeds it |
 
 - **[GPUI](./gpui.md)** draws apps with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit, on macOS, Windows and Linux alike: it is the backend for embedding in GPUI and GPUI Kit apps, whose `AppView` they place in their own element tree. Standalone desktop apps run and are packaged with each OS's own backend (AppKit, Win32, GTK 4).
+- **[TUI](./tui.md)** draws apps on the terminal's grid of character Cells, in the terminal's own colors, keyboard first and with the mouse: `nsh run --target tui` runs an app in the current terminal, and a ratatui app embeds one with `AppView`.
 - **[Web](./web.md)** renders apps as HTML in a browser page: `nsh package --target web` publishes a static site for any web server or CDN, with a Rust app's engine and crate compiled to WebAssembly, and a page of your own embeds an app with `createPlayer` or an iframe. It also runs the live demos and the [playground](/playground) on this site.
 - **Mac Catalyst** runs the iOS backend in an iPhone-sized window (390×844) on a Mac, for development. Select it with `--target catalyst` to see how an app looks on a phone.
 
@@ -36,11 +38,11 @@ A Rust app (its `nsh.json` names the `"root"` component) runs and packages from 
 
 ```sh
 # A Rust app, from its directory
-nsh run --target macos             # or ios, android, windows, linux, web, catalyst
+nsh run --target macos             # or ios, android, windows, linux, tui, web, catalyst
 nsh package --target macos         # or ios, ios-simulator, android, windows, linux, web
 
 # A TSX app
-nsh run App.tsx --target macos     # or ios, android, windows, linux, gpui, web, catalyst
+nsh run App.tsx --target macos     # or ios, android, windows, linux, gpui, tui, web, catalyst
 nsh package App.tsx --target macos
 ```
 
@@ -59,6 +61,7 @@ Each desktop OS packages apps with its own backend, built for the machine it run
 | Android | `NshView` (a `FrameLayout`) | TSX bundles, signed packages | `nsh.aar` | Java or Kotlin |
 | [OHOS](./ohos.md) | `NshSurface` (with `ContentSlot`) | TSX bundles, signed packages | `@nsh/ohos` and `libnsh_platform_ohos.so` | ArkTS |
 | Web | `createPlayer` (a page element) or an iframe | TSX bundles; a Rust app as its published site | the runtime files from `nsh package --target web` | JavaScript or HTML |
+| TUI | `AppView` (an area of a ratatui frame) | a Rust root, TSX bundles | the `nsh-platform-tui` crate | Rust |
 
 A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `App::Rust`, and gives its engines the app's UI sets with `set_ui_sets`, so TSX it loads imports the app's own components and modules. Each view is one engine, and an app can show several. The host registers its own native views for apps to use on every platform ([Native components](./native-components.md)).
 
@@ -69,8 +72,8 @@ A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `Ap
 
 Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):
 
-- **The environment says where the app runs**: in Rust `os()`, `idiom()` and `is_desktop()` (`nsh_core::prelude`), in TSX `platform.os`, `platform.idiom`, `platform.desktop` and `platform.select` from `nsh`. The OS is iOS, Android, OHOS, macOS, Windows, Linux or the web.
-- **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `web={{…}}` or `desktop={{…}}` in TSX (`desktop`: macOS, Windows, Linux and desktop browsers).
+- **The environment says where the app runs**: in Rust `os()`, `idiom()` and `is_desktop()` (`nsh_core::prelude`), in TSX `platform.os`, `platform.idiom`, `platform.desktop` and `platform.select` from `nsh`. The OS is iOS, Android, OHOS, macOS, Windows, Linux or the web; in a terminal, the idiom is `"terminal"` and the OS the machine's own.
+- **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `web={{…}}` or `desktop={{…}}` in TSX (`desktop`: macOS, Windows, Linux, desktop browsers and terminals).
 - **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
 An app's components are drawn with NSH's primitives, so they run on desktops as well as on phones, looking the same on both. A desktop layout is built from the primitives (`view`, `text`, `scroll`, `virtual_list`, …; `View`, `Text`, `Scroll`, `List`, … in TSX) and a check for the desktop, as the gallery's desktop layout is:
@@ -113,7 +116,7 @@ function TabLayout() {
 }
 ```
 
-Each backend lists what it does its own way: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences).
+Each backend lists what it does its own way: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences), [TUI](./tui.md).
 
 ## See also
 

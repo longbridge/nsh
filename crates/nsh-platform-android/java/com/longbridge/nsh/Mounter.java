@@ -63,10 +63,18 @@ final class Mounter {
     private static final int APPEARANCE = 33;
     private static final int COMPONENT_PROP_SLOTS = 34;
     private static final int SHADER = 35;
+    private static final int SHADER_TRANSITION = 36;
+    private static final int SHADER_INPUT = 37;
+    private static final int NAV_SHADER = 38;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
     int appearance;
+    /**
+     * The app's colors for alerts and action sheets ({@code encode.rs} {@code DIALOG_TOKENS}): the dialog, its title,
+     * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
+     */
+    final int[] dialogColors = new int[10];
     /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
@@ -177,6 +185,8 @@ final class Mounter {
     private final SparseArray<ModalHost> modals = new SparseArray<>();
     /** Screens' options, applied once the batch's stacks are settled. */
     private final SparseArray<ScreenOptions> screenOptions = new SparseArray<>();
+    /** The pages and dialogs that come and go through a shader (`transitionShader`; libnsh has it). */
+    final android.util.SparseBooleanArray navShaders = new android.util.SparseBooleanArray();
     /** Parents of screens, header items and modals (not their superviews). */
     private final android.util.SparseIntArray hosts = new android.util.SparseIntArray();
     private final java.util.LinkedHashSet<Integer> dirtyStacks = new java.util.LinkedHashSet<>();
@@ -521,12 +531,7 @@ final class Mounter {
                 case INPUT_CONTENT: {
                     View v = views.get(b.getInt());
                     float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
-                    if (v instanceof InputBox) {
-                        InputBox in = (InputBox) v;
-                        Box.Frame f = Box.frame(in);
-                        int width = f.right - f.left, height = f.bottom - f.top;
-                        in.setContent(px(x), px(y), Math.max(0, width - px(x + w)), Math.max(0, height - px(y + h)));
-                    }
+                    if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
                 case COMMAND: command(b, objects); break;
@@ -539,7 +544,27 @@ final class Mounter {
                     // The layer stays in libnsh, which renders it (`shader.rs`).
                     View v = views.get(b.getInt());
                     boolean on = b.getInt() != 0;
-                    if (v instanceof Box) ((Box) v).setShader(on);
+                    int role = b.getInt();
+                    float overflow = b.getFloat();
+                    int inputs = b.getInt();
+                    if (v instanceof Box) ((Box) v).setShader(on, role, overflow, inputs);
+                    break;
+                }
+                case SHADER_TRANSITION: {
+                    View v = views.get(b.getInt());
+                    float ms = b.getFloat();
+                    if (v instanceof Box) ((Box) v).startTransition(ms);
+                    break;
+                }
+                case SHADER_INPUT: {
+                    View v = views.get(b.getInt());
+                    if (v instanceof Box) ((Box) v).picturesChanged();
+                    break;
+                }
+                case NAV_SHADER: {
+                    int id = b.getInt();
+                    if (b.getInt() != 0) navShaders.put(id, true);
+                    else navShaders.delete(id);
                     break;
                 }
                 case COMPONENT_PROP_SLOTS: {
@@ -686,10 +711,37 @@ final class Mounter {
      * again.
      */
     void destroyComponents() {
+        Notifications.forget(this);
+        if (audio != null) {
+            audio.release();
+            audio = null;
+        }
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
         }
+    }
+
+    /** The app's sounds and players (one per engine), made at its first audio command. UI thread. */
+    private Audio audio;
+
+    private Audio audio() {
+        if (audio == null) audio = new Audio(this);
+        return audio;
+    }
+
+    /**
+     * The app stopped: its shader views stop picturing and drawing frames
+     * libnsh no longer renders (a screen shader gives the surface back), and
+     * its pages and dialogs no longer go through a shader. No {@code DELETE}
+     * follows for them.
+     */
+    void dropShaders() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof Box) ((Box) v).dropShader();
+        }
+        navShaders.clear();
     }
 
     /** Makes registered component {@code name} in box {@code id}. */
@@ -839,12 +891,15 @@ final class Mounter {
         if (v instanceof StackBox) stacks.remove(v);
         SelectableView area = selectableViews.get(id);
         if (area != null) {
-            area.clear();
+            area.remove();
             selectableViews.remove(id);
         }
         screenOptions.remove(id);
+        navShaders.delete(id);
+        if (v instanceof Box) ((Box) v).dropShader();
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
+        stopEffects(id);
         detach(v);
         if (v instanceof ImageBox) cancelImage((ImageBox) v);
         if (v instanceof WebBox) ((WebBox) v).destroy();
@@ -979,6 +1034,9 @@ final class Mounter {
                 decor.borderWidths[i] = borderWidths[i] * density;
                 decor.borderColors[i] = borderColors[i];
             }
+            // A RippleDrawable rasterizes its mask once; a shape change here
+            // would leave the ripple clipped to the stale (pre-change) shape.
+            rippleMaskDirty(id);
             decor.borderStyle = borderStyle;
             decor.continuous = continuous;
             decor.originX = originXFraction ? originX : originX * density;
@@ -990,6 +1048,7 @@ final class Mounter {
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
             decor.gradients = fx.gradients;
+            decor.masks = fx.masks;
             decor.outlineWidth = fx.outlineWidth;
             decor.outlineColor = fx.outlineColor;
             decor.outlineStyle = fx.outlineStyle;
@@ -1054,13 +1113,25 @@ final class Mounter {
         }
     }
 
+    /**
+     * Interpolates two colors in premultiplied ARGB, as CSS and the core's
+     * `lerp_color` (`transition.rs`) do, so that transparent ends do not pass
+     * through black. The progress is clamped: an overshooting easing (a bouncy
+     * spring's projection) must not carry a channel past its ends, where the
+     * packed byte would wrap into a garbage color for a frame.
+     */
     static int lerpColor(int a, int b, float t) {
-        int r = 0;
-        for (int shift = 0; shift < 32; shift += 8) {
-            int ca = (a >>> shift) & 0xff, cb = (b >>> shift) & 0xff;
-            r |= Math.round(ca + (cb - ca) * t) << shift;
+        if (a == b) return a;
+        t = Math.max(0f, Math.min(1f, t));
+        float alphaA = (a >>> 24) & 0xff, alphaB = (b >>> 24) & 0xff;
+        float alpha = alphaA + (alphaB - alphaA) * t;
+        int out = Math.round(Math.max(0, Math.min(255, alpha))) << 24;
+        if (alpha <= 0) return out;
+        for (int shift = 0; shift <= 16; shift += 8) {
+            float x = ((a >>> shift) & 0xff) * alphaA, y = ((b >>> shift) & 0xff) * alphaB;
+            out |= Math.round(Math.max(0, Math.min(255, (x + (y - x) * t) / alpha))) << shift;
         }
-        return r;
+        return out;
     }
 
     /** Animates the style change of `v` from `from` to the values just set. */
@@ -1090,6 +1161,9 @@ final class Mounter {
                         decor.radii[i] = from.radii[i] + (radii[i] - from.radii[i]) * t;
                         decor.borderWidths[i] = from.borderWidths[i] + (widths[i] - from.borderWidths[i]) * t;
                     }
+                    // Same as above: the ripple's cached mask must follow the
+                    // animated shape (e.g. the press corner morph).
+                    rippleMaskDirty(id);
                 }
             }
             now.opacity = opacity ? from.opacity + (to.opacity - from.opacity) * t : to.opacity;
@@ -1102,6 +1176,12 @@ final class Mounter {
             now.rotateY = to.rotateY;
             now.perspective = to.perspective;
             now.background = decor != null ? decor.fill : to.background;
+            // The frame's border colors are what the decor now carries; a
+            // fresh Dynamic's all-transparent array would have applyDynamic
+            // "restore" them to transparent every frame (an outlined view's
+            // border vanished after its first transition and never came
+            // back).
+            if (decor != null) System.arraycopy(decor.borderColors, 0, now.borderColors, 0, 4);
             applyDynamic(v, now);
             v.invalidate();
         });
@@ -1118,6 +1198,40 @@ final class Mounter {
             System.arraycopy(from.borderColors, 0, decor.borderColors, 0, 4);
         }
         a.start();
+    }
+
+    /**
+     * Stops the transition and keyframe animation of `id`, which is gone: an
+     * endless keyframe animation (a pulsing placeholder) would otherwise run
+     * on unseen, and the animation handler keep its view and this mounter.
+     */
+    private void stopEffects(int id) {
+        ValueAnimator transition = transitions.get(id);
+        transitions.remove(id);
+        if (transition != null) transition.cancel();
+        ValueAnimator keyframes = keyframeAnimators.get(id);
+        keyframeAnimators.remove(id);
+        motions.remove(id);
+        if (keyframes != null) keyframes.cancel();
+    }
+
+    /**
+     * The app stopped: its running animations stop too, since no
+     * {@code DELETE} follows for their views. The animation handler is the
+     * UI thread's and holds an animation until it ends, so an endless one
+     * would keep this mounter, its views and their activity forever.
+     */
+    void cancelAnimations() {
+        java.util.ArrayList<Animator> running = new java.util.ArrayList<>();
+        for (int i = 0; i < layoutAnimators.size(); i++) running.add(layoutAnimators.valueAt(i));
+        for (int i = 0; i < transitions.size(); i++) running.add(transitions.valueAt(i));
+        for (int i = 0; i < keyframeAnimators.size(); i++) running.add(keyframeAnimators.valueAt(i));
+        // Their end listeners remove them from these maps: clear first.
+        layoutAnimators.clear();
+        transitions.clear();
+        keyframeAnimators.clear();
+        motions.clear();
+        for (Animator a : running) a.cancel();
     }
 
     /** Starts (or stops) the keyframe animation of `v`. */
@@ -1214,14 +1328,18 @@ final class Mounter {
                 modifiers(e.getMetaState()));
     }
 
-    /** An interaction state of `id` changed: tells the core if it reads it. */
+    /**
+     * An interaction state of `id` changed: tells the core if it reads it.
+     * The focus it always hears (`nsh_core::input::reported_states`): it
+     * works out `focus-within` from it.
+     */
     void reportState(int id, int bit, boolean on) {
         int states = currentStates.get(id);
         int next = on ? states | bit : states & ~bit;
         if (next == states) return;
         currentStates.put(id, next);
-        int tracked = trackedStates.get(id);
-        if ((tracked & bit) != 0) Native.states(handle(), id, next & tracked);
+        int reported = trackedStates.get(id) | STATE_FOCUSED;
+        if ((reported & bit) != 0) Native.states(handle(), id, next & reported);
     }
 
     /**
@@ -1310,6 +1428,17 @@ final class Mounter {
     int longPressDelay(int id) {
         Feedback f = feedback.get(id);
         return f != null && f.longPressDelay >= 0 ? f.longPressDelay : ViewConfiguration.getLongPressTimeout();
+    }
+
+    /**
+     * Drops the cached mask of the ripple of view {@code id}: a
+     * RippleDrawable rasterizes its mask once and reuses it until told
+     * otherwise, so any corner-radius change under an active (or later)
+     * ripple must invalidate it for the mask to follow the new shape.
+     */
+    private void rippleMaskDirty(int id) {
+        Feedback f = feedback.get(id);
+        if (f != null && f.ripple != null) f.ripple.invalidateSelf();
     }
 
     /**
@@ -1440,11 +1569,13 @@ final class Mounter {
             panActivations.remove(id);
         }
         boolean selectableView = b.getInt() != 0;
+        boolean continuesText = b.getInt() != 0;
         if (v == null) return;
+        if (v instanceof TextBox) ((TextBox) v).continuesText = continuesText;
         SelectableView area = selectableViews.get(id);
         if (selectableView && (area == null || area.view != v)) {
             if (area != null) area.clear();
-            selectableViews.put(id, new SelectableView(this, v));
+            selectableViews.put(id, new SelectableView(this, v, id));
         } else if (!selectableView && area != null) {
             area.clear();
             selectableViews.remove(id);
@@ -1743,6 +1874,16 @@ final class Mounter {
         return !shownModals.isEmpty();
     }
 
+    /** The windows of the dialogs shown, bottom to top (the test agent's screenshots). */
+    java.util.List<android.view.Window> modalWindows() {
+        java.util.ArrayList<android.view.Window> windows = new java.util.ArrayList<>();
+        for (ModalHost m : shownModals) {
+            android.view.Window window = m.dialogWindow();
+            if (window != null) windows.add(window);
+        }
+        return windows;
+    }
+
     /** The window of the topmost dialog shown, or null. */
     View topModalWindow() {
         for (int i = shownModals.size() - 1; i >= 0; i--) {
@@ -1934,6 +2075,19 @@ final class Mounter {
                 multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
     }
 
+    /**
+     * A page or dialog leaves with the field that has the keyboard: the
+     * keyboard hides with it, as with a native back, not once the field is
+     * gone (which leaves it up). Focus goes to the host, as `blur()` does.
+     */
+    void hideKeyboardIn(View leaving) {
+        View f = leaving.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
+        if (f.getRootView() == host.getRootView()) host.requestFocus();
+    }
+
     private void command(ByteBuffer b, Object[] objects) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);
@@ -1945,11 +2099,19 @@ final class Mounter {
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (id == 1) {
+                    // Keyboard.dismiss(): hide the keyboard even when the field that showed it is gone (a page that
+                    // closed with it), which leaves no focused view in the host but the keyboard still up. Not when
+                    // an editor outside the host has it (the embedding app's, another NshView's): they share the window.
                     View f = host.findFocus();
-                    if (f != null && f != host) {
-                        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        host.requestFocus();
+                        if (f != host) host.requestFocus();
+                    } else {
+                        View other = host.getRootView().findFocus();
+                        if (other == null || !other.onCheckIsTextEditor() || !imm.isActive(other)) {
+                            imm.hideSoftInputFromWindow(host.getWindowToken(), 0);
+                        }
                     }
                 }
                 break;
@@ -1968,6 +2130,17 @@ final class Mounter {
             case 8: case 9: {
                 String text = (String) objects[b.getInt()];
                 if (v instanceof WebBox) ((WebBox) v).command(kind, text);
+                break;
+            }
+            case 46: {
+                String url = (String) objects[b.getInt()];
+                int count = b.getInt();
+                java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
+                for (int i = 0; i < count; i++) {
+                    String name = (String) objects[b.getInt()];
+                    headers.put(name, (String) objects[b.getInt()]);
+                }
+                if (v instanceof WebBox) ((WebBox) v).load(url, headers);
                 break;
             }
             case 10: {
@@ -2051,6 +2224,50 @@ final class Mounter {
                 Picker.show(context, request);
                 break;
             }
+            case 45: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                String extensions = (String) objects[b.getInt()];
+                request.extensions = extensions.isEmpty() ? new String[0] : extensions.split(",");
+                request.maxBytes = b.getInt();
+                request.files = true;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
+            case 27: {
+                for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 28: {
+                int request = b.getInt();
+                String path = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openPath(context, path);
+                if (opened) {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id"}, new Object[] {(double) request});
+                } else {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                            new Object[] {(double) request, "no app opened the file"});
+                }
+                break;
+            }
+            case 30: {
+                // A file request with no Android implementation: fail it so
+                // the waiting call returns instead of hanging.
+                int request = b.getInt();
+                eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                        new Object[] {(double) request, "not supported on Android"});
+                break;
+            }
+            case 44: {
+                Notifications.command(this, b, objects);
+                break;
+            }
+            case 47: {
+                audio().command(b, objects);
+                break;
+            }
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];
@@ -2126,8 +2343,8 @@ final class Mounter {
                     default: source = new Object[] {0};
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
-                boolean scroll = b.getInt() != 0, js = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js);
+                boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
+                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
                 break;
             }
             case 4: {
@@ -2275,7 +2492,7 @@ final class Mounter {
     }
 
     void event(int id, int kind) {
-        Native.event(handle(), id, kind, null, 0, 0, 0);
+        event(id, kind, null, 0, 0, 0);
     }
 
     /** A press's touch: where it is now and the modifier keys it began with. */
@@ -2328,11 +2545,20 @@ final class Mounter {
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
-        Native.eventMap(handle(), id, kind, keys, values);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.eventMap(handle, id, kind, keys, values);
     }
 
+    /**
+     * Sends a node's event. Loads finish on their own time (an image's {@code
+     * onLoad}, a video's, a web view's): once the view is destroyed there is
+     * no app to tell, and the native side takes a live handle only.
+     */
     void event(int id, int kind, String text, int count, float x, float y) {
-        Native.event(handle(), id, kind, text, count, x, y);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.event(handle, id, kind, text, count, x, y);
     }
 
     void zoom(int id, float scale) {

@@ -50,6 +50,8 @@ function NameField() {
 }
 ```
 
+With no width from its style or its parent, an input is as wide as twenty digits in its font, as an HTML `<input>` is: what it holds does not change its width.
+
 ## Controlled and uncontrolled
 
 - **Controlled**: pass `value` and update it in `onChange`. The app can rewrite what the user typed (trim it, format
@@ -101,6 +103,9 @@ view styles apply):
 |---|---|---|---|
 | `caret` | `.caret(..)` | `boolean` | The caret is drawn (default `true`; `false` hides it). |
 | `selectedRange` | `.selected_range((start, end))` | `{ start: number; end?: number }` | The controlled selection, in UTF-16 units; `end` defaults to `start` (a caret). |
+
+The caret blinks while its window is shown and active. In GPUI windows on Linux it stays shown after ten seconds
+without typing or moving it, as in GTK apps, so a focused field left alone costs no frames.
 
 ### Colors
 

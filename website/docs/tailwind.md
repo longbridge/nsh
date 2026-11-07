@@ -79,7 +79,7 @@ Rust components (`nsh/base`'s and those of an app's own crate) accept `class` an
 | `active:` | The view is pressed | `.active(\|s\| ..)` |
 | `hover:` | A pointer is over the view (iPad and Mac pointers) | `.hover(\|s\| ..)` |
 | `focus:`, `focus-visible:` | An input has focus | `.focus(\|s\| ..)` |
-| `focus-within:` | The view or a descendant has focus | |
+| `focus-within:` | The view or a descendant has focus (the content of an `Overlay` is a descendant of the view it is in) | `.focus_within(..)` |
 | `disabled:`, `enabled:` | The element's `disabled` prop is true / false | `.disabled_style(\|s\| ..)` |
 | `selected:` | The element is selected (a `Button`'s `selected`, `accessibilityState.selected`) | `.selected_style(..)` |
 | `checked:` | The element is checked (`accessibilityState.checked` is `true`; `"mixed"` is not checked) | `.checked_style(..)` |
@@ -87,7 +87,8 @@ Rust components (`nsh/base`'s and those of an app's own crate) accept `class` an
 | `aria-expanded:` | The element is expanded (`accessibilityState.expanded` is `true`): a `Popover`'s or `Menu`'s trigger while its popup is open | `.expanded_style(..)` |
 | `aria-pressed:` | The element is a toggle button that is on (`accessibilityState.pressed` is `true`; `"mixed"` is not pressed). Not `active:`, a press in progress | `.aria_pressed(..)`, `.pressed_style(..)` |
 | `aria-busy:`, `aria-checked:`, `aria-selected:` | `accessibilityState.busy`, `checked` (`true`, not `"mixed"`) or `selected` is `true`, as Tailwind's `aria-*` variants: after the pseudo-classes, in the order of their names | |
-| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:`, `group-selected:`, `group-checked:`, `group-indeterminate:`, `group-aria-expanded:`, `group-aria-pressed:`, `group-aria-busy:`, `group-aria-checked:`, `group-aria-selected:` | The nearest ancestor with the `group` class is in that state | `.group()` on the ancestor; `.group_active(..)`, `.group_hover(..)`, `.group_focus_within(..)` inside |
+| `data-<name>:` | The element has the `data-*` attribute `name`, as Tailwind's boolean `data-*` variants (`&[data-range-start]`): what a component's part shows beyond its states, a calendar's day at the start of a range (`data-range-start:`). After the `aria-*` variants, in the order of their names | `Interactive::project_data(name, ..)` sets one on a component's part |
+| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:`, `group-selected:`, `group-checked:`, `group-indeterminate:`, `group-aria-expanded:`, `group-aria-pressed:`, `group-aria-busy:`, `group-aria-checked:`, `group-aria-selected:`, `group-data-<name>:` | The nearest ancestor with the `group` class is in that state, or has that `data-*` attribute | `.group()` on the ancestor; `.group_active(..)`, `.group_hover(..)`, `.group_focus_within(..)` inside |
 | `group-active/name:` ... | The same, for an ancestor marked `group/name` | `.group_named("name")`; `.group_active_named("name", ..)`, ... |
 | `first:`, `last:`, `odd:`, `even:`, `only:` | The element's own position among its siblings. To color a row's label by the row's position, put `last:text-*` on the row: the label inherits it | Plain Rust from the row's index (`at.is_first()`, `at.is_last()`, `at.index() % 2`) |
 | `placeholder:` | Styles an input's placeholder (`placeholder:text-zinc-400`) | `.placeholder_color(..)` |
@@ -206,7 +207,7 @@ With this theme, `bg-brand-500`, `text-brand` (the `DEFAULT` shade), `border-ink
 | `aspect` | A ratio (`1.5`) | `aspect-*` |
 | `ease` | `[x1, y1, x2, y2]` | `ease-*` |
 
-Unknown keys and invalid values are build errors (`nsh.json: tailwind: unknown theme key 'colours'`). The theme is compiled into the bundle and applied before the first frame.
+An entry NSH cannot read, an unknown key or a value of a form it does not know, is a warning and is left out alone (`nsh.json: tailwind: unknown key 'colours', ignored`), at run time too, so a theme written for a newer NSH keeps its other entries on an older one. The theme is compiled into the bundle and applied before the first frame.
 
 The Tailwind theme shapes your classes. Typed methods keep Tailwind's default scales, so a Rust component looks the same in every app, and take the app's look from the design tokens of its theme, `"theme"` in `nsh.json` ([Rust](./rust.md#theme)).
 
@@ -260,7 +261,8 @@ A token's name is its CSS variable's without `--`, as the theme file writes it: 
 - **Both appearances.** A token has the light and the dark value of the theme: `bg-primary`, `theme().primary` and `token("primary")` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one appearance only is used in both.
 - **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token when the Tailwind theme has no color `primary`.
 - **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens, the Rust bindings reading `theme()` and the TSX code reading `token()` are updated, the classes and bindings natively. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's). A host that only adds its brand gives theme overrides, the tokens its brand changes in the same file format ([iOS](./ios.md#theme-overrides), [Android](./android.md#theme-overrides), `AppView::set_theme_overrides` on the desktops).
-- **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
+- **The app can set another theme.** [`setTheme(theme)`](../modules/nsh.md#settheme) from `nsh` makes a theme in the same format the app's in place of its `"theme"`, while it runs, on every platform and in `nsh test`; `setTheme(null)` gives the app's own back. `token()` reads the new tokens at once. The theme is read whole: a value NSH cannot read throws a `TypeError` naming it, and the theme shown stays. Build it from the app's own theme file so every token the classes name keeps a value. A Rust app sets the tokens of an `nsh_base::Theme` with `set_tokens(theme.into())`.
+- **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app or a theme set while the app runs provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
 
 Classes naming tokens are resolved once per theme, like any other class: drawing them costs what a palette color does.
 

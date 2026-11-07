@@ -438,11 +438,33 @@ impl AttachmentAlignments {
     }
 }
 
+/// Whether the grapheme cluster `c` is drawn as a color emoji: a character
+/// of emoji presentation or one asked for with U+FE0F, unless U+FE0E asks
+/// for text.
+fn is_emoji_presentation(c: &str) -> bool {
+    use unicode_properties::{EmojiStatus, UnicodeEmoji};
+    !c.contains('\u{FE0E}')
+        && c.chars().any(|ch| {
+            ch == '\u{FE0F}'
+                || matches!(
+                    ch.emoji_status(),
+                    EmojiStatus::EmojiPresentation
+                        | EmojiStatus::EmojiPresentationAndModifierBase
+                        | EmojiStatus::EmojiPresentationAndEmojiComponent
+                        | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent
+                )
+        })
+}
+
 /// The character standing for an attachment.
 pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 
 /// A nested `<text>` span with press listeners: presses on its characters
-/// go to it rather than to the block.
+/// go to it rather than to the block. It is a stop of the keyboard focus
+/// of its own ([`Self::focus_stop`]): Tab reaches it after its text view,
+/// in text order, the platform reports `FOCUSED` (`focus:`) and `Focus` /
+/// `Blur` for the span's node and presses it on Return, as a view that
+/// takes presses.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextLink {
     /// Start offset (UTF-16 units, inclusive).
@@ -453,6 +475,9 @@ pub struct TextLink {
     pub node: NodeId,
     /// Its listeners.
     pub events: EventMask,
+    /// A stop of Tab (`ViewProps::focus_stop` of the span: unless
+    /// `focusable={false}` or disabled).
+    pub focus_stop: bool,
 }
 
 /// A nested `<Text>` span with a `testID` ([`AttributedText::test_ids`]).
@@ -530,12 +555,40 @@ impl AttributedText {
     }
 
     /// Appends `s` with `style`, merging with the previous run when the
-    /// style is identical.
+    /// style is identical. Italic text keeps its color emoji upright, in
+    /// runs of their own.
     pub fn push(&mut self, s: &str, style: ResolvedTextStyle) {
         if s.is_empty() {
             return;
         }
         let s = &*style.transform.apply(s);
+        if !style.italic || s.is_ascii() {
+            self.push_run(s, style);
+            return;
+        }
+        // Emoji fonts have no italic face: Chrome and Android slant them,
+        // WebKit and CoreText keep them upright, as every platform does here.
+        let upright = ResolvedTextStyle {
+            italic: false,
+            ..style
+        };
+        let (mut run, mut at) = (0, 0);
+        while at < s.len() {
+            let end = crate::text_edit::next_cluster(s, at);
+            if is_emoji_presentation(&s[at..end]) {
+                self.push_run(&s[run..at], style);
+                self.push_run(&s[at..end], upright);
+                run = end;
+            }
+            at = end;
+        }
+        self.push_run(&s[run..], style);
+    }
+
+    fn push_run(&mut self, s: &str, style: ResolvedTextStyle) {
+        if s.is_empty() {
+            return;
+        }
         let len = s.encode_utf16().count() as u32;
         self.text.push_str(s);
         match self.spans.last_mut() {
@@ -672,6 +725,15 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// Whether each line takes all that fits and [`TextEngine::measure`]'s
+    /// width is the widest line's: a maximum width between that width and
+    /// the one measured then breaks the lines at the same places, so the
+    /// core knows the size without typesetting. A window's resize changes
+    /// the width of every text of a page on every size.
+    fn breaks_lines_greedily(&self) -> bool {
+        false
+    }
+
     /// The final layout in a box of exactly `size`, for drawing.
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
@@ -750,6 +812,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
         (**self).prepare_aligned(text, alignments)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        (**self).breaks_lines_greedily()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
@@ -942,7 +1008,8 @@ mod estimate {
 
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
 /// tests: every character is `0.55 × font size` wide and lines are
-/// `1.2 × font size` tall, their baseline at the bottom (the font's ascent
+/// `1.2 × font size` tall; a text with line breaks measures as wide as its
+/// widest line and as tall as its lines (each wrapped on its own), their baseline at the bottom (the font's ascent
 /// is the line, its descent 0, its x height `0.5 × font size`), where
 /// attachments are placed by [`TextAttachment::ascent`] on the first line.
 #[derive(Debug, Default, Clone, Copy)]
@@ -950,8 +1017,16 @@ pub struct ApproxTextEngine;
 
 impl TextEngine for ApproxTextEngine {
     /// `(character count, font size, max lines, attachments, the indices of
-    /// the characters two UTF-16 units long)`.
-    type Prepared = (usize, Points, u32, Vec<TextAttachment>, Vec<u32>);
+    /// the characters two UTF-16 units long, each line's character count
+    /// when the text has line breaks)`.
+    type Prepared = (
+        usize,
+        Points,
+        u32,
+        Vec<TextAttachment>,
+        Vec<u32>,
+        Vec<usize>,
+    );
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
         self.prepare_aligned(text, &AttachmentAlignments::default())
@@ -971,6 +1046,11 @@ impl TextEngine for ApproxTextEngine {
             .filter(|(_, c)| c.len_utf16() == 2)
             .filter_map(|(i, _)| u32::try_from(i).ok())
             .collect();
+        // Empty (no allocation) for a text of one line.
+        let lines = match text.text.contains('\n') {
+            true => text.text.split('\n').map(|l| l.chars().count()).collect(),
+            false => Vec::new(),
+        };
         (
             text.text.chars().count(),
             size,
@@ -986,20 +1066,30 @@ impl TextEngine for ApproxTextEngine {
                 })
                 .collect(),
             astral,
+            lines,
         )
     }
 
     fn measure(
         &self,
-        &(chars, font, max_lines, ..): &Self::Prepared,
+        &(chars, font, max_lines, _, _, ref breaks): &Self::Prepared,
         max_width: Option<Points>,
     ) -> Size<Points> {
         // The order of the products is kept: it decides the last bit.
-        let width = Points(chars as f32 * font.0 * 0.55);
+        let wrap = |chars: usize| {
+            let width = Points(chars as f32 * font.0 * 0.55);
+            match max_width {
+                Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
+                _ => (width, 1.0),
+            }
+        };
         let line = font * 1.2;
-        let (width, mut lines) = match max_width {
-            Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
-            _ => (width, 1.0),
+        let (width, mut lines) = match breaks.is_empty() {
+            true => wrap(chars),
+            false => breaks.iter().fold((Points::ZERO, 0.0), |(w, n), &c| {
+                let (lw, ln) = wrap(c);
+                (w.max(lw), n + ln)
+            }),
         };
         if max_lines > 0 {
             lines = lines.min(max_lines as f32);
@@ -1009,7 +1099,7 @@ impl TextEngine for ApproxTextEngine {
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         // On one line, each character as wide as the others.
-        let (chars, font, _, attachments, astral) = prepared;
+        let (chars, font, _, attachments, astral, _) = prepared;
         let line = *font * 1.2;
         let advance = *font * 0.55;
         let attachments = attachments
@@ -1145,11 +1235,17 @@ impl ApproxLayout {
 ///
 /// It also holds the surface's pixel ratio: measurements are rounded up to
 /// its device pixels ([`MeasureCache::pixel_ratio`]), so they are only
-/// valid for one ratio and go when it changes.
+/// valid for one ratio and go when it changes. On a grid surface (a
+/// terminal) they are rounded up to its whole Cells instead
+/// ([`MeasureCache::set_cell`]).
 pub(crate) struct MeasureCache {
     current: FxHashMap<(u64, u32), Size<Points>>,
     previous: FxHashMap<(u64, u32), Size<Points>>,
     pixel_ratio: f32,
+    cell: Option<Size<Points>>,
+    /// The commit of a burst of resizes under way (`Core::set_resizing`):
+    /// text it did not find near the screen is not measured.
+    pub(crate) resizing: Option<u32>,
 }
 
 impl Default for MeasureCache {
@@ -1158,6 +1254,8 @@ impl Default for MeasureCache {
             current: FxHashMap::default(),
             previous: FxHashMap::default(),
             pixel_ratio: 1.0,
+            cell: None,
+            resizing: None,
         }
     }
 }
@@ -1184,6 +1282,30 @@ impl MeasureCache {
         self.pixel_ratio = ratio;
         self.clear();
         true
+    }
+
+    /// Measures on a grid of `cell` (a terminal's Cells) from now on, or to
+    /// device pixels with `None`; returns whether it changed (the
+    /// measurements cached before are dropped).
+    pub(crate) fn set_cell(&mut self, cell: Option<Size<Points>>) -> bool {
+        if cell == self.cell {
+            return false;
+        }
+        self.cell = cell;
+        self.clear();
+        true
+    }
+
+    /// `size` rounded up to whole Cells on a grid surface: a text is never
+    /// shorter or narrower than the Cells it takes, so the frames rounded
+    /// to Cells never cut its last line or glyph. `None` off a grid.
+    pub(crate) fn on_cells(&self, size: Size<Points>) -> Option<Size<Points>> {
+        let cell = self.cell?;
+        let up = |v: Points, c: Points| Points(((v.0 / c.0) - 1.0e-3).ceil().max(0.0) * c.0);
+        Some(Size::new(
+            up(size.width, cell.width),
+            up(size.height, cell.height),
+        ))
     }
 
     /// Drops every measurement (the fonts changed), keeping the ratio.
@@ -1235,6 +1357,81 @@ impl MeasureCache {
     }
 }
 
+/// The most a WOFF file's tables may declare they hold: what `wuff` lets a
+/// WOFF2 file hold, which it checks itself before it decompresses.
+const MAX_WOFF_TABLES: u64 = 128 * 1024 * 1024;
+
+/// The TrueType or OpenType data of a font file, which the text engines
+/// register: `data` itself, or what a WOFF or WOFF2 file holds,
+/// decompressed (WOFF2's transformed glyph tables rebuilt).
+pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    let unwrapped = match data.get(..4) {
+        Some(b"wOFF") => {
+            // `wuff` reserves the size each table declares before inflating
+            // it, so a few bytes could otherwise ask for gigabytes; and it
+            // copies a table that is not smaller compressed at its compressed
+            // size, so tables sharing one block of data could copy it past
+            // what their sizes add up to.
+            if let Some(size) = woff_tables_size(data)?.filter(|&size| size > MAX_WOFF_TABLES) {
+                return Err(format!(
+                    "the WOFF font's tables declare {size} bytes, more than a font may hold \
+                     ({MAX_WOFF_TABLES})"
+                ));
+            }
+            wuff::decompress_woff1(data)
+        }
+        Some(b"wOF2") => wuff::decompress_woff2(data),
+        _ => return Ok(std::borrow::Cow::Borrowed(data)),
+    };
+    unwrapped
+        .map(std::borrow::Cow::Owned)
+        .map_err(|e| format!("the WOFF font does not decompress: {e:?}"))
+}
+
+/// The sizes a WOFF file's table directory declares, summed (`None` for a
+/// directory cut short, which `wuff` rejects): after the 44-byte header,
+/// 20 bytes a table, its `compLength` at 8 and `origLength` at 12. A table
+/// larger compressed than it is, which the format does not allow, is an
+/// error.
+fn woff_tables_size(data: &[u8]) -> Result<Option<u64>, String> {
+    let field = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    let Some(tables) = data.get(12..14) else {
+        return Ok(None);
+    };
+    let mut size = 0;
+    for table in 0..usize::from(u16::from_be_bytes([tables[0], tables[1]])) {
+        let at = 44 + table * 20;
+        let (Some(compressed), Some(length)) = (field(at + 8), field(at + 12)) else {
+            return Ok(None);
+        };
+        if compressed > length {
+            return Err(format!(
+                "the WOFF font's table {table} is larger compressed ({compressed} bytes) than it is \
+                 ({length})"
+            ));
+        }
+        size += u64::from(length);
+    }
+    Ok(Some(size))
+}
+
+/// The family name a font registers under, which `fontFamily` names: its
+/// typographic family (name 16) when it has one, else its family (name
+/// 1). A WOFF or WOFF2 font's is the one of the font it holds.
+pub fn font_family(data: &[u8]) -> Result<String, String> {
+    let data = font_data(data)?;
+    let face = ttf_parser::Face::parse(&data, 0).map_err(|e| format!("not a font: {e}"))?;
+    let name = |id| {
+        face.names()
+            .into_iter()
+            .filter(|n| n.name_id == id && n.is_unicode())
+            .find_map(|n| n.to_string())
+    };
+    name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
+        .or_else(|| name(ttf_parser::name_id::FAMILY))
+        .ok_or_else(|| "the font has no family name".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1255,6 +1452,48 @@ mod tests {
         assert_eq!(t.spans.len(), 2);
         assert_eq!((t.spans[0].start, t.spans[0].end), (0, 4));
         assert_eq!((t.spans[1].start, t.spans[1].end), (4, 5));
+    }
+
+    #[test]
+    fn italic_text_keeps_color_emoji_upright() {
+        let italic = ResolvedTextStyle {
+            italic: true,
+            ..Default::default()
+        };
+        let runs = |s: &str| {
+            let mut t = AttributedText::default();
+            t.push(s, italic);
+            let units: Vec<u16> = t.text.encode_utf16().collect();
+            t.spans
+                .iter()
+                .map(|s| {
+                    let text = String::from_utf16(&units[s.start as usize..s.end as usize]);
+                    (text.unwrap(), s.style.italic)
+                })
+                .collect::<Vec<_>>()
+        };
+        let run = |s: &str, italic: bool| (s.to_owned(), italic);
+        assert_eq!(
+            runs("斜体 abc 😀😀 end"),
+            [
+                run("斜体 abc ", true),
+                run("😀😀", false),
+                run(" end", true)
+            ]
+        );
+        // Sequences stay whole: ZWJ, skin tone, flag, keycap, U+FE0F.
+        assert_eq!(runs("👩‍💻👍🏽🇨🇳#️⃣❤️"), [run("👩‍💻👍🏽🇨🇳#️⃣❤️", false)]);
+        // Text presentation by default, or asked for with U+FE0E.
+        assert_eq!(runs("© ❤ ☺ 😀\u{FE0E}"), [run("© ❤ ☺ 😀\u{FE0E}", true)]);
+
+        // Upright text is one run, and pushes merge across the emoji.
+        let mut t = AttributedText::default();
+        t.push("a😀", ResolvedTextStyle::default());
+        assert_eq!(t.spans.len(), 1);
+        t.push("😀", italic);
+        t.push("b", italic);
+        assert_eq!(t.spans.len(), 2);
+        assert_eq!((t.spans[0].end, t.spans[1].start), (5, 5));
     }
 
     #[test]
@@ -1490,5 +1729,118 @@ mod tests {
                 size(px(5.5), px(12.0))
             )]
         );
+    }
+
+    #[test]
+    fn woff_and_woff2_fonts_decompress_to_the_font_they_hold() {
+        let ttf: &[u8] =
+            include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf");
+        let face = |data: &[u8]| {
+            let face = ttf_parser::Face::parse(data, 0).expect("a font");
+            let family = face
+                .names()
+                .into_iter()
+                .find(|n| n.name_id == ttf_parser::name_id::FAMILY && n.is_unicode())
+                .and_then(|n| n.to_string());
+            (family, face.number_of_glyphs(), face.glyph_index('P'))
+        };
+        let original = face(ttf);
+        assert_eq!(original.0.as_deref(), Some("Pacifico"));
+        // TrueType comes back as it is.
+        assert!(matches!(font_data(ttf), Ok(std::borrow::Cow::Borrowed(_))));
+        for wrapped in [
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
+        ] {
+            let data = font_data(wrapped).expect("decompressed");
+            assert_eq!(face(&data), original);
+        }
+        assert!(font_data(b"wOF2 and nothing else").is_err());
+        assert_eq!(font_family(ttf).as_deref(), Ok("Pacifico"));
+        assert_eq!(
+            font_family(include_bytes!(
+                "../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2"
+            ))
+            .as_deref(),
+            Ok("Pacifico")
+        );
+        assert!(font_family(b"not a font").is_err());
+    }
+
+    /// A WOFF file of 68 bytes whose one table declares `length` bytes.
+    fn forged_woff(length: u32) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend(b"wOFF\0\x01\0\0");
+        data.extend(68u32.to_be_bytes()); // length
+        data.extend(1u16.to_be_bytes()); // numTables
+        data.extend([0; 2]); // reserved
+        data.extend(length.saturating_add(28).to_be_bytes()); // totalSfntSize
+        data.extend([0; 24]); // versions, metadata, private data
+        data.extend(b"glyf");
+        data.extend(64u32.to_be_bytes()); // offset
+        data.extend(4u32.to_be_bytes()); // compLength
+        data.extend(length.to_be_bytes()); // origLength
+        data.extend([0; 4]); // origChecksum
+        data.extend([0x78, 0x9c, 0x03, 0x00]); // zlib
+        data
+    }
+
+    #[test]
+    fn a_woff_font_declaring_more_than_a_font_holds_is_refused_before_it_decompresses() {
+        let forged = forged_woff(u32::MAX);
+        let error = font_data(&forged).expect_err("refused");
+        assert!(error.contains("declare"), "{error}");
+        // A size a font may have goes on to `wuff`, which finds the table
+        // does not hold it.
+        let error = font_data(&forged_woff(1024)).expect_err("refused");
+        assert!(error.contains("does not decompress"), "{error}");
+        // So does a directory cut short, for `wuff` to report.
+        assert!(matches!(woff_tables_size(&forged[..56]), Ok(None)));
+        assert!(font_data(&forged[..56]).is_err());
+    }
+
+    #[test]
+    fn a_woff_font_whose_tables_share_data_larger_than_they_are_is_refused() {
+        // Two tables of 4 bytes, each taking the same 8 bytes as stored as
+        // they are: `wuff` would copy those 8 bytes for each, however many
+        // tables there were.
+        let mut forged = Vec::new();
+        forged.extend(b"wOFF\0\x01\0\0");
+        forged.extend(92u32.to_be_bytes()); // length
+        forged.extend(2u16.to_be_bytes()); // numTables
+        forged.extend([0; 2]); // reserved
+        forged.extend(44u32.to_be_bytes()); // totalSfntSize
+        forged.extend([0; 24]); // versions, metadata, private data
+        for tag in [b"cmap", b"glyf"] {
+            forged.extend(tag);
+            forged.extend(84u32.to_be_bytes()); // offset, the same block
+            forged.extend(8u32.to_be_bytes()); // compLength
+            forged.extend(4u32.to_be_bytes()); // origLength
+            forged.extend([0; 4]); // origChecksum
+        }
+        forged.extend([0; 8]);
+        assert_eq!(forged.len(), 92);
+        let error = font_data(&forged).expect_err("refused");
+        assert!(error.contains("larger compressed"), "{error}");
+    }
+
+    #[test]
+    fn a_woff2_font_declaring_more_than_its_size_allows_is_refused() {
+        // One `cmap` table declaring 4 GiB from a brotli stream of 4 bytes
+        // (`wuff` holds what a WOFF2 file decompresses to at most 100 times
+        // the file's size, and 128 MiB).
+        let mut forged = Vec::new();
+        forged.extend(b"wOF2\0\x01\0\0");
+        forged.extend(60u32.to_be_bytes()); // length
+        forged.extend(1u16.to_be_bytes()); // numTables
+        forged.extend([0; 2]); // reserved
+        forged.extend(u32::MAX.to_be_bytes()); // totalSfntSize
+        forged.extend(4u32.to_be_bytes()); // totalCompressedSize
+        forged.extend([0; 24]); // versions, metadata, private data
+        forged.push(0); // cmap, untransformed
+        forged.extend([0x8f, 0xff, 0xff, 0xff, 0x7f]); // origLength, UIntBase128
+        forged.extend([0; 6]); // the stream, padded to 4 bytes
+        assert_eq!(forged.len(), 60);
+        assert!(font_data(&forged).is_err());
     }
 }

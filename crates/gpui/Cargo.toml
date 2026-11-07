@@ -8,7 +8,7 @@ resolver = "3"
 members = ["nsh-platform-gpui", "nsh-gpui-host"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://nsh.dev"
@@ -27,15 +27,15 @@ private_interfaces = "deny"
 
 [workspace.dependencies]
 # nsh's crates, from the main workspace.
-nsh-core = { version = "0.3.0", path = "../nsh-core" }
-nsh-dev = { version = "0.3.0", path = "../nsh-dev" }
-nsh-testing = { version = "0.3.0", path = "../nsh-testing", default-features = false }
-nsh-engine = { version = "0.3.0", path = "../nsh-engine", default-features = false }
-nsh-base = { version = "0.3.0", path = "../nsh-base", default-features = false }
+nsh-core = { version = "0.4.0", path = "../nsh-core" }
+nsh-dev = { version = "0.4.0", path = "../nsh-dev" }
+nsh-testing = { version = "0.4.0", path = "../nsh-testing", default-features = false }
+nsh-engine = { version = "0.4.0", path = "../nsh-engine", default-features = false }
+nsh-base = { version = "0.4.0", path = "../nsh-base", default-features = false }
 # The JSX compiler alone (tests compile their apps).
-nsh-bundler = { version = "0.3.0", path = "../nsh-bundler", default-features = false }
+nsh-bundler = { version = "0.4.0", path = "../nsh-bundler", default-features = false }
 # Shader views' renderer (wgpu, the version GPUI draws with).
-nsh-platform-gpui = { version = "0.3.0", path = "nsh-platform-gpui", default-features = false }
+nsh-platform-gpui = { version = "0.4.0", path = "nsh-platform-gpui", default-features = false }
 
 # The same versions as the main workspace's.
 anyhow = "1"
@@ -50,12 +50,14 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # GPUI Fast (Zed's GPUI with retained rendering), the renderer; the published
 # crates under GPUI's library names, as GPUI Kit apps use them.
-gpui = { package = "gpui-fast", version = "0.1.9", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.9", default-features = false, features = ["font-kit", "wayland", "x11"] }
-# Script shots on Linux: the window read from the X server.
+gpui = { package = "gpui-fast", version = "0.1.13", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", default-features = false, features = ["font-kit", "wayland", "x11"] }
+# Script shots on Linux: the redirected window pixmap read from the X server.
 raw-window-handle = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder"] }
-x11rb = { version = "0.13", default-features = false, features = ["dri3", "present"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSGraphics", "NSScreen"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry", "objc2-core-foundation"] }
+x11rb = { version = "0.13", default-features = false, features = ["composite", "dri3", "present"] }
 # The canvas rasterizer (already in GPUI's tree through resvg).
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 # Font files found by family for canvas text outlines (already in GPUI's tree
@@ -72,7 +74,7 @@ wry = { package = "lb-wry", version = "0.53.3" }
 gtk = "0.18"
 webkit2gtk = { version = "=2.0.1", features = ["v2_38"] }
 # COM on the threads that use GPUI's text system (Windows: DirectWrite).
-windows-sys = { version = "0.61", features = ["Win32_System_Com"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Com", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # Videos (GStreamer 1.20+).
 gstreamer = "0.25"
 gstreamer-app = "0.25"

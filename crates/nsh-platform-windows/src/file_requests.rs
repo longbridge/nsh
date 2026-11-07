@@ -15,6 +15,7 @@ use std::{
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
     file_dialog::{FileFilter, FileRequest, OpenDialog, SaveDialog},
+    picker::{FilePickRequest, read_picked_files},
 };
 use windows::{
     Win32::{
@@ -183,6 +184,34 @@ unsafe fn show(dialog: &IFileDialog, owner: HWND) -> windows::core::Result<bool>
     }
 }
 
+/// `Picker.pickFiles`: the shell's open dialog for `request`, on a thread of
+/// its own as every request's; the files picked are read there and answer
+/// pick `id` as a root `Pick` event.
+pub(crate) fn pick_files(surface: &Rc<Surface>, id: u32, request: &FilePickRequest) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    // A window handle is an address the other thread only hands to the
+    // dialog as its owner.
+    let owner = surface.hwnd().0 as isize;
+    let request = request.clone();
+    let spawned = std::thread::Builder::new()
+        .name("nsh-picker".into())
+        .spawn(move || {
+            let paths = with_com(|| pick_paths(HWND(owner as *mut _), &request.dialog()))
+                .and_then(|paths| paths)
+                .unwrap_or_else(|e| {
+                    log::warn!("the file dialog failed: {e}");
+                    Vec::new()
+                });
+            let files = read_picked_files(&paths, &request);
+            control.dispatch_event(ROOT_ID, EventKind::Pick, EventPayload::Picked { id, files });
+        });
+    if let Err(e) = spawned {
+        log::warn!("cannot show the file dialog: {e}");
+    }
+}
+
 /// The paths picked in the dialog; none when it was cancelled. The
 /// shell's dialog picks files or folders, not both: files and folders pick
 /// files.
@@ -223,10 +252,7 @@ fn pick_paths(owner: HWND, request: &OpenDialog) -> windows::core::Result<Vec<Pa
 }
 
 /// The path chosen in the dialog; none when it was cancelled.
-fn pick_save_path(
-    owner: HWND,
-    request: &SaveDialog,
-) -> windows::core::Result<Option<PathBuf>> {
+fn pick_save_path(owner: HWND, request: &SaveDialog) -> windows::core::Result<Option<PathBuf>> {
     // SAFETY: COM calls on a dialog this thread owns until it returns; the
     // name outlives the call that reads it.
     unsafe {

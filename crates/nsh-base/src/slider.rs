@@ -3,14 +3,15 @@
 
 use nsh_core::{
     AccessibilityActionDef, AccessibilityValue,
-    element::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes},
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes, layout_rtl},
     geometry::{Along, Axis},
     prelude::*,
 };
 
 use crate::{
-    keys::bind_while,
+    keys::{bind_while, bind_while_directed},
     numeric::{self, Range},
+    terminal::{self, SLIDER_THUMB, columns_in, is_terminal, slider_track, track_cell},
 };
 
 /// A slider's value (TS `number | [number, number]`, `SliderValue`): one
@@ -181,8 +182,9 @@ pub struct SliderProps {
     #[prop(default)]
     pub scale: Prop<SliderScale>,
     /// The direction of the track (default `"horizontal"`, `min` at the
-    /// left); a vertical slider has `min` at the bottom. Read when the
-    /// slider is made.
+    /// start: the left, the right in a right-to-left layout, where Left
+    /// raises the value and Right lowers it); a vertical slider has `min`
+    /// at the bottom. Read when the slider is made.
     #[prop(default = Axis::Horizontal)]
     pub axis: Prop<Axis>,
     /// No pointer, keyboard or screen reader changes; `disabled:` styles
@@ -263,8 +265,9 @@ enum Nudge {
     Max,
 }
 
-/// WAI-ARIA's slider keys (Right and Up raise, also on a vertical slider);
-/// arrows and pages repeat while held.
+/// WAI-ARIA's slider keys (Right and Up raise, also on a vertical slider;
+/// Left and Up on a horizontal one in a right-to-left layout, which has its
+/// `min` at the right); arrows and pages repeat while held.
 const KEYS: &[(&str, bool, Nudge)] = &[
     ("right", true, Nudge::Up),
     ("up", true, Nudge::Up),
@@ -305,17 +308,26 @@ struct Ctl {
     scale: Prop<SliderScale>,
     disabled: Prop<bool>,
     axis: Axis,
+    /// The track runs from the right: a horizontal slider in a
+    /// right-to-left layout.
+    mirrored: Memo<bool>,
     /// The indicator's frame in the track.
     rail: Stored<Bounds<Points>>,
     drag: Stored<Option<Drag>>,
-    /// The drag's value, shown from its first move to its end: the thumb
-    /// and the range follow the pointer in the same frame, natively,
-    /// rather than after `onChange` has gone through the app and come back
-    /// as `value` (pointer-driven motion, `docs/dev/animation.md`). At the
-    /// end the app's value shows: the events reach the app in order, so it
-    /// has answered every move's change by then, and an app that kept
-    /// another value (or held the drag's) shows it.
+    /// The drag's value, shown from its first move until the app has
+    /// answered the drag's last change: the thumb and the range follow the
+    /// pointer in the same frame, natively, rather than after `onChange` has
+    /// gone through the app and come back as `value` (pointer-driven motion,
+    /// `docs/dev/animation.md`). After the drag's end the app's value shows
+    /// once it has handled every change ([`after_answer`]): a TSX app hears
+    /// the last move's change after the core has handled the release, so no
+    /// frame shows its answer to an earlier move; an app that kept another
+    /// value (or held the drag's) shows it.
     pending: Signal<Option<SliderValue>>,
+    /// The slider's owner: the drag's value is let go of under it, so a
+    /// thumb that went with the drag (a range made a single value) does not
+    /// keep it.
+    owner: Owner,
     cx: Scope<SliderEvent>,
 }
 
@@ -389,10 +401,14 @@ impl Ctl {
     }
 
     /// Points from the indicator's `min` end of `at`, a point in the
-    /// track (bottom up on a vertical slider).
+    /// track (bottom up on a vertical slider, right to left on a mirrored
+    /// one).
     fn along(self, at: Point<Points>) -> f64 {
         let rail = self.rail.get();
         f64::from(match self.axis {
+            Axis::Horizontal if self.mirrored.get_untracked() => {
+                (rail.origin.x + rail.size.width - at.x).0
+            }
             Axis::Horizontal => (at.x - rail.origin.x).0,
             Axis::Vertical => (rail.origin.y + rail.size.height - at.y).0,
         })
@@ -401,6 +417,7 @@ impl Ctl {
     /// How far a drag went toward `max`.
     fn offset(self, e: &ResponderEvent) -> f64 {
         f64::from(match self.axis {
+            Axis::Horizontal if self.mirrored.get_untracked() => -e.gesture.delta.x.0,
             Axis::Horizontal => e.gesture.delta.x.0,
             Axis::Vertical => -e.gesture.delta.y.0,
         })
@@ -498,7 +515,15 @@ impl Ctl {
             self.cx.emit(SliderEvent::ChangeEnd(drag.value));
         }
         if self.pending.get_untracked().is_some() {
-            self.pending.set(None);
+            let (pending, drag) = (self.pending, self.drag);
+            self.owner.run(|| {
+                after_answer(move || {
+                    // A drag that started since shows its own value.
+                    if drag.get().is_none() {
+                        pending.set(None);
+                    }
+                });
+            });
         }
     }
 
@@ -534,8 +559,14 @@ impl Ctl {
 /// `class` and `style` style the slider, `<part>Class` / `<part>Style` the
 /// parts, whose `disabled:` follow the slider and whose thumbs show
 /// `hover:`, `active:` and `focus:`.
+///
+/// In a terminal it shows the terminal's slider in place of the parts: a
+/// row of `─` as wide as the slider, `━` from `min` to the value (a range:
+/// between its thumbs), and a `●` for each thumb on the Cell of its value;
+/// a vertical slider is a column of `│` and `┃` ([`crate::terminal`]).
 #[component]
 pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
+    let axis = props.axis.get_untracked();
     let ctl = Ctl {
         controlled: props.value,
         own: signal(props.default_value.get_untracked()),
@@ -544,26 +575,32 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
         step: props.step,
         scale: props.scale,
         disabled: props.disabled,
-        axis: props.axis.get_untracked(),
+        axis,
+        mirrored: computed(move || axis == Axis::Horizontal && layout_rtl()),
         rail: stored(Bounds::default()),
         drag: stored(None),
         pending: signal(None),
+        owner: Owner::current(),
         cx,
     };
     // While a drag moves the thumbs and no screen reader runs, the value
     // screen readers get waits for the drag's end: no props item per move.
     let quiet = computed(move || ctl.pending.with(Option::is_some) && !screen_reader());
     let disabled = props.disabled;
+    // In a terminal: the Cell grid the terminal's slider is drawn on.
+    let grid = is_terminal().then(Grid::new);
     let focused = signal(None::<Thumb>);
-    bind_while(
-        move || focused.get().is_some(),
-        KEYS,
-        move |nudge| {
-            if let Some(thumb) = focused.get_untracked() {
-                ctl.nudge(thumb, nudge);
-            }
-        },
-    );
+    let nudge = move |nudge| {
+        if let Some(thumb) = focused.get_untracked() {
+            ctl.nudge(thumb, nudge);
+        }
+    };
+    // A horizontal slider runs along the reading direction, a vertical one
+    // keeps Right raising (WAI-ARIA's keys).
+    match axis {
+        Axis::Horizontal => bind_while_directed(move || focused.get().is_some(), KEYS, nudge),
+        Axis::Vertical => bind_while(move || focused.get().is_some(), KEYS, nudge),
+    }
     let thumb = move |which: Thumb| {
         let label = move || match which {
             Thumb::Start => props
@@ -579,18 +616,37 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
         let said = stored(None::<AccessibilityValue>);
         view()
             .absolute()
-            .map(|v| match ctl.axis {
-                Axis::Horizontal => v.top(relative(0.5)),
-                Axis::Vertical => v.left(relative(0.5)),
-            })
-            .translate_x(relative(-0.5))
-            .translate_y(relative(-0.5))
-            .style_with(move |s| {
-                let f = ctl.fraction(which) as f32;
-                match ctl.axis {
-                    Axis::Horizontal => s.left(relative(f)),
-                    Axis::Vertical => s.top(relative(1.0 - f)),
-                }
+            .map(|v| match grid {
+                // On the Cell the value falls on, one glyph.
+                Some(grid) => v
+                    .style_with(move |s| {
+                        let (x, y) = grid.thumb_at(ctl, which);
+                        s.left(x).top(y)
+                    })
+                    // In the accent while it has the keyboard focus: a
+                    // terminal marks no Adjustable view's focus itself.
+                    .child(text(SLIDER_THUMB).text_color(move || {
+                        if focused.get() == Some(which) && !disabled.get() {
+                            terminal::ACCENT.into()
+                        } else {
+                            crate::theme::theme().foreground
+                        }
+                    })),
+                None => v
+                    .map(|v| match ctl.axis {
+                        Axis::Horizontal => v.top(relative(0.5)),
+                        Axis::Vertical => v.left(relative(0.5)),
+                    })
+                    .translate_x(relative(-0.5))
+                    .translate_y(relative(-0.5))
+                    .style_with(move |s| {
+                        let f = ctl.fraction(which) as f32;
+                        match ctl.axis {
+                            Axis::Horizontal if ctl.mirrored.get() => s.left(relative(1.0 - f)),
+                            Axis::Horizontal => s.left(relative(f)),
+                            Axis::Vertical => s.top(relative(1.0 - f)),
+                        }
+                    }),
             })
             .disabled(disabled)
             .accessible(true)
@@ -633,9 +689,16 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             .on_responder_move(move |e: &ResponderEvent| ctl.drag_to(ctl.offset(e)))
             .on_responder_release(move |_: &ResponderEvent| ctl.release())
             .on_responder_terminate(move |_: &ResponderEvent| ctl.release())
-            .app_class(props.thumb_class)
-            .inline_style(props.thumb_style)
+            .map(|v| match grid {
+                Some(_) => v,
+                None => v
+                    .app_class(props.thumb_class)
+                    .inline_style(props.thumb_style),
+            })
     };
+    if let Some(grid) = grid {
+        return terminal_slider(ctl, grid, disabled, thumb, props.children);
+    }
     let range = view()
         .absolute()
         .pointer_events(PointerEvents::None)
@@ -651,6 +714,9 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             };
             let end = ctl.fraction(Thumb::End) as f32;
             match ctl.axis {
+                Axis::Horizontal if ctl.mirrored.get() => {
+                    s.left(relative(1.0 - end)).right(relative(start))
+                }
                 Axis::Horizontal => s.left(relative(start)).right(relative(1.0 - end)),
                 Axis::Vertical => s.bottom(relative(start)).top(relative(1.0 - end)),
             }
@@ -688,5 +754,171 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
         .app_class(props.track_class)
         .inline_style(props.track_style)
         .child(indicator);
-    view().disabled(disabled).child(track).child(props.children)
+    view()
+        .disabled(disabled)
+        .child(track)
+        .child(props.children)
+        .into_element()
+}
+
+/// The Cells a slider's terminal form is drawn on.
+#[derive(Clone, Copy)]
+struct Grid {
+    /// One Cell, as the terminal's text engine measures one glyph.
+    cell: Size<Points>,
+    /// How many Cells the track is along the slider's axis.
+    cells: Signal<usize>,
+}
+
+impl Grid {
+    fn new() -> Self {
+        let metrics = text_metrics("", "0");
+        Self {
+            cell: Size::new(metrics.width, metrics.height),
+            cells: signal(0),
+        }
+    }
+
+    /// The Cell `thumb` is on (tracked), from the `min` end.
+    fn cell_of(self, ctl: Ctl, thumb: Thumb) -> usize {
+        track_cell(Percentage(ctl.fraction(thumb) as f32), self.cells.get())
+    }
+
+    /// Where `thumb` sits in the track (tracked): the top left of its Cell.
+    fn thumb_at(self, ctl: Ctl, thumb: Thumb) -> (Points, Points) {
+        let cells = self.cells.get();
+        let at = self.cell_of(ctl, thumb);
+        // The Cell from the track's start: a mirrored track runs from the
+        // right, a vertical one from the bottom.
+        let from_start = match ctl.axis {
+            Axis::Horizontal if !ctl.mirrored.get() => at,
+            _ => cells.saturating_sub(1).saturating_sub(at),
+        };
+        match ctl.axis {
+            Axis::Horizontal => (self.cell.width * from_start as f32, px(0.0)),
+            Axis::Vertical => (px(0.0), self.cell.height * from_start as f32),
+        }
+    }
+
+    /// The track's glyphs (tracked), from its start: the filled part
+    /// [`terminal::SLIDER_FILL`], the rest [`terminal::SLIDER_TRACK`].
+    fn track(self, ctl: Ctl) -> String {
+        let cells = self.cells.get();
+        if cells == 0 {
+            return String::new();
+        }
+        let end = self.cell_of(ctl, Thumb::End);
+        let start = match ctl.shown() {
+            SliderValue::Range(..) => self.cell_of(ctl, Thumb::Start),
+            SliderValue::Single(_) => 0,
+        };
+        let row = slider_track(cells, start, end);
+        match ctl.axis {
+            Axis::Horizontal if !ctl.mirrored.get() => row,
+            // From the right, or top down (`max` first).
+            _ => row.chars().rev().collect(),
+        }
+    }
+}
+
+/// A slider's track glyphs `row` (from the track's start) in the slider's
+/// axis: one row, or one glyph a row, with the vertical glyphs, on a
+/// vertical slider.
+fn axis_glyphs(row: &str, axis: Axis) -> String {
+    match axis {
+        Axis::Horizontal => row.into(),
+        Axis::Vertical => row
+            .chars()
+            .map(|c| match c {
+                terminal::SLIDER_FILL => '┃',
+                _ => '│',
+            })
+            .map(String::from)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+/// A slider's terminal form, in place of the app's parts: the track as a
+/// row of glyphs over the slider's width (a column over its height when
+/// vertical), each thumb a view of its own on the Cell of its value, then
+/// the children. Presses on the track and drags of the thumbs work as they
+/// do elsewhere, on the Cells.
+fn terminal_slider(
+    ctl: Ctl,
+    grid: Grid,
+    disabled: Prop<bool>,
+    thumb: impl Fn(Thumb) -> View + Copy + 'static,
+    children: Prop<Children>,
+) -> AnyElement {
+    // The track in three texts: the muted rest around the filled part in
+    // the accent.
+    let parts = computed(move || terminal::split_run(&grid.track(ctl), terminal::SLIDER_TRACK));
+    let part = move |at: usize| {
+        text(move || SharedString::from(parts.with(|p| axis_glyphs(&p[at], ctl.axis))))
+            .when(ctl.axis == Axis::Horizontal, |t| t.number_of_lines(1u32))
+            .text_overflow(nsh_core::EllipsizeMode::Clip)
+            .text_color(move || match at {
+                1 => terminal::ACCENT.into(),
+                _ => crate::theme::theme().muted_foreground,
+            })
+    };
+    let line = view()
+        .absolute()
+        .top(px(0.0))
+        .left(px(0.0))
+        .map(|v| match ctl.axis {
+            Axis::Horizontal => v.right(px(0.0)).flex_row(),
+            Axis::Vertical => v.bottom(px(0.0)).flex_col(),
+        })
+        .overflow_hidden()
+        .pointer_events(PointerEvents::None)
+        .child(part(0))
+        .child(part(1))
+        .child(part(2));
+    // A horizontal track stretches across the slider; a vertical one
+    // grows down it.
+    let fill = move |v: View| match ctl.axis {
+        Axis::Horizontal => v,
+        Axis::Vertical => v.flex_grow(1.0),
+    };
+    let rail = view()
+        .pointer_events(PointerEvents::BoxNone)
+        .map(fill)
+        .on_layout(move |frame: &Bounds<Points>| {
+            ctl.rail.replace(*frame);
+            let n = match ctl.axis {
+                Axis::Horizontal => columns_in(frame.size.width, grid.cell.width),
+                Axis::Vertical => columns_in(frame.size.height, grid.cell.height),
+            };
+            if grid.cells.get_untracked() != n {
+                grid.cells.set(n);
+            }
+        })
+        // One Cell by itself: the slider's size is the app's.
+        .child(text(" "))
+        .child(line)
+        .child(when(
+            move || ctl.shown().is_range(),
+            move || thumb(Thumb::Start),
+        ))
+        .child(thumb(Thumb::End));
+    let track = view()
+        .map(fill)
+        .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+            if !disabled.get_untracked() {
+                request.claim();
+            }
+        }))
+        .keep_touches(true)
+        .on_responder_grant(move |e: &ResponderEvent| ctl.press_track(e))
+        .on_responder_move(move |e: &ResponderEvent| ctl.drag_to(ctl.offset(e)))
+        .on_responder_release(move |_: &ResponderEvent| ctl.release())
+        .on_responder_terminate(move |_: &ResponderEvent| ctl.release())
+        .child(rail);
+    view()
+        .disabled(disabled)
+        .child(track)
+        .child(children)
+        .into_element()
 }

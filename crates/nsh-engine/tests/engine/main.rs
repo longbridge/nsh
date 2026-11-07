@@ -11,6 +11,7 @@ use crossbeam_channel::Sender;
 use nsh_core::MountBatch;
 use nsh_engine::MountSink;
 
+mod assets;
 mod canvas;
 mod class_bench;
 mod clock;
@@ -38,6 +39,7 @@ mod list_bench;
 mod logs;
 mod native;
 mod net;
+mod notifications;
 mod open_url;
 mod package;
 mod parity;
@@ -63,6 +65,7 @@ mod storage;
 mod system;
 mod test_ui;
 mod theme;
+mod url_scheme;
 mod websocket;
 
 /// Hands the engine's batches to the test.

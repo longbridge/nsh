@@ -4,7 +4,8 @@ export const itemsProps = ["each", "children", "keyExtractor", "stickyHeaderIndi
 const own = new Set([...itemsProps.filter(k => !["stickyHeaderIndices", "viewabilityConfig", "refreshing", "onRefresh", "onLoadMore"].includes(k)), "ref", "estimatedItemSize", "loadMoreAtStartThreshold", "separator"]);
 export function createLists(invoke, values, reactive, dom, live, wake) {
   const lists = new Map(), rt = dom.rt;
-  const slot = value => typeof value === "function" ? reactive.untracked(() => value({})) : value;
+  // `<If>` and `<Each>` are memos, the insert's to track (as QuickJS's `slot`).
+  const slot = value => typeof value === "function" && !values.signals.has(value) && !values.memos.has(value) ? reactive.untracked(() => value({})) : value;
   const remove = (parent, entry) => { invoke(306, [parent, entry.node]); entry.dispose(); };
   const render = (props = {}) => {
     const node = rt.element("list"), id = values.nodeIds.get(node);
@@ -18,16 +19,26 @@ export function createLists(invoke, values, reactive, dom, live, wake) {
       for (const entry of entries) { try { entry.dispose(); } catch (error) { failure ??= { error }; } }
       if (failure) throw failure.error;
     });
-    reactive.renderEffect(previous => {
+    const splices = [];
+    // Cells move with their items before their item memos read the new data, as the core moves them
+    // (Rust lists' `move_rows`): otherwise each shows the item now at its old index until it is bound again.
+    state.items = reactive.computed(previous => {
       const next = props.each ?? [], old = previous ?? [];
       if (old.length && old !== next) {
         let start = 0, end = old.length, nextEnd = next.length;
         while (start < end && start < nextEnd && old[start] === next[start]) start++;
         while (end > start && nextEnd > start && old[end - 1] === next[nextEnd - 1]) { end--; nextEnd--; }
-        if (end !== start || nextEnd !== start) rt.prop(node, "splice", [start, end - start, nextEnd - start]);
+        if (end !== start || nextEnd !== start) {
+          splices.push([start, end - start, nextEnd - start]);
+          reactive.untracked(() => { for (const cell of state.cells.values()) { const i = cell.index(); if (i >= end) cell.index.set(i + nextEnd - end); } });
+        }
       }
-      rt.prop(node, "count", next.length);
       return next;
+    });
+    reactive.renderEffect(() => {
+      const next = state.items();
+      for (const splice of splices.splice(0)) rt.prop(node, "splice", splice);
+      rt.prop(node, "count", next.length);
     });
     const previous = new Map();
     reactive.renderEffect(() => {
@@ -93,16 +104,17 @@ export function createLists(invoke, values, reactive, dom, live, wake) {
         const entry = reactive.runWithOwner(state.owner, () => reactive.root(dispose => {
           const index = reactive.signal(first);
           let previous;
-          const item = reactive.computed(() => { const items = state.props.each ?? [], i = index(); if (i < items.length) previous = items[i]; return previous; });
+          const item = reactive.computed(() => { const i = index(), items = state.items(); if (i < items.length) previous = items[i]; return previous; });
           const cell = rt.element("cell");
           try {
             rt.prop(cell, "slot", slotId); rt.append(state.node, cell);
             const content = reactive.untracked(() => state.props.children(item, index));
             if ("separator" in state.props) {
               let separator, made = false;
+              const owner = reactive.getOwner();
               rt.insert(cell, () => {
                 if (index() >= (state.props.each?.length ?? 0) - 1) return content;
-                if (!made) { separator = slot(state.props.separator); made = true; }
+                if (!made) { separator = reactive.runWithOwner(owner, () => slot(state.props.separator)); made = true; }
                 return state.props.inverted ? [separator, content] : [content, separator];
               });
             } else rt.insert(cell, content);

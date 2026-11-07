@@ -9,35 +9,35 @@
   `fadeDuration` (iOS: `CATransition`; Android: alpha over the placeholder; default 0 on iOS and 300ms on Android, as in React
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
-  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur). `onLoad` reports the
+  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
+  API 30 plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
   source's size in pixels on both platforms, whatever size the view decodes at. Downloads are shared per URI (also between
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
-  decodes them. Android `ImageBox` draws its borders above the
+  decodes them; in a terminal (`Idiom::Terminal`) the core answers them at once and sends no command, and `Image`'s
+  functions reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
 - **Loading and memory** (`nsh_core::image`, the design in `image-loading-design.md`; Linux, Windows, macOS and
   GPUI: iOS and Android keep their own loaders, above). One loader per process (`image::loader`) reads every view's, canvas's, `getSize` / `prefetch`'s and `element::svg`'s bytes: a
   `Location` (`http(s)`, a file, `asset:/` by the surface's `AssetBase` — the dev server, a directory, or
   `Directories` looked in in order — or the engine's `Assets` reader, bytes in memory) named by one source key (`Location::key`); one read per key in flight, later requests waiting on it; reads
-  and downloads on their own threads (`DOWNLOADS` 6, `PER_HOST` 4) apart from decodes (`decoders()`,
-  `min(cores − 1, 4)`), both highest `Priority` first (`Visible`, `Normal`, `Prefetch`; `Ticket::set_priority` moves
+  and downloads on their own threads apart from decodes, both highest `Priority` first (`Visible`, `Normal`, `Prefetch`; `Ticket::set_priority` moves
   a waiting one); the download itself is a `Transport` (`Context::transport`, else the process's
   `set_transport`, else ureq with feature `loader`): macOS sets an `NSURLSession` one and builds without ureq (the system's proxies,
   authentication and App Transport Security), Linux, Windows and GPUI use ureq, and the loader checks the size limit
-  and cancellation again on what a transport returns; a bounded read queue (`MAX_QUEUED` 512: a full one turns away its lowest priority); a `Ticket`
+  and cancellation again on what a transport returns; a bounded read queue; a `Ticket`
   dropped by its last waiter cancels the read in its queue or between two chunks of its download. Limits:
   `MAX_BYTES` (64 MiB) a response or file, `TIMEOUT` (60 s) a request, `MAX_REDIRECTS` (20) redirects, each checked
   by `Access::media_redirect` and never from `https` to `http`. A failed read is answered from memory for
-  `FAILURE_TTL` (30 s). L3: the encoded bytes of the last reads (`ENCODED_BYTES`, 32 MiB; 16 on phones; an entry over
-  a quarter is not kept), so a decode at another size, an SVG parsed again or `getSize` reads nothing again.
+  `FAILURE_TTL` (30 s). L3: the encoded bytes of the last reads, so a decode at another size, an SVG parsed again or `getSize` reads nothing again.
   Decoded images (L4, `Images<V>`: the backend gives it its decoder, bytes to its picture at a `Target`) are decoded
   at the size their view shows them: `Want` (the box in points, the device scale, the resize mode; an empty box: the
   natural size; one side alone scales by that side) gives the longest side the fitted image needs in pixels, rounded
-  up to a size bucket (`image::bucket`: powers of √2, never above the natural size; an SVG's within 8192), so views of
-  similar sizes share an entry and a view that grows asks for the next bucket. The natural size comes from the
-  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is remembered, so a request
-  for an image decoded before is answered from memory, here and now. Entries are keyed by (source key, bucket,
+  up to a size bucket (`image::bucket`), so views of similar sizes share an entry. The natural size comes from the
+  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is retained while at least
+  one decoded entry for the source remains. Eviction of its last bucket releases the metadata too; active images
+  keep it through their leases. A cached request is answered from memory, here and now. Entries are keyed by (source key, bucket,
   `Frames`), one decode per key at a time. Every entry, the SVG drawings of `element::svg` included, counts in one
   `Budget` per process (`image::budget()`, `default_budget()`: on desktops a sixteenth of the memory, at most
   256 MiB; on phones an eighth, at most 128 MiB) with what it costs: its pixels, its GPU copies (`MemoryCache::add_cost`) and each variant (a smaller
@@ -51,14 +51,15 @@
   `image` crate and `thumbnail` (shrunk as decoded, before it takes 4 bytes a pixel), others with GDK's loaders; an
   entry costs its pixels twice (the texture and its GSK upload); a frame that grows past the bucket shown loads the
   next one and swaps it in without load events; dropping the view drops its loads and leases. Windows
-  (`nsh-platform-windows` `image.rs`; type-checked, not run): the same, posting to the UI thread with
-  `window::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
+  (`nsh-platform-windows` `image.rs`; type-checked, not run): the same, posting back to the UI thread
+  that asked with `UiThread::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
   WIC cannot read; a `Frame` keeps its premultiplied BGRA pixels and makes its Direct2D bitmap when first drawn,
   which then adds its bytes to the entry (`add_cost`, once: one made again after a device loss replaces it);
-  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`; type-checked, not
-  run): ImageIO thumbnails (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it
-  shrinks) and the bucket's SVG raster; the CGImages are what Core Animation draws, counted once; a blur and the
-  view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
+  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`): ImageIO thumbnails
+  (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it shrinks) and the bucket's
+  SVG raster; each frame reserves two page-rounded stores at its actual CGImage row stride,
+  for the decoded pixels and Core Animation's display copy (a conservative estimate, not a process footprint cap);
+  a blur and the view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
   and the look) on a GCD queue; a view starts once its decoration sees a size and loads a larger bucket when it
   grows; it downloads through `UrlSession` (the shared `NSURLSession`, a task delegate per download handing the
   response and data to the loader thread, which cancels the task when its ticket is dropped, past `TIMEOUT` or past
@@ -169,6 +170,14 @@
   from the bytes (`PickedFile::fill_in`, `imagesize`), and `nsh-js` makes each a `File` over a `Blob` sharing those
   bytes, so `URL.createObjectURL(file)` shows it in an `Image` and `fetch` / `FormData` upload it without a copy in JS.
   An embedder's `PickerBackend` (`EngineConfig::picker`) answers in place of the platform: no command is sent.
+- **Picked files** (`Picker.pickFiles`, `nsh_core::picker::FilePickRequest`): `Command::PickFiles` with a limit and the
+  `file_dialog::FileFilter`s offered, gated by the same `picker` capability and answered by the same `Pick` event. The
+  desktops reuse the open dialog of `file_dialog` (`FilePickRequest::dialog`) and read the paths on a thread
+  (`read_picked_files`); iOS: `UIDocumentPickerViewController` `asCopy` (`UTType` by extension, `public.data` for any
+  file; UniformTypeIdentifiers loaded with `dlopen`); Android: `ACTION_OPEN_DOCUMENT` from the same headless fragment,
+  `EXTRA_MIME_TYPES` from `MimeTypeMap` unless an extension has no type; web: an `<input type=file>` without a canvas.
+  The bytes and the name stay as they are (`finish_files`: no `fill_in`, whose renames serve images); a file larger
+  than `MAX_PICKED_FILE_BYTES` (512 MiB) is left out and logged, since its bytes must all fit in memory.
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the

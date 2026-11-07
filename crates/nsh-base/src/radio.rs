@@ -4,7 +4,10 @@
 
 use nsh_core::{AccessibilityState, Checked, element::Style, prelude::*};
 
-use crate::roving::{Pattern, Roving, member};
+use crate::{
+    roving::{Pattern, Roving, member},
+    terminal::{is_terminal, mark_view, radio_mark},
+};
 
 /// What a [`Radio`] finds of its [`RadioGroup`] through context.
 #[derive(Clone)]
@@ -28,6 +31,12 @@ pub struct RadioProps {
     /// What screen readers say: the option, when its children have no text
     /// that says it.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// How far outside its bounds presses still count, as a view's
+    /// `hitSlop`: one number for every side, or the sides named (each left
+    /// out 0). A small radio (a dot with no label) takes presses a finger
+    /// lands near it, with no change to its layout or look.
+    #[prop(default)]
+    pub hit_slop: Prop<EdgeInsets>,
     /// The content: the app's indicator (a dot, styled with
     /// `group-checked:` classes under `group` on the radio) and its label,
     /// which screen readers say.
@@ -55,12 +64,19 @@ pub enum RadioEvent {
 /// app's `class` and `style` style it, `checked:` and `disabled:` classes
 /// (or `checkedStyle` and `disabledStyle`) its states, and its children are
 /// the app's indicator and label, whose `group-checked:` classes follow the
-/// radio under `group` in its `class`. In a [`RadioGroup`], it is a stop of
+/// radio under `group` in its `class`. `hitSlop` widens where presses count
+/// past its bounds, as a view's does. In a [`RadioGroup`], it is a stop of
 /// the keyboard focus only while it is the radio Tab enters the group at
 /// (see [`RadioGroup`]).
+///
+/// In a terminal it shows the terminal's radio, `(•)` or `( )` and a
+/// space, before its children, in a row ([`crate::terminal`]); an app that
+/// draws a dot of its own among its children leaves it out there
+/// (`platform.idiom === "terminal"`).
 #[component]
 pub fn Radio(props: RadioProps, cx: Scope<RadioEvent>) -> impl IntoElement {
     let checked = props.checked;
+    let terminal = is_terminal();
     let node = element_ref();
     let set = use_context::<RadioGroupContext>().map(|RadioGroupContext(set)| {
         set.register(node, checked, props.disabled, move || {
@@ -85,12 +101,18 @@ pub fn Radio(props: RadioProps, cx: Scope<RadioEvent>) -> impl IntoElement {
             }
         })
         .checked_style(props.checked_style)
+        .hit_slop(props.hit_slop)
         .on_press(move |_: &()| {
             if !checked.get_untracked() {
                 cx.emit(RadioEvent::Change(true));
             }
         })
-        .child(props.children)
+        // The terminal's own radio, before the app's content, in a row.
+        .when(terminal, |v| {
+            v.flex_row()
+                .child(mark_view(move || radio_mark(checked.get())))
+        })
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }
 
 /// The props of [`RadioGroup`].

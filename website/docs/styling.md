@@ -188,7 +188,7 @@ view()
 - **Widths and colors** per side: `borderTopWidth`, `borderRightWidth`, ..., `borderTopColor`, ..., which keep their side in either direction; and `borderStartWidth`, `borderEndWidth`, `borderStartColor`, `borderEndColor`, which follow the [layout direction](./layout.md#right-to-left) (`.border_t(..)`, `.border_t_color(..)`, `.border_s(..)`, `.border_e_color(..)`, ... in Rust).
 - **The color** of a side whose width is set and whose color is not is the text color, as CSS's `currentColor`: `{ borderWidth: 1, color: "#0969da" }` draws a blue border.
 - **Radii** per corner: `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomRightRadius`, `borderBottomLeftRadius`, and `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius` (top start, top end, bottom start, bottom end), which follow the [layout direction](./layout.md#right-to-left) (`.rounded_tl(..)`, ..., `.rounded_ss(..)`, `.rounded_se(..)`, `.rounded_es(..)`, `.rounded_ee(..)` in Rust, and the presets `.rounded_lg()`, `.rounded_full()`, ...).
-- **`borderCurve: "continuous"`** (`.border_curve(BorderCurve::Continuous)`) draws corners whose curvature eases into the edges, like iOS app icons, on both platforms. A pill (`borderRadius` of half the height) stays a pill.
+- **`borderCurve: "continuous"`** (`.border_curve(BorderCurve::Continuous)`, the class `corner-squircle`) draws superellipse corners, whose curvature eases into the edges, like iOS app icons: on iOS, Android, macOS and Linux, and on the web where the browser has CSS `corner-shape` (Chromium); elsewhere circular corners of the same radius. A pill (`borderRadius` of half the height) stays a pill.
 - **`overflow: "hidden"`** (`.overflow_hidden()`) clips children to the rounded shape. What it clips away is clipped in layout too: it does not reach an enclosing scroll view's content size, so a box that lays a child out wider than itself and scales it down with a `transform` (transforms do not affect layout) leaves the scroll view alone.
 
 Radii larger than half the side are clamped, so `borderRadius: 9999` (`.rounded_full()`) makes a circle or a pill.
@@ -315,6 +315,38 @@ versions and other platforms. The glass follows the view's size and rounded corn
 ```tsx
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
 ```
+
+### Progressive blur
+
+A blur that grows along an edge, as under a header or over a photo's caption, is layers of `backdropFilter`, each stronger than the last and masked in further along with `maskImage`. Five layers doubling their radius hide the steps:
+
+```tsx
+const LAYERS = 5;
+
+function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
+  return (
+    <View style={{ pointerEvents: "none", ...props.style }}>
+      <Each of={Array.from({ length: LAYERS }, (_, i) => i)}>
+        {(i) => (
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backdropFilter: `blur(${props.radius / 2 ** (LAYERS - 1 - i())}px)`,
+              maskImage: `linear-gradient(to bottom, transparent ${(i() / LAYERS) * 100}%, black ${((i() + 1) / LAYERS) * 100}%)`,
+            }}
+          />
+        )}
+      </Each>
+    </View>
+  );
+}
+```
+
+A masked `backdropFilter` draws the blur alone, without the system material's tint, at its exact radius, on iOS and macOS too. Each layer blurs what the window shows on every frame, so keep the layers few and the area small. Linux and GPUI draw no `backdropFilter`, so give the region a fading `backgroundImage` where the text over it must stay readable.
 
 ## Outlines, opacity and visibility
 

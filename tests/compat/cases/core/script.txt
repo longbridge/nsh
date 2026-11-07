@@ -88,6 +88,26 @@ frame id:shader 0 64 200 100
 frame id:label 10 10 180 17
 frame id:still 0 164 50 50
 covers [nsh] Shader
+# core-shader-effects
+tap id:case-core-shader-effects
+expect Pressed 0
+expect Spring
+expect Season 1
+frame id:effect 0 64 200 60
+frame id:inside 10 10 180 17
+frame id:transition 0 124 200 40
+frame id:fade 0 164 100 20
+# The effect's children keep their presses; a transition's change with its
+# value, the shader drawing the change over them.
+tap id:inside
+expect Pressed 1
+tap id:next
+expect Summer
+absent Spring
+expect Season 2
+tap id:next
+expect Autumn
+expect Season 3
 # core-elements
 tap id:case-core-elements
 expect In scroll
@@ -113,6 +133,20 @@ covers [nsh] WebView
 covers [nsh] nativeComponent
 covers [nsh] nativeModule
 covers [nsh] PanResponder
+# core-frame-rate
+tap id:case-core-frame-rate
+expect Frame rates started: yes
+# Each animation asks for a rate and still ends where it would.
+animated id:fade opacity 1
+animated id:slide transform.0 0
+# The decay stops at its bound.
+animated id:glide transform.0 20
+animated id:pulse opacity 1
+animated id:tint opacity 1
+style id:spinner animationName spin
+style id:spinner animationFrameRate 30
+nostyle id:uncapped animationFrameRate
+covers [styles] animationFrameRate
 # core-list
 tap id:case-core-list
 expect Fruits
@@ -137,6 +171,13 @@ expect Nothing here
 expect Long 0
 expect Long 4
 absent Long 6
+drawing id:sep-0 fillStyle #ff0000ff
+drawing id:sep-1 fillStyle #ff0000ff
+tap id:reload
+expect Separator cleanups: 0
+tap id:theme
+drawing id:sep-0 fillStyle #0000ffff
+drawing id:sep-1 fillStyle #0000ffff
 tap id:add
 expect 4. Item 4
 expect 3. Cherry
@@ -386,3 +427,8 @@ tap id:risky
 expect Caught pressed
 expect Break
 covers [nsh] ErrorBoundary
+# web-load
+tap id:case-web-load
+tap id:load
+expect Loaded, invalid header: TypeError
+covers [nsh] WebView

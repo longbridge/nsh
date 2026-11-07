@@ -6,22 +6,12 @@
 
 use nsh_core::{
     element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes},
-    geometry::{Point, Points, px},
-    prelude::Spawned,
+    geometry::{Points, px},
 };
 
-/// How often a drag past the viewport's edge scrolls (about a frame).
-pub(crate) const AUTOSCROLL_PERIOD_MS: u64 = 16;
-/// How far inside the viewport's top and bottom edges a drag starts
-/// scrolling, so that it scrolls in a window filling the screen, where the
-/// pointer cannot leave the editor.
-pub(crate) const AUTOSCROLL_INNER_ZONE: Points = Points(16.0);
-/// Points scrolled per period at the edge.
-const MIN_SPEED: f32 = 12.0;
-/// Points scrolled per period at the end of the ramp.
-const MAX_SPEED: f32 = 64.0;
-/// How far past the inner zone the speed ramps up to [`MAX_SPEED`].
-const OUTER_RAMP: f32 = 80.0;
+pub(crate) use crate::autoscroll::{
+    AUTOSCROLL_INNER_ZONE, AUTOSCROLL_PERIOD_MS, AutoScroll, edge_speed,
+};
 
 /// How far an `Editor`'s text scrolls on past its last line
 /// (`scrollBeyondLastLine`): `true` up to a screen, `false` not at all, a
@@ -131,58 +121,6 @@ pub(crate) fn surrounding_margin(
     }
 }
 
-/// How far to scroll per period while a drag is at `position` along an
-/// axis of a viewport `length` long: toward the end past `length - inner`,
-/// toward the start before `inner`, faster the farther out (none inside).
-pub(crate) fn edge_speed(position: Points, length: Points, inner: Points) -> Points {
-    if length.0 <= 0.0 {
-        return px(0.0);
-    }
-    let inner = inner.0.min(length.0 / 4.0);
-    let ramp = |past: f32| {
-        let t = (past / (inner + OUTER_RAMP)).min(1.0);
-        MIN_SPEED + t * (MAX_SPEED - MIN_SPEED)
-    };
-    let end = length.0 - inner;
-    if position.0 > end {
-        px(ramp(position.0 - end))
-    } else if position.0 < inner {
-        px(-ramp(inner - position.0))
-    } else {
-        px(0.0)
-    }
-}
-
-/// A drag scrolling on its own past the viewport's edge.
-pub(crate) struct AutoScroll {
-    /// The pointer's last position in the root view.
-    pub(crate) page: Point<Points>,
-    /// How far each period scrolls, per axis.
-    pub(crate) speed: Point<Points>,
-    /// The timer, while it scrolls.
-    pub(crate) task: Option<Spawned<()>>,
-}
-
-impl Default for AutoScroll {
-    fn default() -> Self {
-        AutoScroll {
-            page: Point::new(px(0.0), px(0.0)),
-            speed: Point::new(px(0.0), px(0.0)),
-            task: None,
-        }
-    }
-}
-
-impl AutoScroll {
-    /// Stops scrolling.
-    pub(crate) fn stop(&mut self) {
-        self.speed = Point::new(px(0.0), px(0.0));
-        if let Some(task) = self.task.take() {
-            task.cancel();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,23 +159,62 @@ mod tests {
         assert_eq!(surrounding_margin(Some(0), px(400.0), lh), px(0.0));
         assert_eq!(surrounding_margin(Some(2), px(10.0), lh), px(0.0));
     }
+}
+
+/// The least height of a mark on the overview ruler, as Monaco's.
+const RULER_MARK_MIN_HEIGHT: Points = Points(6.0);
+
+/// Where a mark covering display rows `rows` is down an overview ruler
+/// `track` tall: its top and height, the rows' place in the rows' box
+/// (`content` tall, or the ruler's height when shorter) scaled to the
+/// ruler, at least [`RULER_MARK_MIN_HEIGHT`] tall and kept within it.
+pub(crate) fn ruler_place(
+    rows: std::ops::Range<usize>,
+    line_height: Points,
+    content: Points,
+    track: Points,
+) -> (Points, Points) {
+    let content = content.max(track).max(px(1.0));
+    let scale = track / content;
+    let height = (line_height * rows.len() as f32 * scale).max(RULER_MARK_MIN_HEIGHT);
+    let top = (line_height * rows.start as f32 * scale).min((track - height).max(px(0.0)));
+    (top, height)
+}
+
+/// The share of the ruler's width before a mark in `lane`, and the share
+/// it takes: the ruler's width is its part's, so the lanes are fractions.
+pub(crate) fn ruler_lane(lane: super::EditorOverviewRulerLane) -> (f32, f32) {
+    use super::EditorOverviewRulerLane as Lane;
+    const THIRD: f32 = 1.0 / 3.0;
+    match lane {
+        Lane::Left => (0.0, THIRD),
+        Lane::Center => (THIRD, THIRD),
+        Lane::Right => (2.0 * THIRD, THIRD),
+        Lane::Full => (0.0, 1.0),
+    }
+}
+
+#[cfg(test)]
+mod ruler_tests {
+    use super::*;
+    use crate::editor::EditorOverviewRulerLane as Lane;
 
     #[test]
-    fn a_drag_scrolls_faster_the_farther_past_the_edge() {
-        let (length, inner) = (px(400.0), px(16.0));
-        assert_eq!(edge_speed(px(200.0), length, inner), px(0.0));
-        // In the inner zone: the slowest speed at its start.
-        assert!((edge_speed(px(384.05), length, inner).0 - MIN_SPEED).abs() < 0.2);
-        let near = edge_speed(px(410.0), length, inner);
-        let far = edge_speed(px(450.0), length, inner);
-        assert!(near.0 > MIN_SPEED && far.0 > near.0);
-        assert_eq!(edge_speed(px(1000.0), length, inner), px(MAX_SPEED));
-        assert_eq!(edge_speed(px(-1000.0), length, inner), px(-MAX_SPEED));
-        assert!(edge_speed(px(-10.0), length, inner).0 < -MIN_SPEED);
-        // Without an inner zone only past the edges.
-        assert_eq!(edge_speed(px(0.0), length, px(0.0)), px(0.0));
-        assert_eq!(edge_speed(px(400.0), length, px(0.0)), px(0.0));
-        assert!(edge_speed(px(-1.0), length, px(0.0)).0 < 0.0);
-        assert_eq!(edge_speed(px(5.0), px(0.0), inner), px(0.0));
+    fn ruler_marks_scale_to_the_ruler_in_their_lanes() {
+        let lh = px(20.0);
+        // 100 rows (2000 points) on a 200 point ruler: a tenth.
+        assert_eq!(
+            ruler_place(50..60, lh, px(2000.0), px(200.0)),
+            (px(100.0), px(20.0))
+        );
+        // A row is at least six points tall, kept within the ruler.
+        assert_eq!(
+            ruler_place(99..100, lh, px(2000.0), px(200.0)),
+            (px(194.0), px(6.0))
+        );
+        // A short text keeps its rows' places.
+        assert_eq!(ruler_place(2..3, lh, px(100.0), px(200.0)).0, px(40.0));
+        assert_eq!(ruler_lane(Lane::Right), (2.0 / 3.0, 1.0 / 3.0));
+        assert_eq!(ruler_lane(Lane::Full), (0.0, 1.0));
     }
 }

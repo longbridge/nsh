@@ -27,6 +27,8 @@ mod access;
 mod agent;
 mod animation;
 mod app;
+mod app_window;
+mod audio;
 mod canvas;
 mod chrome;
 mod compose;
@@ -38,17 +40,21 @@ mod file_requests;
 mod fps;
 mod geom;
 mod gfx;
+mod global_shortcut;
 mod image;
 mod input;
 mod keymap;
+mod linking;
 mod mount;
 mod native;
 mod navigation;
+mod notifications;
 mod picker;
 mod render;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod shell;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -56,8 +62,11 @@ mod system;
 mod text;
 mod text_input;
 mod transition;
+mod tray;
 mod view;
 mod window;
+mod window_close;
+mod window_state;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{
@@ -68,7 +77,10 @@ pub use windows;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
-    native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    native::{ComponentContext, ComponentFactory, Components, NativeComponent, Wheel},
 };

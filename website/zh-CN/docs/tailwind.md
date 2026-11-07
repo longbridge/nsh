@@ -79,7 +79,7 @@ Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中�
 | `active:` | 视图被按下 | `.active(\|s\| ..)` |
 | `hover:` | 指针悬停在视图上（iPad 和 Mac 的指针） | `.hover(\|s\| ..)` |
 | `focus:`、`focus-visible:` | 输入框获得焦点 | `.focus(\|s\| ..)` |
-| `focus-within:` | 视图或其后代获得焦点 | |
+| `focus-within:` | 视图或其后代获得焦点（`Overlay` 的内容是它所在视图的后代） | `.focus_within(..)` |
 | `disabled:`、`enabled:` | 元素的 `disabled` 属性为 true / false | `.disabled_style(\|s\| ..)` |
 | `selected:` | 元素处于选中状态（`Button` 的 `selected`、`accessibilityState.selected`） | `.selected_style(..)` |
 | `checked:` | 元素处于勾选状态（`accessibilityState.checked` 为 `true`；`"mixed"` 不算） | `.checked_style(..)` |
@@ -87,7 +87,8 @@ Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中�
 | `aria-expanded:` | 元素处于展开状态（`accessibilityState.expanded` 为 `true`）：弹出层打开时 `Popover`、`Menu` 的触发器 | `.expanded_style(..)` |
 | `aria-pressed:` | 元素是处于开启状态的切换按钮（`accessibilityState.pressed` 为 `true`；`"mixed"` 不算按下）。不同于 `active:`（正在按压） | `.aria_pressed(..)`、`.pressed_style(..)` |
 | `aria-busy:`、`aria-checked:`、`aria-selected:` | `accessibilityState.busy`、`checked`（`true`，不含 `"mixed"`）或 `selected` 为 `true`，与 Tailwind 的 `aria-*` 变体一致：排在伪类之后，按名称排序 | |
-| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:`、`group-selected:`、`group-checked:`、`group-indeterminate:`、`group-aria-expanded:`、`group-aria-pressed:`、`group-aria-busy:`、`group-aria-checked:`、`group-aria-selected:` | 最近的带 `group` 类的祖先处于该状态 | 祖先上 `.group()`；内部 `.group_active(..)`、`.group_hover(..)`、`.group_focus_within(..)` |
+| `data-<name>:` | 元素带有名为 `name` 的 `data-*` 属性，与 Tailwind 的布尔 `data-*` 变体一致（`&[data-range-start]`）：组件的部件在状态之外显示的信息，比如日历中区间起点的那一天（`data-range-start:`）。排在 `aria-*` 变体之后，按名称排序 | 组件的部件上用 `Interactive::project_data(name, ..)` 设置 |
+| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:`、`group-selected:`、`group-checked:`、`group-indeterminate:`、`group-aria-expanded:`、`group-aria-pressed:`、`group-aria-busy:`、`group-aria-checked:`、`group-aria-selected:`、`group-data-<name>:` | 最近的带 `group` 类的祖先处于该状态，或带有该 `data-*` 属性 | 祖先上 `.group()`；内部 `.group_active(..)`、`.group_hover(..)`、`.group_focus_within(..)` |
 | `group-active/name:` ... | 同上，针对标记为 `group/name` 的祖先 | `.group_named("name")`；`.group_active_named("name", ..)` 等 |
 | `first:`、`last:`、`odd:`、`even:`、`only:` | 元素自身在兄弟节点中的位置。要按行的位置给行内标签上色，把 `last:text-*` 写在行上，标签会继承它 | 根据行的索引用普通 Rust 判断（`at.is_first()`、`at.is_last()`、`at.index() % 2`） |
 | `placeholder:` | 设置输入框占位文字的样式（`placeholder:text-zinc-400`） | `.placeholder_color(..)` |
@@ -206,7 +207,7 @@ view()
 | `aspect` | 比例（`1.5`） | `aspect-*` |
 | `ease` | `[x1, y1, x2, y2]` | `ease-*` |
 
-未知的键和无效的值会导致构建错误（`nsh.json: tailwind: unknown theme key 'colours'`）。主题会编译进 bundle，并在第一帧之前生效。
+NSH 读不懂的条目（不认识的键，或形式不认识的值）会给出警告并单独略过（`nsh.json: tailwind: unknown key 'colours', ignored`），运行时也一样，因此为更新的 NSH 写的主题在较旧的 NSH 上其余条目照常生效。主题会编译进 bundle，并在第一帧之前生效。
 
 Tailwind 主题影响你的类名。类型化方法保持 Tailwind 的默认刻度，因此 Rust 组件在任何应用中看起来都一样，它们从应用主题的设计令牌，即 `nsh.json` 中的 `"theme"` 获取应用的外观（[用 Rust 开发](./rust.md#主题)）。
 
@@ -260,7 +261,8 @@ token 的名称就是主题文件中 CSS 变量去掉 `--` 后的名称：`muted
 - **两种外观。** token 带有主题的浅色值和深色值：`bg-primary`、`theme().primary` 和 `token("primary")` 都会随外观自动切换，不需要 `dark:` 类。只在一种外观里设置的颜色在两种外观下都使用该值。
 - **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 是主题 token。
 - **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类、读取 `theme()` 的 Rust 绑定和读取 `token()` 的 TSX 代码都会更新，其中类和绑定在原生侧更新。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。只想加上自己品牌的宿主给出主题覆盖，即用同样的文件格式写出其品牌要改的 token（[iOS](./ios.md#主题覆盖)、[Android](./android.md#主题覆盖)，桌面端为 `AppView::set_theme_overrides`）。
-- **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
+- **应用可以换一个主题。** `nsh` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 在应用运行时把一个同样格式的主题设为应用的主题，取代它的 `"theme"`，在每个平台和 `nsh test` 里都一样；`setTheme(null)` 恢复应用自己的主题。`token()` 立即读到新的 token。主题要整个读得懂：有读不懂的值时抛出列出该值的 `TypeError`，正在显示的主题保持不变。请从应用自己的主题文件出发构造新主题，这样类名引用的每个 token 都还有值。Rust 应用用 `set_tokens(theme.into())` 设置一个 `nsh_base::Theme` 的 token。
+- **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主或运行时设置的主题提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
 
 引用 token 的类和其他类一样，每套主题只解析一次：绘制时的开销与调色板颜色相同。
 

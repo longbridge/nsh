@@ -36,7 +36,7 @@ use std::f32::consts::PI;
 use crate::{
     Bounds, Command, EventKind, EventPayload, NodeId, Point, Points, ScrollBehavior, Size,
     StickyCell,
-    geometry::{Percentage, Radians, point},
+    geometry::{Axis, Percentage, Radians, point},
 };
 
 /// Below this release speed (points per ms) a drag does not glide.
@@ -370,6 +370,31 @@ pub fn spokes(progress: Percentage, spin: Radians) -> impl Iterator<Item = (Radi
     })
 }
 
+// The reading order.
+
+/// Orders a view's children as they are on screen, the order Tab and
+/// screen readers go through a scroll view's content (and a list's cells,
+/// [`crate::ViewProps::screen_order`]) in: along `axis`, then across it. A
+/// list recycles its cells, so in the view tree they stay in the order
+/// they were made, not their rows'. `origin` is a child's frame origin;
+/// the sort is stable.
+pub fn reading_order<T>(axis: Axis, children: &mut [T], origin: impl Fn(&T) -> Point<Points>) {
+    if children.len() < 2 {
+        return;
+    }
+    let key = |child: &T| {
+        let at = origin(child);
+        match axis {
+            Axis::Horizontal => (at.x.0, at.y.0),
+            Axis::Vertical => (at.y.0, at.x.0),
+        }
+    };
+    children.sort_by(|a, b| {
+        let (a, b) = (key(a), key(b));
+        a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+    });
+}
+
 // The state.
 
 impl ScrollState {
@@ -475,14 +500,50 @@ impl ScrollState {
     /// The indicator's rectangle in a view of `size` and how far it can
     /// travel along its track, or `None` when the content fits.
     pub fn thumb(&self, size: Size<Points>) -> Option<(Bounds<Points>, Points)> {
-        let (rect, travel) = self.thumb_f(size)?;
+        self.thumb_within(
+            size,
+            Bounds {
+                origin: Point::default(),
+                size,
+            },
+        )
+    }
+
+    /// [`ScrollState::thumb`] in a view of `size` of which the scroll
+    /// views and clips around it leave `visible` (view coordinates) in
+    /// sight: the indicator runs along the visible part's bottom (a
+    /// horizontal view) or right edge (a vertical one), so a scroll view
+    /// taller or wider than the one it is in keeps its bar in view. `None`
+    /// also when nothing of the view is visible.
+    pub fn thumb_within(
+        &self,
+        size: Size<Points>,
+        visible: Bounds<Points>,
+    ) -> Option<(Bounds<Points>, Points)> {
+        let (rect, travel) = self.thumb_f(size, visible)?;
         Some((rect, Points(travel)))
     }
 
-    fn thumb_f(&self, size: Size<Points>) -> Option<(Bounds<Points>, f32)> {
+    /// The visible part's right and bottom edges in a view of `size`, or
+    /// `None` when none of it is visible.
+    fn visible_edges(size: Size<Points>, visible: Bounds<Points>) -> Option<(f32, f32)> {
+        let (w, h) = (size.width.0, size.height.0);
+        let left = visible.origin.x.0.max(0.0);
+        let top = visible.origin.y.0.max(0.0);
+        let right = (visible.origin.x.0 + visible.size.width.0).min(w);
+        let bottom = (visible.origin.y.0 + visible.size.height.0).min(h);
+        (right > left && bottom > top).then_some((right, bottom))
+    }
+
+    fn thumb_f(
+        &self,
+        size: Size<Points>,
+        visible: Bounds<Points>,
+    ) -> Option<(Bounds<Points>, f32)> {
         const EDGE: f32 = 2.0;
         let thick = INDICATOR_THICK.0;
         let (w, h) = (size.width.0, size.height.0);
+        let (right, bottom) = Self::visible_edges(size, visible)?;
         let inset = self.behavior.content_inset;
         let (dim, total, offset) = if self.horizontal {
             (
@@ -504,9 +565,9 @@ impl ScrollState {
             } else {
                 start
             };
-            (x, h - thick - EDGE, len, thick)
+            (x, bottom - thick - EDGE, len, thick)
         } else {
-            (w - thick - EDGE, start, thick, len)
+            (right - thick - EDGE, start, thick, len)
         };
         let rect = Bounds {
             origin: point(Points(x), Points(y)),
@@ -522,17 +583,39 @@ impl ScrollState {
     /// `size` grabs the indicator, faded out or not: on the desktop it is a
     /// scroll bar.
     pub fn grabs_thumb(&self, size: Size<Points>, at: Point<Points>) -> bool {
+        self.grabs_thumb_within(
+            size,
+            Bounds {
+                origin: Point::default(),
+                size,
+            },
+            at,
+        )
+    }
+
+    /// [`ScrollState::grabs_thumb`] in a view of which `visible` is in
+    /// sight, the indicator placed as [`ScrollState::thumb_within`] places
+    /// it.
+    pub fn grabs_thumb_within(
+        &self,
+        size: Size<Points>,
+        visible: Bounds<Points>,
+        at: Point<Points>,
+    ) -> bool {
         let (x, y) = (at.x.0, at.y.0);
         if !self.indicator || !self.behavior.enabled {
             return false;
         }
-        let Some((rect, _)) = self.thumb_f(size) else {
+        let Some((rect, _)) = self.thumb_f(size, visible) else {
+            return false;
+        };
+        let Some((right, bottom)) = Self::visible_edges(size, visible) else {
             return false;
         };
         let (along, across, start, len, edge) = if self.horizontal {
-            (x, y, rect.origin.x.0, rect.size.width.0, size.height.0)
+            (x, y, rect.origin.x.0, rect.size.width.0, bottom)
         } else {
-            (y, x, rect.origin.y.0, rect.size.height.0, size.width.0)
+            (y, x, rect.origin.y.0, rect.size.height.0, right)
         };
         (edge - THUMB_GRAB..=edge).contains(&across)
             && (start - THUMB_SLOP..=start + len + THUMB_SLOP).contains(&along)
@@ -783,6 +866,39 @@ pub fn frame(host: &impl ScrollHost, now: f64) -> bool {
     busy
 }
 
+/// When the view's motion next comes to something (ms, the clock
+/// [`frame`] is given): a glide's or an eased move's end, a mouse wheel's
+/// rest; what a surface that draws no frames (a hidden window) runs
+/// [`frame`] at, so the scroll ends and reports it on time without
+/// frames. `None` while nothing runs that ends by itself (the indicator's
+/// fade and the refresh spinner only draw).
+pub fn deadline(host: &impl ScrollHost, now: f64) -> Option<f64> {
+    let (phase, rate) = host.scroll(|s, _| (s.live.phase, rate(&s.behavior)))?;
+    let end = match phase {
+        Phase::Glide { velocity, last } => {
+            // It slows below `STOP` then, or meets an edge before.
+            let speed = velocity.abs();
+            if speed < STOP || !(0.0..1.0).contains(&rate) {
+                last
+            } else {
+                last + ((STOP / speed).ln() / rate.ln()).max(0.0) as f64
+            }
+        }
+        Phase::Animate {
+            start, duration, ..
+        } => start + duration,
+        Phase::Wheel {
+            last,
+            gesture: false,
+            ..
+        } => last + WHEEL_IDLE,
+        _ => return None,
+    };
+    // A millisecond past it: a frame there finds it ended whatever the
+    // rounding.
+    Some(end.max(now) + 1.0)
+}
+
 /// The view left the window during its frames: it stops (a later move
 /// starts again) and reports where it is.
 pub fn detached(host: &impl ScrollHost) {
@@ -915,11 +1031,12 @@ pub fn config(
 ) {
     let changed = host.scroll_mut(|s, _| {
         s.horizontal = horizontal;
-        // A horizontal view keeps its indicator: it is the mouse's scroll
-        // bar, and a mouse without a horizontal wheel has no other way
-        // to move it (mouse drags do not scroll); a built-in bar of the
-        // app's (`replaced`) is the mouse's then.
-        s.indicator = indicator || (horizontal && !replaced);
+        // The view shows its indicator only when it asks to, on either
+        // axis: a mouse without a horizontal wheel still moves a
+        // horizontal view with Shift + wheel, with the vertical wheel
+        // where nothing around scrolls vertically, and with the keys. A
+        // built-in bar of the app's (`replaced`) takes its place.
+        s.indicator = indicator && !replaced;
         if !indicator {
             s.live.alpha = 0.0;
         }
@@ -1163,7 +1280,7 @@ pub fn drag_end(host: &impl ScrollHost, vx: f32, vy: f32) {
 /// sees it can scroll and where its scroll bar is.
 pub fn hovered(host: &impl ScrollHost) {
     let shown = host.scroll_mut(|s, size| {
-        if s.thumb_f(size).is_none() || !s.indicator || !s.behavior.enabled {
+        if s.thumb(size).is_none() || !s.indicator || !s.behavior.enabled {
             return false;
         }
         s.live.shown = host.now();
@@ -1206,7 +1323,7 @@ pub fn thumb_move(host: &impl ScrollHost, moved: Point<Points>) {
         return;
     };
     let Some(Some(pos)) = host.scroll(|s, size| {
-        let (_, travel) = s.thumb_f(size)?;
+        let (_, travel) = s.thumb(size)?;
         let (min, max) = s.limits(size);
         let d = if !s.horizontal {
             dy
@@ -1215,7 +1332,7 @@ pub fn thumb_move(host: &impl ScrollHost, moved: Point<Points>) {
         } else {
             dx
         };
-        let d = thumb_scroll(Points(d), Points(max), Points(travel)).0;
+        let d = thumb_scroll(Points(d), Points(max), travel).0;
         Some((start + d).clamp(min, max.max(min)))
     }) else {
         return;
@@ -1482,6 +1599,32 @@ pub fn reveal(host: &impl ScrollHost, start: Points, len: Points) -> Points {
 mod tests {
     use super::*;
     use crate::EdgeInsets;
+
+    #[test]
+    fn content_is_read_in_the_order_it_is_on_screen() {
+        // Recycled cells: made for rows 0 to 3, rows 0 and 1 scrolled
+        // away and their cells bound to rows 4 and 5.
+        let cells = [(0, 160.0), (1, 200.0), (2, 80.0), (3, 120.0)];
+        let mut vertical = cells;
+        reading_order(Axis::Vertical, &mut vertical, |c| {
+            point(Points(0.0), Points(c.1))
+        });
+        assert_eq!(vertical.map(|c| c.0), [2, 3, 0, 1]);
+        // Two columns read row by row; a horizontal list column by column.
+        let grid = [
+            (0, (50.0, 0.0)),
+            (1, (0.0, 40.0)),
+            (2, (0.0, 0.0)),
+            (3, (50.0, 40.0)),
+        ];
+        let at = |c: &(i32, (f32, f32))| point(Points(c.1.0), Points(c.1.1));
+        let mut rows = grid;
+        reading_order(Axis::Vertical, &mut rows, at);
+        assert_eq!(rows.map(|c| c.0), [2, 0, 1, 3]);
+        let mut columns = grid;
+        reading_order(Axis::Horizontal, &mut columns, at);
+        assert_eq!(columns.map(|c| c.0), [2, 1, 0, 3]);
+    }
 
     fn scroll_state(content: (f32, f32), horizontal: bool) -> ScrollState {
         ScrollState {
@@ -1764,6 +1907,28 @@ mod tests {
     }
 
     #[test]
+    fn thumb_stays_in_the_visible_part() {
+        // A horizontal scroll view 2000 tall in a viewport showing its rows
+        // 600 to 1000: the bar runs along the visible part's bottom, where
+        // a press grabs it, not along the view's own.
+        let mut s = scroll_state((900.0, 2000.0), true);
+        s.indicator = true;
+        s.behavior.enabled = true;
+        let size = sz(300.0, 2000.0);
+        let visible = Bounds::new(pt(0.0, 600.0), sz(300.0, 400.0));
+        let (rect, _) = s.thumb_within(size, visible).unwrap();
+        assert_eq!(rect.origin.y.0, 1000.0 - INDICATOR_THICK.0 - 2.0);
+        assert!(s.grabs_thumb_within(size, visible, pt(20.0, 997.0)));
+        assert!(!s.grabs_thumb_within(size, visible, pt(20.0, 1997.0)));
+        // Unclipped, it is the view's own bottom.
+        let (rect, _) = s.thumb(size).unwrap();
+        assert_eq!(rect.origin.y.0, 2000.0 - INDICATOR_THICK.0 - 2.0);
+        // Out of sight: no bar.
+        let hidden = Bounds::new(pt(0.0, 2100.0), sz(300.0, 400.0));
+        assert!(s.thumb_within(size, hidden).is_none());
+    }
+
+    #[test]
     fn scroll_keys() {
         assert_eq!(
             vk_key_move(0x28, false, false),
@@ -1880,6 +2045,68 @@ mod tests {
             true
         }
         fn start_ticking(&self) {}
+    }
+
+    #[test]
+    fn a_glide_and_an_eased_move_end_at_their_deadlines() {
+        let host = TestHost {
+            state: std::cell::RefCell::new(scroll_state((300.0, 100_000.0), false)),
+            redraws: std::cell::Cell::new(0),
+        };
+        assert_eq!(deadline(&host, 0.0), None);
+        for phase in [
+            Phase::Glide {
+                velocity: 2.0,
+                last: 0.0,
+            },
+            Phase::Animate {
+                from: 0.0,
+                to: 400.0,
+                start: 0.0,
+                duration: ANIMATION,
+                momentum: false,
+                end: true,
+            },
+        ] {
+            host.state.borrow_mut().y = Points(0.0);
+            host.state.borrow_mut().live.phase = phase;
+            let mut now = 0.0;
+            let mut frames = 0;
+            while let Some(next) = deadline(&host, now) {
+                now = next;
+                frame(&host, now);
+                frames += 1;
+                assert!(frames < 5, "{:?}", host.state.borrow().live.phase);
+            }
+            assert!(matches!(host.state.borrow().live.phase, Phase::Idle));
+            let y = host.state.borrow().y.0;
+            match phase {
+                // Where frames would have taken it.
+                Phase::Glide { .. } => assert!(
+                    (y - projected(Points(0.0), 2.0, 0.998).0).abs() < 6.0,
+                    "{y}"
+                ),
+                _ => assert_eq!(y, 400.0),
+            }
+        }
+    }
+
+    #[test]
+    fn indicator_follows_the_view_on_either_axis() {
+        let host = TestHost {
+            state: std::cell::RefCell::new(scroll_state((300.0, 1000.0), false)),
+            redraws: std::cell::Cell::new(0),
+        };
+        for horizontal in [false, true] {
+            config(&host, horizontal, true, false, false);
+            assert!(host.state.borrow().indicator);
+            // `scrollbar={false}` hides it, a horizontal view's too.
+            config(&host, horizontal, false, false, false);
+            assert!(!host.state.borrow().indicator);
+            // A built-in bar of the app's takes its place.
+            config(&host, horizontal, true, true, false);
+            assert!(!host.state.borrow().indicator);
+        }
     }
 
     #[test]

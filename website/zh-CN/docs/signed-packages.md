@@ -1,6 +1,6 @@
 ---
 title: 签名包
-description: 发布由宿主应用下载并验证的应用代码：密钥、证书、nsh publish、验证、吊销与回滚保护。
+description: 发布由宿主应用下载并验证的应用代码：密钥、证书、nsh publish、重新签名、验证、吊销与回滚保护。
 order: 20
 group: delivery
 ---
@@ -21,7 +21,7 @@ group: delivery
 
 > [!NOTE]
 > NSH 只负责验证和运行包，不负责分发。包从哪里来（你的更新服务器、CDN、小程序商店）以及应用何时下载，都由宿主应用
-> 自行决定。
+> 自行决定。打包的 NSH 应用更新自己的 TSX 是例外：[OTA 更新](./ota-updates.md)替它获取、验证、运行和回滚包。
 
 ## 为什么要签名
 
@@ -101,7 +101,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 | `--strip-debug` | 字节码中不保留行号和列号表：包更小，但报错调用栈里没有位置。 |
 | `--min-runtime <version>` | 能运行该包的最低运行时版本，例如 `0.2.0`（`nsh.json` 中的 `minRuntime`）。默认：本 CLI 的版本。见[哪些运行时能运行包](#哪些运行时能运行包)。 |
 
-凡是设备会拒绝的包，`nsh publish` 也拒绝签名：证书必须覆盖该 app id 和当前时间。
+凡是设备会拒绝的包，`nsh publish` 也拒绝签名：app id 必须是单独一级路径，且证书必须覆盖该 app id 和当前时间。
 
 ```text
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
@@ -149,6 +149,33 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-run
 
 包加载时会把略过的内容记录到日志。
 
+## 重新签名包
+
+分发多个应用的包的平台，可以用自己的一个密钥为它们统一签名：CI 构建每个包，并用测试应用信任的密钥签名；平台再用正式应用信任的
+密钥重新签名。
+
+```sh
+nsh publish ci/com.example.counter-2.nshpkg --key keys/platform.secret --cert keys/platform.cert -o com.example.counter-2.nshpkg
+```
+
+```text
+com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), signed again by d0eb0d3cb453b71b, for runtime 0.3.0 or newer
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--key <file>` | 发布密钥的私钥。 |
+| `--cert <file>` | 它的证书。 |
+| `-o, --out <file>` | 要写入的包。可以就是读入的那个包。默认：`.nsh/out/<id>-<build>.nshpkg`。 |
+
+包里 CI 放入的内容全部保留：文件，app id、版本和构建号，声明的能力，[最低运行时版本](#哪些运行时能运行包)，以及
+[更新版本的 NSH](#由更新版本的-nsh-签名的包) 写入的内容。证书、签名时间和签名换成新密钥的，因此包有了自己的 SHA-256，
+[吊销](#吊销密钥和包)时用的就是这个值。
+
+签名前，`nsh publish` 会检查包是否完好（由其证书指明的密钥签名，文件表与数据吻合，每个文件都与其哈希一致），以及新证书是否
+覆盖该 app id 和当前时间。此后由新签名为这个包担保，字节码也包括在内，所以平台只为自己的构建产出的包重新签名。Rust 工具用
+`nsh_package::resign(&bytes, &key, &certificate)` 重新签名。
+
 ## 验证包
 
 `nsh verify` 检查包的方式，与信任指定根密钥的宿主应用完全一致：
@@ -171,7 +198,7 @@ valid: com.example.counter 1.0.0 (build 2), release key 3428d7136788c9ee, sha256
 1. 证书由受信任的根签名；
 2. 发布密钥未被吊销；
 3. 包由发布密钥签名；
-4. 证书覆盖该 app id 和签名时间；
+4. app id 是单独一级路径（不含 `/`、`\`、`:` 或 NUL，也不是 `.` 或 `..`：设备用它给包的目录命名），且证书覆盖该 app id 和签名时间；
 5. 包所需的最低运行时版本；
 6. 文件表与数据完全吻合，且每个文件都与其哈希一致；
 7. 包本身未被吊销；
@@ -328,9 +355,11 @@ adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity 
 3. 上传前对包运行 `nsh verify --root root.pub`。
 4. 将 `root.pub` 内置在宿主应用中；吊销列表单独分发，这样无需更新应用就能吊销。
 5. 如果发布密钥泄露，吊销它（`nsh revoke --extend … --key <id>`），签发新的发布密钥并重新发布。
+6. 由平台为应用统一签名时，给 CI 一个只有测试应用信任的根密钥，正式应用内置平台的根密钥；平台为 CI 的包重新签名（`nsh publish <package>`）。
 
 ## 另请参阅
 
 - [沙箱与能力](./sandbox-and-capabilities.md)
 - [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)
+- [OTA 更新](./ota-updates.md)：以签名包下发打包应用自己的 TSX
 - [CLI](./cli.md)

@@ -188,7 +188,7 @@ view()
 - **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧；以及跟随[布局方向](./layout.md)的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
 - **颜色**：设置了宽度而没有设置颜色的边，用文字颜色绘制，与 CSS 的 `currentColor` 相同：`{ borderWidth: 1, color: "#0969da" }` 画出蓝色边框。
 - **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius`（顶部起始、顶部结束、底部起始、底部结束；Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
-- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`）绘制曲率平滑过渡到边的圆角，就像 iOS 应用图标，两个平台都支持。胶囊形状（`borderRadius` 为高度的一半）依然是胶囊。
+- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`，类名 `corner-squircle`）绘制超椭圆圆角，曲率平滑过渡到边，就像 iOS 应用图标：iOS、Android、macOS、Linux 支持，Web 上在浏览器支持 CSS `corner-shape` 时生效（Chromium）；其他情况下是相同半径的圆角。胶囊形状（`borderRadius` 为高度一半）仍是胶囊。
 - **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。裁掉的部分在布局上同样被裁掉：它不会进入外层滚动视图的内容尺寸，所以一个盒子把子视图按更大的尺寸排版、再用 `transform` 缩小（transform 不影响布局）时，不会让滚动视图多出可滚动的范围。
 
 超过边长一半的半径会被截断，所以 `borderRadius: 9999`（`.rounded_full()`）会得到圆形或胶囊。
@@ -314,6 +314,38 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 ```tsx
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
 ```
+
+### 渐进式模糊
+
+沿某条边逐渐增强的模糊（如顶栏下方、图片说明文字背后）由多层 `backdropFilter` 组成：每层比上一层更强，并用 `maskImage` 往后渐显。五层、半径逐层翻倍即可看不出分层：
+
+```tsx
+const LAYERS = 5;
+
+function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
+  return (
+    <View style={{ pointerEvents: "none", ...props.style }}>
+      <Each of={Array.from({ length: LAYERS }, (_, i) => i)}>
+        {(i) => (
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backdropFilter: `blur(${props.radius / 2 ** (LAYERS - 1 - i())}px)`,
+              maskImage: `linear-gradient(to bottom, transparent ${(i() / LAYERS) * 100}%, black ${((i() + 1) / LAYERS) * 100}%)`,
+            }}
+          />
+        )}
+      </Each>
+    </View>
+  );
+}
+```
+
+带遮罩的 `backdropFilter` 只绘制模糊本身，不带系统材质的色调，半径也是精确的，iOS 和 macOS 同样如此。每一层在每帧都要模糊窗口内容，所以层数要少、面积要小。Linux 和 GPUI 不绘制 `backdropFilter`，如果上面的文字必须清晰可读，请给这块区域加上渐隐的 `backgroundImage`。
 
 ## 轮廓线、不透明度与可见性
 

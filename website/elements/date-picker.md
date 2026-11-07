@@ -126,7 +126,8 @@ change with `onChange({ value })`; the app sets `value` to follow it. Left out, 
   reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time; a
   press on the selected day again closes the popup. On phones and tablets, a tap on a day picks it at its time and
   closes the sheet, as a single date does; the sheet opens again for the time. A day picked before any time gets
-  `defaultTime` (default `00:00`). `hourCycle` is how the field counts the hours.
+  `defaultTime` (default `00:00`). `hourCycle` is how the field counts the hours, as
+  [TimeField](./time-field.md)'s, the user's included.
 
 `cleanable` adds a clear button while there is a value: a press clears it (`onChange({ value: null })`). It comes
 after the trigger, not inside it, so a press on it never opens the popup; the app places it and fills it
@@ -177,7 +178,7 @@ spread apart (`flex-row items-center justify-between`, as `gpui-component`'s). T
 | `presetClass`, `presetStyle` | `.preset_class(..)`, `.preset_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each preset's button. |
 | `calendarClass`, `calendarStyle` | `.calendar_class(..)`, `.calendar_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The calendar. |
 | `headerClass` … `itemStyle` | as `Calendar`'s | as `Calendar`'s | none | The calendar's header, body, months, rows and items. |
-| `renderItem` | `.render_item(..)` | `(item: CalendarItemState) => JSX.Element` | none | Each item of the calendar, drawn by the app. |
+| `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | none | Each item of the calendar, drawn by the app from what it is; its states are the items' classes, as `Calendar`'s. |
 | `timeClass`, `timeStyle` | `.time_class(..)`, `.time_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The time's row: its label at the start, the field at the end. |
 | `timeLabel` | `.time_label(..)` | `JSX.Element` | none | What the time's row shows before the field. |
 | `timeFieldClass`, `timeFieldStyle` | `.time_field_class(..)`, `.time_field_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The time field. |

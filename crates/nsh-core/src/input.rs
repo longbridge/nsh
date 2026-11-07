@@ -15,7 +15,7 @@ use crate::{
     Bounds, EdgeInsets, EventKind, EventMask, GestureValues, NodeId, PanActivation, Point, Points,
     ROOT_ID, Size, ViewKind,
     geometry::Radians,
-    tailwind::state::{HOVERED, PRESSED},
+    tailwind::state::{FOCUSED, HOVERED, PRESSED},
 };
 
 /// Distance a pointer moves before a pan or scroll drag starts.
@@ -455,10 +455,21 @@ pub fn released_inside(local: Point<Points>, size: Size<Points>, slop: EdgeInset
 
 // --- States and hover ---------------------------------------------------------------
 
+/// The interaction states a view that tracks `tracked`
+/// ([`crate::MountItem::TrackStates`]) reports: those, and always
+/// `FOCUSED`. The core keeps one keyboard focus per surface and works out
+/// `focus-within` from it (the views around the focused one, the overlays
+/// counting as inside the view the app put them in), so every view the
+/// focus reaches tells it, whatever its classes read. A focus change is
+/// one report.
+pub fn reported_states(tracked: u16) -> u16 {
+    tracked | FOCUSED
+}
+
 /// Interaction states `states` with `bit` set (or cleared), when the view
-/// tracks it and they change.
+/// reports it ([`reported_states`]) and they change.
 pub fn next_states(tracked: u16, states: u16, bit: u16, on: bool) -> Option<u16> {
-    if tracked & bit == 0 {
+    if reported_states(tracked) & bit == 0 {
         return None;
     }
     let next = if on { states | bit } else { states & !bit };
@@ -664,6 +675,31 @@ pub fn tab_stop(current: Option<usize>, n: usize, back: bool, wrap: bool) -> Opt
     })
 }
 
+/// Whether a key down asks for the context menu of the view with the
+/// keyboard focus: the Menu key (`menu_key`) or Shift+F10, as Windows, GTK
+/// and WAI-ARIA have it, with neither Control, Alt nor Command / Super
+/// held (Shift+Menu too).
+pub fn opens_context_menu(
+    menu_key: bool,
+    key: Option<crate::keymap::Key>,
+    modifiers: crate::keymap::Modifiers,
+) -> bool {
+    if modifiers.ctrl || modifiers.alt || modifiers.cmd {
+        return false;
+    }
+    menu_key || (modifiers.shift && key == Some(crate::keymap::Key::F(10)))
+}
+
+/// Where a context menu asked for without a pointer (the keyboard, an
+/// assistive technology) opens in a view of `size`: its bottom-start
+/// corner, the bottom right one right to left (`rtl`: the surface's
+/// direction, `MountItem::LayoutDirection`), so a menu placed below it
+/// starts where the view does.
+pub fn context_menu_anchor(size: Size<Points>, rtl: bool) -> Point<Points> {
+    let x = if rtl { size.width } else { Points(0.0) };
+    Point { x, y: size.height }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,6 +878,14 @@ mod tests {
     }
 
     #[test]
+    fn focus_is_reported_whatever_is_tracked() {
+        assert_eq!(reported_states(0), FOCUSED);
+        assert_eq!(next_states(0, 0, FOCUSED, true), Some(FOCUSED));
+        assert_eq!(next_states(0, FOCUSED, FOCUSED, false), Some(0));
+        assert_eq!(next_states(0, FOCUSED, FOCUSED, true), None);
+    }
+
+    #[test]
     fn hovers_leave_inside_out_and_enter_outside_in() {
         let (left, entered) = hover_changes(&[3, 2, 1], &[5, 4, 1]);
         assert_eq!(left.collect::<Vec<_>>(), vec![&3, &2]);
@@ -932,5 +976,33 @@ mod tests {
         assert_eq!(tab_stop(Some(2), 3, false, false), None);
         assert_eq!(tab_stop(Some(0), 3, true, false), None);
         assert_eq!(tab_stop(Some(1), 3, true, false), Some(0));
+    }
+
+    #[test]
+    fn context_menu_keys() {
+        use crate::keymap::{Key, Modifiers};
+        let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        let ctrl_shift = Modifiers {
+            ctrl: true,
+            ..shift
+        };
+        assert!(opens_context_menu(true, None, none));
+        assert!(opens_context_menu(true, None, shift));
+        assert!(opens_context_menu(false, Some(Key::F(10)), shift));
+        assert!(!opens_context_menu(false, Some(Key::F(10)), none));
+        assert!(!opens_context_menu(false, Some(Key::F(10)), ctrl_shift));
+        assert!(!opens_context_menu(true, None, ctrl_shift));
+        assert!(!opens_context_menu(false, Some(Key::F(9)), shift));
+    }
+
+    #[test]
+    fn context_menu_anchor_is_the_bottom_start_corner() {
+        let s = size(Points(120.0), Points(40.0));
+        assert_eq!(context_menu_anchor(s, false), p(0.0, 40.0));
+        assert_eq!(context_menu_anchor(s, true), p(120.0, 40.0));
     }
 }

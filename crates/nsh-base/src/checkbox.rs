@@ -3,6 +3,8 @@
 
 use nsh_core::{AccessibilityState, Checked, element::Style, prelude::*};
 
+use crate::terminal::{checkbox_mark, is_terminal, mark_view};
+
 /// The props of [`Checkbox`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct CheckboxProps {
@@ -33,6 +35,12 @@ pub struct CheckboxProps {
     /// What it is for screen readers (default `"checkbox"`; a menu item
     /// that is checked, ...).
     pub role: Prop<Option<AccessibilityRole>>,
+    /// How far outside its bounds presses still count, as a view's
+    /// `hitSlop`: one number for every side, or the sides named (each left
+    /// out 0). A small checkbox (a box with no label) takes presses a
+    /// finger lands near it, with no change to its layout or look.
+    #[prop(default)]
+    pub hit_slop: Prop<EdgeInsets>,
     /// The Tailwind classes of the indicator, the box that shows the value;
     /// `checked:`, `indeterminate:` and `disabled:` follow the checkbox.
     pub indicator_class: Prop<Option<SharedString>>,
@@ -65,13 +73,19 @@ pub enum CheckboxEvent {
 /// and `style` style the checkbox, `indicatorClass` / `indicatorStyle` the
 /// indicator, and `checked:`, `indeterminate:` and `disabled:` classes on
 /// each follow the checkbox's state (or `checkedStyle`,
-/// `indeterminateStyle` and `disabledStyle` on the checkbox).
+/// `indeterminateStyle` and `disabledStyle` on the checkbox). `hitSlop`
+/// widens where presses count past its bounds, as a view's does.
+///
+/// In a terminal it shows the terminal's checkbox, `[x]`, `[ ]` or `[-]`
+/// and a space, in place of the indicator, then its children, in a row
+/// ([`crate::terminal`]).
 #[component]
 pub fn Checkbox(props: CheckboxProps, cx: Scope<CheckboxEvent>) -> impl IntoElement {
     let (checked, indeterminate) = (props.checked, props.indeterminate);
     // Indeterminate wins over checked, as `gpui-base`'s `CheckboxState`
     // holds one of the three.
     let shows_checked = move || checked.get() && !indeterminate.get();
+    let terminal = is_terminal();
     view()
         .disabled(props.disabled)
         .role(move || props.role.get().unwrap_or(AccessibilityRole::Checkbox))
@@ -88,18 +102,25 @@ pub fn Checkbox(props: CheckboxProps, cx: Scope<CheckboxEvent>) -> impl IntoElem
         })
         .checked_style(props.checked_style)
         .indeterminate_style(props.indeterminate_style)
+        .hit_slop(props.hit_slop)
         .on_press(move |_: &()| {
             let next = indeterminate.get_untracked() || !checked.get_untracked();
             cx.emit(CheckboxEvent::Change(next))
         })
-        .child(
-            view()
+        .when(terminal, |v| v.flex_row())
+        .child(match terminal {
+            // The terminal's own checkbox, in place of the app's indicator.
+            true => {
+                mark_view(move || checkbox_mark(checked.get(), indeterminate.get())).into_element()
+            }
+            false => view()
                 .project_checked(shows_checked)
                 .project_indeterminate(indeterminate)
                 .project_disabled(props.disabled)
                 .app_class(props.indicator_class)
                 .inline_style(props.indicator_style)
-                .child(props.indicator.place(|mark| mark)),
-        )
-        .child(props.children)
+                .child(props.indicator.place(|mark| mark))
+                .into_element(),
+        })
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }

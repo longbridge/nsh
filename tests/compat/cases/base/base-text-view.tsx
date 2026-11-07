@@ -9,9 +9,13 @@
 // their scroll indicator (`codeBlockScrollbar`), tables without
 // theirs (`tableScrollbar`),
 // code blocks' actions (`codeBlockActions`, the built-in copy and one of
-// the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
-// images' presses (`onImagePress`), and the static functions
-// (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`). Each
+// the app's: `onCodeBlockAction`), `selectable`, link presses
+// (`onLinkPress`, with the modifier keys held), images' presses
+// (`onImagePress`), and the static functions
+// (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`; emphasis
+// beside CJK text read by the CJK-friendly rule, a tag that names no
+// element read as text, bare URLs ending at CJK text, escaped brackets
+// around reference numbers read as text). Each
 // document's texts are its own, so the script finds them. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
@@ -61,7 +65,13 @@ function App() {
   const image = signal("none");
   const parsed = TextView.parse("**a** b");
   const first = parsed.blocks[0];
+  // Escaped brackets around reference numbers: text, not a formula.
+  const cited = TextView.parse("\\[1\\]\\[3\\]").blocks[0];
   const extended = TextView.parse("Hi @x", { math: false }, [{ name: "m", pattern: "@(\\w+)" }]).blocks[0];
+  // Emphasis beside CJK text: strong up to the full-width colon.
+  const cjk = TextView.parse("**涨幅：**5%").blocks[0];
+  // A bare URL ending where CJK text starts.
+  const url = TextView.parse("https://example.com。下一句").blocks[0];
   return (
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <TextView
@@ -69,7 +79,7 @@ function App() {
         codeBlockScrollbar={false}
         tableScrollbar={false}
         classes={{ root: "text-[#0000ff]" }}
-        onLinkPress={({ url }) => link.set(url)}
+        onLinkPress={({ url, modifiers }) => link.set(`${url} (Command: ${modifiers.platform})`)}
         codeBlockActions={[{ id: "copy", label: "Copy code" }, { id: "run", label: "Run code" }]}
         renderCodeBlockAction={(action) => <Text>{`Action ${action.id}`}</Text>}
         onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.language}`)}
@@ -121,9 +131,13 @@ function App() {
       />
       <Text>{`Plain: ${TextView.plainText(parsed)}`}</Text>
       <Text>{`Parsed: ${parsed.blocks.length} ${first.type}`}</Text>
+      <Text>{`Cited: ${cited.type}`}</Text>
       <Text>{`Extended: ${extended.type === "paragraph" ? extended.content.map((i) => i.type).join(",") : extended.type}`}</Text>
+      <Text>{`CJK emphasis: ${cjk.type === "paragraph" ? cjk.content.map((i) => i.type).join(",") : cjk.type}`}</Text>
+      <Text>{`CJK URL: ${url.type === "paragraph" ? url.content.map((i) => (i.type === "link" ? i.url : i.type)).join(",") : url.type}`}</Text>
       <Text>{`Math off: ${TextView.plainText(TextView.parse("Math $x$", { math: false }))}`}</Text>
       <Text>{`From HTML: ${TextView.plainText(TextView.parseHtml("<p>Hi <i>there</i></p>"))}`}</Text>
+      <Text>{`Unknown tag: ${TextView.plainText(TextView.parse("<US tech> up"))}`}</Text>
     </View>
   );
 }

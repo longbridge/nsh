@@ -49,7 +49,7 @@ view()
 ## How classes combine
 
 - **Later wins.** Among utilities of the same variant level, the one later in the string wins: `"p-4 p-2"` is `p-2`. A component can take a `class` prop and append it to its own classes without `tailwind-merge`.
-- **Variants apply after plain utilities**, in Tailwind's variant order: `group-*:` (by their state, then by group name), `selection:`, `placeholder:`, position (`first:` ...), `checked:`, `indeterminate:`, `selected:`, `focus-within:`, `hover:`, `focus:`, `focus-visible:`, `active:`, `enabled:`, `disabled:`, `aria-busy:`, `aria-checked:`, `aria-expanded:`, `aria-pressed:`, `aria-selected:`, motion, `max-*:` breakpoints widest first, then breakpoints ascending, orientation, direction, `dark:`, then platform. A class's highest variant decides, then its next highest, and one more variant comes later (`dark:hover:` after `dark:`), as Tailwind sorts them. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
+- **Variants apply after plain utilities**, in Tailwind's variant order: `group-*:` (by their state, then by group name), `selection:`, `placeholder:`, position (`first:` ...), `checked:`, `indeterminate:`, `selected:`, `focus-within:`, `hover:`, `focus:`, `focus-visible:`, `active:`, `enabled:`, `disabled:`, `aria-busy:`, `aria-checked:`, `aria-expanded:`, `aria-pressed:`, `aria-selected:`, `data-*:` (by name), motion, `max-*:` breakpoints widest first, then breakpoints ascending, orientation, direction, `dark:`, then platform. A class's highest variant decides, then its next highest, and one more variant comes later (`dark:hover:` after `dark:`), as Tailwind sorts them. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
 - **`style` wins over classes.** The inline `style` is applied on top of the resolved classes. A style key is the CSS property of its name, the one the utilities set, so it replaces that property and nothing else: `style={{ paddingLeft: 8 }}` beats `pl-4` and keeps `pr-4`. An important utility (`!p-4` or `p-4!`) wins over the inline style too.
 - **Text styles inherit.** Text utilities on a view (`text-white`, `font-bold`, `text-center`, ...) pass to the `<Text>` and `<Input>` elements inside it, as in CSS.
 - **Display is CSS's.** `flex` and `inline-flex` make a row unless a direction utility says otherwise, wherever it is in the string (`flex-col flex` is a column). A style's `display: "flex"` is a row in the same way; views that set no display keep NSH's column default.
@@ -318,6 +318,7 @@ view()
 | `border-solid`, `border-dashed`, `border-dotted` | `borderStyle` |
 | `border-none`, `border-hidden` | `borderStyle: "none"` / `"hidden"`: no border whatever the width classes, in any order (`md:border-solid` shows it again) |
 | `rounded`, `rounded-<size>`, `rounded-none`, `rounded-full`, `rounded-[<length>]` | `borderRadius` (bare: `sm`) |
+| `corner-squircle`, `corner-round` | `borderCurve`: `"continuous"`, `"circular"` |
 | `rounded-t-`, `-r-`, `-b-`, `-l-`, `-tl-`, `-tr-`, `-br-`, `-bl-` | the matching corners |
 | `rounded-s-`, `-e-`, `-ss-`, `-se-`, `-es-`, `-ee-` | start / end corners (direction-aware): `borderTopStartRadius`, `borderTopEndRadius`, `borderBottomStartRadius`, `borderBottomEndRadius` |
 | `outline`, `outline-<n>`, `outline-[<length>]` | `outlineWidth` (bare: 1), solid unless a style class is anywhere in the string (`outline-dashed outline-2` is dashed, `outline-none outline-2` draws nothing) |
@@ -480,7 +481,7 @@ States are tracked by the platform only for elements whose classes use them, and
 | `active:` | the element is pressed | `.active(\|s\| …)` |
 | `hover:` | a pointer is over it (iPad pointer, Mac Catalyst, Android mouse) | `.hover(\|s\| …)` |
 | `focus:`, `focus-visible:` | the input has focus | `.focus(\|s\| …)` |
-| `focus-within:` | the element or a descendant has focus |  |
+| `focus-within:` | the element or a descendant has focus (an `Overlay`'s content is a descendant of the element it is in) | `.focus_within(…)` |
 | `disabled:` | the element has the `disabled` prop | `.disabled_style(\|s\| …)` |
 | `enabled:` | the element does not have the `disabled` prop |  |
 | `selected:` | the element is selected: a `Button`'s `selected`, or `accessibilityState.selected` |  |
@@ -491,6 +492,7 @@ States are tracked by the platform only for elements whose classes use them, and
 | `aria-busy:` | the element is busy: `accessibilityState.busy` is `true` |  |
 | `aria-checked:` | the element is checked: `accessibilityState.checked` is `true`, as `checked:` |  |
 | `aria-selected:` | the element is selected: `accessibilityState.selected` is `true`, as `selected:` |  |
+| `data-<name>:` | the element has the boolean `data-*` attribute `name` (Tailwind's `&[data-<name>]`; names of lower case letters, digits and `-`): what a component's part shows beyond its states, a calendar's day at the start of a range `data-range-start` | `Interactive::project_data(name, …)` sets one |
 
 The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle` and `pressedStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
 
@@ -537,6 +539,7 @@ Mark an ancestor with `group` and style descendants by its state with `group-<st
 | `group-aria-expanded:` | expanded |  |
 | `group-aria-pressed:` | a toggle button that is on |  |
 | `group-aria-busy:`, `group-aria-checked:`, `group-aria-selected:` | busy, checked, selected |  |
+| `group-data-<name>:` | showing the `data-*` attribute `name` |  |
 
 ```rust tabs
 view()

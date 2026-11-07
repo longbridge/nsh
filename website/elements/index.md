@@ -106,13 +106,16 @@ and take their look from the app.
 | `<Accordion>` and its parts | `nsh_base::accordion()`, `accordion_item()`, ... | Stacked sections that expand and collapse under their headings, one at a time or several | [Accordion](./accordion.md) |
 | `<Avatar>`, `<AvatarGroup>` | `nsh_base::avatar()`, `avatar_group()` | A person's picture, or a fallback while it loads or when it fails, and a row of them that shows the first few | [Avatar](./avatar.md) |
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
+| `<Carousel>` and its parts | `nsh_base::carousel()`, `carousel_content()`, ... | Slides shown one place at a time, swiped natively, with previous / next, a pagination, the keys and a seamless loop | [Carousel](./carousel.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | A region whose content expands and collapses | [Collapsible](./collapsible.md) |
+| `<Command>` | `nsh_base::command()` | A command palette: a search field over commands filtered natively, a virtualized list, the keys of a Cmd+K palette | [Command](./command.md) |
 | `<DataTable>` | `nsh_base::data_table()` | A table of rows and columns of any number, selectable, sortable, with resizable and movable columns | [DataTable](./data-table.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
 | `<DockArea>` | `nsh_base::dock_area()` | A workspace of splits, tab groups and edge docks the user arranges | [Dock](./dock.md) |
 | `<Editor>` | `nsh_base::editor()` | A code editor with highlighting, several carets, folding and search | [Editor](./editor.md) |
+| `<HoverCard>` | `nsh_base::hover_card()` | A preview of what its trigger points at, while the pointer rests on it | [HoverCard](./hover-card.md) |
 | `<Input>` | `nsh_base::input()` | The native text input (UITextField or UITextView / EditText) | [Input](./input.md) |
 | `<Link>` | `nsh_base::link()` | A press target that opens a page, a site or a route of the app | [Link](./link.md) |
 | `<Menu>`, `<ContextMenu>`, `<MenuItem>`, `<MenuSeparator>`, `<Submenu>` | `nsh_base::menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones | [Menu](./menu.md) |
@@ -120,6 +123,7 @@ and take their look from the app.
 | `<NumberInput>` | `nsh_base::number_input()` | A number typed in a field or stepped with buttons and keys | [NumberInput](./number-input.md) |
 | `<OtpInput>` | `nsh_base::otp_input()` | A one-time code of a fixed number of digits, typed, pasted or autofilled into cells | [OtpInput](./otp-input.md) |
 | `<Pagination>` | `nsh_base::pagination()` | The pages of a set: Previous, the pages around the current one, ellipses and Next | [Pagination](./pagination.md) |
+| `<Tree>` | `nsh_base::tree()` | Items that hold items, expanded and collapsed, one selected: virtualized, one stop of the keyboard focus | [Tree](./tree.md) |
 | `<Plot>`, `<Line>`, `<Area>`, `<Bar>`, `<Grid>`, `<Pie>`, `<Arc>` (`nsh/base/plot`) | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | A chart's frame and its marks, drawn natively from the app's rows | [Plot](./plot.md) |
 | `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
 | `<Progress>` | `nsh_base::progress()` | A progress bar: how far a task is, or that it is under way | [Progress](./progress.md) |
@@ -195,6 +199,7 @@ an `<Input>`, an `ImageStyle` on an `<Image>`, a `ViewStyle` elsewhere.
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | While pressed. |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | While a pointer is over the view. |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | While the view has focus. |
+| `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | While the view or a view inside it has focus (the content of an `Overlay` counts as inside the view it is in). |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | While `disabled`. |
 | `checkedStyle` | `.checked(\|s\| ..)`, `.checked_style(style)` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`, `.indeterminate_style(style)` | `indeterminate:` | While `accessibilityState.checked` is `"mixed"` (a checkbox that is neither checked nor unchecked). |
@@ -279,8 +284,8 @@ const at = signal<number | null>(null);
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it. Phones
-and tablets show none. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
+every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -319,7 +324,9 @@ tooltips keeps one small component of its own that wraps a text in its `Tooltip`
 ### Context menus
 
 `onContextMenu` tells a view that the secondary button was pressed over it: a right click, Control-click on macOS, a
-two-finger click on a touchpad, the secondary click of an iPad's pointer; in browsers also the keyboard's menu key.
+two-finger click on a touchpad, the secondary click of an iPad's pointer; in browsers also Shift+F10 and the
+keyboard's Menu key on the focused view; on macOS and Windows also a screen reader's "show menu" action (VoiceOver's
+VO-Shift-M, UI Automation's).
 Open the app's own menu there; in TSX, [`Menu.popup`](../modules/nsh-desktop.md) shows the system's:
 
 ```rust tabs
@@ -339,10 +346,13 @@ import { Menu } from "nsh/desktop";
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | The secondary button was pressed over the view or a view inside it. |
+| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | A context menu was asked for over the view or a view inside it. |
 
 `ContextMenuEvent` has `position` in the view, `pagePosition` in its root view (where `Menu.popup` places a menu:
-`Menu.popup(items, e.pagePosition)`) and the `modifiers`; in Rust `position`, `page_position` and `modifiers`. The nearest view that listens, from the one under the pointer outwards, hears it. A text input, or
+`Menu.popup(items, e.pagePosition)`), the `modifiers` and `pointerType`, the DOM's: `"mouse"`, `"pen"` or `"touch"`
+for a pointer, `null` for the keyboard or a screen reader, whose positions are the view's bottom-start corner, so a
+menu placed there opens below the view; in Rust `position`, `page_position`, `modifiers` and `pointer_type`
+(`Option<PointerType>`). The nearest view that listens, from the one under the pointer outwards, hears it. A text input, or
 selectable text with an edit menu (Windows, the GPUI backend, browsers), nearer than that view shows its own menu
 instead. The platform decides this as the button goes down, from what is mounted, so the handler is told after the fact
 and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
@@ -362,6 +372,12 @@ opens a page.
 
 A ref's `focus()` moves the keyboard focus to a stop as Tab does (its focus styles show and `onFocus` fires), say to
 give it back to the trigger of a popup that closed, and `blur()` takes it off.
+
+A view around the focus styles itself with `focus-within:` (`focusWithinStyle`, `.focus_within(..)`) while the focus
+is on it or on any view inside it: a field's frame around the input that edits, a toolbar while one of its buttons has
+the focus. The content of an `Overlay` is inside the view the overlay is in, wherever it shows, so a popup counts as
+part of the view that holds its trigger. In Rust, a component hears the focus come into an element and leave it with
+its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside it is neither.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
@@ -497,6 +513,8 @@ their platform.
 | `desktop` key | Rust | Type | Description |
 |---|---|---|---|
 | `windowDrag` | `.window_drag(..)` | `boolean` | Pressing the view drags the window, as its title bar would; `false` keeps a part of a draggable view clickable. See [a title bar of your own](../modules/nsh-desktop.md#a-title-bar-of-your-own). |
+| `windowControl` | `.window_control(..)` | `"minimize" \| "maximize" \| "close"` | The view is that window button of a title bar the app draws: the platform carries out its press, and assistive technologies see the button. |
+| `windowResize` | `.window_resize(..)` | `"top" \| "bottom" \| "left" \| "right" \| "topLeft" \| "topRight" \| "bottomLeft" \| "bottomRight"` | Pressing the view resizes a frameless window by that edge or corner. |
 
 ```rust tabs
 use nsh_core::Ripple;

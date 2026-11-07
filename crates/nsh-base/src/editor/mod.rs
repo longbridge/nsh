@@ -44,8 +44,9 @@ pub use completion::{
 pub use data::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
     EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag, EditorEdit,
-    EditorFoldRange, EditorLocation, EditorPosition, EditorRange, EditorSearch, EditorSearchResult,
-    EditorSelection, EditorToken,
+    EditorFoldRange, EditorGutterMark, EditorGutterPlacement, EditorLocation,
+    EditorOverviewRulerLane, EditorOverviewRulerMark, EditorPosition, EditorRange, EditorSearch,
+    EditorSearchResult, EditorSelection, EditorToken,
 };
 pub use definition::{EditorCodeActionRequest, EditorDefinitionRequest, EditorDefinitionTrigger};
 pub use highlighter::{
@@ -128,7 +129,8 @@ pub struct EditorProps {
     /// The font size, in points (default 13).
     #[prop(default = Points(13.0))]
     pub font_size: Prop<Points>,
-    /// The height of a row, in points (default 20).
+    /// The height of a row, in points (default 20; in a terminal a row is
+    /// one Cell, whatever this is).
     #[prop(default = Points(20.0))]
     pub line_height: Prop<Points>,
     /// What to find: its matches are highlighted, and `findNext`,
@@ -142,6 +144,11 @@ pub struct EditorProps {
     /// run), carried through edits until the app sets new ones.
     #[prop(default)]
     pub decorations: Prop<Vec<EditorDecoration>>,
+    /// The width of the gutter's strip of decorations' marks
+    /// ([`EditorDecoration::gutter`]), in points (default 3). The strip,
+    /// before the line numbers, shows while a decoration has a mark there.
+    #[prop(default = Points(3.0))]
+    pub gutter_decorations_width: Prop<Points>,
     /// Classes of the editor's parts, after their own styles.
     #[prop(default)]
     pub classes: Prop<EditorClasses>,

@@ -158,6 +158,9 @@ stack's state, dialogs, the Android back button and tabs.
 - When the user leaves a page natively (the back button, swipe back, Android back, the desktops' back keys, the
   browser's back), the page goes. In TSX the stack removes its route from the state, so `nav.routes()` always matches
   what the user sees. In Rust the page reports `on_dismiss`, where you drop its route (and the routes above it).
+- Android back, the desktops' back keys and the browser's back act on the stack that shows: a stack laid out at no
+  size, or inside a view laid out so (a tab that is not selected, `display: none`), keeps its pages until it shows
+  again.
 - In TSX, a child function that returns something other than a `<NavPage>` gets a page with default options. Return
   a `<NavPage>` to set its header and other options.
 
@@ -232,6 +235,7 @@ the props' snake-case names.
 | `popOnBack` | `.pop_on_back(..)` | `boolean` | `true` | The back buttons and the swipe back pop the page. See [Leaving a page](#leaving-a-page). |
 | `popOnSwipe` | `.pop_on_swipe(..)` | `boolean` | `true` | The interactive back gesture pops the page: iOS swipe back, Android predictive back that follows the finger. The back buttons pop either way. |
 | `animation` | `.animation(..)` | `"default" \| "slide" \| "fade" \| "none"` | `"default"` | How the page enters and leaves. |
+| `transitionShader` | `.transition_shader(TransitionShader::new(program))` | `{ source: string; uniforms?: Record<string, ShaderUniform>; duration?: number }` | none | The page enters and leaves through a WGSL shader in place of its `animation`: `shade(uv)` reads the page below as `sample_from` and this page as `sample_to` while `nsh.progress` runs from 0 to 1 over `duration` milliseconds (350 by default), and from 1 back to 0 as the page leaves. When the system asks for less motion, the page takes its own `animation`. See [Shader](./shader.md). |
 | `statusBar` | `.status_bar(..)` | `{ foreground?, hidden?, animated? }` | none | iOS and Android: the status bar while the page is on top. See [Status bar](../modules/nsh-base.md#status-bar). |
 | `style`, `class` | style methods | | none | The page's style. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content. |

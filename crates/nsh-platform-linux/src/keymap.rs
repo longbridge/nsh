@@ -1,15 +1,17 @@
 //! The app's keyboard shortcuts (`nsh/keymap`): the table the engine
 //! mounts ([`MountItem::Keymap`](nsh_core::MountItem::Keymap)) becomes a
-//! global-scope `gtk::ShortcutController` on the root, one shortcut per
-//! binding, newest first (GTK tries a controller's shortcuts in order).
+//! global-scope `gtk::ShortcutController` on the root view of each of the
+//! app's windows (the main one and its own), one shortcut per binding,
+//! newest first (GTK tries a controller's shortcuts in order).
 //!
 //! GTK matches the triggers, also on the keys of the layout's Latin group
 //! under other layouts, as it does the application's accelerators. A
 //! binding's action decides on the spot whether it fires (where the focus
 //! is: `KeyBinding::in_text`), reports it to JS with the root's
 //! `KeyCommand` event and stops the key; JS runs the handler afterwards.
-//! A binding that does not fire lets GTK try the next shortcut and then the
-//! focus widget.
+//! A binding that does not fire, or fires and passes the key through
+//! (`KeyBinding::pass_through`), lets GTK try the next shortcut and then
+//! the focus widget.
 
 use std::{
     cell::{Cell, RefCell},
@@ -24,24 +26,24 @@ use nsh_core::{
     platform::Os,
 };
 
-use crate::surface::Surface;
+use crate::{surface::Surface, view::NshView};
 
-/// A surface's shortcut controller, while it has bindings.
+/// A surface's shortcut controllers, while it has bindings.
 #[derive(Default)]
 pub(crate) struct KeymapState {
-    controller: RefCell<Option<gtk::ShortcutController>>,
+    /// The bindings.
+    keymap: RefCell<Option<Arc<Keymap>>>,
+    /// A controller on each window's root view.
+    controllers: RefCell<Vec<(glib::WeakRef<NshView>, gtk::ShortcutController)>>,
     /// Each binding's trigger and whether it fires in a text field
-    /// (`KeyBinding::in_text`), for [`claims`].
+    /// (`KeyBinding::in_text`), for [`claims`]; a binding passing its key
+    /// through claims none.
     triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool)>>,
     /// The binding whose key is held down (GDK does not mark auto-repeats):
     /// it does not fire again until a key is released.
     held: Rc<Cell<Option<u32>>>,
-    /// The window's key controller that sees releases, and its window.
-    releases: RefCell<Option<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
-    /// The bindings, for keys pressed without a GDK event
-    /// ([`press`], `nsh test --target linux`).
-    #[cfg(feature = "dev")]
-    keymap: RefCell<Option<Arc<Keymap>>>,
+    /// The windows' key controllers that see releases, and their windows.
+    releases: RefCell<Vec<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
 }
 
 /// `MountItem::Keymap`: replaces the surface's shortcuts.
@@ -50,9 +52,46 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
     if keymap.is_empty() {
         return;
     }
-    #[cfg(feature = "dev")]
+    // What a press of the menus' shortcuts gives way to (`claims`).
+    let display = surface.root.display();
+    let mut triggers = Vec::new();
+    for binding in keymap.bindings().iter().rev() {
+        if skipped(binding) || binding.pass_through {
+            continue;
+        }
+        if let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key))
+            .and_then(|t| gtk::ShortcutTrigger::parse_string(&t))
+        {
+            triggers.push((trigger, binding.in_text));
+        }
+    }
+    *surface.keymap.triggers.borrow_mut() = triggers;
+    *surface.keymap.keymap.borrow_mut() = Some(keymap);
+    attach(surface, &surface.root);
+    for (_, root) in crate::window::roots(surface) {
+        attach(surface, &root);
+    }
+}
+
+/// The dev host's Ctrl+R reloads, whatever the app binds.
+fn skipped(binding: &nsh_core::keymap::KeyBinding) -> bool {
+    cfg!(feature = "dev") && binding.keystroke.reloads(Os::Linux)
+}
+
+/// Gives the root view of a window (`root`) the app's shortcuts: a window
+/// of the app's own as it opens, every window as the bindings change.
+pub(crate) fn attach(surface: &Rc<Surface>, root: &NshView) {
+    let keymap = surface.keymap.keymap.borrow().clone();
+    let Some(keymap) = keymap else {
+        return;
+    };
+    let mut controllers = surface.keymap.controllers.borrow_mut();
+    controllers.retain(|(r, _)| r.upgrade().is_some());
+    if controllers
+        .iter()
+        .any(|(r, _)| r.upgrade().as_ref() == Some(root))
     {
-        *surface.keymap.keymap.borrow_mut() = Some(keymap.clone());
+        return;
     }
     let controller = gtk::ShortcutController::new();
     controller.set_scope(gtk::ShortcutScope::Global);
@@ -60,10 +99,9 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
     // phase the focused field (and its own capture controller) would see
     // the key first, and `when: "always"` could not take Ctrl+A from it.
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let display = surface.root.display();
+    let display = root.display();
     for binding in keymap.bindings().iter().rev() {
-        // The dev host's Ctrl+R reloads, whatever the app binds.
-        if cfg!(feature = "dev") && binding.keystroke.reloads(Os::Linux) {
+        if skipped(binding) {
             continue;
         }
         let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key)) else {
@@ -71,9 +109,13 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
         };
         let weak = Rc::downgrade(surface);
         let (id, in_text, repeat) = (binding.id, binding.in_text, binding.repeat);
-        let action = gtk::CallbackAction::new(move |_, _| match weak.upgrade() {
-            Some(surface) if fires(&surface, in_text) => {
-                watch_releases(&surface);
+        let pass_through = binding.pass_through;
+        // The widget is the root view of the window the key is in.
+        let action = gtk::CallbackAction::new(move |widget, _| match weak.upgrade() {
+            Some(surface) if fires(widget, in_text) => {
+                if let Some(window) = widget.root().and_downcast::<gtk::Window>() {
+                    watch_releases(&surface, &window);
+                }
                 let held = &surface.keymap.held;
                 if repeat || held.get() != Some(id) {
                     held.set(Some(id));
@@ -83,54 +125,53 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
                         EventPayload::Value(PayloadValue::Number(id as f64)),
                     );
                 }
-                glib::Propagation::Stop
+                if pass_through {
+                    glib::Propagation::Proceed
+                } else {
+                    glib::Propagation::Stop
+                }
             }
             _ => glib::Propagation::Proceed,
         });
         let Some(trigger) = gtk::ShortcutTrigger::parse_string(&trigger) else {
             continue;
         };
-        surface
-            .keymap
-            .triggers
-            .borrow_mut()
-            .push((trigger.clone(), in_text));
         controller.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
     }
-    surface.root.add_controller(controller.clone());
-    *surface.keymap.controller.borrow_mut() = Some(controller);
+    root.add_controller(controller.clone());
+    controllers.push((root.downgrade(), controller));
 }
 
 /// Removes the surface's shortcuts (the app stopped).
 pub(crate) fn clear(surface: &Surface) {
-    if let Some(controller) = surface.keymap.controller.borrow_mut().take() {
-        surface.root.remove_controller(&controller);
+    for (root, controller) in surface.keymap.controllers.borrow_mut().drain(..) {
+        if let Some(root) = root.upgrade() {
+            root.remove_controller(&controller);
+        }
     }
-    if let Some((window, keys)) = surface.keymap.releases.borrow_mut().take()
-        && let Some(window) = window.upgrade()
-    {
-        window.remove_controller(&keys);
+    for (window, keys) in surface.keymap.releases.borrow_mut().drain(..) {
+        if let Some(window) = window.upgrade() {
+            window.remove_controller(&keys);
+        }
     }
     surface.keymap.held.set(None);
     surface.keymap.triggers.borrow_mut().clear();
-    #[cfg(feature = "dev")]
     surface.keymap.keymap.borrow_mut().take();
 }
 
 /// A key pressed without a GDK event (GTK takes no made-up ones; `nsh test
 /// --target linux`): the newest binding of `stroke` that fires where the
-/// focus is reports it, as its shortcut's action would. False if none.
+/// focus is reports it, as its shortcut's action would. Whether it took
+/// the key: false if none fired or the one that did passes it through.
 #[cfg(feature = "dev")]
 pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
     let keymap = surface.keymap.keymap.borrow().clone();
     let Some(keymap) = keymap else {
         return false;
     };
-    let fired = keymap
-        .bindings()
-        .iter()
-        .rev()
-        .find(|b| b.keystroke == stroke && fires(surface, b.in_text));
+    let fired = keymap.bindings().iter().rev().find(|b| {
+        b.keystroke == stroke && fires(crate::window::key_root(surface).upcast_ref(), b.in_text)
+    });
     if let Some(binding) = fired {
         surface.event(
             ROOT_ID,
@@ -138,33 +179,37 @@ pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
             EventPayload::Value(PayloadValue::Number(binding.id as f64)),
         );
     }
-    fired.is_some()
+    fired.is_some_and(|b| !b.pass_through)
 }
 
 /// Whether a binding fires for `event` where the focus is: the application
 /// menu's shortcuts (`chrome.rs`), whose controller the window runs first,
 /// give way to it, as menus' key equivalents do on macOS.
 pub(crate) fn claims(surface: &Surface, event: &gtk::gdk::Event) -> bool {
+    // The root view of the window the key is in.
+    let root = event
+        .surface()
+        .and_then(|s| crate::window::root_at(surface, &s))
+        .unwrap_or_else(|| surface.root.clone());
     surface
         .keymap
         .triggers
         .borrow()
         .iter()
         .any(|(trigger, in_text)| {
-            trigger.trigger(event, false) != gtk::gdk::KeyMatch::None && fires(surface, *in_text)
+            trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
+                && fires(root.upcast_ref(), *in_text)
         })
 }
 
-/// Listens to the releases of the surface's window (once per window), so
-/// that a held key's binding fires again after it is released.
-fn watch_releases(surface: &Surface) {
-    let Some(window) = surface.root.root().and_downcast::<gtk::Window>() else {
-        return;
-    };
+/// Listens to the releases of `window` (once per window), so that a held
+/// key's binding fires again after it is released.
+fn watch_releases(surface: &Surface, window: &gtk::Window) {
     let mut releases = surface.keymap.releases.borrow_mut();
+    releases.retain(|(w, _)| w.upgrade().is_some());
     if releases
-        .as_ref()
-        .is_some_and(|(w, _)| w.upgrade().as_ref() == Some(&window))
+        .iter()
+        .any(|(w, _)| w.upgrade().as_ref() == Some(window))
     {
         return;
     }
@@ -173,14 +218,13 @@ fn watch_releases(surface: &Surface) {
     let held = surface.keymap.held.clone();
     keys.connect_key_released(move |_, _, _, _| held.set(None));
     window.add_controller(keys.clone());
-    *releases = Some((window.downgrade(), keys));
+    releases.push((window.downgrade(), keys));
 }
 
-/// Whether a binding fires where the focus is: never while it is in
-/// another surface, in a text field or hosted widget only when the binding
-/// may (`in_text`).
-fn fires(surface: &Surface, in_text: bool) -> bool {
-    let root = surface.root.upcast_ref::<gtk::Widget>();
+/// Whether a binding fires where the focus of the window of root view
+/// `root` is: never while it is in another surface, in a text field or
+/// hosted widget only when the binding may (`in_text`).
+fn fires(root: &gtk::Widget, in_text: bool) -> bool {
     let Some(focus) = root.root().and_then(|r| r.focus()) else {
         return true;
     };

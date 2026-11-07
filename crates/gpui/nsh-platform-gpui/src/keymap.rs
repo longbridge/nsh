@@ -30,7 +30,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
-    keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
+    keymap::{Key, Keymap, Keystroke, Modifiers},
     platform::Os,
 };
 
@@ -63,8 +63,9 @@ pub(crate) fn clear(surface: &Surface) {
     surface.keymap.table.borrow_mut().take();
 }
 
-/// A key down: whether it fired (or, held, repeats) one of the bindings;
-/// then it is consumed. `editing`: a text field or a native component has
+/// A key down: whether one of the bindings consumes it (it fired one, or,
+/// held, repeats one). A binding passing the key through fires and leaves
+/// it to the window. `editing`: a text field or a native component has
 /// the keyboard focus.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, editing: bool) -> bool {
     let repeat = repeats(&surface.keymap, event);
@@ -79,7 +80,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, editing: bool) -> boo
         return false;
     }
     let found = table.find(keystroke, editing, repeat);
-    if let KeyMatch::Fire(id) = found {
+    if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
             EventKind::KeyCommand,

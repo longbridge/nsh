@@ -55,6 +55,12 @@ pub(crate) struct Geo {
     /// The content offsets (the scroll offsets, scaled).
     pub(crate) cx: f64,
     pub(crate) cy: f64,
+    /// The width the vertical scroll bar takes at the right: a terminal's
+    /// column of Cells once the rows overflow, where the core lays the
+    /// scroll view's content out beside its bar; the cells leave it free,
+    /// as the bar is not drawn over content. Elsewhere none, the bar lying
+    /// over the rows.
+    pub(crate) bar: f32,
 }
 
 /// The state that is not a signal.
@@ -95,6 +101,9 @@ pub(crate) struct Dt {
     pub(crate) scroll_x: Signal<Points>,
     pub(crate) scroll_y: Signal<Points>,
     pub(crate) viewport: Signal<Size<Points>>,
+    /// The width of the hit layer's content, inside its scroll view: less
+    /// than the viewport's by the column a terminal's bar takes.
+    pub(crate) rows_width: Signal<Option<Points>>,
     pub(crate) hover: Signal<Option<usize>>,
     pub(crate) focused: Signal<bool>,
     pub(crate) column_drag: Signal<Option<MoveDrag>>,
@@ -146,13 +155,16 @@ impl Dt {
             scroll_x: signal(Points::ZERO),
             scroll_y: signal(Points::ZERO),
             viewport: signal(Size::default()),
+            rows_width: signal(None),
             hover: signal(None),
             focused: signal(false),
             column_drag: signal(None),
             vscroll: element_ref(),
             hscroll: element_ref(),
             strip: element_ref(),
-            anchored: !nsh_core::element::is_desktop(),
+            // A terminal's pointer is a mouse that drags the bar, as a
+            // desktop's does.
+            anchored: !nsh_core::element::is_desktop() && !crate::terminal::is_terminal(),
             anchor_x: signal(Anchor::default()),
             anchor_y: signal(Anchor::default()),
             // Rows are short, columns wide: a window of columns reaches
@@ -351,16 +363,26 @@ impl Dt {
 
     // Geometry.
 
+    /// A body row's height: the app's, or in a terminal one Cell, so rows
+    /// land on the grid's lines whatever the app gave.
     pub(crate) fn row_height(&self) -> f32 {
-        self.props.row_height.get().0.max(1.0)
+        crate::terminal::row_height(self.props.row_height.get())
+            .0
+            .max(1.0)
     }
 
-    /// The height of one title row.
+    /// The height of one title row: the app's, or in a terminal one Cell,
+    /// as a body row's: the titles stand apart by their band (a face is its
+    /// fill or its line, so a row for their rule would be blank) and their
+    /// type, right over the first row.
     fn header_row_height(&self) -> f32 {
+        if crate::terminal::is_terminal() {
+            return crate::terminal::cell_height().0.max(1.0);
+        }
         self.props
             .header_height
             .get()
-            .map_or_else(|| self.row_height(), |h| h.0.max(1.0))
+            .map_or_else(|| self.props.row_height.get().0.max(1.0), |h| h.0.max(1.0))
     }
 
     /// How many title rows there are: the group levels and the titles.
@@ -425,7 +447,13 @@ impl Dt {
             rows as f64 * row_height as f64,
             (height - header).max(0.0) as f64,
         );
-        let x = Axis::new(scroll_width, (width - lead - fixed).max(0.0) as f64);
+        // What the hit layer's scroll view keeps beside its content for its
+        // bar (a terminal's column): none until laid out.
+        let bar = self
+            .rows_width
+            .get()
+            .map_or(0.0, |rows| (width - rows.0).max(0.0));
+        let x = Axis::new(scroll_width, (width - lead - fixed - bar).max(0.0) as f64);
         let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x);
         let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y);
         Geo {
@@ -437,6 +465,7 @@ impl Dt {
             x,
             cx,
             cy,
+            bar,
         }
     }
 
@@ -634,6 +663,9 @@ impl Dt {
 
     fn bind_keys(&self) {
         let dt = self.clone();
+        // A terminal's Tab moves the focus on, out of the table, as Tab does
+        // everywhere in a terminal; the arrows move between the columns.
+        let tab = !crate::terminal::is_terminal();
         effect(move || {
             if !dt.focused.get() {
                 return;
@@ -651,12 +683,16 @@ impl Dt {
                 ("end", Move::Last, true),
             ];
             for (keys, movement, repeat) in moves {
+                if !tab && keys.ends_with("tab") {
+                    continue;
+                }
                 let dt = dt.clone();
                 on_key_with(
                     keys,
                     KeyOptions {
                         when: When::NotEditing,
                         repeat,
+                        ..Default::default()
                     },
                     move |_| dt.key_move(movement),
                 );
@@ -677,6 +713,7 @@ impl Dt {
                 KeyOptions {
                     when: When::NotEditing,
                     repeat: false,
+                    ..Default::default()
                 },
                 move |_| copy.copy_selection(),
             );
@@ -814,17 +851,15 @@ impl Dt {
                 return Points(to as f32);
             }
         }
-        let a = axis.anchor_at(
-            content,
-            f64::from(nsh_core::element::pixel_ratio()),
-        );
+        let a = axis.anchor_at(content, f64::from(nsh_core::element::pixel_ratio()));
         anchor.set(a);
         scroll.set(Points(a.scroll as f32));
         Points(a.scroll as f32)
     }
 
-    /// A scroll came to rest: followed from an anchor, the scroll views
-    /// move, unseen, to where their bars stand for the content shown.
+    /// A scroll came to rest: followed from an anchor, the anchor moves to
+    /// where the bar stands for the content shown, and the scroll views move
+    /// there, unseen, when they are not already ([`settle`]).
     pub(crate) fn rest(&self) {
         if !self.anchored {
             return;
@@ -832,19 +867,19 @@ impl Dt {
         let g = untracked(|| self.geo());
         let ratio = f64::from(nsh_core::element::pixel_ratio());
         if g.y.scaled() {
-            let a = g.y.anchor_at(g.cy, ratio);
-            let y = Points(a.scroll as f32);
-            if y != self.scroll_y.get_untracked() {
-                self.anchor_y.set(a);
+            let mut a = self.anchor_y.get_untracked();
+            let moved = settle(&g.y, g.cy, ratio, &mut a, self.scroll_y.get_untracked());
+            self.anchor_y.set(a);
+            if let Some(y) = moved {
                 self.scroll_y.set(y);
                 self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
             }
         }
         if g.x.scaled() {
-            let a = g.x.anchor_at(g.cx, ratio);
-            let x = Points(a.scroll as f32);
-            if x != self.scroll_x.get_untracked() {
-                self.anchor_x.set(a);
+            let mut a = self.anchor_x.get_untracked();
+            let moved = settle(&g.x, g.cx, ratio, &mut a, self.scroll_x.get_untracked());
+            self.anchor_x.set(a);
+            if let Some(x) = moved {
                 self.scroll_x.set(x);
                 self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
             }
@@ -1470,6 +1505,27 @@ fn from_public(selection: DataTableSelection) -> Selection {
     }
 }
 
+/// A scroll came to rest on `axis` at scroll offset `scroll`, showing
+/// content offset `content`: `anchor` moves to where the bar stands for that
+/// content, and the scroll offset the scroll view moves to, unseen, is
+/// returned when it is not already there.
+///
+/// The anchor moves even when the scroll view does not. A drag back
+/// to the top ends at offset 0, already where the bar stands for the top;
+/// keeping the anchor that stood for the content before that drag makes the
+/// next one, followed from it, jump back toward that content.
+fn settle(
+    axis: &Axis,
+    content: f64,
+    pixel_ratio: f64,
+    anchor: &mut Anchor,
+    scroll: Points,
+) -> Option<Points> {
+    *anchor = axis.anchor_at(content, pixel_ratio);
+    let to = Points(anchor.scroll as f32);
+    (to != scroll).then_some(to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1497,5 +1553,33 @@ mod tests {
         };
         let spec = spec_of(&column);
         assert!(spec.max >= spec.min);
+    }
+
+    #[test]
+    fn a_rest_at_the_top_retargets_the_anchor_without_moving() {
+        // A million rows of 28 points, dragged back to the top: the scroll
+        // view is at 0 and shows the top, already where the bar stands, while
+        // the anchor still stands for content further down.
+        let axis = Axis::new(28_000_000.0, 600.0);
+        let mut anchor = axis.anchor_at(900.0, 2.0);
+        assert!(axis.content_offset_from(58.0, anchor) > 500.0);
+        let moved = settle(&axis, 0.0, 2.0, &mut anchor, Points::ZERO);
+        assert_eq!(moved, None, "the scroll view stays at the top");
+        // The next short drag is followed from the new anchor, one to one.
+        let next = axis.content_offset_from(58.0, anchor);
+        assert!((next - 58.0).abs() < 1e-6, "a drag of 58 shows {next}");
+    }
+
+    #[test]
+    fn a_rest_away_from_the_bar_moves_the_scroll_view_there() {
+        let axis = Axis::new(28_000_000.0, 600.0);
+        let content = 14_000_000.0;
+        let mut anchor = Anchor::default();
+        let moved = settle(&axis, content, 2.0, &mut anchor, Points(10.0));
+        assert_eq!(anchor, axis.anchor_at(content, 2.0));
+        assert_eq!(moved, Some(Points(anchor.scroll as f32)));
+        let at = Points(anchor.scroll as f32);
+        let again = settle(&axis, content, 2.0, &mut anchor, at);
+        assert_eq!(again, None, "once there, it stays");
     }
 }

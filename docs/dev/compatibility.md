@@ -7,7 +7,7 @@ starting after an NSH update is a bug in NSH, never in the app.
 
 This page is the contract and how it is enforced. It holds from the first release recorded in
 `nsh-compat` ("Releasing") on, and for good, whatever the version number says; earlier versions made no promises.
-No release is recorded yet, 0.3.0 included: the first one recorded starts the contract.
+No release is recorded yet, 0.3.0 and 0.4.0 included: the first one recorded starts the contract.
 
 ## What apps depend on
 
@@ -60,6 +60,15 @@ good, whatever the version number says. Between releases, and before the first c
    ignores the header fields, files and capabilities a later release added (never granting what it does not know),
    unless the header's `critical` names them, so a package published with a lower minimum runtime
    (`nsh publish --min-runtime`) runs on the older runtimes it names ("Format evolution" in `nsh-package`).
+   `nsh.json` and what bundles carry from it hold both ways too: what a reader cannot read, a key it does not
+   know at any depth (`updater.channel`, a capability) or a value of a form it does not know (`"build": "7"`, a
+   tailwind color of a newer syntax), is a warning and is left out entry by entry, never an error, at build time
+   and at run time alike, and the rest applies: `nsh-cli`'s `package::parse_config` (unknown keys through
+   `serde_ignored`, values through `serde_path_to_error`, removed and read again), the
+   `from_json_lenient` of `tailwind::Theme`, `nsh_base::Theme` and `StatusBarSetting`,
+   `url_scheme::schemes_from_json_lenient`, the bundler's `resolve`, `Capabilities::from_json_lenient` (a capability or `http` grant it cannot read is not granted, so
+   nothing left out widens access). Only text that is no JSON object, a file `nsh.json` names that is missing,
+   NSH's own `Info.plist` keys and an Android `targetSdk` below the minimum are errors.
 7. **The only exception is security**: a capability that cannot be kept safe may be closed. A pull request of
    `nsh-compat` adds what it removes to that repository's `closed.txt`, each with its reason (`<entry> -- <reason>`,
    the entry as the checks report the break: `[<module>] <path>`, `<file>: <Name>`, `<file>: <Name>.<member>` or
@@ -119,7 +128,7 @@ The cases are grouped by domain (`base`, `core`, `events`, `layout`, `paint`, `p
 each. The domain's `App.tsx` imports every case and shows one at a time: the script taps `id:case-<case>` (one of the
 one-point views over the top left corner, out of the layout) and checks that case, then the next. What applies to a
 whole app has a domain of its own: the platform (`android`; `macos`, which also declares capabilities; `browser`, a
-desktop browser with the user's text size at 2) and `nsh.json`'s settings (the `layout` domain's theme spacing, the
+desktop browser with the user's text size at 2; `terminal`, the Terminal idiom on Linux) and `nsh.json`'s settings (the `layout` domain's theme spacing, the
 `base` domain's status bar). A case goes where its platform and settings are, and where they change nothing its
 neighbors check. An app whose `nsh.json` declares `capabilities` runs with the `capabilities.json` and `app.json` its
 build wrote and a new, empty data directory, so a script checks what a grant allows and what stays refused (the
@@ -170,7 +179,9 @@ screen and pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop=
 prop), `style` / `nostyle` (a paint or text style key), `drawing` / `nodrawing` (an operation of a canvas's latest
 drawing, written as the canvas method or property apps use: `drawing id:chart strokeStyle #ff0000ff`; the SVG paint
 properties `fill`, `stroke`, `strokeWidth` and `strokeDasharray` show only there, in what a component draws),
-`listens` (an event the platform reports),
+`animated` (what the animations bound to a view set on it now, the graph run as a platform runs it:
+`animated id:link opacity 0.4`; `opacity`, the colors, `transform.<i>` and a canvas's `slot.<i>`), `listens` (an
+event the platform reports),
 `statusbar <key>=<value>...` (the status bar the platform was last told to show: `foreground`, `hidden`, `animated`);
 `log <text>` checks a `console` line, and `covers <item>` is a claim, not a step. Other steps stand in for the
 platform's input: `event <selector> <onEvent> [<key>=<value>...]` reports an event with its payload keys as the

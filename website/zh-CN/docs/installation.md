@@ -68,7 +68,7 @@ mise use -g github:longbridge/nsh
 
 ## 用 Rust 编写的应用
 
-通过 [rustup](https://rustup.rs) 安装 Rust。`nsh` 用 Cargo 为每个目标构建 Rust 应用的运行器，使用你的 crate 以及 crates.io 上与 CLI 同版本的 NSH crate，所以请添加你要运行的平台对应的 Rust 目标：
+通过 [rustup](https://rustup.rs) 安装 Rust，开发时推荐使用 [huacnlee/cargo](#从源码构建)。`nsh` 用 Cargo 为每个目标构建 Rust 应用的运行器，使用你的 crate 以及 crates.io 上与 CLI 同版本的 NSH crate，所以请添加你要运行的平台对应的 Rust 目标：
 
 ```sh
 rustup target add aarch64-apple-ios-sim aarch64-apple-ios aarch64-apple-ios-macabi   # iOS 模拟器、真机、Mac Catalyst
@@ -121,6 +121,12 @@ nsh -V # nsh 0.1.1 (abcdef0)
 ## 从源码构建
 
 你需要通过 [rustup](https://rustup.rs) 安装 Rust。仓库中的 `rust-toolchain.toml` 会选择 stable 工具链，并在首次使用时安装 iOS 和 Android 目标。
+
+开发时推荐使用 [huacnlee/cargo](https://github.com/huacnlee/cargo)，一个可以直接替换官方 Cargo 的分支：所有 Git worktree 共用一个构建目录，它会自己控制在大小限制之内，不需要任何配置。它会替换 `~/.cargo/bin/cargo`，`rust-toolchain.toml` 和 `cargo +nightly` 照常可用，并且会自动更新；恢复 rustup 自带版本的方法见它的 README。
+
+```sh
+curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh     # Windows：irm https://huacnlee.github.io/cargo/install.ps1 | iex
+```
 
 ```sh
 git clone https://github.com/longbridge/nsh.git
@@ -189,7 +195,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 - **GTK 4.14** 及以上；构建运行时还需要它们的开发包和 clang：`libgtk-4-dev clang`（Debian、Ubuntu 24.04 及以上）、`gtk4 clang`（Arch）、`gtk4-devel clang`（Fedora）。
 - Web 视图需要 **WebKitGTK 6.0**（2.40 及以上）：构建运行时需要 `libwebkitgtk-6.0-dev`（Debian、Ubuntu）、`webkitgtk-6.0`（Arch）、`webkitgtk6.0-devel`（Fedora），应用运行的机器上也需要它。没有它时，`cargo xtask dist` 构建的运行时中 Web 视图为占位视图。
-- 应用要播放的视频格式对应的 **GStreamer** 插件。
+- **GStreamer** 1.14 及以上，用于视频和声音：构建运行时需要 `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`（Debian、Ubuntu）、`gstreamer gst-plugins-base`（Arch）、`gstreamer1-devel gstreamer1-plugins-base-devel`（Fedora），以及应用要播放的视频和音频格式对应的插件。
 
 见 [Linux](./linux.md)。
 

@@ -95,6 +95,9 @@ mount(() => <Text>{{shown()}}</Text>);
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
+        audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -662,6 +665,9 @@ mount(() => <Text>{shown()}</Text>);
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
+        audio: None,
+        windows: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(

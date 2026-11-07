@@ -36,6 +36,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod events;
+mod file_drop;
 mod geom;
 mod image;
 mod input;
@@ -58,6 +59,7 @@ mod text;
 mod text_input;
 mod transition;
 mod view;
+mod window;
 
 // Windows of GPUI's test platform, which `shot` turns on.
 #[cfg(all(test, feature = "shot"))]
@@ -66,6 +68,7 @@ mod tests;
 pub use gpui;
 pub use nsh_base::{Theme, ThemeError};
 pub use nsh_core::{
+    desktop::WindowBackend,
     element::{AdaptiveColor, Color, Hsla, Rgba},
     platform::{Appearance, Locale},
 };

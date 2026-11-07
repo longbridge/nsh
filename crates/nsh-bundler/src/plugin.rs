@@ -68,8 +68,12 @@ pub(crate) struct ThemeSetup {
 /// File types imported as image assets.
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"];
 
+/// File types imported as audio: the formats `Sound` and `AudioPlayer`
+/// play on every platform (`docs/dev/audio-design.md`).
+pub(crate) const AUDIO_EXTENSIONS: &[&str] = &["wav", "m4a", "aac", "mp3"];
+
 /// File types imported as fonts.
-pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf"];
+pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
 /// File types imported as media URLs for the native player.
 pub(crate) const MEDIA_EXTENSIONS: &[&str] = &["mp4", "m4v", "webm", "mov"];
@@ -80,19 +84,9 @@ fn has_extension(path: &Path, extensions: &[&str]) -> bool {
         .is_some_and(|e| extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-/// The family name a font registers under: the typographic family (name
-/// 16) when present, else the legacy family (name 1).
+/// The family name a font registers under ([`nsh_core::font_family`]).
 fn font_family(data: &[u8]) -> Result<String, String> {
-    let face = ttf_parser::Face::parse(data, 0).map_err(|e| e.to_string())?;
-    let name = |id| {
-        face.names()
-            .into_iter()
-            .filter(|n| n.name_id == id && n.is_unicode())
-            .find_map(|n| n.to_string())
-    };
-    name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
-        .or_else(|| name(ttf_parser::name_id::FAMILY))
-        .ok_or_else(|| "the font has no family name".to_owned())
+    nsh_core::font_family(data)
 }
 
 /// An SVG imported as `rel`: its size in points, as the native backends
@@ -460,6 +454,20 @@ impl Plugin for NshPlugin {
                 ..Default::default()
             }));
         }
+        if has_extension(path, AUDIO_EXTENSIONS) {
+            // An audio import is its URL, for `Sound.load` and `AudioPlayer`;
+            // the file ships with the app.
+            self.assets
+                .lock()
+                .expect("assets lock")
+                .push(path.to_path_buf());
+            let code = format!("export default {:?};", format!("asset:/{rel}"));
+            return Ok(Some(HookLoadOutput {
+                code: code.into(),
+                module_type: Some(ModuleType::Js),
+                ..Default::default()
+            }));
+        }
         if !has_extension(path, IMAGE_EXTENSIONS) {
             return Ok(None);
         }
@@ -628,6 +636,28 @@ mod tests {
     fn svg(body: &str) -> Vec<u8> {
         format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{body}</svg>"#)
             .into_bytes()
+    }
+
+    /// An audio import is its `asset:/` URL, and the file ships.
+    #[test]
+    fn an_audio_import_is_its_url_and_ships() {
+        let dir = std::env::temp_dir().join(format!("nsh-audio-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        std::fs::write(dir.join("sounds/tap.wav"), b"RIFF").unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { Sound, mount, View } from \"nsh\";\nimport tap from \"./sounds/tap.wav\";\nSound.load(tap);\nmount(() => <View />);\n",
+        )
+        .unwrap();
+        let bundle = bundled(&dir);
+        assert!(
+            bundle.code.contains("\"asset:/sounds/tap.wav\""),
+            "{}",
+            bundle.code
+        );
+        assert_eq!(assets(&bundle), ["sounds/tap.wav"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -833,5 +863,20 @@ mod tests {
         let bundle = bundled(&dir);
         assert!(!bundle.code.contains("scales"), "{}", bundle.code);
         assert_eq!(assets(&bundle), ["img/mark.svg"]);
+    }
+
+    #[test]
+    fn a_font_import_names_its_family_from_truetype_woff_and_woff2() {
+        for data in [
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
+        ] {
+            assert_eq!(font_family(data).as_deref(), Ok("Pacifico"));
+        }
+        assert!(has_extension(
+            Path::new("fonts/Inter.WOFF2"),
+            FONT_EXTENSIONS
+        ));
     }
 }

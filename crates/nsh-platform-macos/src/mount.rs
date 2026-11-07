@@ -8,7 +8,11 @@ use std::{cell::RefCell, rc::Rc};
 use nsh_core::{Command, LayoutAnimation, MountItem, NodeId, ROOT_ID, ViewKind, canvas::Damage};
 use rustc_hash::FxHashMap;
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    sight::Sights,
+    surface::Surface,
+    view::{NshView, Planned, Views},
+};
 
 /// The views of a surface.
 pub(crate) struct Mounter {
@@ -24,6 +28,17 @@ pub(crate) struct Mounter {
     /// Views whose drawing changed while they could not be seen
     /// ([`Mounter::draw_when_shown`]).
     stale: RefCell<Vec<NshView>>,
+    /// During a window's live resize, the views out of sight whose frames
+    /// wait to be placed ([`Mounter::place_shown`]).
+    unplaced: RefCell<Vec<NshView>>,
+    /// Whether the window is in a live resize.
+    live_resize: bool,
+    /// The ancestors [`Mounter::revisit`] resolved (kept for the
+    /// allocations; cleared on each pass).
+    sights: RefCell<Sights<NshView>>,
+    /// The same over the frames waiting to be placed
+    /// ([`Mounter::place_shown`]).
+    planned_sights: RefCell<Sights<NshView>>,
 }
 
 impl Mounter {
@@ -36,6 +51,10 @@ impl Mounter {
             layout_animation: None,
             rtl: false,
             stale: RefCell::default(),
+            unplaced: RefCell::default(),
+            live_resize: false,
+            sights: RefCell::default(),
+            planned_sights: RefCell::default(),
         }
     }
 
@@ -61,6 +80,12 @@ impl Mounter {
     /// rows out of sight, and a pulse on each of them would otherwise
     /// redraw them all on every frame.
     pub(crate) fn draw_when_shown(&self, view: &NshView, damage: Damage) {
+        // Already waiting: it was out of sight, and anything that could
+        // show it since (a move, a batch) has the frame revisit it. Charts
+        // below the fold get new values on every frame of their appear.
+        if view.is_stale() {
+            return;
+        }
         if view.shown() {
             match damage {
                 Damage::Rect(r) => view.redraw_rect(r),
@@ -71,26 +96,102 @@ impl Mounter {
         }
     }
 
+    /// Takes views the surface put off while a batch held the mounter
+    /// ([`crate::surface::Surface::draw_when_shown`]); whether it could.
+    pub(crate) fn adopt_stale(&self, views: &mut Vec<NshView>) -> bool {
+        let Ok(mut stale) = self.stale.try_borrow_mut() else {
+            return false;
+        };
+        stale.append(views);
+        true
+    }
+
     /// Draws the views [`Mounter::draw_when_shown`] put off that can be
     /// seen now (after scrolls, batches and frames). Views out of the tree
     /// wait (their content is drawn once they show); deleted ones are
-    /// dropped.
-    pub(crate) fn revisit(&self) {
+    /// dropped. Whether the pass ran (it does not while one runs).
+    ///
+    /// The views it keeps share their ancestors: each ancestor's visible
+    /// part is resolved once per pass ([`Sights`]), which keeps a pass
+    /// over the hundreds of out-of-sight views of a long page cheap.
+    pub(crate) fn revisit(&self) -> bool {
         let Ok(mut stale) = self.stale.try_borrow_mut() else {
-            return;
+            return false;
         };
         if stale.is_empty() {
-            return;
+            return true;
         }
+        let Ok(mut sights) = self.sights.try_borrow_mut() else {
+            return false;
+        };
+        // Nothing moves while the pass decides (drawing comes after), so
+        // what it resolves stays true until it ends.
+        sights.clear();
         let shown: Vec<NshView> = stale
-            .extract_if(.., |v| !self.alive(v) || v.shown())
+            .extract_if(.., |v| !self.alive(v) || sights.shows(&Views, v))
             .collect();
+        sights.clear();
+        drop(sights);
         drop(stale);
         for view in shown {
             view.set_stale(false);
             if self.alive(&view) {
                 view.redraw();
                 crate::shader::shown(&view);
+            }
+        }
+        true
+    }
+
+    /// The window's live resize starts or ends. Its end places every view
+    /// still waiting, so nothing outside a drag sees a frame not applied.
+    pub(crate) fn set_live_resize(&mut self, on: bool) {
+        self.live_resize = on;
+        if !on {
+            for view in std::mem::take(self.unplaced.get_mut()) {
+                view.set_unplaced(false);
+                if self.alive(&view) {
+                    view.moved();
+                }
+            }
+        }
+    }
+
+    /// Places the views whose frames waited and that can be seen now, where
+    /// they are or where they go: left where it is, a view whose new frame is
+    /// out of sight would stay on screen over what took its place. A window's
+    /// live resize changes the frame of every view of a long page on every
+    /// size, and moving a view costs the main thread and Core Animation's
+    /// commit whether it shows or not.
+    pub(crate) fn place_shown(&self) {
+        let Ok(mut unplaced) = self.unplaced.try_borrow_mut() else {
+            return;
+        };
+        if unplaced.is_empty() {
+            return;
+        }
+        let Ok(mut sights) = self.sights.try_borrow_mut() else {
+            return;
+        };
+        let Ok(mut planned) = self.planned_sights.try_borrow_mut() else {
+            return;
+        };
+        sights.clear();
+        planned.clear();
+        let shown: Vec<NshView> = unplaced
+            .extract_if(.., |v| {
+                !self.alive(v) || planned.shows(&Planned, v) || sights.shows(&Views, v)
+            })
+            .collect();
+        sights.clear();
+        planned.clear();
+        drop(sights);
+        drop(planned);
+        drop(unplaced);
+        for view in shown {
+            view.set_unplaced(false);
+            if self.alive(&view) {
+                view.moved();
             }
         }
     }
@@ -183,17 +284,26 @@ impl Mounter {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
                     crate::native::deleted(surface, &view);
+                    crate::shader::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
                         crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
+                    // After the detach: a dialog closing through its shader
+                    // has read it.
+                    crate::navigation::deleted(surface, &view);
                 }
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // The root and a window's root fill their window: the
+                // platform reports their size (`set_root_size`), and the
+                // core's frame for them is never theirs to take (it is
+                // the one of a dialog over the main window until the
+                // window's size comes).
+                if *id == ROOT_ID || crate::window::is_window(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;
@@ -212,7 +322,20 @@ impl Mounter {
                     return;
                 }
                 let old = std::mem::replace(&mut view.state_mut().frame, *frame);
-                view.moved();
+                // Plain views go through `place_shown`, which needs no
+                // answer from anything they contain.
+                if self.live_resize
+                    && self.layout_animation.is_none()
+                    && matches!(view.kind(), ViewKind::View | ViewKind::Text)
+                    && view.state().live.is_none()
+                {
+                    if view.set_unplaced(true) {
+                        self.unplaced.borrow_mut().push(view.clone());
+                    }
+                    crate::sight::moved();
+                } else {
+                    view.moved();
+                }
                 crate::transition::frame_changed(
                     surface,
                     view,
@@ -242,11 +365,14 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
+                    let same = crate::text::draws_the_same(view, text, layout, *content);
                     crate::text::set(view, text, layout, *content);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
-                    self.draw_when_shown(view, Damage::All);
+                    if !same {
+                        self.draw_when_shown(view, Damage::All);
+                    }
                     crate::access::text_changed(view);
                 }
             }
@@ -333,6 +459,21 @@ impl Mounter {
                     self.draw_when_shown(view, Damage::All);
                 }
             }
+            MountItem::ShaderTransition { id, duration } => {
+                if let Some(view) = self.get(*id) {
+                    crate::shader::start_transition(surface, view, *duration);
+                }
+            }
+            MountItem::ShaderInput { id } => {
+                if let Some(view) = self.get(*id) {
+                    crate::shader::input_changed(surface, view);
+                }
+            }
+            MountItem::NavShader { id, shader } => {
+                if let Some(view) = self.get(*id) {
+                    crate::navigation::set_shader(surface, view, shader.clone());
+                }
+            }
             MountItem::Shader { id, layer } => {
                 if let Some(view) = self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
@@ -394,7 +535,9 @@ impl Mounter {
             // The animator's (`Surface::apply`).
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
-            | MountItem::ComponentPropSlots { .. } => {}
+            | MountItem::ComponentPropSlots { .. }
+            | MountItem::TreeOrder(_)
+            | MountItem::ProjectStates { .. } => {}
         }
     }
 
@@ -460,6 +603,11 @@ impl Mounter {
                 }
             }
             Command::ImageInfo { .. } => crate::image::command(surface, id, command),
+            // A window of the app's own (`Window.open`) shows dialog root
+            // `id`.
+            Command::Desktop(desktop) if id != ROOT_ID => {
+                crate::window::command(surface, id, view, desktop);
+            }
             Command::SetJsResponder { .. } | Command::ClearJsResponder => {
                 crate::input::command(surface, id, command);
             }
@@ -469,6 +617,8 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::SendInput(_)
+            | Command::Load(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

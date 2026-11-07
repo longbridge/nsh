@@ -92,7 +92,7 @@ mount(App);
 
 内容来自以下三个属性之一，按此顺序读取：
 
-- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。
+- **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。中日韩文字旁的强调按 CommonMark 的 CJK 友好修订判定，`**涨幅：**5%` 会加粗到冒号为止；裸网址遇到中日韩文字或弯引号即结束：`https://example.com。下一句` 只链接 `https://example.com`。写在尖括号里（`<https://zh.wikipedia.org/wiki/中文>`）或写成链接的网址保留全部字符。标签名既不是 HTML 元素、也不是 `tag` 扩展时（`<US tech>`、`<公司名>`），按原样显示为文字。
 - **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留；脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
 - **`document`**：应用构建或保存的文档块：TSX 中是普通对象，Rust 中是 `nsh_base::text_view::Document`（[文档模型](#the-document-model)）。
 
@@ -218,8 +218,8 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 | `superscript`、`subscript` | `Superscript`, `Subscript` | 上标和下标（字号更小）。 |
 | `link` | `Link` | 链接（主题的 `primary` 色，带下划线）。 |
 | `image` | `Image` | 图片。 |
-| `math` | `Math` | 文本中的公式；没有 `renderMath` 时以等宽字体显示其 TeX。 |
-| `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时以等宽字体显示其 TeX。 |
+| `math` | `Math` | 文本中的公式；没有 `renderMath` 时由 TextView 排版。 |
+| `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时由 TextView 排版并居中。 |
 | `table` | `Table` | 表格：`renderTableActions` 的内容，然后是单元格的滚动视图。 |
 | `tableScroll` | `TableScroll` | 表格单元格的横向滚动视图：空间足够时各列适应内容宽度，较窄时换行收缩到每列的下限，再窄则横向滚动。 |
 | `tableRow` | `TableRow` | 表格的每一行：位于单元格后面的视图，用于背景和边框（文本样式设在 `tableCell` 上）。 |
@@ -287,7 +287,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 
 ## 链接
 
-链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。
+链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。在终端里，Tab 依次到达每个链接和脚注引用，Return 按下获得焦点的那一个：`onLinkPress` 收到它，与收到点击一样。事件还带有按下时按住的修饰键（`modifiers`，与点击事件的相同），应用可以把按住 Command（macOS 以外是 Control）的点击交给浏览器，普通点击自己处理；键盘或辅助技术触发的按下不带修饰键。
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};
@@ -415,7 +415,7 @@ import { Image, View } from "nsh";
 />
 ```
 
-`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，公式以等宽字体显示其 TeX（`math` 和 `mathBlock` 部件）。
+`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
 
 <a id="markdown-extensions"></a>
 
@@ -539,6 +539,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 ````
 
 `BarChart`（Rust 中是 `bar_chart`）代表应用自己的图表。提及（mention）的捕获组在 `node.attributes?.["1"]`（Rust 中是 `node.attributes["1"]`：`ada`）中，完整匹配在 `node.text`（`@ada`）中。没有渲染函数的自定义节点显示其内容。
+为行内节点返回的视图（如芯片）按它自己的 `verticalAlign` 放在行中：`align-middle`（`verticalAlign: "middle"`）让它与文字居中对齐；除非视图比行高更高，它所在的行仍保持段落的 `lineHeight`。
 
 <a id="options"></a>
 
@@ -548,7 +549,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `math` | `boolean` | `true` | 公式：文本中的 `$…$`，`$$…$$` 公式块。 |
+| `math` | `boolean` | `true` | 公式：文本中的 `$…$` 和 `\(…\)`，`$$…$$` 和 `\[…\]` 公式块。转义方括号里是引用编号或中日韩文字时（`\[1\]\[3\]`、`\[注\]`）按文字显示。 |
 | `html` | `boolean` | `true` | Markdown 中的 HTML 按 `html` 属性的方式读取；`false` 时显示为文本。 |
 | `alerts` | `boolean` | `true` | GitHub 的提示块：`> [!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]`。 |
 | `frontmatter` | `boolean` | `false` | 开头的 YAML front matter（`---` … `---`）成为名为 `frontmatter` 的自定义节点，其 `text` 是 YAML。 |
@@ -753,8 +754,17 @@ fn chat() -> impl IntoElement {
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url, modifiers }`，其 URL（标题为 `#anchor`，脚注为 `#footnote-<label>`）和按住的修饰键。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start }`，与复制得到的内容相同的选中文字及其起始位置；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
+
+## 方法
+
+`ref` 提供 `TextViewRef`（Rust 中通过 `component_ref::<TextView>()` 取得 `TextViewApi`）。JS 中的方法返回 `Promise`。
+
+| 方法 | Rust | 说明 |
+|---|---|---|
+| `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | 读取 `selectable` 视图的选区：`format` 为 `"plain"`（默认，与复制相同）、`"markdown"` 或 `"html"`，由选中的节点重新生成；选中全部时返回原样的源文（[读取为 Markdown 或 HTML](./text-selection.md#读取为-markdown-或-html)）。没有选中内容时返回 `""`。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 
 <a id="accessibility"></a>

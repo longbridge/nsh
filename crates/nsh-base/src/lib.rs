@@ -1,9 +1,9 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! avatars (`Avatar`, `AvatarGroup`), controls (`Button`, a link (`Link`), `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), the pages of a set (`Pagination`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
+//! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
-//! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
+//! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
 //! with a table's semantics (`Table` and its parts), toasts (`Toast`,
 //! `ToastStack`, `ToastManager`), text input (`Input`), the system's
@@ -18,18 +18,25 @@
 
 mod accordion;
 mod alert_dialog;
+#[cfg(any(feature = "editor", feature = "rich-editor"))]
+mod autoscroll;
 mod avatar;
 mod button;
 mod calendar;
+mod carousel;
 mod checkbox;
 mod collapsible;
 mod color_picker;
 mod combobox;
+mod command;
 mod data_table;
 mod date_picker;
+#[cfg(feature = "editor")]
 mod diff;
 pub mod dock;
+#[cfg(feature = "editor")]
 pub mod editor;
+mod hover_card;
 mod keys;
 mod link;
 mod listbox;
@@ -39,12 +46,14 @@ mod number_input;
 mod numeric;
 mod otp_input;
 mod pagination;
+#[cfg(feature = "plot")]
 pub mod plot;
 mod popover;
 mod popup;
 mod progress;
 mod radio;
 mod resizable;
+#[cfg(feature = "rich-editor")]
 pub mod rich_editor;
 mod roving;
 mod scrollbar;
@@ -52,17 +61,30 @@ mod select;
 mod sheet;
 mod slider;
 mod sort;
+mod status_line;
 mod switch;
 mod syntax;
 mod table;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
+pub mod terminal;
 pub mod text_view;
+
+/// The KaTeX fonts `TextView` draws formulas with, in one file,
+/// zstd-compressed (about 230 kB of 500 kB; license in
+/// `fonts/katex.LICENSE.txt`). The native runtimes embed them; `nsh` publishes
+/// them next to a web runtime, which fetches them for its first formula.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub const MATH_FONTS: &[u8] = include_bytes!("../fonts/katex.pack.zst");
 mod theme;
 mod time_field;
 mod toast;
 mod toggle;
 mod toolbar;
 mod tooltip;
+mod tree;
 mod window;
 
 use std::sync::Arc;
@@ -72,6 +94,12 @@ use nsh_core::element::{ComponentSpec, Registry};
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
 pub use nsh_core::element::{Input, input};
 
+#[cfg(feature = "term")]
+pub use crate::term::{
+    Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,
+    TerminalEmulatorEvent, TerminalEmulatorFactory, TerminalEvent, TerminalLine, TerminalModes,
+    TerminalProps, TerminalRun, TerminalSize, TerminalStyle, VtEmulator, terminal,
+};
 pub use crate::{
     accordion::{
         Accordion, AccordionElement, AccordionEvent, AccordionHeader, AccordionHeaderElement,
@@ -90,8 +118,17 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
-        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
-        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+        Calendar, CalendarElement, CalendarEntry, CalendarEvent, CalendarItemKind, CalendarProps,
+        CalendarValue, Date, Matcher, YearRange, calendar,
+    },
+    carousel::{
+        Carousel, CarouselContent, CarouselContentElement, CarouselContentProps,
+        CarouselControlProps, CarouselElement, CarouselEvent, CarouselItem, CarouselItemElement,
+        CarouselItemProps, CarouselNext, CarouselNextElement, CarouselPagination,
+        CarouselPaginationElement, CarouselPaginationItem, CarouselPaginationItemElement,
+        CarouselPaginationItemProps, CarouselPaginationProps, CarouselPrevious,
+        CarouselPreviousElement, CarouselProps, carousel, carousel_content, carousel_item,
+        carousel_next, carousel_pagination, carousel_pagination_item, carousel_previous,
     },
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
@@ -104,6 +141,10 @@ pub use crate::{
         color_area, color_eye_dropper, color_field, color_picker, color_slider, color_swatch,
     },
     combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
+    command::{
+        Command, CommandApi, CommandElement, CommandEntry, CommandEvent, CommandGroup, CommandItem,
+        CommandProps, command,
+    },
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
@@ -115,28 +156,14 @@ pub use crate::{
         DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,
         DateRangePreset, DateTime, PickedDate, date_picker,
     },
-    diff::{
-        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,
-        DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide, DiffStats,
-        DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent, DiffViewPart,
-        DiffViewProps, DiffViewStyles, diff_view,
-    },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
-    editor::{
-        Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
-        EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
-        EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
-        EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll, EditorScrollBeyond,
-        EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
-        EditorToken, editor,
-    },
+    hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
-        context_menu, menu, menu_item, menu_separator, submenu,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
+        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
@@ -171,7 +198,7 @@ pub use crate::{
         set_scrollbar_theme,
     },
     select::{
-        Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
+        Select, SelectElement, SelectEntry, SelectEvent, SelectGroup, SelectItem, SelectProps,
         SelectValue, select,
     },
     sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
@@ -187,14 +214,15 @@ pub use crate::{
     tabs::{Tab, TabElement, TabEvent, TabProps, Tabs, TabsElement, TabsProps, tab, tabs},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
-        TextViewParts, TextViewProps, TextViewStyles, text_view,
+        TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewClasses,
+        TextViewCodeAction, TextViewCodeActionEvent, TextViewElement, TextViewEvent,
+        TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart, TextViewParts,
+        TextViewProps, TextViewSelectionEvent, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
-        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+        TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
@@ -211,6 +239,26 @@ pub use crate::{
         toolbar_group, toolbar_separator,
     },
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
+    tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
+};
+#[cfg(feature = "editor")]
+pub use crate::{
+    diff::{
+        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffHunkBounds,
+        DiffIndicators, DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide,
+        DiffStats, DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent,
+        DiffViewPart, DiffViewProps, DiffViewStyles, diff_view,
+    },
+    editor::{
+        Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
+        EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
+        EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
+        EditorElement, EditorEvent, EditorFoldRange, EditorGutterMark, EditorGutterPlacement,
+        EditorHoverEvent, EditorLocation, EditorOverviewRulerLane, EditorOverviewRulerMark,
+        EditorPart, EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll,
+        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
+        EditorTextPressEvent, EditorToken, editor,
+    },
 };
 
 /// The JS module apps import the foundation as.
@@ -234,7 +282,7 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
         // `env.rs`), declared by hand.
         .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack", "Input"])
         // The theme: the app's over the default, as design tokens.
-        .tokens_from(tokens_of);
+        .tokens_from(theme::read_tokens);
     registry
 }
 
@@ -247,17 +295,24 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
 pub mod parts {
     use nsh_core::element::Registry;
 
+    #[cfg(feature = "plot")]
+    use crate::plot;
+    #[cfg(feature = "rich-editor")]
+    use crate::rich_editor;
     use crate::{
         Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, AlertDialog,
-        Avatar, AvatarGroup, Button, Calendar, Checkbox, Collapsible, ColorArea, ColorEyeDropper, ColorField,
-        ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable, DatePicker,
-        DiffView, DockArea, Editor, Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput,
-        Pagination, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
-        Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
-        TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast,
-        ToastStack, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, plot,
-        rich_editor, toast,
+        Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
+        CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
+        Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
+        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, HoverCard, Link, Menu,
+        MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
+        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
+        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, toast,
     };
+    #[cfg(feature = "editor")]
+    use crate::{DiffView, Editor};
 
     /// What a part does: registers its components, classes and modules.
     pub type Part = fn(&mut Registry);
@@ -265,20 +320,34 @@ pub mod parts {
     /// Every part by its name, the order [`crate::registry`] registers them.
     pub const ALL: &[(&str, Part)] = &[
         ("core", core),
+        ("pickers", pickers),
+        ("color_picker", color_picker),
+        ("carousel", carousel),
+        ("tree", tree),
+        ("fields", fields),
         ("text_view", text_view),
+        #[cfg(feature = "editor")]
         ("editor", editor),
+        #[cfg(feature = "editor")]
         ("diff", diff),
+        #[cfg(feature = "rich-editor")]
         ("rich_editor", rich_editor),
         ("data_table", data_table),
         ("table", table),
         ("dock", dock),
         ("resizable", resizable),
+        #[cfg(feature = "plot")]
         ("plot", plot),
+        #[cfg(feature = "term")]
+        ("term", term),
     ];
 
-    /// The controls, popups, toasts and dialogs every app may use: avatars,
-    /// buttons, links, checkboxes, color pickers, radios, switches, toggles, toolbars, sliders, scroll bars, number inputs, one-time code inputs, paginations, selects, comboboxes, tabs, collapsibles, accordions, progress,
-    /// menus, popovers, sheets, tooltips, toasts and system alerts.
+    /// The controls, popups, toasts and dialogs every app may use: buttons,
+    /// links, checkboxes, radios, switches, toggles, toolbars, sliders,
+    /// scroll bars, paginations, tabs, collapsibles, accordions, avatars,
+    /// progress, menus, popovers, hover cards, sheets, tooltips, toasts and
+    /// system alerts. The larger controls are parts of their own, so a web
+    /// runtime linked for an app leaves out those it does not use.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -296,22 +365,11 @@ pub mod parts {
             .register::<MenuSeparator>()
             .register::<Submenu>()
             .register::<Popover>()
+            .register::<HoverCard>()
             .register::<Sheet>()
             .register::<Tooltip>()
-            .register::<Calendar>()
             .register::<Checkbox>()
             .register::<Collapsible>()
-            .register::<DatePicker>()
-            .register::<Combobox>()
-            .register::<ColorPicker>()
-            .register::<ColorArea>()
-            .register::<ColorSlider>()
-            .register::<ColorField>()
-            .register::<ColorSwatch>()
-            .register::<ColorEyeDropper>()
-            .register::<Select>()
-            .register::<NumberInput>()
-            .register::<OtpInput>()
             .register::<Pagination>()
             .register::<Radio>()
             .register::<RadioGroup>()
@@ -320,6 +378,10 @@ pub mod parts {
             .module::<Scrollbar>()
             .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
+            // Lists to pick from: in every app's forms, so never apart.
+            .register::<Select>()
+            .register::<Combobox>()
+            .register::<Command>()
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
@@ -328,11 +390,51 @@ pub mod parts {
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
-            .register::<TimeField>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
             .module::<AlertDialog>();
+    }
+
+    /// `Calendar`, `DatePicker` and `TimeField`: dates and times.
+    pub fn pickers(registry: &mut Registry) {
+        registry
+            .register::<Calendar>()
+            .register::<DatePicker>()
+            .register::<TimeField>();
+    }
+
+    /// `ColorPicker` and its parts.
+    pub fn color_picker(registry: &mut Registry) {
+        registry
+            .register::<ColorPicker>()
+            .register::<ColorArea>()
+            .register::<ColorSlider>()
+            .register::<ColorField>()
+            .register::<ColorSwatch>()
+            .register::<ColorEyeDropper>();
+    }
+
+    /// `Carousel` and its parts.
+    pub fn carousel(registry: &mut Registry) {
+        registry
+            .register::<Carousel>()
+            .register::<CarouselContent>()
+            .register::<CarouselItem>()
+            .register::<CarouselPrevious>()
+            .register::<CarouselNext>()
+            .register::<CarouselPagination>()
+            .register::<CarouselPaginationItem>();
+    }
+
+    /// `Tree`: items that hold items.
+    pub fn tree(registry: &mut Registry) {
+        registry.register::<Tree>();
+    }
+
+    /// `NumberInput` and `OtpInput`.
+    pub fn fields(registry: &mut Registry) {
+        registry.register::<NumberInput>().register::<OtpInput>();
     }
 
     /// `TextView`: Markdown and HTML documents.
@@ -341,20 +443,29 @@ pub mod parts {
     }
 
     /// The `Editor`: a code editor.
+    #[cfg(feature = "editor")]
     pub fn editor(registry: &mut Registry) {
         registry.register::<Editor>();
     }
 
     /// `DiffView`: the changes between two texts or of a patch.
+    #[cfg(feature = "editor")]
     pub fn diff(registry: &mut Registry) {
         registry.register::<DiffView>();
     }
 
     /// `RichEditor`, with its schema, session and plugin classes and its
     /// module.
+    #[cfg(feature = "rich-editor")]
     pub fn rich_editor(registry: &mut Registry) {
         registry.register::<rich_editor::view::RichEditor>();
         rich_editor::js::register(registry);
+    }
+
+    /// `Terminal`.
+    #[cfg(feature = "term")]
+    pub fn term(registry: &mut Registry) {
+        registry.register::<crate::Terminal>();
     }
 
     /// `DataTable`.
@@ -388,6 +499,7 @@ pub mod parts {
     }
 
     /// Charts' parts, a module of their own: `nsh/base/plot`.
+    #[cfg(feature = "plot")]
     pub fn plot(registry: &mut Registry) {
         registry.submodule(plot::registry());
     }
@@ -403,6 +515,7 @@ mod tests {
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
+    #[cfg(all(feature = "editor", feature = "plot", feature = "rich-editor"))]
     #[test]
     fn the_exports_are_pinned() {
         let registry = super::registry();
@@ -419,6 +532,13 @@ mod tests {
                 "AvatarGroup",
                 "Button",
                 "Calendar",
+                "Carousel",
+                "CarouselContent",
+                "CarouselItem",
+                "CarouselNext",
+                "CarouselPagination",
+                "CarouselPaginationItem",
+                "CarouselPrevious",
                 "Checkbox",
                 "Collapsible",
                 "ColorArea",
@@ -428,12 +548,14 @@ mod tests {
                 "ColorSlider",
                 "ColorSwatch",
                 "Combobox",
+                "Command",
                 "ContextMenu",
                 "DataTable",
                 "DatePicker",
                 "DiffView",
                 "DockArea",
                 "Editor",
+                "HoverCard",
                 "Link",
                 "Menu",
                 "MenuItem",
@@ -464,6 +586,7 @@ mod tests {
                 "TableHeader",
                 "TableRow",
                 "Tabs",
+                "Terminal",
                 "TextView",
                 "TimeField",
                 "Toast",
@@ -473,7 +596,8 @@ mod tests {
                 "Toolbar",
                 "ToolbarGroup",
                 "ToolbarSeparator",
-                "Tooltip"
+                "Tooltip",
+                "Tree"
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
@@ -501,6 +625,8 @@ mod tests {
                 "Arc",
                 "Area",
                 "Bar",
+                "Cell",
+                "Dot",
                 "Grid",
                 "Line",
                 "Pie",
@@ -510,7 +636,9 @@ mod tests {
                 "PlotLabel",
                 "RadialGrid",
                 "RadialLine",
-                "Sankey"
+                "Rule",
+                "Sankey",
+                "Treemap"
             ]
         );
     }
@@ -561,6 +689,7 @@ mod tests {
     #[test]
     fn every_export_is_documented() {
         assert_eq!(super::registry().undocumented(), Vec::<String>::new());
+        #[cfg(feature = "plot")]
         assert_eq!(super::plot::registry().undocumented(), Vec::<String>::new());
     }
 }
