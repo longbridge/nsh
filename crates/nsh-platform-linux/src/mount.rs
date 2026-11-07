@@ -226,7 +226,7 @@ impl Mounter {
                     view.state_mut().events = *events;
                     crate::file_drop::events_changed(surface, view);
                     crate::input::events_changed(surface, view);
-                    crate::access::events_changed(view);
+                    crate::access::events_changed(surface, view);
                 }
             }
             MountItem::Image {

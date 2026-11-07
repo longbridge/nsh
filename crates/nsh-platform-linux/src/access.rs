@@ -15,12 +15,13 @@
 //!   the description) and its states (`accessibilityState`,
 //!   `accessibilityElementsHidden`, which hides the subtree, and
 //!   `visibility: hidden`, which does too, as in a browser);
-//! - its `testID` as the widget name (what GTK Inspector shows).
+//! - its `testID` as the widget name (what GTK Inspector shows);
+//! - a plain view's press handler as the parameterless `nsh.activate`
+//!   action, exposed by GTK through AT-SPI's Action interface.
 //!
-//! What GTK cannot express: `accessible={true}` grouping (children stay
+//! Not yet supported: `accessible={true}` grouping (children stay
 //! separate elements; buttons still read the text inside them),
-//! `accessibilityActions` (GTK has no custom actions; AT-SPI's "activate"
-//! of a button needs an activate signal) and live regions, which are
+//! `accessibilityActions` and live regions, which are
 //! emulated by announcing a changed label or text
 //! (`gtk_accessible_announce`).
 //!
@@ -28,20 +29,22 @@
 //! ([`Applied`]): `ViewProps` also carries touch properties, and `Text`
 //! items come again on every relayout.
 
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use gtk4::{self as gtk, AccessibleRole as Gtk, accessible, prelude::*};
 use nsh_core::{
     Accessibility, AccessibilityRole as Role, AttributedText, Checked, EventKind, EventMask,
-    LiveRegion, MountBatch, MountItem, NodeId, ViewKind, ViewStyle,
+    EventPayload, LiveRegion, MountBatch, MountItem, NodeId, PressEvent, ViewKind, ViewStyle,
 };
 use rustc_hash::FxHashMap;
 
-use crate::view::NshView;
+use crate::{surface::Surface, view::NshView};
 
 /// What was last given to GTK for one view.
 #[derive(Debug, Default)]
 pub(crate) struct Applied {
+    /// The native press action, allocated only for a view that takes presses.
+    activation: Option<gtk::gio::SimpleAction>,
     /// The applied description; `None` until the first update.
     spec: Option<Box<Spec>>,
     /// The text a text view's label was taken from.
@@ -156,8 +159,73 @@ pub(crate) fn props_changed(view: &NshView) {
 
 /// The view's event listeners changed: views with press handlers are
 /// buttons.
-pub(crate) fn events_changed(view: &NshView) {
+pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
+    let install = {
+        let s = view.state();
+        s.kind == ViewKind::View
+            && s.events.contains(EventKind::Press)
+            && s.access.activation.is_none()
+    };
+    if install {
+        let action = gtk::gio::SimpleAction::new("activate", None);
+        let weak_surface = Rc::downgrade(surface);
+        let weak_view = view.downgrade();
+        action.connect_activate(move |_, _| {
+            let (Some(surface), Some(view)) = (weak_surface.upgrade(), weak_view.upgrade()) else {
+                return;
+            };
+            // Retained accessible objects must not address a replacement node.
+            if surface.mounter.borrow().views.get(&view.id()) != Some(&view)
+                || !view.is_mapped()
+                || !pressable(&view)
+                || !shown(&view)
+            {
+                return;
+            }
+            let events = view.state().events;
+            let press = EventPayload::Press(PressEvent {
+                clicks: 1,
+                ..Default::default()
+            });
+            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+                if events.contains(kind) {
+                    surface.event(view.id(), kind, press.clone());
+                }
+            }
+        });
+        let group = gtk::gio::SimpleActionGroup::new();
+        group.add_action(&action);
+        view.insert_action_group("nsh", Some(&group));
+        view.state_mut().access.activation = Some(action);
+    }
     update(view);
+}
+
+fn pressable(view: &NshView) -> bool {
+    let s = view.state();
+    let a = &s.props.accessibility;
+    s.events.contains(EventKind::Press)
+        && !s.style.hidden
+        && !a.hidden
+        && !a.state.disabled
+        && a.accessible != Some(false)
+}
+
+fn shown(view: &NshView) -> bool {
+    let mut at = Some(view.clone());
+    while let Some(view) = at {
+        {
+            let s = view.state();
+            if s.style.hidden
+                || s.props.accessibility.hidden
+                || s.live.as_ref().is_some_and(|live| live.dying())
+            {
+                return false;
+            }
+        }
+        at = view.parent_view();
+    }
+    true
 }
 
 /// The view's style changed: `visibility` hides or shows its subtree.
@@ -192,6 +260,10 @@ pub(crate) fn announce(widget: &impl IsA<gtk::Accessible>, text: &str) {
 /// Brings what GTK knows of the view up to date; true if its label
 /// changed.
 fn update(view: &NshView) -> bool {
+    let action = view.state().access.activation.clone();
+    if let Some(action) = action {
+        action.set_enabled(pressable(view));
+    }
     let (spec, old, live) = {
         let mut s = view.state_mut();
         let s = &mut *s;
@@ -573,6 +645,120 @@ mod tests {
     use nsh_core::{AccessibilityState, AccessibilityValue};
 
     use super::*;
+
+    #[test]
+    fn activation_tracks_current_listeners_and_props() {
+        use crate::gtk_test::{apply, run, surface, view};
+
+        run(|| {
+            let surface = surface();
+            apply(
+                &surface,
+                &[MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                }],
+            );
+            let button = view(&surface, 2);
+            assert!(button.state().access.activation.is_none());
+            let mut props = button.state().props.clone();
+            props.accessibility.role = Role::Button;
+            apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: 2,
+                    props: props.clone(),
+                }],
+            );
+            let mut events = EventMask::default();
+            events.set(EventKind::Press, true);
+            apply(&surface, &[MountItem::Events { id: 2, events }]);
+            let action = button.state().access.activation.clone().unwrap();
+            assert!(action.is_enabled());
+            assert!(action.parameter_type().is_none());
+
+            props.accessibility.accessible = Some(false);
+            apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: 2,
+                    props: props.clone(),
+                }],
+            );
+            assert!(!action.is_enabled());
+            props.accessibility.accessible = None;
+            apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: 2,
+                    props: props.clone(),
+                }],
+            );
+            assert!(action.is_enabled());
+            events.set(EventKind::Press, false);
+            events.set(EventKind::LongPress, true);
+            apply(&surface, &[MountItem::Events { id: 2, events }]);
+            assert!(!action.is_enabled());
+            events.set(EventKind::Press, true);
+            apply(&surface, &[MountItem::Events { id: 2, events }]);
+            assert!(action.is_enabled());
+
+            props.accessibility.state.disabled = true;
+            apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: 2,
+                    props: props.clone(),
+                }],
+            );
+            assert!(!action.is_enabled());
+            props.accessibility.state.disabled = false;
+            props.accessibility.hidden = true;
+            apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: 2,
+                    props: props.clone(),
+                }],
+            );
+            assert!(!action.is_enabled());
+            props.accessibility.hidden = false;
+            apply(&surface, &[MountItem::ViewProps { id: 2, props }]);
+            assert!(action.is_enabled());
+            assert_eq!(button.state().access.activation.as_ref(), Some(&action));
+
+            let mut style = button.state().style.clone();
+            style.hidden = true;
+            apply(
+                &surface,
+                &[MountItem::ViewStyle {
+                    id: 2,
+                    style: style.clone(),
+                }],
+            );
+            assert!(!action.is_enabled());
+            style.hidden = false;
+            apply(&surface, &[MountItem::ViewStyle { id: 2, style }]);
+            assert!(action.is_enabled());
+
+            for (id, kind, event) in [
+                (3, ViewKind::Text, EventKind::Press),
+                (4, ViewKind::View, EventKind::LongPress),
+                (5, ViewKind::View, EventKind::PressDown),
+            ] {
+                let mut events = EventMask::default();
+                events.set(event, true);
+                apply(
+                    &surface,
+                    &[
+                        MountItem::Create { id, kind },
+                        MountItem::Events { id, events },
+                    ],
+                );
+                assert!(view(&surface, id).state().access.activation.is_none());
+            }
+        });
+    }
 
     struct Recorder(Arc<std::sync::Mutex<Vec<EventKind>>>);
 
