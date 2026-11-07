@@ -142,12 +142,15 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities`, `schemes` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+Every key is checked when the app is built. What NSH cannot read, a key it does not know or a value of a form it does
+not know, is reported as a warning and left out, entry by entry, and the rest of the file applies. So an app written
+for a newer NSH builds and runs with an older one, and a typo shows up in the build's output:
 
 ```text
-error building App.tsx failed
-nsh.json: tailwind: unknown theme key `colours`
+warn nsh.json: tailwind: unknown key `colours`, ignored (one of a newer NSH, or a typo)
 ```
+
+A capability NSH cannot read is not granted, so nothing left out ever widens what the app may do.
 
 
 ### capabilities

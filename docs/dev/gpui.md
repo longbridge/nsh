@@ -95,14 +95,26 @@ import -window root -display :170 whole.png        # the display, if the window'
 ```
 
 - With `DISPLAY` set, `nsh test` starts the host without `WAYLAND_DISPLAY`, which makes GPUI use X11: screenshots
-  read the window back from the X server (`GetImage`), and web views only embed in X11 windows.
+  read a redirected window pixmap from the X server (X Composite 0.2 or later), and web views only embed in X11 windows.
+  Automatic redirection starts before requesting a fresh GPUI frame; after it is presented, capture names the current
+  backing pixmap and reads that with `GetImage`. A covering window cannot replace the captured pixels. The screenshot
+  connection releases the pixmap and its redirection on drop, including on errors. Resizing is safe because each shot
+  names the pixmap after drawing.
+- Linux's GPUI Fast 0.1.13 window does not implement `render_to_image`; its renderer and scene are private, so NSH
+  cannot use the macOS / Windows offscreen path. Pure Wayland screenshots remain unsupported; use an isolated Xvfb
+  or Xwayland `-shm` display. The X server must support Composite; capture reports an error otherwise. This captures
+  X11 child windows (including embedded web views), rather than only GPUI's scene.
 - `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a screenshot waits for the blanks the last frame
   waits for (about 3 s each); with `-shm` frames are copied in as GPUI presents them.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: where WebKit cannot allocate GBM buffers ("Failed to create GBM buffer" in the
   log, common under Xwayland), pages stay black without it.
 - A tiling window manager tiles the rootful Xwayland window and its root shrinks with it: make it float at its full
   size (Hyprland: `hyprctl dispatch` float, resize and move it to a special workspace).
+- The covered-window and resize regression test runs on a real X server:
+  `xvfb-run -a cargo test --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-platform-gpui --features dev screenshot_keeps_obscured_pixels_and_follows_resize -- --ignored`.
 - GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
+
+A fully covering window does not change the gallery capture: `app.screenshot` while covered is byte-identical to its unobscured capture.
 
 ## Architecture
 
@@ -208,7 +220,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 ## Frame statistics: `--fps`
 
-`nsh-gpui-host --fps` (`AppOptions::fps`, `AppView::set_fps_monitor` for embedders) logs one `nsh::perf` line a
+`nsh-gpui-host --fps` (`AppOptions::fps`, `NSH_FPS=1`, `AppView::set_fps_monitor` for embedders, the app's `setFpsEnabled`) logs one `nsh::perf` line a
 second (`stats.rs`): `fps 145 active 0/145 gap … tick … paint … canvas 0.04 paths 26.0 raf 145 notifies 0`. Frames
 drawn and how many of them GPUI counted active (unfocused windows run at 30 fps unless `inactive_frame_interval` is
 `None`), the gaps between frames, the animation tick (prepaint) and the tree's paint (milliseconds as
@@ -254,9 +266,9 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 comes before the first bundle.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
-again, whatever covers it. On Linux GPUI cannot read a frame back, so the window is read from the X server: the host
-runs under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a window covering this one
-shows in the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
+again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
+pixmap after requesting a fresh frame. The host runs under X11 or Xwayland (see "Looking at a change on Linux");
+covering windows do not affect the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
 and Windows.
 
 ## Not implemented, or different

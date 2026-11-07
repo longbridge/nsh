@@ -303,6 +303,10 @@ mod imp {
             self.host.set_displays(displays);
         }
 
+        pub(crate) fn set_fps_enabled(&self, enabled: bool) {
+            self.host.set_fps_enabled(enabled);
+        }
+
         pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::element::Tokens>) {
             self.host.set_tokens(tokens);
         }
@@ -465,6 +469,10 @@ mod stub {
         }
 
         pub(crate) fn set_displays(&self, _: &[nsh_core::desktop::Display]) {
+            match *self {}
+        }
+
+        pub(crate) fn set_fps_enabled(&self, _: bool) {
             match *self {}
         }
 

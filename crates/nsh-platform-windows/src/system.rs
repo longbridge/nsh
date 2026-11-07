@@ -758,6 +758,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::Announce(text) => crate::access::announce(surface, text),
+        Command::PerfMonitor(true) => surface.enable_fps(),
+        Command::PerfMonitor(false) => surface.disable_fps(),
         Command::Notification(command) => crate::notifications::command(surface, command),
         Command::Audio(command) => {
             let base = surface.asset_base.borrow().clone();

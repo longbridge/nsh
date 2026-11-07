@@ -200,7 +200,7 @@ nsh package --target web              # static site
 ```
 
 - Output goes to `.nsh/out/`, or `-o`.
-- `nsh.json` gives `name`, `id` (required), `version`, `build`, `icon`. Flags override them: `--name`, `--id`, `--app-version`, `--build`, `--icon`. Unknown keys are errors. A `com.example.` id warns.
+- `nsh.json` gives `name`, `id` (required), `version`, `build`, `icon`. Flags override them: `--name`, `--id`, `--app-version`, `--build`, `--icon`. What NSH cannot read (unknown keys, values of an unknown form) is warned of and left out. A `com.example.` id warns.
 - `--run` installs and launches; `web` serves the site. Not for `--target ios`.
 - Android defaults to the debug key and to `arm64-v8a` and `armeabi-v7a`. `--abi` changes them. `NSH_KEYSTORE_PASSWORD` holds the password.
 - A TSX entry adds its name: `nsh package App.tsx --target ...`. A mixed app is run from its directory the same way, with Cargo building its runner.

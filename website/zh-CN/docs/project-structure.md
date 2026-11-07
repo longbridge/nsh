@@ -141,12 +141,13 @@ mount(App);
 
 `nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。
 
-`tailwind`、`theme`、`appearance`、`statusBar`、`capabilities`、`schemes` 和 `resolve` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
+构建应用时会校验每个键。NSH 读不懂的内容（不认识的键，或形式不认识的值）会给出警告并逐项略过，文件的其余部分照常生效。因此为更新的 NSH 写的应用在较旧的 NSH 上照样能构建和运行，拼写错误也会出现在构建输出里：
 
 ```text
-error building App.tsx failed
-nsh.json: tailwind: unknown theme key `colours`
+warn nsh.json: tailwind: unknown key `colours`, ignored (one of a newer NSH, or a typo)
 ```
+
+NSH 读不懂的能力不会被授予，因此略过的内容永远不会扩大应用的权限。
 
 
 ### capabilities

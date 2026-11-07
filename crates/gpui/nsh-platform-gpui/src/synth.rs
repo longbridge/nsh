@@ -135,7 +135,7 @@ pub(crate) fn capture(_window: &mut Window) -> anyhow::Result<::image::RgbaImage
     anyhow::bail!("shots need nsh-platform-gpui's feature `shot`")
 }
 
-/// Shots on Linux: the window read from the X server.
+/// Shots on Linux: a redirected pixmap, independent of window stacking.
 #[cfg(target_os = "linux")]
 pub(crate) mod x11 {
     use std::time::{Duration, Instant};
@@ -146,6 +146,7 @@ pub(crate) mod x11 {
         connection::{Connection, RequestConnection},
         protocol::{
             Event,
+            composite::{ConnectionExt as _, Redirect},
             present::{self, ConnectionExt as _},
             xproto::{ConnectionExt as _, ImageFormat, ImageOrder},
         },
@@ -175,7 +176,20 @@ pub(crate) mod x11 {
                 RawWindowHandle::Xcb(h) => h.window.get(),
                 _ => bail!("shots need X11 (run with `WAYLAND_DISPLAY=`)"),
             };
+            Self::connect(id)
+        }
+
+        fn connect(id: u32) -> anyhow::Result<Watch> {
             let (conn, _) = x11rb::connect(None).context("cannot connect to the X server")?;
+            // Automatic redirection keeps normal presentation, but retains all
+            // of our pixels even where another window covers us. GetImage on
+            // the window itself has undefined pixels in those regions.
+            conn.composite_query_version(0, 2)?
+                .reply()
+                .context("shots need X Composite 0.2 (use Xvfb or Xwayland -shm)")?;
+            conn.composite_redirect_window(id, Redirect::AUTOMATIC)?
+                .check()
+                .context("cannot redirect the window for a screenshot")?;
             let has = |name| {
                 conn.extension_information(name)
                     .is_ok_and(|info| info.is_some())
@@ -259,8 +273,14 @@ pub(crate) mod x11 {
             let geometry = conn.get_geometry(self.window)?.reply()?;
             let attributes = conn.get_window_attributes(self.window)?.reply()?;
             let (w, h) = (geometry.width, geometry.height);
+            // Name after drawing: a resize replaces the redirected backing
+            // pixmap. The connection owns the name and releases it on drop,
+            // along with our automatic redirection, including on errors.
+            let pixmap = conn.generate_id()?;
+            conn.composite_name_window_pixmap(self.window, pixmap)?
+                .check()?;
             let reply = conn
-                .get_image(ImageFormat::Z_PIXMAP, self.window, 0, 0, w, h, !0)?
+                .get_image(ImageFormat::Z_PIXMAP, pixmap, 0, 0, w, h, !0)?
                 .reply()?;
             let setup = conn.setup();
             let bpp = setup
@@ -320,6 +340,92 @@ pub(crate) mod x11 {
             ];
         }
         out
+    }
+    #[cfg(test)]
+    mod tests {
+        use x11rb::protocol::xproto::{
+            ChangeGCAux, ConfigureWindowAux, CreateGCAux, CreateWindowAux, Rectangle, WindowClass,
+        };
+
+        use super::*;
+
+        /// Run on a bare Xvfb so GetImage of a covered window cannot rely
+        /// on a desktop compositor retaining the obscured pixels for us.
+        #[test]
+        #[ignore = "needs an X11 display with Composite (xvfb-run -a)"]
+        fn screenshot_keeps_obscured_pixels_and_follows_resize() -> anyhow::Result<()> {
+            let (conn, screen) = x11rb::connect(None)?;
+            let root = &conn.setup().roots[screen];
+            let create = |color| -> anyhow::Result<u32> {
+                let id = conn.generate_id()?;
+                conn.create_window(
+                    root.root_depth,
+                    id,
+                    root.root,
+                    0,
+                    0,
+                    48,
+                    32,
+                    0,
+                    WindowClass::INPUT_OUTPUT,
+                    root.root_visual,
+                    &CreateWindowAux::new()
+                        .background_pixel(color)
+                        .override_redirect(1),
+                )?
+                .check()?;
+                conn.map_window(id)?.check()?;
+                Ok(id)
+            };
+            let window = create(0)?;
+            let watch = Watch::connect(window)?;
+            let gc = conn.generate_id()?;
+            conn.create_gc(gc, window, &CreateGCAux::new().foreground(0xff0000))?
+                .check()?;
+            let paint = || -> anyhow::Result<()> {
+                conn.poly_fill_rectangle(
+                    window,
+                    gc,
+                    &[Rectangle {
+                        x: 0,
+                        y: 0,
+                        width: 48,
+                        height: 32,
+                    }],
+                )?
+                .check()?;
+                Ok(())
+            };
+            paint()?;
+            let before = watch.capture()?;
+            assert_eq!(before.dimensions(), (48, 32));
+            assert!(before.pixels().all(|p| p.0 == [255, 0, 0, 255]));
+            let cover = create(0x0000ff)?;
+            // The root really shows the blue cover, not our red window.
+            let root_pixels = conn
+                .get_image(ImageFormat::Z_PIXMAP, root.root, 0, 0, 48, 32, !0)?
+                .reply()?;
+            let cover_pixels = conn
+                .get_image(ImageFormat::Z_PIXMAP, cover, 0, 0, 48, 32, !0)?
+                .reply()?;
+            assert_eq!(root_pixels.data, cover_pixels.data);
+            assert_eq!(watch.capture()?, before);
+            // Production starts its screenshot connection while the window
+            // may already be covered. Redraw into a newly redirected pixmap.
+            drop(watch);
+            let watch = Watch::connect(window)?;
+            paint()?;
+            assert_eq!(watch.capture()?, before);
+            conn.configure_window(window, &ConfigureWindowAux::new().width(24).height(16))?
+                .check()?;
+            conn.change_gc(gc, &ChangeGCAux::new().foreground(0x00ff00))?
+                .check()?;
+            paint()?;
+            let resized = watch.capture()?;
+            assert_eq!(resized.dimensions(), (24, 16));
+            assert!(resized.pixels().all(|p| p.0 == [0, 255, 0, 255]));
+            Ok(())
+        }
     }
 }
 

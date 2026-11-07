@@ -1005,6 +1005,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 
 Shows the app in `scheme` whatever the system's appearance, at once: `colorScheme()`, `dark:` classes, the components' theme and the platform's controls (alerts, the status bar's default style) follow it; `"system"` follows the system again. `nsh.json` `"appearance"` sets it from the start. Rust: `set_color_scheme(Appearance::Dark)` (`Appearance::Light`, `Appearance::System`).
 
+### fpsEnabled and setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` turns on the performance monitor, `false` turns it off: on macOS a panel at the top right of the app ([macOS](../docs/macos.md#performance-monitor)), on iOS, Windows, Linux and GPUI one `nsh::perf` log line a second, on the terminal a status line ([Performance](../docs/performance.md#on-screen---fps)). `fpsEnabled()` is whether it measures, as the platform reports it (reactive), so a switch shows what the platform did; it is also on when the app was started with `--fps` or with the environment variable `NSH_FPS=1`. Where the platform has no monitor (Android, the web) `fpsEnabled()` stays `false`. Rust: `set_fps_enabled(true)`, `fps_enabled() -> bool`.
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
 ### platform
 
 ```ts

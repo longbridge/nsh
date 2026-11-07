@@ -767,3 +767,54 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     advance(&engine, 0);
     assert_eq!(last_text(&rx, &mut last), "no window, displays 0");
 }
+
+/// Shows whether the performance monitor measures and turns it on.
+#[component]
+fn FpsSwitch() -> impl IntoElement {
+    view()
+        .child(text(move || format!("fps {}", fps_enabled())))
+        .child(text("Measure").on_press(|_: &()| set_fps_enabled(true)))
+}
+
+#[test]
+fn components_turn_the_performance_monitor_on_and_follow_it() {
+    let (engine, rx, _) = start::<FpsSwitch>(Environment::default());
+    let mut press = None;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while press.is_none() {
+        let batch = rx.recv_deadline(deadline).expect("the first render");
+        for item in batch.items {
+            if let MountItem::Text { id, text, .. } = item
+                && text.text == "Measure"
+            {
+                press = Some(id);
+            }
+        }
+    }
+    // The app asks; the platform turns its monitor on.
+    engine
+        .control()
+        .dispatch_event(press.unwrap(), EventKind::Press, EventPayload::None);
+    let mut asked = false;
+    while !asked {
+        let batch = rx.recv_deadline(deadline).expect("the command");
+        asked = batch.items.iter().any(|item| {
+            matches!(
+                item,
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PerfMonitor(true)
+                }
+            )
+        });
+    }
+    // What the app reads follows the monitor the platform installs, and
+    // removes.
+    engine
+        .control()
+        .set_perf_monitor(Some(Arc::new(nsh_engine::perf::PerfMonitor::new())));
+    until(&rx, "fps true");
+    engine.control().set_perf_monitor(None);
+    let (texts, ..) = until(&rx, "fps false");
+    assert_eq!(texts.last().map(String::as_str), Some("fps false"));
+}

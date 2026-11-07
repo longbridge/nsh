@@ -565,27 +565,47 @@ fn root_config(
     };
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
-        nsh_base::Theme::from_json(&json).map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
+        let (_, ignored) = nsh_base::Theme::from_json_lenient(&json)
+            .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
+        for what in ignored {
+            crate::ui::warn(format_args!(
+                "nsh.json: theme: {what}, ignored (one of a newer NSH, or a typo)"
+            ));
+        }
     }
     let appearance = match config.get("appearance").and_then(|a| a.as_str()) {
         None | Some("system") => None,
         Some(a @ ("light" | "dark")) => Some(a.to_owned()),
         Some(other) => {
-            bail!("nsh.json: appearance: {other:?} is not \"light\", \"dark\" or \"system\"")
+            crate::ui::warn(format_args!(
+                "nsh.json: appearance: {other:?} is not \"light\", \"dark\" or \"system\", ignored (one of a newer NSH, or a typo)"
+            ));
+            None
         }
     };
     let status_bar = match config.get("statusBar") {
         None => None,
         Some(v) => {
-            nsh_core::StatusBarSetting::from_json(v)
-                .map_err(|e| anyhow::anyhow!("nsh.json: statusBar: {e}"))?;
+            let (_, ignored) = nsh_core::StatusBarSetting::from_json_lenient(v);
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: statusBar: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
             Some(v.to_string())
         }
     };
     let url_schemes = match config.get("schemes") {
         None => Vec::new(),
-        Some(v) => nsh_core::url_scheme::schemes_from_json(v)
-            .map_err(|e| anyhow::anyhow!("nsh.json: {e}"))?,
+        Some(v) => {
+            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(v);
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
+            schemes
+        }
     };
     Ok(RootConfig {
         component,
@@ -1980,8 +2000,15 @@ opt-level = \"s\"
             return Ok(path);
         }
         // A cargo that keeps its own target directory (a wrapper ignoring
-        // CARGO_TARGET_DIR) built it elsewhere: Cargo says where.
-        Ok(cargo_target_directory(workspace).map(place).unwrap_or(path))
+        // CARGO_TARGET_DIR) built it elsewhere: Cargo says where, or it is
+        // the generated workspace's own `target` (a cargo that always uses
+        // `./target`, whatever its metadata reports).
+        Ok(cargo_target_directory(workspace)
+            .into_iter()
+            .chain([workspace.join("target")])
+            .map(place)
+            .find(|candidate| candidate.exists())
+            .unwrap_or(path))
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -2398,7 +2425,7 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
         .status_bar
         .as_deref()
         .and_then(|json| serde_json::from_str(json).ok())
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok())
+        .map(|v| nsh_core::StatusBarSetting::from_json(&v))
     {
         let mut make_setting = "nsh_core::StatusBarSetting::default()".to_owned();
         if let Some(style) = setting.style {
@@ -2953,14 +2980,14 @@ mod tests {
                 "{bad}"
             );
         }
-        assert!(
-            super::root_config(
-                &dir,
-                &config(r#"{ "root": "App", "appearance": "dim" }"#),
-                &ws
-            )
-            .is_err()
-        );
+        // A value of a newer NSH (or a typo) is warned of and left out.
+        let root = super::root_config(
+            &dir,
+            &config(r#"{ "root": "App", "appearance": "dim" }"#),
+            &ws,
+        )
+        .unwrap();
+        assert_eq!(root.appearance, None);
         let root = super::root_config(
             &dir,
             &config(r#"{ "root": "App", "statusBar": { "foreground": "light" } }"#),
@@ -2971,26 +2998,16 @@ mod tests {
             root.status_bar.as_deref(),
             Some(r#"{"foreground":"light"}"#)
         );
-        for (bad, message) in [
-            (r#""light""#, "nsh.json: statusBar: expected an object"),
-            (
-                r#"{ "foreground": "dim" }"#,
-                "nsh.json: statusBar: foreground: \"dim\" is not",
-            ),
-            (
-                r#"{ "hidden": "yes" }"#,
-                "nsh.json: statusBar: hidden: \"yes\" is not true or false",
-            ),
-            (
-                r#"{ "style": "light" }"#,
-                "nsh.json: statusBar: unknown key \"style\"",
-            ),
+        for bad in [
+            r#""light""#,
+            r#"{ "foreground": "dim" }"#,
+            r#"{ "hidden": "yes" }"#,
         ] {
             let json = format!(r#"{{ "root": "App", "statusBar": {bad} }}"#);
-            let err = super::root_config(&dir, &config(&json), &ws)
-                .unwrap_err()
-                .to_string();
-            assert!(err.starts_with(message), "{err}");
+            assert!(
+                super::root_config(&dir, &config(&json), &ws).is_ok(),
+                "{bad}"
+            );
         }
         let code = super::root_fn(
             "#[cfg(x)]\n",
