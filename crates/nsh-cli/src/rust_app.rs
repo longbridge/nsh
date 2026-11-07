@@ -1980,8 +1980,15 @@ opt-level = \"s\"
             return Ok(path);
         }
         // A cargo that keeps its own target directory (a wrapper ignoring
-        // CARGO_TARGET_DIR) built it elsewhere: Cargo says where.
-        Ok(cargo_target_directory(workspace).map(place).unwrap_or(path))
+        // CARGO_TARGET_DIR) built it elsewhere: Cargo says where, or it is
+        // the generated workspace's own `target` (a cargo that always uses
+        // `./target`, whatever its metadata reports).
+        Ok(cargo_target_directory(workspace)
+            .into_iter()
+            .chain([workspace.join("target")])
+            .map(place)
+            .find(|candidate| candidate.exists())
+            .unwrap_or(path))
     }
 
     /// The development host (`runner` false) or release runner of the app,

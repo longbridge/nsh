@@ -1,6 +1,6 @@
-import { Canvas, cleanup, computed, createAnimatedValue, Easing, effect, Image, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, token, View, type ViewStyle } from "nsh";
+import { Canvas, cleanup, computed, createAnimatedValue, Easing, effect, Image, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Button as BaseButton, Link, Menu, MenuItem, MenuSeparator, Popover, Slider, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, MenuMark, mono, motion, photoUrl, PopIn, popupSurface, sliderFill, sliderLook, terminal, TERMINAL_GAP, Tip, Toggle as Switch, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, toggleSizes, toolbarRule, toolbarTrack } from "../ui";
+import { alpha, backdrop, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemSize, MenuMark, MenuPanel, menuSeparator, menuSheet, mono, motion, photoUrl, PopIn, popoverLook, sliderFill, sliderLook, terminal, TERMINAL_GAP, Tip, Toggle as Switch, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, toggleSizes, toolbarRule, toolbarTrack } from "../ui";
 import { Field } from "./OverlayUi";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
@@ -189,7 +189,6 @@ const BLOCKS: { value: Block; icon: LucideIconName }[] = [
  * mark, or with `check` an on / off tool folded into the menu (a mark), its check the app's.
  */
 function Item(props: { label: string; icon?: LucideIconName; onSelect: () => void; checked?: boolean; check?: boolean; disabled?: boolean }) {
-  const row = pointer ? { height: 26, radius: 6, font: 13, icon: 14 } : { height: 46, radius: 10, font: 16, icon: 18 };
   return (
     <MenuItem
       onSelect={props.onSelect}
@@ -197,24 +196,15 @@ function Item(props: { label: string; icon?: LucideIconName; onSelect: () => voi
       checked={props.checked}
       role={props.checked === undefined ? undefined : props.check ? "menuitemcheckbox" : "menuitemradio"}
       indicatorClass={menuIndicator}
-      indicator={props.checked === undefined ? undefined : <MenuMark kind={props.check ? "check" : "dot"} size={row.icon} tint={colors.accent} />}
-      hoverStyle={{ backgroundColor: token("accent") }}
-      activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
-      disabledStyle={{ opacity: 0.35 }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 8, height: row.height, paddingHorizontal: 8, borderRadius: row.radius }}
+      indicator={props.checked === undefined ? undefined : <MenuMark kind={props.check ? "check" : "dot"} size={menuItemSize.icon} tint={colors.accent} />}
+      {...menuItemLook()}
     >
       <If when={props.icon}>
-        <LucideIcon name={props.icon!} size={row.icon} tint={colors.muted} />
+        <LucideIcon name={props.icon!} {...menuItemGlyph()} />
       </If>
-      <Text style={{ flex: 1, fontSize: row.font, color: colors.text }}>{props.label}</Text>
+      <Text style={menuItemLabel()}>{props.label}</Text>
     </MenuItem>
   );
-}
-
-/** A menu's items: the popup surface coming in on desktops, the sheet's rows on touch screens. */
-function MenuPanel(props: { children: JSX.Element }) {
-  if (!pointer) return props.children;
-  return <PopIn style={{ ...popupSurface(), minWidth: 190, padding: 4 }}>{props.children}</PopIn>;
 }
 
 /** What a narrow formatting bar folds into "⋯" after the alignment, least used first. */
@@ -237,9 +227,6 @@ function compactWidth(folded: number): number {
   return parts.reduce((a, b) => a + b, 0) + (parts.length - 1) * gap + 8 + 8;
 }
 
-// A terminal shows a menu as a popup, framed by the terminal: no sheet's look.
-const sheet = pointer || terminal ? undefined : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34 };
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 
 /**
  * Toolbar, ToolbarGroup and ToolbarSeparator: a text editor's formatting
@@ -323,8 +310,8 @@ export function ToolbarDemo() {
           <Menu
             offset={6}
             margin={8}
-            popupStyle={sheet}
-            backdropStyle={backdrop}
+            popupStyle={menuSheet()}
+            backdropStyle={backdrop()}
             onOpenChange={({ open }) => blockOpen.set(open)}
             trigger={
               <Trigger label={`Block: ${block()}`} tip={<Tip label="Turn into" />} open={blockOpen()} wide>
@@ -338,7 +325,7 @@ export function ToolbarDemo() {
               </Trigger>
             }
           >
-            <MenuPanel>
+            <MenuPanel minWidth={190}>
               <Each of={BLOCKS}>
                 {(b) => <Item label={b().value} icon={b().icon} checked={block() === b().value} onSelect={() => commit({ block: b().value }, `Block: ${b().value}`)} />}
               </Each>
@@ -389,7 +376,7 @@ export function ToolbarDemo() {
             }
           >
             {/* The popover's field and buttons are stops of their own, not the toolbar's items. */}
-            <PopIn style={{ ...popupSurface(), width: pointer ? 280 : 320, padding: 12, gap: 10 }}>
+            <PopIn style={popoverLook({ width: pointer ? 280 : 320 })}>
               <Text style={{ fontSize: pointer ? 12 : 14, fontWeight: "600", color: colors.text }}>Link to</Text>
               <Field value={draft()} onChange={({ value }) => draft.set(value)} onSubmit={applyLink} placeholder="https://" keyboardType="url" autoCapitalize="none" accessibilityLabel="Link address" autoFocus />
               <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 6 }}>
@@ -406,8 +393,8 @@ export function ToolbarDemo() {
             align="end"
             offset={6}
             margin={8}
-            popupStyle={sheet}
-            backdropStyle={backdrop}
+            popupStyle={menuSheet()}
+            backdropStyle={backdrop()}
             onOpenChange={({ open }) => moreOpen.set(open)}
             trigger={
               <Trigger label="More formatting" tip={<Tip label="More" />} open={moreOpen()}>
@@ -415,26 +402,26 @@ export function ToolbarDemo() {
               </Trigger>
             }
           >
-            <MenuPanel>
+            <MenuPanel minWidth={190}>
               {/* What the bar folded: the history, the marks, then the alignment. */}
               <If when={folded("redo")}>
                 <If when={folded("undo")}>
                   <Item label="Undo" icon="undo-2" disabled={past().length === 0} onSelect={undo} />
                 </If>
                 <Item label="Redo" icon="redo-2" disabled={future().length === 0} onSelect={redo} />
-                <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 4, backgroundColor: colors.line }} />
+                <MenuSeparator style={menuSeparator()} />
               </If>
               <If when={folded("strike")}>
                 <Each of={MARKS.filter((m) => folded(m.value))}>
                   {(m) => <Item label={m().label} icon={m().icon} check checked={has(m().value)} onSelect={() => toggleMark(m(), !has(m().value))} />}
                 </Each>
-                <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 4, backgroundColor: colors.line }} />
+                <MenuSeparator style={menuSeparator()} />
               </If>
               <If when={compact()}>
                 <Each of={ALIGNS}>
                   {(a) => <Item label={a().label} checked={state().align === a().value} onSelect={() => commit({ align: a().value }, `Align: ${a().value}`)} />}
                 </Each>
-                <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 4, backgroundColor: colors.line }} />
+                <MenuSeparator style={menuSeparator()} />
               </If>
               <Item label="Clear formatting" icon="x" disabled={state().marks.length === 0 && state().block === "Paragraph"} onSelect={() => commit({ marks: [], block: "Paragraph" }, "Clear formatting")} />
               <Item label="Copy as Markdown" icon="copy" onSelect={() => last.set("Copied as Markdown")} />

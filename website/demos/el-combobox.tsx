@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { type JSX, mount, signal, Text, token, View } from "nsh";
 import { Combobox, type OpenChangeReason, type SelectEntry, type SelectGroup } from "nsh/base";
 import { CheckMark, desktop, Icon, Log, Panel, size, Split, ui } from "./palette";
 
@@ -42,7 +42,7 @@ const surface = () =>
     ? { ...ui().card, borderRadius: 12, padding: 4 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30, maxHeight: "70%" as const };
 
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+const backdrop = () => ({ backgroundColor: token("scrim") });
 
 /** The field: a bordered box around the input, the clear button and the chevron. */
 const fieldStyle = (open: boolean) => ({
@@ -169,7 +169,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the labels"
@@ -199,7 +199,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               style={fieldStyle(assigneeOpen())}
               placeholder="Assign someone"
