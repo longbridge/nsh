@@ -202,6 +202,7 @@ fn can_activate(surface: &Surface, view: &NshView) -> bool {
         || !view.is_mapped()
         || surface.mounter.borrow().views.get(&view.id()) != Some(view)
         || !crate::navigation::in_focus_scope(surface, view)
+        || crate::window::blocked_by_modal(surface, view)
     {
         return false;
     }
@@ -795,10 +796,36 @@ mod tests {
     fn Activation() -> impl nsh_core::element::IntoElement {
         use nsh_core::prelude::*;
 
+        recording_target(view())
+    }
+
+    #[nsh_core::element::component]
+    fn ImageActivation() -> impl nsh_core::element::IntoElement {
+        recording_target(nsh_core::element::image(""))
+    }
+
+    #[nsh_core::element::component]
+    fn TextActivation() -> impl nsh_core::element::IntoElement {
+        recording_target(nsh_core::element::text("Press text"))
+    }
+
+    #[cfg(feature = "dev")]
+    #[nsh_core::element::component]
+    fn InputActivation() -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
+        recording_target(nsh_core::element::input().p(px(12.0)))
+    }
+
+    fn recording_target(
+        target: impl nsh_core::element::Interactive + nsh_core::element::Accessible,
+    ) -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
         let events = engine_context::<Recorder>().unwrap().0.clone();
         let down = events.clone();
         let up = events.clone();
-        view()
+        target
             .test_id("activation")
             .label("Activate")
             .w(px(100.0))
@@ -836,10 +863,17 @@ mod tests {
     fn with_activation(
         check: impl FnOnce(&Rc<Surface>, &NshView, &Recorded) + Send + 'static,
     ) -> Option<()> {
+        with_root(nsh_engine::Root::of::<Activation>(), check)
+    }
+
+    fn with_root(
+        root: nsh_engine::Root,
+        check: impl FnOnce(&Rc<Surface>, &NshView, &Recorded) + Send + 'static,
+    ) -> Option<()> {
         crate::gtk_test::run(move || {
             let surface = crate::gtk_test::surface();
             let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let mut config = nsh_engine::EngineConfig::new(nsh_engine::Root::of::<Activation>());
+            let mut config = nsh_engine::EngineConfig::new(root);
             config.context = config.context.with(Recorder(events.clone()));
             surface.start(config);
             let window = TestWindow(crate::gtk_test::show(&surface));
@@ -1130,22 +1164,201 @@ mod tests {
         });
     }
 
-    fn secondary_window(surface: &Rc<Surface>, id: NodeId) -> (NshView, TestWindow) {
+    fn pending_window(
+        surface: &Rc<Surface>,
+        id: NodeId,
+        open: nsh_core::desktop::OpenWindow,
+    ) -> (NshView, TestWindow) {
         crate::gtk_test::apply(
             surface,
-            &[MountItem::Create {
-                id,
-                kind: ViewKind::Modal,
-            }],
+            &[
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Modal,
+                },
+                MountItem::Command {
+                    id,
+                    command: nsh_core::Command::Desktop(Box::new(
+                        nsh_core::desktop::DesktopCommand::OpenWindow(Box::new(open)),
+                    )),
+                },
+            ],
         );
         let root = crate::gtk_test::view(surface, id);
-        let command = nsh_core::desktop::DesktopCommand::OpenWindow(Box::default());
-        crate::window::command(surface, id, Some(&root), &command);
-        crate::window::batch_applied(surface);
-        crate::window::batch_applied(surface);
         let window = TestWindow(root.root().unwrap().downcast::<gtk::Window>().unwrap());
-        assert!(crate::gtk_test::wait_until(|| root.is_mapped()));
         (root, window)
+    }
+
+    fn show_window(surface: &Rc<Surface>, root: &NshView) {
+        crate::window::batch_applied(surface);
+        crate::window::batch_applied(surface);
+        assert!(crate::gtk_test::wait_until(|| root.is_mapped()));
+    }
+
+    fn secondary_window(surface: &Rc<Surface>, id: NodeId) -> (NshView, TestWindow) {
+        let pair = pending_window(surface, id, Default::default());
+        show_window(surface, &pair.0);
+        pair
+    }
+
+    fn native_modal_window(
+        surface: &Rc<Surface>,
+        id: NodeId,
+        parent: NodeId,
+    ) -> (NshView, TestWindow) {
+        let mut open = nsh_core::desktop::OpenWindow::default();
+        open.parent = Some(parent);
+        open.options.modal = true;
+        let pair = pending_window(surface, id, open);
+        show_window(surface, &pair.0);
+        assert!(pair.1.0.is_modal());
+        let parent_window = crate::window::host_root(surface, parent)
+            .root()
+            .unwrap()
+            .downcast::<gtk::Window>()
+            .unwrap();
+        assert_eq!(pair.1.0.transient_for().as_ref(), Some(&parent_window));
+        pair
+    }
+
+    fn move_to_window(surface: &Rc<Surface>, button: &NshView, parent: NodeId) {
+        crate::gtk_test::apply(
+            surface,
+            &[MountItem::Insert {
+                parent,
+                child: button.id(),
+                before: None,
+            }],
+        );
+        assert!(crate::gtk_test::wait_until(|| button.is_mapped()));
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_respects_native_modal_windows() {
+        let ran = with_activation(|surface, button, events| {
+            atspi_activate();
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+            events.lock().unwrap().clear();
+            let (modal_root, modal_window) = native_modal_window(surface, 9600, nsh_core::ROOT_ID);
+            assert!(button.is_mapped(), "the background button remains mapped");
+            atspi_activate();
+            flush(surface);
+            assert!(
+                events.lock().unwrap().is_empty(),
+                "a parented native modal blocks AT-SPI in its parent"
+            );
+            move_to_window(surface, button, modal_root.id());
+            atspi_activate();
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+            events.lock().unwrap().clear();
+            move_to_window(surface, button, nsh_core::ROOT_ID);
+            modal_window.0.close();
+            assert!(crate::gtk_test::wait_until(|| !modal_window.0.is_visible()));
+            atspi_activate();
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+        });
+        assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_native_modals_follow_transient_ownership() {
+        let ran = with_activation(|surface, button, events| {
+            let (parent_root, parent_window) =
+                native_modal_window(surface, 9600, nsh_core::ROOT_ID);
+            let (child_root, child_window) = native_modal_window(surface, 9700, parent_root.id());
+            let (independent_root, _independent_window) = secondary_window(surface, 9800);
+            let attempt = |parent: NodeId, expected: &[(EventKind, EventPayload)]| {
+                move_to_window(surface, button, parent);
+                atspi_activate();
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected, "window {parent}");
+                events.lock().unwrap().clear();
+            };
+            let pressed = expected_press();
+            attempt(nsh_core::ROOT_ID, &[]);
+            attempt(parent_root.id(), &[]);
+            attempt(child_root.id(), &pressed);
+            attempt(independent_root.id(), &pressed);
+            child_window.0.close();
+            assert!(crate::gtk_test::wait_until(|| !child_window.0.is_visible()));
+            attempt(parent_root.id(), &pressed);
+            attempt(nsh_core::ROOT_ID, &[]);
+            parent_window.0.close();
+            assert!(crate::gtk_test::wait_until(|| !parent_window
+                .0
+                .is_visible()));
+            attempt(nsh_core::ROOT_ID, &pressed);
+            attempt(independent_root.id(), &pressed);
+        });
+        assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
+    #[test]
+    fn activation_native_modals_follow_visibility_and_modality() {
+        with_activation(|surface, button, _events| {
+            let mut open = nsh_core::desktop::OpenWindow::default();
+            open.parent = Some(nsh_core::ROOT_ID);
+            open.options.modal = true;
+            let (root, window) = pending_window(surface, 9600, open);
+            assert!(!window.0.is_visible());
+            assert!(
+                can_activate(surface, button),
+                "an unshown modal does not block"
+            );
+            show_window(surface, &root);
+            assert!(
+                !can_activate(surface, button),
+                "the shown modal blocks its parent"
+            );
+            let hide =
+                nsh_core::desktop::DesktopCommand::Request(nsh_core::desktop::WindowRequest::Hide);
+            crate::window::command(surface, root.id(), Some(&root), &hide);
+            assert!(!window.0.is_visible());
+            assert!(
+                can_activate(surface, button),
+                "a hidden modal does not block"
+            );
+            let mut open = nsh_core::desktop::OpenWindow::default();
+            open.parent = Some(nsh_core::ROOT_ID);
+            let (root, window) = pending_window(surface, 9700, open);
+            show_window(surface, &root);
+            assert!(!window.0.is_modal());
+            assert!(
+                can_activate(surface, button),
+                "a shown nonmodal transient does not block"
+            );
+        });
+    }
+
+    #[test]
+    fn activation_deferred_control_rechecks_native_modal_admission() {
+        with_activation(|surface, button, events| {
+            let control = window_control(surface);
+            let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+            let count = count_closes(&window);
+            control.activate_action("nsh.activate", None).unwrap();
+            let (_root, modal) = native_modal_window(surface, 9600, nsh_core::ROOT_ID);
+            let settled = Rc::new(std::cell::Cell::new(false));
+            let idle = settled.clone();
+            gtk::glib::idle_add_local_once(move || idle.set(true));
+            assert!(crate::gtk_test::wait_until(|| settled.get()));
+            assert_eq!(
+                count.get(),
+                0,
+                "a new modal cancels the pending native operation"
+            );
+            modal.0.close();
+            assert!(crate::gtk_test::wait_until(|| !modal.0.is_visible()));
+            control.activate_action("nsh.activate", None).unwrap();
+            assert!(crate::gtk_test::wait_until(|| count.get() == 1));
+            flush(surface);
+            assert!(events.lock().unwrap().is_empty());
+        });
     }
 
     fn window_scope_case(activate: impl Fn() + Send + 'static) -> Option<()> {
@@ -1267,7 +1480,7 @@ mod tests {
             control.activate_action("nsh.activate", None).unwrap();
             assert_eq!(count.get(), 0, "native close is deferred");
             let mut props = control.state().props.clone();
-            props.window_control = None;
+            props.window_control = Some(nsh_core::desktop::WindowControl::Minimize);
             crate::gtk_test::apply(
                 surface,
                 &[MountItem::ViewProps {
@@ -1275,6 +1488,8 @@ mod tests {
                     props,
                 }],
             );
+            assert!(control.is_mapped());
+            assert!(can_activate(surface, &control));
             let settled = Rc::new(std::cell::Cell::new(false));
             let idle = settled.clone();
             gtk::glib::idle_add_local_once(move || idle.set(true));
@@ -1298,6 +1513,123 @@ mod tests {
             flush(surface);
             assert!(events.lock().unwrap().is_empty());
         });
+    }
+
+    #[test]
+    fn activation_deferred_control_rechecks_its_window() {
+        with_activation(|surface, button, events| {
+            let control = window_control(surface);
+            let main = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+            let main_closes = count_closes(&main);
+            let (other_root, other_window) = secondary_window(surface, 9500);
+            control.activate_action("nsh.activate", None).unwrap();
+            // Reparent synchronously: draining the loop while unmapped would
+            // let the pending operation reject for the wrong reason.
+            crate::gtk_test::apply(
+                surface,
+                &[MountItem::Insert {
+                    parent: other_root.id(),
+                    child: control.id(),
+                    before: None,
+                }],
+            );
+            assert!(control.is_mapped());
+            assert!(can_activate(surface, &control));
+            assert_eq!(control.root().as_ref(), Some(other_window.0.upcast_ref()));
+            let settled = Rc::new(std::cell::Cell::new(false));
+            let idle = settled.clone();
+            gtk::glib::idle_add_local_once(move || idle.set(true));
+            assert!(crate::gtk_test::wait_until(|| settled.get()));
+            assert_eq!(main_closes.get(), 0);
+            assert!(main.is_visible());
+            assert!(other_window.0.is_visible());
+            control.activate_action("nsh.activate", None).unwrap();
+            assert!(crate::gtk_test::wait_until(|| !other_window.0.is_visible()));
+            assert!(main.is_visible());
+            assert_eq!(main_closes.get(), 0);
+            flush(surface);
+            assert!(events.lock().unwrap().is_empty());
+        });
+    }
+
+    fn stacked_modal_case(activate: impl Fn(&NshView) + Send + 'static) -> Option<()> {
+        with_activation(move |surface, button, events| {
+            let older = present_modal(surface, 9000, nsh_core::ROOT_ID);
+            move_to_window(surface, button, older.id());
+            activate(button);
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+            events.lock().unwrap().clear();
+            let newer = present_modal(surface, 9100, nsh_core::ROOT_ID);
+            assert!(older.is_mapped());
+            assert!(button.is_mapped());
+            activate(button);
+            flush(surface);
+            assert!(events.lock().unwrap().is_empty());
+            crate::gtk_test::apply(surface, &[MountItem::Remove { id: newer.id() }]);
+            crate::navigation::end_batch(surface);
+            activate(button);
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+        })
+    }
+
+    #[test]
+    fn activation_respects_stacked_modals() {
+        stacked_modal_case(|button| button.activate_action("nsh.activate", None).unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_respects_stacked_modals() {
+        let ran = stacked_modal_case(|_| atspi_activate());
+        assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
+    fn non_view_case(atspi: bool) -> Option<()> {
+        let mut ran = None;
+        for (root, kind, role) in [
+            (
+                nsh_engine::Root::of::<ImageActivation>(),
+                ViewKind::Image,
+                Gtk::Img,
+            ),
+            (
+                nsh_engine::Root::of::<TextActivation>(),
+                ViewKind::Text,
+                Gtk::Label,
+            ),
+        ] {
+            ran = with_root(root, move |surface, target, events| {
+                assert_eq!(target.state().kind, kind);
+                assert_eq!(target.accessible_role(), role);
+                let window = target.root().unwrap().downcast::<gtk::Window>().unwrap();
+                let focus = gtk::prelude::GtkWindowExt::focus(&window);
+                if atspi {
+                    atspi_activate();
+                } else {
+                    target.activate_action("nsh.activate", None).unwrap();
+                }
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                assert_eq!(gtk::prelude::GtkWindowExt::focus(&window), focus);
+            });
+        }
+        ran
+    }
+
+    #[test]
+    fn activation_delivers_non_view_press_payloads() {
+        non_view_case(false);
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_delivers_non_view_press_payloads() {
+        assert!(
+            non_view_case(true).is_some(),
+            "the AT-SPI test requires a GTK display"
+        );
     }
 
     #[test]
@@ -1325,6 +1657,106 @@ mod tests {
             assert!(events.lock().unwrap().is_empty());
         });
         assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
+    #[test]
+    #[cfg(feature = "dev")]
+    fn activation_input_wrapper_preserves_native_editing() {
+        with_root(
+            nsh_engine::Root::of::<InputActivation>(),
+            |surface, input, events| {
+                assert_eq!(input.state().kind, ViewKind::Input);
+                let window = input.root().unwrap().downcast::<gtk::Window>().unwrap();
+                let (editor, rect) = {
+                    let state = input.state();
+                    let native = state
+                        .natives
+                        .iter()
+                        .find(|native| native.widget.is::<gtk::Text>())
+                        .unwrap();
+                    (native.widget.clone(), native.rect)
+                };
+                let point = |x, y| {
+                    input
+                        .compute_point(&surface.root, &gtk::graphene::Point::new(x, y))
+                        .unwrap()
+                };
+                let click = |point: gtk::graphene::Point| {
+                    crate::input::simulate(
+                        surface,
+                        crate::input::Simulated::Down(point.x(), point.y()),
+                    );
+                    crate::input::simulate(
+                        surface,
+                        crate::input::Simulated::Up(point.x(), point.y()),
+                    );
+                    flush(surface);
+                };
+                assert!(crate::gtk_test::wait_until(|| editor.is_mapped()
+                    && editor.width() > 0
+                    && editor.height() > 0));
+                let center = gtk::graphene::Point::new(
+                    editor.width() as f32 / 2.0,
+                    editor.height() as f32 / 2.0,
+                );
+                assert!(
+                    editor
+                        .pick(
+                            center.x() as f64,
+                            center.y() as f64,
+                            gtk::PickFlags::DEFAULT
+                        )
+                        .is_some()
+                );
+                click(editor.compute_point(&surface.root, &center).unwrap());
+                assert!(
+                    events.lock().unwrap().is_empty(),
+                    "the hosted editor does not dispatch Press: {:?}",
+                    *events.lock().unwrap()
+                );
+                assert!(crate::synth::focused_text(&window).is_some());
+                crate::synth::type_text(&window, "native");
+                let editable = editor.downcast::<gtk::Editable>().unwrap();
+                assert_eq!(editable.text(), "native");
+                flush(surface);
+                assert!(events.lock().unwrap().is_empty());
+                assert!(rect.origin.x.0 > 2.0 && rect.origin.y.0 > 2.0);
+                click(point(2.0, 2.0));
+                let pointer_events = events.lock().unwrap().clone();
+                assert_eq!(
+                    pointer_events
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    [EventKind::PressDown, EventKind::PressUp, EventKind::Press]
+                );
+                assert!(
+                    pointer_events
+                        .iter()
+                        .all(|(_, payload)| matches!(payload, EventPayload::Press(_)))
+                );
+                events.lock().unwrap().clear();
+                let focus = gtk::prelude::GtkWindowExt::focus(&window);
+                input.activate_action("nsh.activate", None).unwrap();
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                assert_eq!(gtk::prelude::GtkWindowExt::focus(&window), focus);
+                crate::gtk_test::apply(
+                    surface,
+                    &[MountItem::Create {
+                        id: 9900,
+                        kind: ViewKind::Input,
+                    }],
+                );
+                assert!(
+                    crate::gtk_test::view(surface, 9900)
+                        .state()
+                        .access
+                        .activation
+                        .is_none()
+                );
+            },
+        );
     }
 
     #[test]

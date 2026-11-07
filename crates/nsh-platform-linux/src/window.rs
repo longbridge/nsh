@@ -207,6 +207,19 @@ fn gtk_window(surface: &Surface, id: NodeId) -> Option<gtk::Window> {
     }
 }
 
+/// A shown native modal keeps its transient parent from taking input.
+/// Independent windows keep their own input scope.
+pub(crate) fn blocked_by_modal(surface: &Surface, view: &NshView) -> bool {
+    let Some(parent) = view.root().and_downcast::<gtk::Window>() else {
+        return false;
+    };
+    surface.windows.borrow().values().any(|w| {
+        w.window.is_visible()
+            && w.window.is_modal()
+            && w.window.transient_for().as_ref() == Some(&parent)
+    })
+}
+
 /// The root node of `window`.
 fn id_of(surface: &Surface, window: &gtk::Window) -> Option<NodeId> {
     if main_window(surface).as_ref() == Some(window) {

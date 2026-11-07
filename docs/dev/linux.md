@@ -280,10 +280,13 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
 - **`keyboardShouldPersistTaps`** is ignored: it decides what a tap does while the software keyboard is up, and there is
   none (the keyboard height is 0). iOS ignores it with a hardware keyboard too (Mac Catalyst always): taps outside the
   focused field act at once and leave the focus where it is (a click on another field moves it).
-- **Accessibility**: `accessible={true}` grouping (children stay separate elements), app-defined `accessibilityActions` and real live regions (emulated by announcements).
+- **Accessibility**: `accessible={true}` grouping (children stay separate elements), app-defined `accessibilityActions`
+  and real live regions (emulated by announcements).
   Press listeners and app-drawn window controls expose the parameterless `nsh.activate` action through AT-SPI.
   Presses use the keyboard's event order and payload, stay inside the newest modal of the target window, and leave
-  keyboard focus alone. Hidden, disabled, removed or untargetable controls cannot activate.
+  keyboard focus alone. A shown native modal also blocks its transient parent; independent windows keep their scope.
+  Hidden, disabled, removed or untargetable controls cannot activate. Blocked actions can remain listed by AT-SPI;
+  runtime checks prevent their dispatch.
 - **No desktop equivalent**: the status bar; `AccessibilityFocus` moves keyboard focus when the view can take it.
 - **Packaged apps** are a directory and a `.tar.gz` (`embedding.md`); GTK 4, Pango and (with the release runner's
   default `webview` feature) WebKitGTK 6.0 must be installed where they run.

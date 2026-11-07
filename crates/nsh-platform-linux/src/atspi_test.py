@@ -88,7 +88,9 @@ try:
         count = action_count(action, None)
         assert count == 1, f"expected one AT-SPI action, got {count}"
         assert string(action_name, action, 0) == "nsh.activate"
-        assert do_action(action, 0, None), "AT-SPI rejected activation"
+        accepted = bool(do_action(action, 0, None))
+        print(f"AT-SPI target_pid={os.getppid()} actions={count} name=nsh.activate accepted={accepted}", flush=True)
+        assert accepted, "AT-SPI rejected activation"
     finally:
         unref(action)
 finally:
