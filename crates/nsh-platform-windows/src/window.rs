@@ -384,12 +384,6 @@ pub(crate) fn frame_extents(hwnd: HWND) -> (i32, i32, i32, i32) {
     )
 }
 
-/// The surface window `hwnd` (its own or one of the app's own) is of.
-#[cfg(feature = "dev")]
-pub(crate) fn surface_of(hwnd: HWND) -> Option<Rc<Surface>> {
-    data(hwnd)?.surface.upgrade()
-}
-
 /// What `hwnd` holds of the app's window API.
 pub(crate) fn shell(hwnd: HWND) -> Option<&'static crate::shell::Shell> {
     data(hwnd).map(|d| &d.shell)
@@ -1693,8 +1687,8 @@ impl Drop for Ticker {
     }
 }
 
-/// The surface of a window, if it has one (other modules' window
-/// procedures, tests).
+/// The surface window `hwnd` (its own or one of the app's own) is of
+/// (other modules' window procedures, tests, the test agent).
 #[allow(dead_code)]
 pub(crate) fn surface_of(hwnd: HWND) -> Option<Rc<Surface>> {
     data(hwnd).and_then(|d| d.surface.upgrade())

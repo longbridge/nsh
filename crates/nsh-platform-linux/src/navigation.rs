@@ -1331,6 +1331,7 @@ pub(crate) fn default_back(surface: &Rc<Surface>) {
 
 /// The window of `surface`, when a text field (a `gtk::TextView` or any
 /// `gtk::Editable`) or a web view's page has its keyboard focus.
+#[cfg(feature = "dev")]
 pub(crate) fn focused_field(surface: &Surface) -> Option<gtk::Root> {
     focused_field_in(&surface.root)
 }
