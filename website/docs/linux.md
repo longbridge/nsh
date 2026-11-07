@@ -24,7 +24,10 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
   default, so packaged apps need WebKitGTK 6.0 where they run (`libwebkitgtk-6.0-4` on Debian and Ubuntu; GNOME
   desktops have it). `cargo xtask dist` on a machine without its development files builds a runtime whose web views
   are placeholders, and whose apps need only GTK.
-- **GStreamer** plugins for the video formats your app plays (GTK plays video through GStreamer).
+- **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with: to build the runtime its
+  development packages, `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian and Ubuntu, `gstreamer
+  gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora. Where apps run, GStreamer and
+  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays.
 
 ## Running an app
 
@@ -177,8 +180,9 @@ app.connect_activate(|app| {
 });
 ```
 
-A TSX app opens its windows with [`Window.open`](../modules/nsh-desktop.md#windowopen): they run in the app's one JS
-runtime, so they share its signals and modules directly.
+A TSX app opens its windows with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): they run in the
+app's one JS runtime, so they share its signals and modules directly. Dialogs, panels and popups are transient for
+their parent window, and the window manager places every window.
 
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'

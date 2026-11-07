@@ -26,6 +26,7 @@ use crate::{
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
+        services::FetchFailure,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
     },
@@ -64,13 +65,20 @@ type Rows = (u32, Option<Rc<[u64]>>);
 
 /// The parts of a view's list cells that show rows: the index each one's
 /// content reads, and the content's owner.
-type CellRows =
-    Rc<RefCell<FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>>>;
+type CellRows = Rc<RefCell<CellRowMap>>;
+
+/// The index and owner of each part of a list's cells showing a row.
+type CellRowMap = FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>;
 
 /// A component's own list.
 struct VirtualListState {
     /// The component whose view it is in (its rows' handlers are its).
     owner: NodeId,
+    /// The owner of the run that made the list, if any: its rows are made
+    /// under it and disposed with it. Shared with the cleanup each run
+    /// registers, which disposes the rows only while the list is still
+    /// that run's.
+    scope: Rc<std::cell::Cell<Option<crate::element::Owner>>>,
     row: RowFn,
     count: u32,
     keys: Option<Rc<[u64]>>,
@@ -471,7 +479,7 @@ impl ClipboardAnswer {
 struct PendingFetch {
     /// What arrived so far.
     response: crate::element::HttpResponse,
-    answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
+    answer: AnswerSlot<Result<crate::element::HttpResponse, FetchFailure>>,
 }
 
 /// What notifications wait for ([`crate::notifications`]).
@@ -586,6 +594,8 @@ pub(super) struct Components {
     next_pick: u32,
     /// The speech recognition session running, if any.
     speech: Option<SpeechSession>,
+    /// The sounds and players open, by id: where their events go.
+    audio: FxHashMap<u32, crate::audio::AudioSink>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
     /// The links that open the app ([`crate::url_scheme`]).
@@ -710,6 +720,7 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             speech: None,
+            audio: FxHashMap::default(),
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
@@ -832,7 +843,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Registry::tokens_from`]); set before the first op. Runs the
     /// sets' setup functions ([`Registry::setup`]).
     pub fn set_components(&mut self, registry: Registry) {
-        if let Some(Ok(tokens)) = registry.tokens(None) {
+        if let Some(Ok((tokens, _))) = registry.tokens(None) {
             self.set_tokens(tokens);
         }
         {
@@ -855,11 +866,18 @@ impl<M: TextEngine> Core<M> {
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
-    /// UI set that reads themes makes tokens of.
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
+    /// which the UI set that reads themes makes tokens of. What it cannot
+    /// read is left out and the rest applies, so a bundle made by a newer
+    /// NSH keeps its theme here.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
         match self.components.registry.tokens(Some(json)) {
-            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Ok((tokens, left_out))) => {
+                for what in left_out {
+                    log::warn!("theme: {what}, ignored");
+                }
+                self.set_tokens(tokens);
+            }
             Some(Err(e)) => log::warn!("theme: {e}"),
             None => log::warn!("theme: no UI set reads themes"),
         }
@@ -988,6 +1006,18 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
+    /// Whether the platform's performance monitor measures
+    /// (`fpsEnabled()`): what read it runs again.
+    pub fn set_perf_monitor(&mut self, enabled: bool) {
+        self.components.runtime.set_perf_monitor(enabled);
+    }
+
+    /// The displays components read ([`crate::element::desktop::displays`]),
+    /// as the platform reports them: what read them runs again.
+    pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {
+        self.components.runtime.set_displays(displays);
+    }
+
     /// The environment components read is now `environment`.
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
@@ -1006,6 +1036,10 @@ impl<M: TextEngine> Core<M> {
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
+        }
+        // A main window that keeps its placement saves it as it changes.
+        if let Some(state) = environment.window_state {
+            self.keep_window_placement(crate::ROOT_ID, &state);
         }
     }
 
@@ -2065,7 +2099,9 @@ impl<M: TextEngine> Core<M> {
                     let at = row_position(index, count, count_signal, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
-                let el = self.build_cell(host, inst, build);
+                // The wrapper is the placing component's.
+                let parent = self.list_component_owner(list);
+                let el = self.build_cell(parent, inst, build);
                 inst.row_index = made.take();
                 if let (Some(list), Some(index), Some(owner)) =
                     (list, inst.row_index, inst.cell_owner)
@@ -2089,11 +2125,16 @@ impl<M: TextEngine> Core<M> {
                     .and_then(|k| self.nodes[k as usize].list.as_ref())
                     .is_some_and(|l| l.inverted);
                 let state = self.components.virtual_lists.get(&list).map(|state| {
+                    // The run that made the list went (its view goes in
+                    // this commit): no row is made under it.
+                    let scope = state.scope.get();
+                    let gone = scope.is_some_and(|s| !s.is_live());
                     (
-                        state.count as usize,
+                        if gone { 0 } else { state.count as usize },
                         state.row.clone(),
                         state.separator.clone(),
                         state.rows.clone(),
+                        scope,
                     )
                 });
                 match state {
@@ -2108,7 +2149,7 @@ impl<M: TextEngine> Core<M> {
                         inst.row_index = None;
                         ElNode::empty_view()
                     }
-                    Some((count, row, separator, rows)) => {
+                    Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
                         let build = || {
@@ -2128,7 +2169,12 @@ impl<M: TextEngine> Core<M> {
                             .into_element()
                             .0
                         };
-                        let el = self.build_cell(host, inst, build);
+                        // Under the run that made the list, also when the
+                        // row is inside another component's wrapper (an
+                        // `Items` prop): the list is known here, not from
+                        // the cell's parent.
+                        let parent = scope.unwrap_or_else(|| self.list_component_owner(Some(list)));
+                        let el = self.build_cell(parent, inst, build);
                         inst.row_index = made.take();
                         if let (Some(index), Some(owner)) = (inst.row_index, inst.cell_owner) {
                             rows.borrow_mut().insert(host, (index, owner));
@@ -2159,27 +2205,26 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Builds a list cell's row with `build` under an owner of the cell's
-    /// own (the previous row's goes), made under the list component's so the
-    /// row sees its context.
+    /// own (the previous row's goes), made under `parent` so the row sees
+    /// its context.
     fn build_cell(
         &mut self,
-        cell: NodeId,
+        parent: crate::element::Owner,
         inst: &mut Instance,
         build: impl FnOnce() -> ElNode,
     ) -> Result<ElNode, String> {
         if let Some(owner) = inst.cell_owner.take() {
             owner.dispose();
         }
-        let parent = self.cell_parent_owner(cell);
         let (owner, el) = parent.run(|| crate::element::create_root(|| caught(build)));
         inst.cell_owner = Some(owner);
         el
     }
 
-    /// The owner of the component whose list cell `cell` is in.
-    fn cell_parent_owner(&self, cell: NodeId) -> crate::element::Owner {
-        let component = self
-            .list_of(cell)
+    /// The owner of the component whose list `list` is (its own list, or
+    /// the list it places another component's `Items` in).
+    fn list_component_owner(&self, list: Option<NodeId>) -> crate::element::Owner {
+        let component = list
             .and_then(|list| {
                 self.components
                     .virtual_lists
@@ -2680,6 +2725,24 @@ impl<M: TextEngine> Core<M> {
             let _ = self.apply_op(Op::Draw {
                 id,
                 drawing: Box::new((**drawing).clone()),
+            });
+        }
+        if new.window != old.window
+            && let Some(window) = &new.window
+        {
+            // Opened once; then only its attributes follow (the record sends
+            // what changed).
+            let command = if old.window.is_none() {
+                crate::desktop::DesktopCommand::OpenWindow(Box::new(crate::desktop::OpenWindow {
+                    options: (**window).clone(),
+                    ..Default::default()
+                }))
+            } else {
+                crate::desktop::DesktopCommand::SetAttributes(Box::new(window.attributes.clone()))
+            };
+            let _ = self.apply_op(Op::Command {
+                id,
+                command: crate::Command::Desktop(Box::new(command)),
             });
         }
     }
@@ -4124,6 +4187,7 @@ impl<M: TextEngine> Core<M> {
             .entry(id)
             .or_insert_with(|| VirtualListState {
                 owner,
+                scope: Rc::default(),
                 row: list.row.clone(),
                 count: 0,
                 keys: None,
@@ -4138,6 +4202,24 @@ impl<M: TextEngine> Core<M> {
                 latest: None,
                 report: None,
             });
+        // The rows go with the run that made the list. A list a later run
+        // keeps takes that run's owner: its cells are made again below.
+        if state.scope.get() != list.scope {
+            state.scope.set(list.scope);
+            if let Some(scope) = list.scope {
+                let rows = Rc::downgrade(&state.rows);
+                let current = Rc::downgrade(&state.scope);
+                scope.run(|| {
+                    crate::element::cleanup(move || {
+                        // A run the list has since left keeps the rows of
+                        // the run it is in now.
+                        if current.upgrade().is_some_and(|c| c.get() == Some(scope)) {
+                            dispose_rows(&rows);
+                        }
+                    })
+                });
+            }
+        }
         let cells = state.rows.clone();
         let bound = matches!(list.count, Reactive::Bound(_)) || list.keys.is_some();
         let (count, keys) = (list.count, list.keys);
@@ -5101,6 +5183,90 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Applies a sound's or a player's request: through the embedding
+    /// app's audio stack when it gave one, else as commands on the root the
+    /// platform answers with [`EventKind::Audio`].
+    fn audio_action(&mut self, action: crate::element::AudioAction) {
+        use crate::{
+            audio::{AudioCommand, AudioError, AudioEvent},
+            element::AudioAction,
+        };
+        let (command, sink) = match action {
+            AudioAction::Available(answer) => {
+                let available = match &self.audio {
+                    Some(backend) => backend.available(),
+                    None => self.components.environment.audio,
+                };
+                answer.borrow_mut().deliver(available);
+                return;
+            }
+            AudioAction::Open { command, sink } => {
+                debug_assert!(matches!(
+                    command,
+                    AudioCommand::Load { .. }
+                        | AudioCommand::LoadUrl { .. }
+                        | AudioCommand::Open { .. }
+                ));
+                let failed = |error, message: &str| AudioEvent::Failed {
+                    error,
+                    message: message.into(),
+                };
+                if !self.access.allows_audio() {
+                    sink.send(failed(AudioError::NotAllowed, "sound is not granted"));
+                    sink.close();
+                    self.deny(
+                        "sound is not granted: add `\"audio\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let AudioCommand::Open { src, .. } | AudioCommand::LoadUrl { url: src, .. } =
+                    &command
+                    && !self.access.allows_media(src)
+                {
+                    sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
+                    sink.close();
+                    self.deny(format!(
+                        "`{src}` is not granted by capabilities.network in nsh.json"
+                    ));
+                    return;
+                }
+                if self.audio.is_none() && !self.components.environment.audio {
+                    sink.send(failed(AudioError::Unavailable, "nothing plays sound here"));
+                    sink.close();
+                    return;
+                }
+                self.components.audio.insert(command.id(), sink.clone());
+                (command, sink)
+            }
+            AudioAction::Command(command) => {
+                let id = command.id();
+                let sink = if command.ends() {
+                    self.components.audio.remove(&id)
+                } else {
+                    self.components.audio.get(&id).cloned()
+                };
+                // A command of an object that failed to open, or closed.
+                let Some(sink) = sink else {
+                    return;
+                };
+                if command.ends() {
+                    sink.close();
+                }
+                (command, sink)
+            }
+        };
+        match self.audio.clone() {
+            Some(backend) => backend.command(command, &sink),
+            None => {
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Audio(command),
+                });
+            }
+        }
+    }
+
     fn apply_action(&mut self, action: Action) {
         match action {
             Action::Command(id, command) => {
@@ -5176,6 +5342,12 @@ impl<M: TextEngine> Core<M> {
                     },
                 );
                 self.components.fetch_requests.push((id, *request));
+            }
+            Action::RegisterFont(data, answer) => {
+                // The family is the answer: a font without one is refused.
+                let family = crate::text::font_family(&data)
+                    .and_then(|family| self.register_font(&data).map(|()| family));
+                answer.borrow_mut().deliver(family);
             }
             Action::PickImages(request, answer) => {
                 if !self.access.allows_picker() {
@@ -5304,6 +5476,7 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::Speech(action) => self.speech_action(action),
+            Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
             Action::NextUrlSchemeOpen(answer) => {
                 let links = &mut self.components.url_schemes;
@@ -5465,12 +5638,29 @@ impl<M: TextEngine> Core<M> {
             }
             FetchEvent::Failed(error) => {
                 if let Some(pending) = self.components.fetches.remove(&id) {
-                    pending.answer.borrow_mut().deliver(Err(error));
+                    pending
+                        .answer
+                        .borrow_mut()
+                        .deliver(Err(FetchFailure::Failed(error)));
                 }
                 return false;
             }
         }
         true
+    }
+
+    /// Fails the tasks' request `id`, which the app's capabilities do not
+    /// grant: `url` is the URL refused, the request's or a redirect's (the
+    /// engine checks every hop), `message` why. A task's
+    /// [`fetch`](crate::element::fetch) fails with the message; a module
+    /// function's call rejects with `ERR_ACCESS_DENIED`, `permission`
+    /// `"network"` and `resource` the URL, as JS's `fetch` does
+    /// (`registerFont`).
+    pub fn fetch_refused(&mut self, id: u32, message: String, url: String) {
+        if let Some(pending) = self.components.fetches.remove(&id) {
+            let refused = FetchFailure::Refused { message, url };
+            pending.answer.borrow_mut().deliver(Err(refused));
+        }
     }
 
     /// Resolves clipboard read `id` with the platform's answer (an empty
@@ -5528,6 +5718,26 @@ impl<M: TextEngine> Core<M> {
             _ => None,
         };
         match kind {
+            // A window that keeps its placement saves it as it changes; the
+            // event goes on to the app.
+            EventKind::Window => {
+                if let EventPayload::Window(event) = payload {
+                    match event.as_ref() {
+                        crate::desktop::WindowEvent::State(state) => {
+                            self.keep_window_placement(id, state);
+                        }
+                        // Rust listeners of the main window's; JS's hear it
+                        // from the event.
+                        crate::desktop::WindowEvent::ClosePress { reason }
+                            if id == crate::ROOT_ID =>
+                        {
+                            self.components.runtime.main_close_pressed(*reason);
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
             EventKind::Dialog => {
                 let Some(dialog) = number("id") else {
                     return false;
@@ -5651,6 +5861,16 @@ impl<M: TextEngine> Core<M> {
                     if ended {
                         self.components.speech = None;
                     }
+                }
+                true
+            }
+            EventKind::Audio if id == crate::ROOT_ID => {
+                let EventPayload::Audio { id: object, event } = payload else {
+                    return false;
+                };
+                // Dropped once the object is closed.
+                if let Some(sink) = self.components.audio.get(object) {
+                    sink.send(event.clone());
                 }
                 true
             }
@@ -6035,6 +6255,17 @@ impl<M: TextEngine> Core<M> {
 fn drop_caught<T>(value: T) {
     if let Err(message) = caught(move || drop(value)) {
         log::error!(target: "js", "a value of a call into Rust panicked as it dropped: {message}");
+    }
+}
+
+/// Disposes the contents of a list's cells: the run that made the list went.
+fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
+    let Some(rows) = rows.upgrade() else {
+        return;
+    };
+    let owners: Vec<_> = rows.borrow_mut().drain().map(|(_, (_, o))| o).collect();
+    for owner in owners {
+        owner.dispose();
     }
 }
 

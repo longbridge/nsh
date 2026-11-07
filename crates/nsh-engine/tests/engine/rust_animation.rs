@@ -117,6 +117,8 @@ impl Platform {
             host: Default::default(),
             picker: None,
             speech: None,
+            audio: None,
+            windows: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

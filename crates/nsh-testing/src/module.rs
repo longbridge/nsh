@@ -277,6 +277,7 @@ impl Testing {
             clipboard: options.clipboard,
             color_scheme: options.color_scheme,
             locale: options.locale,
+            locale_settings: options.locale_settings.unwrap_or_default(),
             reduced_motion: options.reduced_motion,
             platform: options.platform,
             clock: options
@@ -406,6 +407,10 @@ pub struct OpenOptions {
     pub color_scheme: Option<ColorScheme>,
     /// The device's locale, a BCP 47 tag (`"en-US"`).
     pub locale: Option<String>,
+    /// The user's locale settings (`localeSettings()`): the ones it names,
+    /// over the locale's (it alone as the languages, its region's
+    /// preferences) in UTC.
+    pub locale_settings: Option<LocaleSettingsOptions>,
     /// The user asked for less motion (false).
     pub reduced_motion: Option<bool>,
     /// The platform the app believes it runs on headless (`"ios"`; a
@@ -431,6 +436,82 @@ pub struct OpenOptions {
     /// `schemes`), as from the system. Headless runs only: with
     /// `--target` it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
     pub url_scheme: Option<String>,
+}
+
+/// Locale settings a test gives the user (`open`'s `localeSettings`,
+/// `app.setLocaleSettings`; `localeSettings()`): the ones it names change,
+/// the others stay.
+#[derive(Debug, Default, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct LocaleSettingsOptions {
+    /// The preferred languages, BCP 47 tags, most preferred first.
+    pub languages: Option<Vec<String>>,
+    /// The device's time zone, an IANA name. It names the zone: local
+    /// times, `Date`'s and `Intl`'s, stay the machine's, and so does the
+    /// zone `Intl` names.
+    pub time_zone: Option<String>,
+    /// 12- or 24-hour time.
+    pub hour_cycle: Option<nsh_core::platform::HourCycle>,
+    /// The day weeks start on, 1 for Monday to 7 for Sunday.
+    pub first_day_of_week: Option<u32>,
+    /// The units of lengths, weights and volumes.
+    pub measurement_system: Option<nsh_core::platform::MeasurementSystem>,
+    /// The unit of temperatures.
+    pub temperature_unit: Option<nsh_core::platform::TemperatureUnit>,
+}
+
+impl LocaleSettingsOptions {
+    /// The ones these name, as pins of the environment; `what` (the call)
+    /// begins the error of a value that names none.
+    pub(crate) fn pins(&self, what: &str) -> Result<nsh_engine::EnvironmentPins, String> {
+        use nsh_core::platform::{Languages, TimeZone, Weekday};
+        let mut pins = nsh_engine::EnvironmentPins::default();
+        if let Some(tags) = &self.languages {
+            let languages = Languages::parse(tags.iter().map(String::as_str))
+                .ok_or_else(|| format!("{what}: {tags:?} names no language"))?;
+            pins.languages = Some(languages);
+        }
+        if let Some(name) = &self.time_zone {
+            let zone = TimeZone::parse(name)
+                .ok_or_else(|| format!("{what}: {name:?} is not a time zone"))?;
+            pins.time_zone = Some(zone);
+        }
+        pins.hour_cycle = self.hour_cycle;
+        if let Some(day) = self.first_day_of_week {
+            let weekday = u8::try_from(day)
+                .ok()
+                .and_then(Weekday::from_number)
+                .ok_or_else(|| {
+                    format!("{what}: {day} is not a day of the week (1 Monday to 7 Sunday)")
+                })?;
+            pins.first_day_of_week = Some(weekday);
+        }
+        pins.measurement_system = self.measurement_system;
+        pins.temperature_unit = self.temperature_unit;
+        Ok(pins)
+    }
+
+    /// The ones these name, as a test writes them (`{ hourCycle: "h23" }`).
+    pub(crate) fn label(&self) -> String {
+        let named = [
+            self.languages
+                .as_ref()
+                .map(|tags| format!("languages: {tags:?}")),
+            self.time_zone
+                .as_ref()
+                .map(|name| format!("timeZone: {name:?}")),
+            self.hour_cycle
+                .map(|c| format!("hourCycle: {:?}", c.name())),
+            self.first_day_of_week
+                .map(|d| format!("firstDayOfWeek: {d}")),
+            self.measurement_system
+                .map(|s| format!("measurementSystem: {:?}", s.name())),
+            self.temperature_unit
+                .map(|u| format!("temperatureUnit: {:?}", u.name())),
+        ];
+        let named: Vec<String> = named.into_iter().flatten().collect();
+        format!("{{ {} }}", named.join(", "))
+    }
 }
 
 /// The embedding app a test plays (`open`'s `host`; `nsh/host`).
@@ -797,6 +878,42 @@ impl From<&nsh_core::speech::SpeechRequest> for SpeechRequest {
         SpeechRequest {
             lang: request.lang.clone(),
             interim: request.interim,
+        }
+    }
+}
+
+/// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
+/// reads it.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct AudioCall {
+    /// `"load"`, `"play"`, `"stop"`, `"unload"` for sounds; `"open"`,
+    /// `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"` for
+    /// players.
+    pub command: String,
+    /// The sound's or player's source.
+    pub src: String,
+    /// `play`'s, `open`'s and `set`'s volume.
+    pub volume: Option<f64>,
+    /// `play`'s, `open`'s and `set`'s rate.
+    pub rate: Option<f64>,
+    /// `seek`'s position, in seconds.
+    pub position: Option<f64>,
+}
+
+/// `value` as the shortest decimal that reads back as it (`0.8`, not
+/// `0.800000011920929`): what the app wrote.
+fn shortest(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+impl From<&crate::headless::AudioCall> for AudioCall {
+    fn from(call: &crate::headless::AudioCall) -> Self {
+        AudioCall {
+            command: call.command.into(),
+            src: call.src.clone(),
+            volume: call.volume.map(shortest),
+            rate: call.rate.map(shortest),
+            position: call.position.map(|p| p.as_secs_f64()),
         }
     }
 }
@@ -1173,6 +1290,7 @@ pub(crate) struct Launch {
     pub(crate) clipboard: Option<String>,
     pub(crate) color_scheme: Option<ColorScheme>,
     pub(crate) locale: Option<String>,
+    pub(crate) locale_settings: LocaleSettingsOptions,
     pub(crate) reduced_motion: Option<bool>,
     /// The platform `open` named (headless: iOS when it named none).
     pub(crate) platform: Option<Platform>,
@@ -1423,7 +1541,8 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// is on screen, when it cannot be taken or the app threw. The failures a
 /// test may expect carry a `code` to match (messages may change):
 /// `ERR_NSH_TEST_NOT_FOUND` (nothing matches the selector),
-/// `ERR_NSH_TEST_DISABLED` (what it names is disabled), `ETIMEDOUT` (a wait
+/// `ERR_NSH_TEST_DISABLED` (what it names is disabled),
+/// `ERR_NSH_TEST_COVERED` (another view is drawn over it), `ETIMEDOUT` (a wait
 /// ran out of time), `ERR_NSH_TEST_NO_BACK` (nothing to go back from).
 /// The app closes when the test that opened it ends.
 #[class]
@@ -1539,6 +1658,59 @@ impl Clock {
     pub fn set_system_time(&self, time: Time) -> Result<(), String> {
         let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
         app.as_mut().ok_or(CLOSED)?.set_system_time(time.0)
+    }
+}
+
+/// A window of an app (`app.window(id)`), on a desktop: what the platform
+/// reports of it, and its close button. Headless, the driver plays the
+/// platform's windows: one display, and windows whose content fills them.
+#[class]
+pub struct AppWindow {
+    steps: Steps,
+    id: String,
+}
+
+#[class]
+impl AppWindow {
+    /// The app's id for the window (`"main"`: the main window).
+    #[getter]
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    /// Its state as the platform reports it to the app now (its mode,
+    /// whether it is minimized, shown and focused, its bounds and content
+    /// bounds in screen points, its display); `null` while it is not open.
+    pub fn state(&self) -> Result<Option<nsh_core::desktop::WindowState>, JsError> {
+        let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(app) = app.as_deref_mut() else {
+            return Err(JsError::Error(CLOSED.to_owned()));
+        };
+        app.window_state(&self.id).map_err(step_error)
+    }
+
+    /// Presses its close button as the user does: the window reports the
+    /// press (`onClosePress`, reason `"closeButton"`) and closes when its
+    /// `closeOnPress` lets it (the default); resolves once the app is quiet.
+    /// Rejects when it is not open or has no close button (`closable:
+    /// false`).
+    pub async fn press_close(this: Instance<Self>) -> Result<(), JsError> {
+        let (steps, id) = this.with(|w| (w.steps.clone(), w.id.clone()));
+        steps.run(move |app| app.press_window_close(&id)).await
+    }
+
+    /// A picture of the window as `app.screenshot` takes of the main one:
+    /// PNG bytes of its content, also saved at `path` (relative to the
+    /// current directory, on this machine) when given. A real platform's
+    /// (`nsh test --target`), which draws the window; a headless run draws
+    /// nothing. Rejects when the window is not open.
+    pub async fn screenshot(this: Instance<Self>, path: Option<String>) -> Result<Vec<u8>, String> {
+        let (app, id) = this.with(|w| (w.steps.app.clone(), w.id.clone()));
+        let bytes = on_app(&app, move |a| a.window_screenshot(&id)).await?;
+        if let Some(path) = path {
+            save_screenshot(path, bytes.clone()).await?;
+        }
+        Ok(bytes)
     }
 }
 
@@ -1935,6 +2107,22 @@ impl App {
         step(&this, move |app| app.end_speech(error)).await
     }
 
+    /// What the app asked of the speaker (`Sound`, `AudioPlayer`), in
+    /// order. Headless apps play sound: sounds decode as WAV (their length
+    /// from the header; anything else fails with `decode`), players play a
+    /// minute of their source at once and end when `endAudio` says.
+    /// Headless runs only.
+    pub fn audio(&self) -> Result<Vec<AudioCall>, JsError> {
+        self.with(|app| Ok(app.audio_calls()?.iter().map(AudioCall::from).collect()))
+    }
+
+    /// The players playing reach their end: `end` (those that loop start
+    /// again). Then waits until the app is quiet. Rejects when none plays.
+    /// Headless runs only.
+    pub async fn end_audio(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.end_audio()).await
+    }
+
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, JsError> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
@@ -1956,6 +2144,16 @@ impl App {
                     .collect()
             }))
         })
+    }
+
+    /// The app's window `id` (`"main"`, or the id the app opened one
+    /// with), on a desktop: its state as the platform reports it, and its
+    /// close button. The window need not be open yet.
+    pub fn window(&self, id: String) -> AppWindow {
+        AppWindow {
+            steps: self.steps.clone(),
+            id,
+        }
     }
 
     /// The app's keyboard, whose keys the test presses.
@@ -2012,12 +2210,7 @@ impl App {
         let app = this.with(|a| a.steps.app.clone());
         let bytes = on_app(&app, |a| a.screenshot()).await?;
         if let Some(path) = path {
-            let saved = bytes.clone();
-            blocking(move || {
-                std::fs::write(&path, saved).map_err(|e| format!("screenshot({path:?}): {e}"))
-            })
-            .await
-            .map_err(|e| e.to_string())??;
+            save_screenshot(path, bytes.clone()).await?;
         }
         Ok(bytes)
     }
@@ -2055,6 +2248,19 @@ impl App {
     /// and comes back (`"active"`); `lifecycle()` follows. Headless only.
     pub async fn set_lifecycle(this: Instance<Self>, state: Lifecycle) -> Result<(), JsError> {
         step(&this, move |app| app.set_lifecycle(state.into())).await
+    }
+
+    /// Gives the user the locale settings `settings` names
+    /// (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`), as the system does
+    /// when the user changes them or travels; `localeSettings()` follows,
+    /// with the others as they were. A time zone names the zone: local
+    /// times stay the machine's. Headless only.
+    pub async fn set_locale_settings(
+        this: Instance<Self>,
+        settings: LocaleSettingsOptions,
+    ) -> Result<(), JsError> {
+        settings.pins("setLocaleSettings").map_err(JsError::Range)?;
+        step(&this, move |app| app.set_locale_settings(settings)).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.
@@ -2153,6 +2359,13 @@ impl Steps {
             .await??;
         }
     }
+}
+
+/// Saves a screenshot's `bytes` at `path`, on a blocking thread.
+async fn save_screenshot(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    blocking(move || std::fs::write(&path, bytes).map_err(|e| format!("screenshot({path:?}): {e}")))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// `f` with the app `app`, on a blocking thread.

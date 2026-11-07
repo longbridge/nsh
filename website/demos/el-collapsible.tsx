@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { Collapsible, Switch } from "nsh/base";
-import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // Each section: a summary row, the app's trigger (it says whether it is
 // expanded to screen readers), and details the collapsible reveals while the
@@ -105,10 +105,7 @@ function App() {
                 class={`flex-row-reverse items-center justify-between gap-3 ${pad} pb-3 active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={originals() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={originals() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => originals())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Keep originals</Text>
               </Switch>

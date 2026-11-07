@@ -65,8 +65,9 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements)) and `updater`, which makes desktop packages update themselves
-(see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
-every key. Unknown keys are an error.
+(see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
+every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
+still builds with an older one, and the warning catches a typo.
 
 Every key above can be overridden on the command line, which is handy in CI:
 
@@ -93,6 +94,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
 | `--format <apk \| aab>` | Android: an APK (default), installed directly, or an Android App Bundle for Google Play ([below](#google-play-app-bundles)). |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
+| `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
 ## iOS simulator
 
@@ -281,7 +283,7 @@ says what to set instead:
 | `CFBundleIdentifier` | `id` |
 | `CFBundleName`, `CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
-| `CFBundleURLTypes` | `deepLinks` |
+| `CFBundleURLTypes` | `schemes` |
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
@@ -362,6 +364,7 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 
 - [CLI](./cli.md): every command
 - [App Updates](./app-updates.md): packaged apps that update themselves
+- [OTA Updates](./ota-updates.md): new TSX for packaged apps, iOS and Android included, without a new build
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app

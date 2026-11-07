@@ -694,34 +694,50 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
     Cursor::Arrow
 }
 
-/// Pressing `(x, y)` (root coordinates) drags the window: the nearest view
-/// that sets `windowDrag` says so, unless a text field, a hosted item
-/// (header buttons, editors) or a view with press or touch handlers is
-/// nearer.
-pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
-    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
-        return false;
-    };
+/// What a view of the app's marks as part of its window's frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowPart {
+    /// `windowResize`: an edge or corner that resizes the window.
+    Resize(nsh_core::desktop::ResizeEdge),
+    /// `windowControl`: a button that minimizes, maximizes or closes it.
+    Control(nsh_core::desktop::WindowControl),
+    /// `windowDrag`: pressing it moves the window.
+    Drag,
+}
+
+/// What pressing `(x, y)` (the input root's coordinates) does to the
+/// window: the nearest view marked `windowResize`, `windowControl` or
+/// `windowDrag` says so (`windowDrag: false` stops the search), unless a
+/// text field, a hosted item (editors, web views) or a view with press or
+/// touch handlers is nearer.
+pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPart> {
+    let hit = pick(&surface.input_root(), x, y, true)?;
     if hit.item.is_some() {
-        return false;
+        return None;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {
         {
             let s = v.state();
+            if let Some(edge) = s.props.window_resize {
+                return Some(WindowPart::Resize(edge));
+            }
+            if let Some(control) = s.props.window_control {
+                return Some(WindowPart::Control(control));
+            }
             if let Some(drag) = s.props.window_drag {
-                return drag;
+                return drag.then_some(WindowPart::Drag);
             }
             if s.kind == ViewKind::Input
                 || has_press(s.events)
                 || s.events.contains(EventKind::Touch)
             {
-                return false;
+                return None;
             }
         }
         view = v.parent_view();
     }
-    false
+    None
 }
 
 /// A context menu asked for on `view` without a pointer (UI Automation's
@@ -1044,6 +1060,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
+        || crate::app_window::escape(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
@@ -1076,7 +1093,8 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     true
 }
 
-/// The enabled text fields shown under `view`, in tree order.
+/// The enabled text fields shown under `view`, in tree order (a scroll
+/// view's content as it is on screen).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
     {
         let s = view.state();
@@ -1087,7 +1105,7 @@ fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
             out.push(view.clone());
         }
     }
-    view.with_children(|children| {
+    view.with_children_in_reading_order(|children| {
         for child in children {
             collect_fields(child, out);
         }

@@ -798,6 +798,13 @@ impl Node {
         if self.spare {
             props.accessibility.hidden = true;
         }
+        if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
+            props.screen_order = Some(if list.horizontal {
+                crate::geometry::Axis::Horizontal
+            } else {
+                crate::geometry::Axis::Vertical
+            });
+        }
         props
     }
 
@@ -1128,8 +1135,12 @@ pub struct Core<M: TextEngine> {
     /// headers under the status bar).
     safe_area: EdgeInsets,
     list_binds: Vec<ListBind>,
-    /// The lists keeping items rendered for [`Core::set_kept`].
+    /// The lists keeping items rendered ([`Core::sync_kept`]).
     kept_lists: Vec<Key>,
+    /// The nodes of the last [`Core::set_kept`].
+    selection_kept: Vec<NodeId>,
+    /// [`Core::sync_kept`]'s buffer, reused.
+    kept_scratch: Vec<Key>,
     /// The runtime's lists with overscan cells waiting to bind
     /// ([`Core::take_paced_list_binds`]), in the order they asked.
     paced_lists: Vec<NodeId>,
@@ -1233,15 +1244,29 @@ pub struct Core<M: TextEngine> {
     access: Arc<crate::access::Access>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
+    /// The windows' attribute records, by root node (the main window's is
+    /// the root's): what was sent the platform and what was set since.
+    windows: rustc_hash::FxHashMap<NodeId, crate::desktop::window::WindowRecord>,
+    /// The windows of the app's own, by the app's id: their root nodes,
+    /// and whether their placement is kept.
+    window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
+    /// The main window's placement is kept (nsh.json `window.restoreBounds`,
+    /// [`Core::set_main_window`]).
+    keep_main_placement: bool,
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
     /// Answers the app's picks in place of the platform's picker
     /// ([`Core::set_picker`]).
     picker: Option<Arc<dyn crate::picker::PickerBackend>>,
+    /// Opens and applies the app's windows of its own in place of the
+    /// platform ([`Core::set_window_backend`]).
+    window_backend: Option<Arc<dyn crate::desktop::WindowBackend>>,
     /// Recognizes the app's speech in place of the platform
     /// ([`Core::set_speech`]).
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
+    /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
+    audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1300,9 +1325,14 @@ impl<M: TextEngine> Core<M> {
             max_nodes: usize::MAX,
             access: Arc::default(),
             denied: Default::default(),
+            windows: Default::default(),
+            window_ids: Default::default(),
+            keep_main_placement: false,
             clipboard: None,
             picker: None,
+            window_backend: None,
             speech: None,
+            audio: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1331,6 +1361,8 @@ impl<M: TextEngine> Core<M> {
             safe_area: EdgeInsets::default(),
             list_binds: Vec::new(),
             kept_lists: Vec::new(),
+            selection_kept: Vec::new(),
+            kept_scratch: Vec::new(),
             paced_lists: Vec::new(),
             paced_scratch: Vec::new(),
             events: Vec::new(),
@@ -1521,11 +1553,48 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
+    /// The main window's launch-time options (nsh.json `"window"`): its
+    /// attributes go to the main window with the next commit, as
+    /// `currentWindow().set()` sends them (capabilities apply); with
+    /// `restoreBounds` its placement is kept from then on as the platform
+    /// reports it (the environment's window state), for the next launch
+    /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
+    pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
+        self.keep_main_placement = options.restore_bounds;
+        if let Some(state) = self.components.environment.window_state {
+            self.keep_window_placement(crate::ROOT_ID, &state);
+        }
+        if options.attributes.is_empty() {
+            return;
+        }
+        let _ = self.apply_op(Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
+                Box::new(options.attributes.clone()),
+            ))),
+        });
+    }
+
+    /// Opens and applies the app's windows of its own with `backend`, an
+    /// embedding host's windows or a test's fake, instead of the platform
+    /// (`None`: the platform's, the default). The main window's commands
+    /// stay with the platform.
+    pub fn set_window_backend(&mut self, backend: Option<Arc<dyn crate::desktop::WindowBackend>>) {
+        self.window_backend = backend;
+    }
+
     /// Recognizes the app's speech (`Speech.start`) with `backend`, an
     /// embedding app's own recognizer or a test's fake, instead of the
     /// platform's (`None`: the platform's, the default).
     pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
         self.speech = backend;
+    }
+
+    /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
+    /// embedding app's own audio stack or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
+        self.audio = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -1666,12 +1735,41 @@ impl<M: TextEngine> Core<M> {
     /// the render window too, until the next call: the ends of a text
     /// selection across a list's rows, whose texts must outlive scrolling
     /// away (a recycled cell would show another row). Replaces the last
-    /// call's; none releases them.
+    /// call's; none releases them. The rows holding the keyboard focus or
+    /// an open overlay are kept anyway ([`Core::sync_kept`]).
     pub fn set_kept(&mut self, nodes: &[NodeId]) {
+        self.selection_kept.clear();
+        self.selection_kept.extend_from_slice(nodes);
+        self.sync_kept();
+    }
+
+    /// Keeps the rows of lists rendered wherever they scroll while they
+    /// hold what must outlive scrolling away: [`Core::set_kept`]'s nodes,
+    /// the keyboard focus and open overlays (a row's menu or popover). A
+    /// recycled cell would show another row, drop the focus and close the
+    /// overlay. Each list's kept rows are all that hold one; in a list in
+    /// another list's row, both rows are kept.
+    fn sync_kept(&mut self) {
+        let mut holders = std::mem::take(&mut self.kept_scratch);
+        holders.clear();
+        holders.extend(
+            self.selection_kept
+                .iter()
+                .filter_map(|&id| self.key(id).ok()),
+        );
+        if let Some((key, id)) = self.focus
+            && self.nodes.get(key as usize).is_some_and(|n| n.id == id)
+        {
+            holders.push(key);
+        }
+        holders.extend(self.overlays.iter().copied().filter(|&key| {
+            self.overlay(key)
+                .is_some_and(|o| o.host.is_some() && o.config.hint.is_none())
+        }));
         let mut kept: Vec<(Key, u32)> = Vec::new();
-        for &id in nodes {
-            let Ok(mut key) = self.key(id) else { continue };
-            // Up to the cell: the ancestor whose parent is a list holding
+        for &holder in &holders {
+            let mut key = holder;
+            // Up to each cell: an ancestor whose parent is a list holding
             // it in a slot.
             loop {
                 let parent = self.nodes[key as usize].parent;
@@ -1686,10 +1784,13 @@ impl<M: TextEngine> Core<M> {
                         .and_then(|s| s.index)
                 {
                     kept.push((parent, index));
-                    break;
                 }
                 key = parent;
             }
+        }
+        self.kept_scratch = holders;
+        if kept.is_empty() && self.kept_lists.is_empty() {
+            return;
         }
         let mut lists: Vec<Key> = kept.iter().map(|&(list, _)| list).collect();
         lists.sort_unstable();
@@ -1825,6 +1926,11 @@ impl<M: TextEngine> Core<M> {
         }
         self.paced_lists = lists;
         self.paced_scratch = one;
+    }
+
+    /// Whether events wait for [`Core::take_events`].
+    pub fn has_events(&self) -> bool {
+        !self.events.is_empty()
     }
 
     /// Moves what the core hands JS (events it raised, such as
@@ -2208,10 +2314,239 @@ impl<M: TextEngine> Core<M> {
                 self.answer_measure(id, call);
                 Ok(())
             }
+            // A window's attributes go into its record, sent once per
+            // commit; opening one is checked and resolved here.
+            Op::Command {
+                id,
+                command: Command::Desktop(desktop),
+            } if desktop.is_windows() => {
+                self.key(id)?;
+                self.window_command(id, *desktop);
+                Ok(())
+            }
             Op::Command { id, command } => {
                 self.key(id)?;
                 self.commands.push((id, command));
                 Ok(())
+            }
+        }
+    }
+
+    /// A command about window `id` (its root node): attributes join its
+    /// record ([`Core::flush_windows`] sends what changed), opening one is
+    /// checked against the capabilities and resolved, a placement is fitted
+    /// on the displays there are.
+    fn window_command(&mut self, id: NodeId, command: crate::desktop::DesktopCommand) {
+        use crate::desktop::{
+            DesktopCommand, WindowPlacement, WindowRequest,
+            window::{WindowRecord, placement_key},
+        };
+        match command {
+            DesktopCommand::SetAttributes(mut attributes) => {
+                attributes.sanitize();
+                let denied = self.access.deny_window_attributes(&mut attributes);
+                if !denied.is_empty() {
+                    self.deny(format!(
+                        "nsh/desktop: the window attributes {} are not granted by capabilities.windows: left as they are",
+                        denied.join(", ")
+                    ));
+                }
+                // Fitting the content or not lays the window's root out
+                // again ([`Core::fit_window`]).
+                if attributes.size_to_content.is_some()
+                    && let Ok(key) = self.key(id)
+                    && let Some(layout) = self.nodes[key as usize].layout
+                {
+                    self.layout.mark_dirty(layout);
+                    self.needs_layout = true;
+                }
+                self.windows
+                    .entry(id)
+                    .or_default()
+                    .pending
+                    .merge(&attributes);
+            }
+            DesktopCommand::OpenWindow(mut open) => {
+                let options = &mut open.options;
+                // `Window.open` checked it already and threw; this guards
+                // every other way in.
+                let open_now = self
+                    .window_ids
+                    .values()
+                    .filter(|(node, _)| *node != id && self.key(*node).is_ok())
+                    .count();
+                if let Err(message) =
+                    self.access
+                        .check_window(options.kind, &options.attributes, open_now)
+                {
+                    self.deny(format!("nsh/desktop: {message}: the window does not open"));
+                    return;
+                }
+                options.attributes.sanitize();
+                options.attributes =
+                    crate::desktop::WindowAttributes::resolve(options.kind, &options.attributes);
+                open.parent = match options.parent.as_deref() {
+                    None => None,
+                    Some("main") => Some(crate::ROOT_ID),
+                    Some(parent) => self.window_ids.get(parent).map(|(node, _)| *node),
+                };
+                if options.restore_bounds {
+                    let _entered = self.components.runtime.enter();
+                    open.placement = crate::storage::Storage::get_item(&placement_key(&options.id))
+                        .and_then(|json| serde_json::from_str::<WindowPlacement>(&json).ok())
+                        .map(|p| self.components.runtime.fit_window_placement(p));
+                }
+                let size = open
+                    .placement
+                    .map(|p| p.bounds.size)
+                    .or(options.default_size);
+                self.windows
+                    .insert(id, WindowRecord::opened(options.attributes.clone(), size));
+                self.window_ids
+                    .insert(options.id.clone(), (id, options.restore_bounds));
+                self.commands.push((
+                    id,
+                    Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
+                ));
+            }
+            // Saved placements go onto the displays there are now, whichever
+            // side (Rust or JS) restores them.
+            DesktopCommand::Request(WindowRequest::SetPlacement(placement)) => {
+                let placement = self.components.runtime.fit_window_placement(placement);
+                self.commands.push((
+                    id,
+                    Command::Desktop(Box::new(DesktopCommand::Request(
+                        WindowRequest::SetPlacement(placement),
+                    ))),
+                ));
+            }
+            other => self.commands.push((id, Command::Desktop(Box::new(other)))),
+        }
+    }
+
+    /// Sends each window's attributes that changed since the last commit,
+    /// one command per window; forgets the windows whose root is gone.
+    fn flush_windows(&mut self) {
+        if self.windows.is_empty() {
+            return;
+        }
+        let gone: Vec<NodeId> = self
+            .windows
+            .keys()
+            .copied()
+            .filter(|&id| self.key(id).is_err())
+            .collect();
+        for id in gone {
+            self.windows.remove(&id);
+            self.window_ids.retain(|_, (node, _)| *node != id);
+        }
+        let mut ids: Vec<NodeId> = self.windows.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let Some(diff) = self.windows.get_mut(&id).and_then(|r| r.take_diff()) else {
+                continue;
+            };
+            self.commands.push((
+                id,
+                Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
+                    Box::new(diff),
+                ))),
+            ));
+        }
+    }
+
+    /// A window that fits its content (`sizeToContent`), the main one or
+    /// one of the app's own: its root was laid out at its content's size on
+    /// those sides; the window is sized to it when it changes. The platforms do nothing for
+    /// it but carry out the request.
+    fn fit_window(&mut self, key: Key, layout: LayoutId) {
+        let id = self.nodes[key as usize].id;
+        let Some(record) = self.windows.get_mut(&id) else {
+            return;
+        };
+        let (width, height) = record.fits();
+        if !width && !height {
+            record.fitted = None;
+            return;
+        }
+        let laid_out = self.layout.unrounded_layout(layout).size;
+        let size = crate::geometry::size(
+            Points(laid_out.width.ceil()),
+            Points(laid_out.height.ceil()),
+        );
+        if record.fitted == Some(size) {
+            return;
+        }
+        record.fitted = Some(size);
+        self.commands.push((
+            id,
+            Command::Desktop(Box::new(crate::desktop::DesktopCommand::Request(
+                crate::desktop::WindowRequest::SetContentSize {
+                    width: width.then_some(size.width),
+                    height: height.then_some(size.height),
+                },
+            ))),
+        ));
+    }
+
+    /// The size of modal `key`'s root view: what the platform reported
+    /// (`set_root_size`), else, for the root of a window of the app's own,
+    /// the window's size as the core knows it (its content's with
+    /// `sizeToContent`, the placement's or `defaultSize`), else a dialog's
+    /// main window's. `None`: a window whose size only its platform knows,
+    /// laid out at its content's size until the platform reports it, never
+    /// at the main window's.
+    pub(crate) fn root_view_size(&self, key: Key) -> Option<Size<Points>> {
+        let node = &self.nodes[key as usize];
+        if let Some(size) = node.root.as_ref().and_then(|r| r.reported) {
+            return Some(size);
+        }
+        if self.window_ids.values().any(|(id, _)| *id == node.id) {
+            return self.windows.get(&node.id).and_then(|r| r.fitted.or(r.size));
+        }
+        Some(self.viewport)
+    }
+
+    /// The window node `key` shows in: the root of the nearest window of
+    /// the app's own around it, else the main window ([`ROOT_ID`]).
+    pub(crate) fn window_of(&self, key: Key) -> NodeId {
+        if self.window_ids.is_empty() {
+            return crate::ROOT_ID;
+        }
+        let mut k = self.nodes[key as usize].parent;
+        while k != NO_KEY {
+            let n = &self.nodes[k as usize];
+            if n.kind == Kind::Modal && self.window_ids.values().any(|(node, _)| *node == n.id) {
+                return n.id;
+            }
+            k = n.parent;
+        }
+        crate::ROOT_ID
+    }
+
+    /// Keeps the placement of window `id` (its root node) a platform
+    /// reported, when the app asked to restore its bounds.
+    pub(crate) fn keep_window_placement(
+        &mut self,
+        id: NodeId,
+        state: &crate::desktop::WindowState,
+    ) {
+        let key = if id == crate::ROOT_ID {
+            self.keep_main_placement
+                .then(|| crate::desktop::window::placement_key("main"))
+        } else {
+            self.window_ids
+                .iter()
+                .find(|(_, (node, keep))| *node == id && *keep)
+                .map(|(key, _)| crate::desktop::window::placement_key(key))
+        };
+        let Some(key) = key else {
+            return;
+        };
+        if let Ok(json) = serde_json::to_string(&state.placement) {
+            let _entered = self.components.runtime.enter();
+            if crate::storage::Storage::get_item(&key).as_deref() != Some(json.as_str()) {
+                let _ = crate::storage::Storage::set_item(key, json);
             }
         }
     }
@@ -2259,12 +2594,35 @@ impl<M: TextEngine> Core<M> {
         if std::mem::take(&mut self.tree_order_changed) {
             let mut order = Vec::new();
             let mut pending = vec![self.root];
+            let mut cells = Vec::new();
             while let Some(key) = pending.pop() {
                 let node = &self.nodes[key as usize];
                 if node.created {
                     order.push(node.id);
                 }
-                pending.extend(node.children.iter().rev().copied());
+                match &node.list {
+                    // A list recycles its cells, so they are not in their
+                    // rows' order among its children: they go as they are
+                    // on screen, along the list's axis, then across it.
+                    Some(list) if node.children.len() > 1 => {
+                        cells.clear();
+                        cells.extend_from_slice(&node.children);
+                        let start = |k: &Key| {
+                            let at = self.nodes[*k as usize].frame.origin;
+                            if list.horizontal {
+                                (at.x.0, at.y.0)
+                            } else {
+                                (at.y.0, at.x.0)
+                            }
+                        };
+                        cells.sort_by(|a, b| {
+                            let (a, b) = (start(a), start(b));
+                            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+                        });
+                        pending.extend(cells.iter().rev().copied());
+                    }
+                    _ => pending.extend(node.children.iter().rev().copied()),
+                }
             }
             self.mount.push(MountItem::TreeOrder(order));
         }
@@ -2318,6 +2676,11 @@ impl<M: TextEngine> Core<M> {
         self.sync_ch();
         self.sync_fixed();
         self.sync_overlays();
+        // The rows holding the focus or an open overlay stay rendered,
+        // before the lists update their windows.
+        if self.focus.is_some() || !self.overlays.is_empty() || !self.kept_lists.is_empty() {
+            self.sync_kept();
+        }
         self.sync_back();
         self.sync_keys();
         // Platforms animate the frames, insertions and removals that follow
@@ -2381,6 +2744,8 @@ impl<M: TextEngine> Core<M> {
             self.commands
                 .push((crate::ROOT_ID, Command::StatusBar(config)));
         }
+        // Each window's attributes, once per commit.
+        self.flush_windows();
         // The components' measurements, with this commit's layout as JS's.
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
@@ -2401,6 +2766,14 @@ impl<M: TextEngine> Core<M> {
             let Ok(key) = self.key(id) else { continue };
             let node = &self.nodes[key as usize];
             if !node.created {
+                continue;
+            }
+            if id != crate::ROOT_ID
+                && let Some(backend) = &self.window_backend
+                && let Command::Desktop(desktop) = &command
+                && desktop.is_window_command()
+            {
+                backend.command(id, desktop);
                 continue;
             }
             // A list in its parent's viewport not placed in its view yet
@@ -4023,6 +4396,8 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.sync_spacer(key, true);
                         self.outer_moved = true;
+                        // Its children are read along the new axis.
+                        flags |= dirty::VIEW_PROPS;
                     }
                 }
             }
@@ -4459,6 +4834,20 @@ impl<M: TextEngine> Core<M> {
                 let props = node.props.get_or_insert_default();
                 if props.window_drag != value {
                     props.window_drag = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
+            Prop::WindowControl(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.window_control != value {
+                    props.window_control = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
+            Prop::WindowResize(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.window_resize != value {
+                    props.window_resize = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }
@@ -5529,7 +5918,7 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare {
+        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {
@@ -5833,7 +6222,8 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::MODAL != 0
                 && let Some(root) = &node.root
             {
-                let config = root.modal;
+                let mut config = root.modal;
+                config.window = self.window_of(key);
                 self.mount.push(MountItem::ModalConfig { id, config });
             }
             if flags & dirty::NAV_SHADER != 0
@@ -6149,7 +6539,12 @@ impl<M: TextEngine> Core<M> {
             let attachments =
                 !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
             let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
-            if attachments || !self.layout.measures_as_before(layout, measure) {
+            // A text sized by its style never resizes its box: no need to
+            // typeset it to know.
+            if attachments
+                || !(self.layout.sized_by_style(layout)
+                    || self.layout.measures_as_before(layout, measure))
+            {
                 self.layout.mark_dirty(layout);
                 self.needs_layout = true;
             }
@@ -6498,7 +6893,27 @@ impl<M: TextEngine> Core<M> {
         // A clean root has nothing new to lay out, nor frames to emit.
         let main = self.layout.dirty(root);
         if main {
+            // A main window that fits its content: laid out at its
+            // content's size on those sides ([`Core::fit_window`]).
+            let (fitting, fitted) = self
+                .windows
+                .get(&crate::ROOT_ID)
+                .map_or(((false, false), false), |r| (r.fits(), r.fitted.is_some()));
+            let mut available = available;
+            if fitting != (false, false) || fitted {
+                let mut style = root_style(self.viewport);
+                if fitting.0 {
+                    available.width = AvailableSpace::MaxContent;
+                    style.size.width = taffy::Dimension::auto();
+                }
+                if fitting.1 {
+                    available.height = AvailableSpace::MaxContent;
+                    style.size.height = taffy::Dimension::auto();
+                }
+                self.layout.set_style(root, style);
+            }
             self.layout_root(root, available);
+            self.fit_window(self.root, root);
         }
         main
     }
@@ -6699,8 +7114,29 @@ impl<M: TextEngine> Core<M> {
                 )
             }
             Kind::Modal => {
-                let size = root.reported.unwrap_or(self.viewport);
-                (size, 0.0, definite(size))
+                // A window whose size is not known yet: its content's.
+                let known = self.root_view_size(key);
+                let size = known.unwrap_or_default();
+                let mut available = match known {
+                    Some(size) => definite(size),
+                    None => taffy::Size {
+                        width: AvailableSpace::MaxContent,
+                        height: AvailableSpace::MaxContent,
+                    },
+                };
+                // A window that fits its content: laid out at its content's
+                // size on those sides ([`Core::fit_window`]).
+                let (width, height) = self
+                    .windows
+                    .get(&node.id)
+                    .map_or((false, false), |r| r.fits());
+                if width {
+                    available.width = AvailableSpace::MaxContent;
+                }
+                if height {
+                    available.height = AvailableSpace::MaxContent;
+                }
+                (size, 0.0, available)
             }
             // As wide as the window, as tall as its content.
             Kind::InputAccessory => (
@@ -6750,6 +7186,20 @@ impl<M: TextEngine> Core<M> {
                 width: taffy::Dimension::length(size.width.0),
                 height: taffy::Dimension::length(size.height.0),
             };
+            if kind == Kind::Modal {
+                let id = self.nodes[key as usize].id;
+                let (mut width, mut height) =
+                    self.windows.get(&id).map_or((false, false), |r| r.fits());
+                if self.root_view_size(key).is_none() {
+                    (width, height) = (true, true);
+                }
+                if width {
+                    style.size.width = taffy::Dimension::auto();
+                }
+                if height {
+                    style.size.height = taffy::Dimension::auto();
+                }
+            }
             if config_padding > 0.0 {
                 let base = match style.padding.top.into_raw() {
                     raw if raw.tag() == taffy::CompactLength::LENGTH_TAG => raw.value(),
@@ -6766,6 +7216,9 @@ impl<M: TextEngine> Core<M> {
             .expect("root state")
             .laid_out = Some((size, header));
         self.layout_root(layout, available);
+        if kind == Kind::Modal {
+            self.fit_window(key, layout);
+        }
         self.emit_frames(key);
         if kind == Kind::Screen && header_changed {
             let id = self.nodes[key as usize].id;
@@ -7398,6 +7851,14 @@ impl<M: TextEngine> Core<M> {
                 ));
             }
             self.mount.push(MountItem::Frame { id, frame });
+            let node = &self.nodes[key as usize];
+            // A list's cell moved: the logical order goes by where cells are.
+            if self.track_tree_order
+                && node.parent != NO_KEY
+                && self.nodes[node.parent as usize].list.is_some()
+            {
+                self.tree_order_changed = true;
+            }
             let node = &self.nodes[key as usize];
             // Translations by a fraction of the size follow it, and so does
             // the perspective of its parent, seen from the parent's center.

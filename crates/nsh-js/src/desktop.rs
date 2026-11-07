@@ -1,6 +1,7 @@
-//! `nsh/desktop`'s hand-written exports (with the registry's `Window`):
-//! `isAvailable`, `titleBar()` (the environment's accessor) and `Menu`,
-//! whose items call the app's functions: the menus are decoded natively
+//! `nsh/desktop`'s hand-written exports (with the registry's
+//! `Application`): `isAvailable`, `displays()` (the environment's
+//! accessor), the windows (`crate::window`) and `Menu`, `Tray` and
+//! `GlobalShortcut`, whose items call the app's functions: the menus are decoded natively
 //! into [`MenuItem`]s with an id per item, the functions kept by id, and
 //! the platform's [`EventKind::Menu`] calls the chosen item's.
 
@@ -12,12 +13,9 @@ use std::{
 };
 
 use nsh_core::{
-    Command, EventKind, ImageSource, NodeId, Op, ROOT_ID, Tag,
-    desktop::{
-        DesktopCommand, MenuAction, MenuItem, MenuRole, Shortcut, Tray, WindowFrameStyle,
-        WindowLevel, WindowOptions,
-    },
-    geometry::{Points, Size, point},
+    Command, EventKind, ImageSource, Op, ROOT_ID,
+    desktop::{DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray},
+    geometry::{Points, point},
     keymap::When,
     platform::Os,
 };
@@ -53,23 +51,6 @@ pub(crate) struct Menus {
     /// The root's `onMenu` handler is set.
     listening: Cell<bool>,
     next: Cell<u32>,
-    /// The windows `Window.open` opened, oldest first.
-    windows: RefCell<Vec<AppWindow>>,
-}
-
-/// A window of the app's own (`Window.open`): a dialog root the platform
-/// shows in a window instead of over the main one.
-struct AppWindow {
-    /// The app's id for it (`Window.open`'s `id`).
-    key: String,
-    /// The dialog root's node id.
-    id: NodeId,
-    /// The dialog root (owned).
-    node: JsValue,
-    /// The reactive root its content renders in.
-    owner: u32,
-    /// The handle `Window.open` returns (owned).
-    handle: JsValue,
 }
 
 impl Default for Menus {
@@ -82,7 +63,6 @@ impl Default for Menus {
             closed: Cell::new(UNDEFINED),
             listening: Cell::new(false),
             next: Cell::new(0),
-            windows: RefCell::default(),
         }
     }
 }
@@ -156,13 +136,6 @@ impl Menus {
         {
             // SAFETY: owned values; no JS runs from here on.
             unsafe { qjs::JS_FreeValue(raw, f) };
-        }
-        for w in self.windows.get_mut().drain(..) {
-            // SAFETY: owned values; no JS runs from here on.
-            unsafe {
-                qjs::JS_FreeValue(raw, w.node);
-                qjs::JS_FreeValue(raw, w.handle);
-            }
         }
     }
 }
@@ -819,268 +792,39 @@ fn menu(cx: *mut JsContext) -> JsValue {
         qjs::JS_SetPropertyStr(cx, o, c"setApplicationMenu".as_ptr(), set);
         let pop = reactive::new_function(cx, c"popup", popup, 2);
         qjs::JS_SetPropertyStr(cx, o, c"popup".as_ptr(), pop);
+        let bar = reactive::new_function(cx, c"setMenuBar", set_menu_bar, 1);
+        qjs::JS_SetPropertyStr(cx, o, c"setMenuBar".as_ptr(), bar);
         o
     }
 }
 
-// --- Windows ---------------------------------------------------------------------------
-
-/// The platforms that show windows of the app's own.
-fn opens_windows(os: Os) -> bool {
-    matches!(os, Os::Linux | Os::Windows)
-}
-
-/// Number property `key`, if it is a finite number.
-fn number(cx: *mut JsContext, object: JsValue, key: &CStr) -> Option<f32> {
-    let v = get(cx, object, key);
-    // SAFETY: an inline tag check, then a conversion of a number.
-    let n = unsafe { qjs::JS_IsNumber(v) }.then(|| {
-        let mut n = 0f64;
-        unsafe { qjs::JS_ToFloat64(cx, &mut n, v) };
-        n as f32
-    });
-    free(cx, v);
-    n.filter(|n| n.is_finite())
-}
-
-/// `Window.open`'s options (`id` aside).
-fn window_options(cx: *mut JsContext, o: JsValue) -> Result<WindowOptions, String> {
-    let mut options = WindowOptions::default();
-    options.title = string(cx, o, c"title");
-    let size = get(cx, o, c"size");
-    if is_object(size) {
-        let (w, h) = (number(cx, size, c"width"), number(cx, size, c"height"));
-        free(cx, size);
-        match (w, h) {
-            (Some(w), Some(h)) if w > 0.0 && h > 0.0 => {
-                options.size = Some(Size::new(Points(w), Points(h)));
-            }
-            _ => return Err("size takes a positive width and height".into()),
-        }
-    } else {
-        free(cx, size);
-    }
-    let position = get(cx, o, c"position");
-    if is_object(position) {
-        let (x, y) = (number(cx, position, c"x"), number(cx, position, c"y"));
-        free(cx, position);
-        match (x, y) {
-            (Some(x), Some(y)) => options.position = Some(point(Points(x), Points(y))),
-            _ => return Err("position takes a finite x and y".into()),
-        }
-    } else {
-        free(cx, position);
-    }
-    options.level = match string(cx, o, c"level").as_deref() {
-        None | Some("normal") => WindowLevel::Normal,
-        Some("floating") => WindowLevel::Floating,
-        Some("desktopIcon") => WindowLevel::DesktopIcon,
-        Some(other) => return Err(format!("unknown level {other:?}")),
-    };
-    options.frame = match string(cx, o, c"frame").as_deref() {
-        None | Some("default") => WindowFrameStyle::Default,
-        Some("none") => WindowFrameStyle::None,
-        Some(other) => return Err(format!("unknown frame {other:?}")),
-    };
-    Ok(options)
-}
-
-/// A function with `data` (dups kept).
-fn with_data(
-    cx: *mut JsContext,
-    f: unsafe extern "C" fn(
-        *mut JsContext,
-        JsValue,
-        c_int,
-        *mut JsValue,
-        c_int,
-        *mut JsValue,
-    ) -> JsValue,
-    magic: c_int,
-    data: &mut [JsValue],
-) -> JsValue {
-    // SAFETY: the function keeps dups of `data`.
-    unsafe {
-        qjs::JS_NewCFunctionData(
-            cx,
-            Some(f),
-            0,
-            magic,
-            data.len() as c_int,
-            data.as_mut_ptr(),
-        )
-    }
-}
-
-/// `Window.open(Component, { id, title, size, position, level, frame })`:
-/// renders `Component` in a window of its own, with the app's runtime (it
-/// reads and writes the same signals and modules as the main window);
-/// the window of the same `id`, if it is open, otherwise.
-unsafe extern "C" fn open_window(
+/// `Menu.setMenuBar(mode)`: when the window's menu bar shows, where the
+/// app's window draws one.
+unsafe extern "C" fn set_menu_bar(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let (component, o) = (arg(argc, argv, 0), arg(argc, argv, 1));
-    // SAFETY: an inline check.
-    if !unsafe { qjs::JS_IsFunction(cx, component) } {
-        return throw(cx, "Window.open: the first argument is a component");
-    }
-    if !is_object(o) {
-        return throw(cx, "Window.open: options with an id");
-    }
-    let Some(key) = string(cx, o, c"id") else {
-        return throw(cx, "Window.open: options.id is a string");
-    };
-    let os = os(cx);
-    if !opens_windows(os) {
-        return throw(
-            cx,
-            &format!("Window.open: windows of the app's own are not supported on {os:?} yet"),
-        );
-    }
-    if let Some(w) = menus(cx).windows.borrow().iter().find(|w| w.key == key) {
-        // SAFETY: a dup for the caller.
-        return unsafe { qjs::JS_DupValue(cx, w.handle) };
-    }
-    let options = match window_options(cx, o) {
-        Ok(options) => options,
-        Err(e) => return throw(cx, &format!("Window.open: {e}")),
-    };
-    let node = match dom::create_element(cx, Tag::Modal) {
-        Ok(node) => node,
-        Err(e) => return e,
-    };
-    let Some(id) = dom::node_id(cx, node) else {
-        free(cx, node);
-        return throw(cx, "Window.open: no node");
-    };
-    if let Err(e) = dom::push_op(
-        cx,
-        Op::Command {
-            id,
-            command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(options)))),
-        },
-    ) {
-        free(cx, node);
-        return e;
-    }
-    let (owner, rendered) = reactive::with_root(cx, || {
-        // SAFETY: a new props object for the call, freed after it.
-        let mut args = [unsafe { qjs::JS_NewObject(cx) }];
-        let out = reactive::untracked_with(cx, || unsafe {
-            qjs::JS_Call(cx, component, UNDEFINED, 1, args.as_mut_ptr())
-        });
-        free(cx, args[0]);
-        // SAFETY: an inline check.
-        if unsafe { qjs::JS_IsException(out) } {
-            return Err(out);
-        }
-        let r = dom::insert_value_at(cx, node, out, None);
-        free(cx, out);
-        r
+    let mode = crate::dom::string_arg(cx, arg(argc, argv, 0));
+    let host = crate::classes::host_outside_calls(cx);
+    let mode = mode.and_then(|m| {
+        let value = nsh_core::element::JsHost::new_string(&host, &m).ok()?;
+        let value = nsh_core::element::JsOwned::new(&host, value);
+        <MenuBarMode as nsh_core::element::JsValue>::from_js(value.get()).ok()
     });
-    let inserted = rendered.and_then(|()| dom::insert_node(cx, dom::root_value(cx), node, None));
-    if let Err(e) = inserted {
-        reactive::dispose_owner(cx, owner);
-        free(cx, node);
-        return e;
-    }
-    let mut data = [qjs::JS_NewFloat64(id as f64)];
-    // The user closed the window: it closes as `close()` would.
-    let dismissed = with_data(cx, window_call, 2, &mut data);
-    let r = dom::set_handler(cx, id, EventKind::Dismiss, dismissed);
-    free(cx, dismissed);
-    if let Err(e) = r {
-        return e;
-    }
-    // SAFETY: a new object; it takes the values set on it.
-    let handle = unsafe { qjs::JS_NewObject(cx) };
-    unsafe {
-        let k = qjs::JS_NewStringLen(cx, key.as_ptr().cast(), key.len() as _);
-        qjs::JS_SetPropertyStr(cx, handle, c"id".as_ptr(), k);
-        for (name, magic) in [(c"focus", 0), (c"hide", 1), (c"close", 2)] {
-            let f = with_data(cx, window_call, magic, &mut data);
-            qjs::JS_SetPropertyStr(cx, handle, name.as_ptr(), f);
-        }
-    }
-    menus(cx).windows.borrow_mut().push(AppWindow {
-        key,
-        id,
-        node,
-        owner,
-        // SAFETY: a dup the list owns.
-        handle: unsafe { qjs::JS_DupValue(cx, handle) },
-    });
-    reactive::finish_value(cx, handle)
-}
-
-/// A window handle's `focus()` (0), `hide()` (1) and `close()` (2).
-unsafe extern "C" fn window_call(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-    magic: c_int,
-    data: *mut JsValue,
-) -> JsValue {
-    let mut n = 0f64;
-    // SAFETY: one data value (`open_window`).
-    unsafe { qjs::JS_ToFloat64(cx, &mut n, *data) };
-    let id = n as NodeId;
-    if magic != 2 {
-        if !menus(cx).windows.borrow().iter().any(|w| w.id == id) {
-            return UNDEFINED;
-        }
-        let command = if magic == 0 {
-            DesktopCommand::OrderFront
-        } else {
-            DesktopCommand::Hide
-        };
-        let r = dom::push_op(
-            cx,
-            Op::Command {
-                id,
-                command: Command::Desktop(Box::new(command)),
-            },
-        );
-        return match r {
-            Ok(()) => UNDEFINED,
-            Err(e) => e,
-        };
-    }
-    // Closed already: nothing to do.
-    let w = {
-        let mut windows = menus(cx).windows.borrow_mut();
-        let Some(i) = windows.iter().position(|w| w.id == id) else {
-            return UNDEFINED;
-        };
-        windows.remove(i)
+    host.clear_pending();
+    let Some(mode) = mode else {
+        return throw(cx, "Menu.setMenuBar: the mode is \"shown\" or \"autoHide\"");
     };
-    reactive::dispose_owner(cx, w.owner);
-    let r = dom::remove_node(cx, dom::root_value(cx), w.node);
-    free(cx, w.node);
-    free(cx, w.handle);
-    match r {
-        Ok(()) => reactive::finish_value(cx, UNDEFINED),
+    match send(cx, DesktopCommand::SetMenuBar(mode)) {
+        Ok(()) => UNDEFINED,
         Err(e) => e,
     }
 }
 
-/// `Window`: the registry's module (`setTitle`, `minimize`, ...) with
-/// `open`.
-fn window_module(cx: *mut JsContext) -> JsValue {
-    let window = crate::components::runtime_module(cx, "nsh/desktop", "Window")
-        // SAFETY: a new object when the runtime has none.
-        .unwrap_or_else(|| unsafe { qjs::JS_NewObject(cx) });
-    let open = reactive::new_function(cx, c"open", open_window, 2);
-    // SAFETY: the object takes the function.
-    unsafe { qjs::JS_SetPropertyStr(cx, window, c"open".as_ptr(), open) };
-    window
-}
-
-/// The hand-written exports of `nsh/desktop` (with the registry's `Window`).
+/// The hand-written exports of `nsh/desktop` (with the registry's
+/// `Application`).
 pub(crate) const EXPORTS: &[Item] = &[
     (
         "isAvailable",
@@ -1097,19 +841,59 @@ pub(crate) const EXPORTS: &[Item] = &[
         ),
     ),
     (
-        "titleBar",
-        Export::Value(crate::env::title_bar),
+        "displays",
+        Export::Value(crate::env::displays),
         Ts::value(
-            "The title bar's area while the app hides it (`Window.setTitleBar({ style: \"hidden\" })`),\nin points (reactive): its `height`, and the widths the system's window\ncontrols take at its `left` and `right` ends (macOS's traffic lights,\nWindows' caption buttons, GTK's window buttons). All 0 while the system\nshows its title bar, and off desktops.",
-            "Accessor<TitleBarArea>",
+            "The displays (reactive): their bounds and the parts of them windows\nuse, in points, in screen coordinates. Plugging in a display, unplugging\none or arranging them again changes them. Empty off desktops.",
+            "Accessor<Display[]>",
         ),
     ),
     (
         "Window",
-        Export::Value(window_module),
+        Export::Value(crate::window::window_export),
         Ts::value(
-            "The window: the registry's functions on the main window (`setTitle`,\n`setFrame`, ...) and `open`, which opens windows of the app's own.",
-            "WindowModule & WindowOpener",
+            "A window of the app's own (desktops), rendered from the app's one engine:\nit shares the app's signals, context and theme. Open while `open` is not\nfalse and the user has not closed it (`onOpenChange` tells the app); it\ncloses when it unmounts. `Window.open` is the same imperatively;\n`Window.get` finds an open window by id. Off the desktops `<Window>`\nrenders nothing and `Window.open` throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.",
+            "WindowComponent",
+        ),
+    ),
+    (
+        "currentWindow",
+        Export::Function(crate::window::current_window, 0),
+        Ts::function(
+            "The window the calling component renders in: the nearest `<Window>` (or\n`Window.open`'s) around it, else the main window. Call it while\nrendering and keep the `WindowRef`: outside a component (an event\nhandler, a timer, after an `await`) it throws a `TypeError`.",
+            &["(): WindowRef"],
+        ),
+    ),
+    (
+        "windows",
+        Export::Function(crate::window::all_windows, 0),
+        Ts::function(
+            "The open windows (reactive): the main window, then the app's own in\nthe order they opened.",
+            &["(): WindowRef[]"],
+        ),
+    ),
+    (
+        "focusedWindow",
+        Export::Function(crate::window::focused_window, 0),
+        Ts::function(
+            "The window with the keyboard focus, or `null` while another app has it\n(reactive).",
+            &["(): WindowRef | null"],
+        ),
+    ),
+    (
+        "windowState",
+        Export::Function(crate::window::window_state, 0),
+        Ts::function(
+            "The current window's state (reactive): `currentWindow().state()`.\n`null` off desktops.",
+            &["(): WindowState | null"],
+        ),
+    ),
+    (
+        "titleBar",
+        Export::Function(crate::window::title_bar, 0),
+        Ts::function(
+            "The current window's hidden title bar area, in points (reactive):\n`currentWindow().titleBar()`. All 0 while the system shows its title\nbar, and off desktops.",
+            &["(): TitleBarArea"],
         ),
     ),
     (
@@ -1139,47 +923,130 @@ pub(crate) const EXPORTS: &[Item] = &[
 ];
 
 /// `nsh/desktop`'s types (with the registry's).
-pub(crate) const TYPES: &str = r#"/** `Window.open`'s options. */
-export interface WindowOpenOptions {
-  /** The window's id: opening the same id again returns the open window. */
-  id: string;
-  /** Its title (the main window's when left out). */
-  title?: string;
-  /** Its content size, in points (480×360 when left out). */
-  size?: { width: number; height: number };
-  /** Its top left corner on the screen, in points (where the system puts
-   * it when left out; GTK always places windows itself). */
-  position?: { x: number; y: number };
-  /** How high it floats (`"normal"` by default; not on Linux). */
-  level?: "normal" | "floating" | "desktopIcon";
-  /** `"none"`: no title bar or border, the app draws everything. */
-  frame?: "default" | "none";
+pub(crate) const TYPES: &str = r#"/** `<Window>`'s props: the window's options and attributes, whether it is
+ * open, its content and its events. */
+export interface WindowProps extends WindowOptions {
+  /** Whether it is open (controlled). Without it, open from the start
+   * unless `defaultOpen` is false. */
+  open?: boolean;
+  /** Whether it is open at first while `open` is not given (default true). */
+  defaultOpen?: boolean;
+  /** It closed while `open` held: the user's close press (with
+   * `closeOnPress`), Escape (`closeOnEscape`), losing the focus
+   * (`closeOnBlur`), its parent closing, or the app's `WindowRef.close()`
+   * (`"close"`), so a controlled `open` follows. */
+  onOpenChange?: (event: { open: boolean; reason: WindowCloseCause }) => void;
+  /** The user asked to close it, whether or not `closeOnPress` lets it close. */
+  onClosePress?: (event: { reason: CloseReason }) => void;
+  /** It gained or lost the keyboard focus. */
+  onFocusChange?: (event: { focused: boolean }) => void;
+  /** Its mode changed, or it was minimized or restored. */
+  onModeChange?: (event: { mode: WindowMode; minimized: boolean }) => void;
+  /** It moved or was resized (once the move or resize settles). */
+  onBoundsChange?: (event: { bounds: Bounds }) => void;
+  /** It moved to another display. */
+  onDisplayChange?: (event: { display: Display }) => void;
+  /** What it shows; `currentWindow()` in it is this window. */
+  children?: JSX.Element;
+  /** Takes the window's `WindowRef` once it opens (a variable, a signal or a
+   * function); each opening gives a new one. */
+  ref?: WindowRef | ((node: WindowRef) => void);
 }
 
-/** A window `Window.open` opened. */
-export interface AppWindow {
-  /** The id it was opened with. */
-  readonly id: string;
-  /** Shows it (again, after `hide`) and brings it to the front. */
-  focus(): void;
-  /** Hides it; `focus` shows it again. */
-  hide(): void;
-  /** Closes it: its content unmounts. Also what happens when the user
-   * closes it. */
-  close(): void;
-}
-
-/** Opening windows of the app's own. */
-export interface WindowOpener {
+/** `Window`: the component, and opening and finding windows imperatively. */
+export interface WindowComponent {
+  (props: WindowProps): JSX.Element;
   /** Renders `component` in a window of its own and returns it, or returns
-   * the open window of the same `id`. The window runs in the app's one JS
-   * runtime: it reads and writes the same signals, stores and modules as
-   * the main window, so there is nothing to send between windows. Closing
-   * the main window closes it too. Linux and Windows; elsewhere it throws. */
-  open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
+   * the open window of the same `id`. Throws `ERR_ACCESS_DENIED`
+   * (`permission: "windows"`) when the app's capabilities do not grant
+   * the window, and `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` off the
+   * desktops. */
+  open(component: () => JSX.Element, options: WindowOptions): WindowRef;
+  /** The open window with `id` (`"main"`: the main window), or `null`
+   * (reactive). */
+  get(id: string): WindowRef | null;
 }
 
-/** The hidden title bar's area, in points. */
+/** A window: the main window or one of the app's own. Requests return
+ * nothing: the platform may decline or adjust them, and `state()` reports
+ * what happened. A closed window's requests do nothing. */
+export interface WindowRef {
+  /** The app's id for it (`"main"`: the main window). */
+  readonly id: string;
+  /** It is the main window. */
+  readonly main: boolean;
+  /** The window that owns it, or `null`. */
+  readonly parent: WindowRef | null;
+  /** What the platform reports of it (reactive); `null` off desktops,
+   * before it shows and once it closed. */
+  state(): WindowState | null;
+  /** Its hidden title bar's area, in points (reactive). */
+  titleBar(): TitleBarArea;
+  /** Changes the attributes `attributes` sets; the others keep their
+   * values. An attribute the app's capabilities do not grant is left as it
+   * is, with a warning. */
+  set(attributes: Partial<WindowAttributes>): void;
+  /** Shows it, restoring it when minimized. */
+  show(): void;
+  /** Hides it. */
+  hide(): void;
+  /** Shows it, brings it to the front of its level and focuses it. */
+  focus(): void;
+  /** Closes it, whatever `closeOnPress` says. */
+  close(): void;
+  /** Minimizes it. */
+  minimize(): void;
+  /** Brings it back from being minimized, in the mode it had. */
+  restore(): void;
+  /** Puts it in `mode`; doing it again changes nothing. */
+  setMode(mode: WindowMode): void;
+  /** Moves and sizes it, in points, in screen coordinates; fields left out
+   * keep their values. */
+  setBounds(bounds: { origin?: Partial<Point>; size?: Partial<Size>; animated?: boolean }): void;
+  /** Restores a placement saved from `state().placement`, fitted on the
+   * displays there are now. */
+  setPlacement(placement: WindowPlacement): void;
+  /** Centers it on `display` (its own without it). */
+  center(options?: { display?: DisplayId }): void;
+  /** Asks for the user's attention (the Dock's icon bounces, the taskbar
+   * button flashes); `critical` until the user activates the app. */
+  requestAttention(options?: { critical?: boolean }): void;
+  /** Listens to it; returns a function that stops. A listener registered
+   * while a component renders goes with the component. */
+  on(event: "closePress", listener: (event: { reason: CloseReason }) => void): () => void;
+  on(event: "close", listener: () => void): () => void;
+  on(event: "focusChange", listener: (event: { focused: boolean }) => void): () => void;
+  on(event: "modeChange", listener: (event: { mode: WindowMode; minimized: boolean }) => void): () => void;
+  on(event: "boundsChange", listener: (event: { bounds: Bounds }) => void): () => void;
+  on(event: "displayChange", listener: (event: { display: Display }) => void): () => void;
+}
+
+/** What the platform reports of a window. Rectangles are in points, in
+ * screen coordinates: from the primary display's top left corner, `y`
+ * growing down. */
+export interface WindowState {
+  /** Its mode (minimized apart). */
+  mode: WindowMode;
+  /** It is minimized (in the Dock, the taskbar). */
+  minimized: boolean;
+  /** It is on the screen (not hidden, not minimized). */
+  visible: boolean;
+  /** It has the keyboard focus. */
+  focused: boolean;
+  /** Its outer frame now, window decorations included. */
+  bounds: Bounds;
+  /** Its content area now. */
+  contentBounds: Bounds;
+  /** Its mode and windowed bounds: what to save, and give to
+   * `setPlacement`, to open it the same way next time. */
+  placement: WindowPlacement;
+  /** The display it is on (the one with most of it). */
+  display: Display | null;
+  /** Device pixels per point. */
+  scaleFactor: number;
+}
+
+/** A hidden title bar's area, in points. */
 export interface TitleBarArea {
   /** Its height. */
   height: number;
@@ -1276,6 +1143,13 @@ export interface MenuModule {
    * own). Call it again to change it (in an `effect`, it follows the
    * signals it reads); `null` restores the platform's default menu. */
   setApplicationMenu(items: readonly (MenuItem | null | undefined | false)[] | null): void;
+  /** When the window's menu bar shows on Windows and Linux where the app's
+   * window draws the application menu as a bar (the GPUI backend):
+   * `"shown"` (the default) always; `"autoHide"` only after Alt is pressed
+   * and released alone, until Alt alone hides it again. F10 and Alt with a
+   * menu's initial open a menu either way. macOS's menu bar is the
+   * system's. */
+  setMenuBar(mode: "shown" | "autoHide"): void;
   /** Shows a context menu with its top left corner at `at` (the window's
    * coordinates, points: `Menu.popup(items, e.pagePosition)` in an
    * `onContextMenu`), else at the pointer. The promise resolves once

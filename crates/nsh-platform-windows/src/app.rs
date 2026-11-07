@@ -3,13 +3,14 @@
 //! loop).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
 };
 
 use nsh_core::{
+    desktop::{Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -249,6 +250,8 @@ pub struct AppView {
     surface: Rc<Surface>,
     hwnd: HWND,
     options: RefCell<AppOptions>,
+    /// The mode the main window takes once shown (nsh.json `window`).
+    opening_mode: Cell<Option<WindowMode>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -257,6 +260,18 @@ impl AppView {
     /// A view with no app yet: a child window of `parent`, or a top-level
     /// window (hidden until [`AppView::show`]) when `None`.
     pub fn new(parent: Option<HWND>, options: AppOptions) -> windows::core::Result<Rc<AppView>> {
+        let composed = options.transparent;
+        AppView::make(parent, options, composed)
+    }
+
+    /// [`AppView::new`]; `composed`: a top-level window is shown by a
+    /// composition (no redirection bitmap) although it has a frame, for a
+    /// system backdrop to show through.
+    fn make(
+        parent: Option<HWND>,
+        options: AppOptions,
+        composed: bool,
+    ) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
         if options.notifications {
@@ -270,26 +285,33 @@ impl AppView {
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);
         let transparent = options.transparent && parent.is_none();
-        let hwnd =
-            crate::window::create(&surface, &options.title, options.size, parent, transparent)?;
-        if transparent {
+        let composed = (composed || transparent) && parent.is_none();
+        let hwnd = crate::window::create(&surface, &options.title, options.size, parent, composed)?;
+        if composed {
             *surface.base.borrow_mut() = Some(crate::compose::Composition::new(hwnd)?);
-        }
-        if options.skip_taskbar && parent.is_none() {
-            surface.chrome.skip_taskbar.set(true);
         }
         if parent.is_none() {
             crate::window::set_icon(hwnd, options.icon.as_deref());
+            // The main window's attributes: a normal window's, with the
+            // options'.
+            if let Some(shell) = crate::window::shell(hwnd) {
+                let mut attrs = shell.attrs();
+                attrs.transparent = transparent;
+                attrs.taskbar = !options.skip_taskbar;
+                shell.set(attrs);
+                crate::shell::sync(&surface, hwnd, None, attrs);
+            }
         }
         let view = Rc::new(AppView {
             surface,
             hwnd,
             options: RefCell::new(options),
+            opening_mode: Cell::new(None),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
-        if view.options.borrow().fps {
+        if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
             view.surface.enable_fps();
         }
         Ok(view)
@@ -300,11 +322,69 @@ impl AppView {
         self.hwnd
     }
 
-    /// Shows a top-level view's window.
+    /// Shows a top-level view's window (in the mode nsh.json `window`
+    /// opens it in).
     pub fn show(&self) {
         crate::window::show(self.hwnd);
-        // The taskbar adds a tab for a window being shown.
-        crate::chrome::reapply_skip_taskbar(&self.surface);
+        if let Some(mode) = self.opening_mode.take() {
+            crate::window_state::set_mode(self.hwnd, mode);
+        }
+    }
+
+    /// Gives the main window what nsh.json `window` sets (`launch`): its
+    /// attributes, content size, position, display and mode, or the
+    /// placement it was left in (`kept`). A window shown already takes the
+    /// mode at once, a hidden one when it shows.
+    pub(crate) fn place_main_window(
+        &self,
+        launch: &MainWindowOptions,
+        kept: Option<WindowPlacement>,
+    ) {
+        let hwnd = self.hwnd;
+        if !crate::window_state::top_level(hwnd) {
+            return;
+        }
+        crate::shell::apply(&self.surface, hwnd, &launch.attributes);
+        let mode = match kept {
+            Some(placement) => {
+                crate::window_state::set_placement(hwnd, placement);
+                placement.mode
+            }
+            None => {
+                let content = launch
+                    .default_size
+                    .filter(|s| s.width.0 >= 1.0 && s.height.0 >= 1.0);
+                match (launch.default_position, launch.display) {
+                    (Some(WindowPosition::At(at)), display) => {
+                        let content = content.or_else(|| content_size(hwnd));
+                        if let Some(content) = content {
+                            crate::window_state::open_at(hwnd, content, Some(at), None, display);
+                        }
+                    }
+                    // The main window has no parent: centered on its display.
+                    (Some(_), display) | (None, display @ Some(_)) => {
+                        if let Some(content) = content.or_else(|| content_size(hwnd)) {
+                            crate::window_state::open_at(hwnd, content, None, None, display);
+                        }
+                    }
+                    (None, None) => {
+                        if let Some(content) = content {
+                            crate::window_state::size_content(hwnd, content);
+                        }
+                    }
+                }
+                launch.default_mode.unwrap_or(WindowMode::Normal)
+            }
+        };
+        // SAFETY: a plain query.
+        let visible =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() };
+        if visible {
+            crate::window_state::set_mode(hwnd, mode);
+        } else {
+            self.opening_mode
+                .set(Some(mode).filter(|m| *m != WindowMode::Normal));
+        }
     }
 
     /// The channel with the apps this view runs (`nsh/host`;
@@ -366,6 +446,8 @@ impl AppView {
             host: options.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
+            windows: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -444,6 +526,7 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         file_requests: true,
         notifications: true,
+        audio: true,
         ..Environment::default()
     }
 }
@@ -458,6 +541,7 @@ fn initial_environment() -> Environment {
 /// after the graphics DLLs and their driver threads are gone, and the
 /// process would end with a stray exit code.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+    wait_for_replaced_process();
     options.notifications = true;
     /// The app, moved to the UI thread.
     struct Job(AppSource, AppOptions);
@@ -486,8 +570,53 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     }
 }
 
+thread_local! {
+    /// The standalone app's UI thread ([`run_app`]): what may restart.
+    static STANDALONE: Cell<bool> = const { Cell::new(false) };
+    /// The app asked to start again when its run ends.
+    static RESTART: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the standalone app ([`run_app`]) to start again once its run has
+/// ended ([`nsh_core::restart`]); the caller then quits it. A view embedded
+/// in another app leaves the app's lifecycle to that app: false there, with
+/// nothing marked.
+pub(crate) fn request_restart() -> bool {
+    STANDALONE.get() && {
+        RESTART.set(true);
+        true
+    }
+}
+
+/// Waits, at most [`nsh_core::restart::WAIT_LIMIT`], for the process this
+/// one replaces when the app restarted ([`nsh_core::restart::WAIT_FOR_ENV`]),
+/// so that the two never run side by side.
+fn wait_for_replaced_process() {
+    use windows::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+    let Some(pid) = nsh_core::restart::wait_for_pid() else {
+        return;
+    };
+    // Programs the app starts must not wait for it too.
+    // SAFETY: called at the start of `run_app`, before it starts the UI
+    // thread or anything else that reads the environment.
+    unsafe { std::env::remove_var(nsh_core::restart::WAIT_FOR_ENV) };
+    // SAFETY: plain calls; the handle is closed once waited on. A process
+    // that has exited already cannot be opened, and nothing waits.
+    unsafe {
+        if let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            let limit = nsh_core::restart::WAIT_LIMIT.as_millis() as u32;
+            let _ = WaitForSingleObject(process, limit);
+            let _ = CloseHandle(process);
+        }
+    }
+}
+
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    STANDALONE.set(true);
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
@@ -500,7 +629,42 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     {
         return std::process::ExitCode::SUCCESS;
     }
-    let view = match AppView::new(None, options.clone()) {
+    // The app to run, when it is known now (a dev server's comes later).
+    let app = match &source {
+        AppSource::Rust(root) => Some(App::Rust(root.clone())),
+        AppSource::Bundle(bundle) => Some(App::Js(bundle.clone())),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(_) => None,
+    };
+    // nsh.json `window` (a bundle's, or compiled into a Rust app's root):
+    // known before the window is made, so that its first frame has it.
+    let launch = app
+        .as_ref()
+        .and_then(App::main_window)
+        .cloned()
+        .unwrap_or_default();
+    let mut options = options;
+    if launch.attributes.transparent == Some(true) {
+        options.transparent = true;
+    }
+    // A backdrop shows through a window without a redirection bitmap.
+    let composed = options.transparent
+        || launch
+            .attributes
+            .backdrop
+            .is_some_and(|b| b != Backdrop::None);
+    // `restoreBounds`: where its last run left it (the engine keeps it
+    // as it changes), fitted on the displays there are.
+    let kept = match app {
+        Some(app) if launch.restore_bounds => {
+            let mut config = EngineConfig::new(app);
+            config.data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
+            config.storage = options.storage.clone();
+            config.main_window_placement(&crate::window_state::displays())
+        }
+        _ => None,
+    };
+    let view = match AppView::make(None, options.clone(), composed) {
         Ok(view) => view,
         Err(err) => {
             fatal_error(&format!("Cannot open a window: {err}"));
@@ -516,6 +680,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::system::environment_applied(view.surface());
     crate::linking::attach(view.surface());
     install_shortcuts(&view);
+    view.place_main_window(&launch, kept);
     view.show();
     let code = crate::window::run_loop();
     view.stop();
@@ -523,11 +688,34 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     // SAFETY: pairs the `OleInitialize` above; nothing on this thread uses
     // OLE afterwards.
     unsafe { windows::Win32::System::Ole::OleUninitialize() };
+    STANDALONE.set(false);
+    // The new process waits for this one to exit ([`wait_for_replaced_process`]).
+    if RESTART.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on restart; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::restart::spawn_after_exit() {
+            log::error!("cannot restart the app: {err}");
+        }
+    }
     if code == 0 {
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
     }
+}
+
+/// The content size of `hwnd` in points.
+fn content_size(hwnd: HWND) -> Option<Size<nsh_core::Points>> {
+    let mut rect = windows::Win32::Foundation::RECT::default();
+    // SAFETY: a query with a local out value.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect) }.ok()?;
+    let scale = crate::window::dpi(hwnd) as f32 / 96.0;
+    Some(Size::new(
+        px((rect.right - rect.left) as f32 / scale),
+        px((rect.bottom - rect.top) as f32 / scale),
+    ))
 }
 
 /// The standalone app's window shortcuts: F11 toggles full screen, as in
@@ -577,7 +765,7 @@ pub fn fatal_error(message: &str) {
 mod tests {
     use windows::Win32::UI::WindowsAndMessaging::{
         DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, WS_CAPTION,
-        WS_EX_NOREDIRECTIONBITMAP, WS_THICKFRAME,
+        WS_EX_NOREDIRECTIONBITMAP,
     };
 
     use super::*;
@@ -605,15 +793,13 @@ mod tests {
         )
         .unwrap();
         let (style, ex) = styles(view.hwnd());
-        assert_eq!(
-            style & (WS_CAPTION.0 | WS_THICKFRAME.0),
-            0,
-            "no system frame"
-        );
+        assert_eq!(style & WS_CAPTION.0, 0, "no system frame");
         assert_ne!(ex & WS_EX_NOREDIRECTIONBITMAP.0, 0, "no redirection bitmap");
         let surface = view.surface();
         assert!(surface.transparent());
-        assert!(surface.chrome.skip_taskbar.get());
+        let shell = crate::window::shell(view.hwnd()).unwrap();
+        assert!(!shell.attrs().taskbar);
+        assert!(shell.attrs().frameless());
         assert_eq!(
             crate::system::window_background(surface),
             nsh_core::Color::TRANSPARENT
@@ -635,7 +821,7 @@ mod tests {
         assert_ne!(style & WS_CAPTION.0, 0);
         assert_eq!(ex & WS_EX_NOREDIRECTIONBITMAP.0, 0);
         assert!(!view.surface().transparent());
-        assert!(!view.surface().chrome.skip_taskbar.get());
+        assert!(crate::window::shell(view.hwnd()).unwrap().attrs().taskbar);
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(view.hwnd()) };
     }

@@ -516,27 +516,43 @@ pub(crate) fn install_keyboard(surface: &Rc<Surface>) {
             return;
         }
         installed.borrow().set(Some(&window));
-        let keys = gtk::EventControllerKey::new();
-        let pressed = weak.clone();
-        keys.connect_key_pressed(move |_, key, _, modifiers| match pressed.upgrade() {
-            Some(surface) if key_pressed(&surface, key, modifiers) => glib::Propagation::Stop,
-            _ => glib::Propagation::Proceed,
-        });
-        window.add_controller(keys);
-        let weak = weak.clone();
-        window.connect_focus_widget_notify(move |window| {
-            if let (Some(surface), Some(focus)) = (weak.upgrade(), GtkWindowExt::focus(window)) {
-                reveal(&surface, &focus);
+        if let Some(surface) = weak.upgrade() {
+            watch_keys(&surface, &window, root);
+        }
+    });
+}
+
+/// Lets the keyboard scroll the scroll views under `root` in `window`
+/// (the main one, or one of the app's own with its own root view).
+pub(crate) fn watch_keys(surface: &Rc<Surface>, window: &gtk::Window, root: &NshView) {
+    let keys = gtk::EventControllerKey::new();
+    let pressed = Rc::downgrade(surface);
+    let on = root.downgrade();
+    keys.connect_key_pressed(
+        move |_, key, _, modifiers| match (pressed.upgrade(), on.upgrade()) {
+            (Some(surface), Some(root)) if key_pressed(&surface, &root, key, modifiers) => {
+                glib::Propagation::Stop
             }
-        });
+            _ => glib::Propagation::Proceed,
+        },
+    );
+    window.add_controller(keys);
+    let weak = Rc::downgrade(surface);
+    let on = root.downgrade();
+    window.connect_focus_widget_notify(move |window| {
+        if let (Some(surface), Some(root), Some(focus)) =
+            (weak.upgrade(), on.upgrade(), GtkWindowExt::focus(window))
+        {
+            reveal(&surface, &root, &focus);
+        }
     });
 }
 
 /// Scrolls the scroll views around the newly focused `focus` (animated)
 /// so that the view hosting it shows, as iOS and Android do for the
 /// focused field.
-fn reveal(surface: &Rc<Surface>, focus: &gtk::Widget) {
-    let root = surface.root.upcast_ref::<gtk::Widget>();
+fn reveal(surface: &Rc<Surface>, root: &NshView, focus: &gtk::Widget) {
+    let root = root.upcast_ref::<gtk::Widget>();
     if focus == root || !focus.is_ancestor(root) {
         return;
     }
@@ -573,11 +589,15 @@ fn reveal(surface: &Rc<Surface>, focus: &gtk::Widget) {
 }
 
 /// A key reached the window: whether it scrolled a view.
-fn key_pressed(surface: &Rc<Surface>, key: gdk::Key, modifiers: gdk::ModifierType) -> bool {
+fn key_pressed(
+    surface: &Rc<Surface>,
+    root: &NshView,
+    key: gdk::Key,
+    modifiers: gdk::ModifierType,
+) -> bool {
     let Some((horizontal, m)) = key_move(key, modifiers) else {
         return false;
     };
-    let root = &surface.root;
     if !root.is_mapped() {
         return false;
     }

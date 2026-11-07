@@ -31,6 +31,7 @@ impl Headless {
             .bounds_in_root(target)
             .ok_or_else(|| format!("`{selector}` is not on screen"))?
             .center();
+        self.activate_window_of(target);
         if let Some(id) = self.screen.context_menu_target(target) {
             let origin = self
                 .screen

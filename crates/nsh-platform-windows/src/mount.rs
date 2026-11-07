@@ -184,7 +184,9 @@ impl Mounter {
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = &self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // A window's root takes its window's size, which the core
+                // lays it out at (`set_root_size`).
+                if *id == ROOT_ID || crate::app_window::is_window(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;

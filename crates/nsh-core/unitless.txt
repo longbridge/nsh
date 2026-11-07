@@ -75,12 +75,23 @@ animation::ops::Easing::Bezier.2                                 # easing curve 
 animation::ops::Easing::Bezier.3                                 # easing curve coordinates (unit square)
 animation::ops::Operand::Const.0                                 # a generic animated value (any prop: opacity, a color channel, a length)
 animation::ops::Output::Numbers.0                                # generic animated values
+audio::AudioCommand::Play.rate                                   # a playback rate multiplier
+audio::AudioCommand::Play.volume                                 # audio volume, 0..1
+audio::PlayerSettings.rate                                       # a playback rate multiplier
+audio::PlayerSettings.volume                                     # audio volume, 0..1
+audio::RATE                                                      # a playback rate multiplier
+audio::VOLUME                                                    # audio volume, 0..1
+audio::check_rate ->                                             # a playback rate multiplier
+audio::check_rate(rate)                                          # a playback rate multiplier
+audio::check_volume ->                                           # audio volume, 0..1
+audio::check_volume(volume)                                      # audio volume, 0..1
 canvas::CanvasOp::MiterLimit.0                                   # a ratio of the stroke width
 canvas::Num::Const.0                                             # a generic number (a JS value, a recorded slot)
 canvas::Num::get ->                                              # a generic number (a JS value, a recorded slot)
 canvas::Num::get(slot)                                           # a generic number (a JS value, a recorded slot)
 canvas::ViewBoxFit::transform ->                                 # a transform matrix (scales, and offsets in points)
 canvas::damage::DamageScan::damage(value)                        # a generic number (a JS value, a recorded slot)
+canvas::damage::DamageScan::painted_after(value)                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_path(slot)                                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
@@ -89,6 +100,9 @@ core::Core::set_zoom(scale)                                      # a zoom scale 
 css::Color::with_alpha(factor)                                   # an opacity factor
 desktop::menu_icon::fade(opacity)                                # an opacity factor
 desktop::menu_icon::want(scale)                                  # device pixels per point, a ratio
+desktop::window_state::Display.refresh_rate                     # a refresh rate (Hz)
+desktop::window_state::Display.scale_factor                     # device pixels per point, a ratio
+desktop::window_state::WindowState.scale_factor                 # device pixels per point, a ratio
 effects::Filter::Brightness.0                                    # a filter amount (1 leaves the image as it is)
 effects::Filter::Contrast.0                                      # a filter amount (1 leaves the image as it is)
 effects::Filter::Grayscale.0                                     # a filter amount (1 leaves the image as it is)
@@ -333,6 +347,8 @@ element::animated::sample_spring(fps)                                 # time
 element::animated::sample_spring(from)                                # an animated value (any quantity)
 element::animated::sample_spring(to)                                  # an animated value (any quantity)
 element::asset::ImageAsset.scales                                     # pixel densities (device pixels per point)
+element::audio::Sound::play(rate)                                     # a playback rate multiplier
+element::audio::Sound::play(volume)                                   # audio volume, 0..1
 element::builder::Image::fade_duration(ms)                            # time
 element::builder::Interactive::long_press_delay(ms)                   # time
 element::builder::Text::max_font_size_multiplier(multiplier)          # a font scale factor

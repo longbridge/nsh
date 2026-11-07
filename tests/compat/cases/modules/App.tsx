@@ -6,7 +6,9 @@ import { type JSX, View, mount, signal } from "nsh";
 import ModStandardAccess from "./mod-standard-access";
 import ModAccessibility from "./mod-accessibility";
 import ModAndroid from "./mod-android";
+import ModAudio from "./mod-audio";
 import ModClipboard from "./mod-clipboard";
+import ModFps from "./mod-fps";
 import ModUrlScheme from "./mod-url-scheme";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
@@ -19,12 +21,15 @@ import ModPicker from "./mod-picker";
 import ModNotifications from "./mod-notifications";
 import ModSpeech from "./mod-speech";
 import ModStorage from "./mod-storage";
+import ModUpdater from "./mod-updater";
 
 const cases: Record<string, () => JSX.Element> = {
   "mod-standard-access": ModStandardAccess,
   "mod-accessibility": ModAccessibility,
   "mod-android": ModAndroid,
+  "mod-audio": ModAudio,
   "mod-clipboard": ModClipboard,
+  "mod-fps": ModFps,
   "mod-url-scheme": ModUrlScheme,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,
@@ -37,6 +42,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-notifications": ModNotifications,
   "mod-speech": ModSpeech,
   "mod-storage": ModStorage,
+  "mod-updater": ModUpdater,
 };
 const shown = signal("");
 
