@@ -295,6 +295,7 @@ Things that were found the hard way. Read the section of the area you change bef
   of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
   each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
   the gallery's index ran at about half the frame rate before (#519).
+- **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
@@ -350,6 +351,11 @@ Things that were found the hard way. Read the section of the area you change bef
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
   the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
   so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+- **Android 9, GIFs cannot play from an `AnimatedImageDrawable`**: its later frames decode on hwui's `AnimatedImageTh`, and
+  reading the source bytes there (`ByteArrayStream::read`, `SkGIFFrameContext`) needs a JNIEnv that thread does not have: the
+  process aborts with "Failed to get JNIEnv for JavaVM". Any `ImageDecoder` source backed by memory hits it; animated WebP does
+  not. Below API 30 a GIF plays from `android.graphics.Movie` (`MovieDrawable`): each view decodes its own, on the thread
+  that draws it.
 - **Android widgets**: `MediaPlayer.setPlaybackParams` starts playback (set the rate only while playing) and a paused player draws nothing until
   it seeks; `WebView` JavaScript bridge calls arrive on a binder thread (post to the UI thread).
 - **Android, negative letter spacing**: Minikin adds half the spacing on both sides of each glyph and trims the halves at line edges,
@@ -460,6 +466,17 @@ Things that were found the hard way. Read the section of the area you change bef
   frame, all of it lost on a field. The agent's swipes ease in and out, a quarter frame apart as a drag's samples,
   so their first moves stay within the slop and each loses about the slop wherever it lands.
 
+- **Screenshots are copied from the windows' surfaces** (`PixelCopy`, `TestAgent.screenshot`): a view tree drawn
+  into a software `Canvas` holds only what the CPU draws, without `TextureView`s (video), `RenderEffect` filters, the
+  backdrop's blur (it draws a `RenderNode`, on hardware canvases only) and hardware layers. A copy holds the last frame
+  the window drew, so the agent invalidates the windows and waits for their next frame first (a frame commit callback,
+  two Choreographer frames on API 28); the copy is reported on a thread of its own, as the main thread runs the
+  request. A `<modal>` is a dialog window of its own (`ModalHost`), so the activity's copy holds none of it: the
+  agent copies each shown modal's window and the system alert's and places them over it, bottom to top. The dim
+  behind a dialog is the compositor's layer between the windows: the agent fills the picture so far with black at
+  the dialog's `dimAmount` (`FLAG_DIM_BEHIND`) before placing the dialog's copy over it. A window without a surface
+  (an activity stopped behind the lock screen of a phone) is drawn into a bitmap, the views as the CPU draws them.
+
 ## macOS, AppKit
 
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
@@ -475,6 +492,13 @@ Things that were found the hard way. Read the section of the area you change bef
   a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
   current frame and style (including any later title bar change in the same batch).
+
+- **From macOS 26 a window with a toolbar has larger corners than one with only a title bar** (seen on 26.6), even an
+  empty `NSToolbar` in `UnifiedCompact`; the radius is the system's and no API sets it. A hidden title bar of the app's
+  height therefore centers the traffic lights itself instead of selecting a toolbar style (`chrome::TrafficLights`).
+  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, a screen change, leaving full
+  screen), so they are placed again from their `NSViewFrameDidChangeNotification`s, which arrive inside that layout,
+  before anything is drawn.
 
 - **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
@@ -506,7 +530,7 @@ Things that were found the hard way. Read the section of the area you change bef
   agent's input posts to the application's queue (`synth.rs`).
 - `CALayer.backgroundFilters` (iOS's backdrop blur) do nothing in AppKit windows, `layerUsesCoreImageFilters` or
   not, and Core Image is not even loaded (`CIFilter` is missing) unless something links it. Backdrop blur is an
-  `NSVisualEffectView` with within-window blending; it needs `wantsLayer` set when created, or it has no layer to order
+  `NSVisualEffectView` with withinWindow blending; it needs `wantsLayer` set when created, or it has no layer to order
   and clip until AppKit makes one.
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
   outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface
@@ -530,11 +554,27 @@ Things that were found the hard way. Read the section of the area you change bef
   children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
   `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
-  filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
-  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, the test agent's screenshot, shows them: WebKit
-  draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
+  filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
+  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages
+  and dialogs that leave as images take their live web views and videos along (`native::lend`). The test agent's
+  screenshots are the window server's instead (next item).
+- `CARenderer` (`rendererWithMTLTexture:options:`) renders only a layer tree in a context of its own: given a window's
+  content layer it rendered it offscreen and left the window's content blank on screen (macOS 27), so it cannot take a
+  picture of a shown window. It also renders nothing unless the layer is set inside a committed `CATransaction`.
+- `CGWindowListCreateImage` / `CGWindowListCreateImageFromArray` take pictures of the app's own windows without the
+  Screen Recording permission (`CGPreflightScreenCaptureAccess()` false, macOS 27): the window server's composite,
+  backdrop blur included. They are deprecated and gone from the SDK's headers since macOS 15 (still exported: look
+  them up with `dlsym`). The array lists window numbers as raw values (no CFNumbers, no callbacks), frontmost first.
+  The picture lags the last `CATransaction` commit by a frame or two: flush and wait (50 ms) before taking it.
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
+- While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
+  occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
+  keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and
+  `kCGSSessionOnConsoleKey` tell it (`system::screen_locked`). Not yet verified on a locked machine: that a lock posts
+  `NSApplicationDidChangeOcclusionStateNotification` only after the session dictionary says locked (else a test's
+  `lifecycle()` reads `background` until the next environment change), and that `WKWebView` takes a press handed to
+  `mouseDown:` directly in an inactive app outside `sendInput` (`agent::mouse`).
 
 ## Windows, Win32
 
@@ -577,13 +617,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Web, browsers
 
-- **WebKit takes an import map only before the document's first module script**: one added after it is ignored,
-  and the app's `import "nsh"` failed with "Module name, 'nsh' does not resolve to a valid URL" (iOS 18.3 Safari; a
-  `document.open()` in between does not reset it, a dynamic `import()` from a classic script counts as a module
-  script, and navigating the frame gives it a new realm; iOS 26.5 Safari and Chrome 152 merge the later map). The realm's import map
-  goes in before the bootstrap module, with the native modules' facades made from `nativeExports` (`runtime.js`);
-  a module the app imports whole is mapped only once the namespaces exist, which needs a browser that merges
-  import maps (Chrome 133 and later).
+- **Firefox and older WebKit ignore an import map added after the first module script**: Firefox 153 rejected
+  the development host's bare `nsh` import, and iOS 18.3 Safari reported "Module name, 'nsh' does not resolve to a
+  valid URL". A `document.open()` does not reset this state; a dynamic `import()` from a classic script also
+  starts module loading. The realm bootstrap is therefore a self-contained generated classic script: it builds
+  the namespaces before `runtime.js` installs one complete map and loads `realm.js`, the first module. This also
+  covers namespace imports without relying on multiple import maps. Regenerate `bootstrap.js` with the command
+  in `docs/dev/web.md`; a module-mode minifier removes its strict directive, so the publisher restores the
+  directive before loading the result as a classic script.
 - **WebKit does not hand a `<link rel=preload as=fetch>` still in flight to the `fetch` of the same URL**: the
   `fetch` downloads the file again, and only once the preload has finished does it come from the HTTP cache (iOS 26.5
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
@@ -605,6 +646,12 @@ Things that were found the hard way. Read the section of the area you change bef
   `wheel` events that were not cancelable, and the page scrolled under it although the root's listener prevented
   them (headless Chrome 156: `cancelable: false`, `scrollY` 300 after a 300 px wheel). The layer has a blocking
   listener of its own (`raise`).
+- **A clip with `corner-shape` corners breaks the backdrop filters inside it**: under a view with `overflow: clip`
+  (or `hidden`), a radius and `corner-shape: superellipse(…)`, a descendant's `backdrop-filter` showed nothing, or
+  blurred its whole box with its `mask-image` ignored (Chrome 156, headed and headless alike; the gallery's
+  "Progressive blur", inside continuous-cornered cards). Either one alone is fine, as are circular corners. A clipping
+  view with continuous corners (`nsh-curve-clip`) takes circular corners of its radius while a backdrop-filtered view
+  (`nsh-backdrop`) is inside it (`nsh.js`, `placeCorners`).
 - **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of

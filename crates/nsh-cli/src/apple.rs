@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 /// `nsh.json` `"ios"` or `"macos"`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AppleConfig {
     /// Keys added to the app's `Info.plist`.
     #[serde(default)]

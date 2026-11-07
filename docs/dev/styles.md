@@ -30,7 +30,8 @@
 - **Extensions**, the keys and classes NSH has that CSS / Tailwind do not: `placeholderColor` (`<Input>`'s
   `InputStyle`), `selectionColor` (inputs and selectable texts), `tintColor` (`<Image>`; class `tint-*`),
   `borderCurve` (`continuous` corners, class `corner-squircle`; the web draws them with CSS `corner-shape: superellipse()` fitted to the native curve, where the browser has it), `glassEffect` (Apple's
-  Liquid Glass on iOS 26 / macOS 26, the `backdropFilter` elsewhere), `writingDirection` (a text's base direction, from
+  Liquid Glass on iOS 26 / macOS 26, the `backdropFilter` elsewhere), `glassTintColor` (the tint of that
+  glass on iOS 26 and macOS 26), `writingDirection` (a text's base direction, from
   its content by default as the platforms' text views do, beside `direction`, the layout's), `textAlignVertical` (where
   text shorter than its `<Text>` box sits); value forms past CSS's:
   `transform` lists, `translate` / `scale` pairs, shadows' layers (`{ x, y, blur, spread, color, inset }`),
@@ -237,9 +238,11 @@
   `grayscale`, `hue-rotate`, `invert`, `saturate`, `sepia`, `opacity`, `blur`, `drop-shadow`; color filters are composed into one
   matrix), `backdropFilter` (blur; iOS chooses its system material through the
   `ios={{ backdropMaterial }}` prop: `ultraThin` by default, then `thin`, `regular`, `thick`, `chrome`;
-  the radius approximates strength as a fraction of the material, rather than a Gaussian radius), `glassEffect`
+  the radius approximates strength as a fraction of the material, rather than a Gaussian radius; macOS takes
+  an explicit `macos={{ backdrop }}` instead (below), and blurs with `NSVisualEffectView` otherwise), `glassEffect`
   (Apple's Liquid Glass, drawn in the `backdropFilter`'s place on iOS 26 and macOS 26 and later (`UIGlassEffect`, `NSGlassEffectView`, both looked up at run time) and nowhere else, so give a glass
-  view a blur to fall back to), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
+  view a blur to fall back to), `glassTintColor` (the tint of the native glass on iOS 26 and macOS 26;
+  `null` restores its native default, an explicit transparent color remains a tint, and the earlier-system blur fallback is unchanged), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
   filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
   duration, delay, easing) and `animation*` (Tailwind's `spin` / `ping` / `pulse` / `bounce`), `display: grid` with
   `gridTemplateColumns/Rows` (line names: `grid.rs` turns them into taffy's `grid_template_*_names`, one set per
@@ -278,7 +281,7 @@
   `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever
   order the widths come in, as `outlineStyle: "none"` does, `Pending`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`
   (`continuous`: corners easing into the edges, Figma's 60% corner smoothing, shrinking to circular where the box is too
-  small, so pills stay pills; the outline geometry is `nsh_core::shape::rounded_rect`, ported to `Decor.java`; iOS layers that
+  small, so pills stay pills; the outline geometry is `nsh_core::shape::rounded_rect`, ported to `Decor.java`, where Android below API 30 casts the shadow of the smallest corner's round rect instead, as API 28 and 29 take only convex outlines and smoothed corners are not always convex; iOS layers that
   draw their own corners use `cornerCurve`), `overflow`, `opacity`,
   the transform properties as CSS composes them (`Style::set_transform`: `translate`, `rotate`, `scale`, then
   `transform`, CSS's string of `translate()` / `scale()` / `rotate()` / `rotateX()` / `rotateY()` / `skew()` /
@@ -288,7 +291,7 @@
   the `transform`): a style's `scale` replaces a class's scale and leaves its rotation. The list keeps how many steps
   each property holds (`Pending::transform_counts`), so setting one moves the animated bindings of those after it.
   Applied right to left like CSS; Android has no skew, `zIndex` (stable order of the native views), `boxShadow`
-  (CSS's, the one shadow of styles, classes and typed styles alike; `effects.rs`), `tintColor` (images), `objectPosition` (images: where the fitted image sits, CSS's `object-position`; `images.md`), `android={{ elevation }}` (a prop, not a style: Android's material shadow), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
+  (CSS's, the one shadow of styles, classes and typed styles alike; `effects.rs`), `tintColor` (images), `glassTintColor` (Liquid Glass), `objectPosition` (images: where the fitted image sits, CSS's `object-position`; `images.md`), `android={{ elevation }}` (a prop, not a style: Android's material shadow), `macos={{ backdrop }}` (a prop, not a style: macOS's `NSVisualEffectView` material, `MacOsBackdrop` in `effects.rs`: an explicit one selects the native view with no blur needed, and wins over `glassEffect` and `backdropFilter`; `None` keeps the fallback), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
   Android sets the pivot), `backfaceVisibility` (iOS `doubleSided`; Android hides the view while its rotations turn it away). `style` may be an array of styles merged left to right
   (falsy entries skipped), decoded in Rust. In one style object (an array is flattened into one, as React Native does) a
   longhand wins over its shorthand whatever the key order (`StylePatch::set`, `StyleKey::longhands`: border widths and

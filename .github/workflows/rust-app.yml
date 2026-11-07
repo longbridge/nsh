@@ -31,7 +31,11 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-app.yml"
+      - ".github/actions/cargo/**"
   pull_request:
+    # `closed` runs nothing, but it takes the pull request's concurrency group
+    # and so cancels its runs still queued or running once it merges or closes.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
@@ -60,6 +64,7 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-app.yml"
+      - ".github/actions/cargo/**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -68,7 +73,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-app-${{ github.ref }}
+  group: rust-app-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -81,6 +86,13 @@ env:
 
 jobs:
   check:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     strategy:
       fail-fast: false
       matrix:
@@ -104,11 +116,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust-app
       - name: Clippy
         run: cargo clippy -p gallery-native --all-targets --locked -- -D warnings
       # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
@@ -131,6 +144,13 @@ jobs:
   # The same crate compiled into the app's own web runtime: `nsh package
   # --target web` builds it for wasm32 and publishes the site.
   web:
+    # Nothing for drafts or a pull request being closed.
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
+    # push cancels this run before it takes one.
+    environment:
+      name: ci-debounce
+      deployment: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -146,11 +166,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust-app-web
       - name: Build the command line
         run: cargo build -p nsh-cli --locked
       - name: Publish the Rust gallery for the web
@@ -204,6 +225,10 @@ jobs:
           for file in device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
             ./target/debug/nsh test "examples/gallery/tests/$file.test.tsx" --target web
           done
+          # This host drives a desktop mouse, not the file's held-finger case.
+          # The full file, including touch long press, also runs headless above.
+          ./target/debug/nsh test examples/gallery/tests/context-menu-press.test.tsx --target web --filter Shift+F10
+          ./target/debug/nsh test examples/gallery/tests/context-menu-press.test.tsx --target web --filter "a tap"
           ./target/debug/nsh test examples/gallery/tests/data-table-interactions.test.tsx --target web --filter "column's classes style"
           ./target/debug/nsh test examples/gallery/tests/environment.test.tsx --target web --filter appearance
           ./target/debug/nsh test examples/gallery/tests/controls.test.tsx --target web --filter 'one-time code'

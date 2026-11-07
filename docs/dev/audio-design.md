@@ -159,7 +159,8 @@ player.dispose();
   (`Environment::audio`, or the core has an `AudioBackend`).
 - `Sound.load(src: string): Promise<Sound>`: fetches the bytes and has the
   platform decode them to PCM. `src` is what `Image` takes: a bundled asset
-  (relative path or `asset:`), a `file:` URL, `data:` / `blob:`, or `http(s)`.
+  (relative path or `asset:`; TSX imports `.wav`, `.m4a`, `.aac` and `.mp3`
+  files as their `asset:/` URL and ships them, `nsh-bundler`'s `plugin.rs`), a `file:` URL, `data:` / `blob:`, or `http(s)`.
   The bytes come through the image loader's L1–L3 (`image-loading-design.md`:
   assets, files, the remote loader with its disk cache, dedup and limits) so
   `Sound.load` never writes a second loader; the platform only decodes.

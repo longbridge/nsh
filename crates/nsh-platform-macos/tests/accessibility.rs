@@ -4,8 +4,13 @@
 //! so this test runs without libtest's harness, on the process's own.
 
 #[cfg(target_os = "macos")]
+#[path = "accessibility/table.rs"]
+mod table;
+
+#[cfg(target_os = "macos")]
 fn main() {
     macos::run();
+    table::run();
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -14,7 +19,7 @@ fn main() {}
 #[cfg(target_os = "macos")]
 mod macos {
     use std::{
-        sync::atomic::{AtomicBool, Ordering},
+        sync::atomic::{AtomicBool, AtomicU32, Ordering},
         time::{Duration, Instant},
     };
 
@@ -30,6 +35,9 @@ mod macos {
 
     /// The test sets it to change the texts inside the elements.
     static RENAMED: AtomicBool = AtomicBool::new(false);
+
+    /// The scale requested by the frame checks, in percent.
+    static ZOOM: AtomicU32 = AtomicU32::new(100);
 
     /// An option and a tree item holding only a text, an option with a
     /// label of its own, and a button holding only a text.
@@ -70,6 +78,102 @@ mod macos {
                     .on_press(|| {})
                     .child(name("Save", "Save all")),
             )
+            .child(geometry())
+    }
+
+    /// Fixed geometry makes the expected screen frames independent of
+    /// both AppKit's view conversions and Core Animation's conversions.
+    #[component]
+    fn Geometry() -> impl IntoElement {
+        let zoom = signal(1.0);
+        set_interval(Duration::from_millis(20), move || {
+            zoom.set(ZOOM.load(Ordering::SeqCst) as f32 / 100.0);
+        });
+        view()
+            .absolute()
+            .left(px(40.0))
+            .top(px(100.0))
+            .w(px(200.0))
+            .h(px(160.0))
+            .scale(move || zoom.get())
+            .child(
+                text("Scaled row")
+                    .test_id("scaled-row")
+                    .absolute()
+                    .left(px(20.0))
+                    .top(px(30.0))
+                    .w(px(80.0))
+                    .h(px(20.0)),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .left(px(30.0))
+                    .top(px(70.0))
+                    .w(px(100.0))
+                    .h(px(60.0))
+                    .origin_top_left()
+                    .scale_x(0.5)
+                    .scale_y(1.5)
+                    .child(
+                        text("Nested")
+                            .test_id("nested-row")
+                            .absolute()
+                            .left(px(10.0))
+                            .top(px(8.0))
+                            .w(px(40.0))
+                            .h(px(12.0))
+                            .translate_x(px(6.0))
+                            .translate_y(px(4.0)),
+                    ),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .left(px(100.0))
+                    .top(px(20.0))
+                    .w(px(50.0))
+                    .h(px(50.0))
+                    .origin_top_left()
+                    .rotate(deg(45.0))
+                    .child(
+                        text("Rotated")
+                            .test_id("rotated-row")
+                            .w(px(30.0))
+                            .h(px(10.0))
+                            .origin_top_left()
+                            .rotate(deg(-45.0)),
+                    ),
+            )
+    }
+
+    /// Reads AXFrame through NSAccessibility in a normal window. Screen
+    /// coordinates have their origin at the bottom left, unlike our root.
+    fn check_frame(root: &NSView, id: &str, expected: (f64, f64, f64, f64)) {
+        let element = find(root, id).expect("a mounted element");
+        let actual = element.accessibilityFrame();
+        let window = root.window().expect("a window");
+        let content = window.convertRectToScreen(root.convertRect_toView(root.bounds(), None));
+        let (x, y, width, height) = expected;
+        let expected = [
+            content.origin.x + x,
+            content.origin.y + content.size.height - y - height,
+            width,
+            height,
+        ];
+        let actual = [
+            actual.origin.x,
+            actual.origin.y,
+            actual.size.width,
+            actual.size.height,
+        ];
+        println!("AXFrame {id}: {actual:?}, expected {expected:?}");
+        for (got, want) in actual.into_iter().zip(expected) {
+            assert!(
+                (got - want).abs() < 0.01,
+                "{id}: {actual:?} != {expected:?}"
+            );
+        }
     }
 
     /// Runs the main run loop until `done` holds, for at most 5 s.
@@ -164,6 +268,33 @@ mod macos {
         );
         assert_eq!(read(&root, "labelled"), (None, Some("Fixed".into()), 0));
         assert_eq!(read(&root, "button"), (Some("Save all".into()), None, 0));
+
+        until("the geometry mount", || find(&root, "nested-row").is_some());
+        println!("window backing scale: {}", window.backingScaleFactor());
+        for percent in [120, 80, 100] {
+            ZOOM.store(percent, Ordering::SeqCst);
+            // Allow the reactive scale and the ordinary display pass to
+            // settle. Do not force screenshot rendering of the views.
+            let soon = NSDate::dateWithTimeIntervalSinceNow(0.15);
+            NSRunLoop::currentRunLoop().runUntilDate(&soon);
+            let s = percent as f64 / 100.0;
+            check_frame(
+                &root,
+                "scaled-row",
+                (140.0 - 80.0 * s, 180.0 - 50.0 * s, 80.0 * s, 20.0 * s),
+            );
+            check_frame(
+                &root,
+                "nested-row",
+                (140.0 - 62.0 * s, 180.0 + 8.0 * s, 20.0 * s, 18.0 * s),
+            );
+            // Opposite rotations cancel before enclosing the rectangle.
+            check_frame(
+                &root,
+                "rotated-row",
+                (140.0, 180.0 - 60.0 * s, 30.0 * s, 10.0 * s),
+            );
+        }
 
         app.stop();
         window.close();

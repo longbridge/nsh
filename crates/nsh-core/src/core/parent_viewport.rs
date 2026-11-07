@@ -173,7 +173,8 @@ impl<M: TextEngine> Core<M> {
                 .as_ref()
                 .is_some_and(|s| s.refreshing);
             let flags = match (parent, refreshing) {
-                (true, _) => dirty::VIEW,
+                // Its children are read in screen order (`ViewProps::screen_order`).
+                (true, _) => dirty::VIEW | dirty::VIEW_PROPS,
                 (false, false) => dirty::VIEW | dirty::SCROLL,
                 (false, true) => dirty::VIEW | dirty::SCROLL | dirty::REFRESHING,
             };

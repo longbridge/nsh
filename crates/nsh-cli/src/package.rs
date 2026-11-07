@@ -65,8 +65,13 @@ impl PackageTarget {
 }
 
 /// App metadata: `nsh.json` next to the entry, overridden by flags.
+///
+/// Keys it does not know, here or in its sections, are warned of and
+/// ignored ([`read_config`]), never refused: an app written for a newer
+/// NSH still builds with this one, and one for an older NSH keeps building
+/// after a key it set is retired.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AppConfig {
     /// Display name.
     pub(crate) name: Option<String>,
@@ -82,7 +87,7 @@ pub(crate) struct AppConfig {
     pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
-    _tailwind: Option<serde::de::IgnoredAny>,
+    _tailwind: Option<serde_json::Value>,
     /// Read and checked by the bundler; packages read only what the
     /// system must be told ahead (`speech`'s usage descriptions).
     #[serde(default)]
@@ -97,16 +102,16 @@ pub(crate) struct AppConfig {
     pub(crate) status_bar: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
-    _theme: Option<serde::de::IgnoredAny>,
+    _theme: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
-    _resolve: Option<serde::de::IgnoredAny>,
+    _resolve: Option<serde_json::Value>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
-    _rust: Option<serde::de::IgnoredAny>,
+    _rust: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
-    _root: Option<serde::de::IgnoredAny>,
+    _root: Option<serde_json::Value>,
     /// What the web's packages add to the page (`web.rs`).
     #[serde(default)]
     pub(crate) web: WebConfig,
@@ -121,6 +126,10 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// The main window's launch-time options (`"window"`, checked by
+    /// [`read_config`]): written into `app.json` and the dev server's app
+    /// info, where the runners read them before the app's code runs.
+    pub(crate) window: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
@@ -134,7 +143,7 @@ pub(crate) struct AppConfig {
 
 /// `nsh.json` `"android"`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AndroidConfig {
     /// The API level the app targets (`targetSdkVersion`; default
     /// [`android::DEFAULT_TARGET_SDK`]), which it also compiles against:
@@ -158,7 +167,7 @@ impl AndroidConfig {
 
 /// `nsh.json` `"tui"`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TuiConfig {
     /// Width and height of one Cell in points (`8x16` by default).
     pub(crate) points_per_cell: Option<String>,
@@ -187,11 +196,11 @@ impl AppConfig {
         }
     }
 
-    /// The URL schemes the app claims (`"schemes": [...]`),
-    /// checked, in lower case.
-    pub(crate) fn url_schemes(&self) -> anyhow::Result<Vec<String>> {
+    /// The URL schemes the app claims (`"schemes": [...]`), checked, in
+    /// lower case; those it cannot claim are left out ([`read_config`]
+    /// warns of them).
+    pub(crate) fn url_schemes(&self) -> Vec<String> {
         nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
-            .map_err(|e| anyhow::anyhow!("nsh.json: {e}"))
     }
 
     /// Adds what the system shows when the app first asks for the
@@ -222,11 +231,25 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
 /// The `app.json` of a package: `info` (the app's id, ...) with the
 /// schemes it claims, which its runner hands the core so the links of
 /// others are dropped (`nsh_engine::Bundle::url_schemes`).
-pub(crate) fn app_json(mut info: serde_json::Value, schemes: &[String]) -> String {
+pub(crate) fn app_json(
+    mut info: serde_json::Value,
+    schemes: &[String],
+    window: Option<&serde_json::Value>,
+) -> String {
     if !schemes.is_empty() {
         info["schemes"] = serde_json::json!(schemes);
     }
+    if let Some(window) = window {
+        info["window"] = window.clone();
+    }
     info.to_string()
+}
+
+/// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
+/// dev server's app info carries it.
+pub(crate) fn window_json(entry: &Path) -> Option<String> {
+    let entry = dunce::canonicalize(entry).ok()?;
+    read_config(&entry).ok()?.window.map(|w| w.to_string())
 }
 
 /// Declares the URL schemes the app claims in an Apple `Info.plist`
@@ -250,7 +273,7 @@ fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
 
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct WebConfig {
     /// The page's host: a JS module, relative to `nsh.json`, whose
     /// `createHost(player)` returns what `nsh/host` calls reach
@@ -262,6 +285,11 @@ pub(crate) struct WebConfig {
     /// `capabilities`.
     #[serde(default)]
     pub(crate) connect: Vec<String>,
+    /// The path the site is served under (`/`, `/apps/counter/`): the page
+    /// gets a `<base href>`, so it loads at any of the app's own paths
+    /// (`/apps/counter/sports/football`). Without it the page's URLs are
+    /// relative to the page.
+    pub(crate) base: Option<String>,
 }
 
 /// Options of `nsh package`.
@@ -287,6 +315,8 @@ pub(crate) struct PackageOptions<'a> {
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
     pub(crate) run: bool,
+    /// The web: the URL the site's files are served from (`--asset-url`).
+    pub(crate) asset_url: Option<&'a str>,
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -296,17 +326,144 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let Ok(text) = fs::read_to_string(&path) else {
         return Ok(AppConfig::default());
     };
-    let mut config: AppConfig =
-        serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
-    if let Some(value) = &config.tui.points_per_cell {
-        crate::run::parse_points_per_cell(value).map_err(anyhow::Error::msg)?;
+    let (mut config, mut ignored) =
+        parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
+    if let Some(value) = &config.tui.points_per_cell
+        && let Err(e) = crate::run::parse_points_per_cell(value)
+    {
+        ignored.push(format!("tui.pointsPerCell: {e}"));
+        config.tui.points_per_cell = None;
     }
-    config.schemes = config.url_schemes()?;
+    let (schemes, schemes_ignored) =
+        nsh_core::url_scheme::schemes_from_json_lenient(&serde_json::json!(config.schemes));
+    config.schemes = schemes;
+    ignored.extend(schemes_ignored);
+    // The bundler warns of another value.
+    if !matches!(
+        config.appearance.as_deref(),
+        None | Some("light" | "dark" | "system")
+    ) {
+        config.appearance = None;
+    }
+    if let Some(window) = &config.window
+        && let Err(e) = nsh_core::desktop::MainWindowOptions::from_json(window)
+    {
+        ignored.push(format!("window: {e}"));
+        config.window = None;
+    }
+    warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
     config.macos.check(ApplePlatform::Macos)?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
+}
+
+/// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
+/// does not know (`unknown key `updater.channel``) and values of a form it
+/// does not know (`build: invalid type: string "7", expected u32`), a newer
+/// NSH's or typos. Only text that is no JSON object is an error.
+fn parse_config(text: &str) -> anyhow::Result<(AppConfig, Vec<String>)> {
+    let mut value: serde_json::Value = serde_json::from_str(text)?;
+    if !value.is_object() {
+        bail!("expected an object");
+    }
+    let mut ignored = Vec::new();
+    // Each round leaves out the value that failed, until the rest reads;
+    // every value can fail once at most.
+    loop {
+        let mut unknown = Vec::new();
+        let read = serde_path_to_error::deserialize::<_, AppConfig>(
+            serde_ignored::Deserializer::new(&value, &mut |key: serde_ignored::Path<'_>| {
+                let mut name = String::new();
+                key_name(&key, &mut name);
+                unknown.push(format!("unknown key `{name}`"));
+            }),
+        );
+        match read {
+            Ok(config) => {
+                ignored.extend(unknown);
+                return Ok((config, ignored));
+            }
+            Err(e) => {
+                let at = e.path().clone();
+                if !remove_at(&mut value, &at) {
+                    return Err(e.into_inner().into());
+                }
+                ignored.push(format!("{at}: {}", e.into_inner()));
+            }
+        }
+    }
+}
+
+/// Removes the value at `path` from `value`; `false` when there is none
+/// (the root).
+fn remove_at(value: &mut serde_json::Value, path: &serde_path_to_error::Path) -> bool {
+    use serde_path_to_error::Segment;
+    let segments: Vec<&Segment> = path.iter().collect();
+    let Some((last, parents)) = segments.split_last() else {
+        return false;
+    };
+    let mut at = value;
+    for segment in parents {
+        let next = match (segment, at) {
+            (Segment::Map { key }, serde_json::Value::Object(o)) => o.get_mut(key),
+            (Segment::Seq { index }, serde_json::Value::Array(a)) => a.get_mut(*index),
+            _ => None,
+        };
+        match next {
+            Some(next) => at = next,
+            None => return false,
+        }
+    }
+    match (last, at) {
+        (Segment::Map { key }, serde_json::Value::Object(o)) => o.remove(key).is_some(),
+        (Segment::Seq { index }, serde_json::Value::Array(a)) if *index < a.len() => {
+            a.remove(*index);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A key's path as `nsh.json` writes it (`updater.channel`): the steps
+/// through `Option`s and newtypes are not keys.
+fn key_name(path: &serde_ignored::Path<'_>, out: &mut String) {
+    use serde_ignored::Path;
+    let mut step = |parent: &Path<'_>, segment: &dyn std::fmt::Display| {
+        key_name(parent, out);
+        if !out.is_empty() {
+            out.push('.');
+        }
+        out.push_str(&segment.to_string());
+    };
+    match path {
+        Path::Root => {}
+        Path::Map { parent, key } => step(parent, key),
+        Path::Seq { parent, index } => step(parent, index),
+        Path::Some { parent }
+        | Path::NewtypeStruct { parent }
+        | Path::NewtypeVariant { parent } => key_name(parent, out),
+    }
+}
+
+/// Warns of what `nsh.json` left out, once per file: a command reads it
+/// several times.
+fn warn_ignored(path: &Path, ignored: &[String]) {
+    static WARNED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    if ignored.is_empty() {
+        return;
+    }
+    let mut warned = WARNED.lock().unwrap_or_else(|e| e.into_inner());
+    if warned.iter().any(|p| p == path) {
+        return;
+    }
+    warned.push(path.to_owned());
+    for what in ignored {
+        crate::ui::warn(format_args!(
+            "nsh.json: {what}, ignored (one of a newer NSH, or a typo)"
+        ));
+    }
 }
 
 /// `nsh.json` `web.host` (`read_config` made it absolute), canonical: the
@@ -380,6 +537,12 @@ pub(crate) fn release_name_and_id(
 }
 
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
+    if options.asset_url.is_some() && options.target != PackageTarget::Web {
+        bail!("--asset-url is where a web site's files are served from: package with --target web");
+    }
+    if let Some(url) = options.asset_url {
+        crate::web::check_asset_url(url)?;
+    }
     if options.target == PackageTarget::Gpui {
         let instead = PackageTarget::desktop()
             .and_then(|t| clap::ValueEnum::to_possible_value(&t))
@@ -407,7 +570,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
-    let schemes = config.url_schemes()?;
+    let schemes = config.url_schemes();
     if options.target == PackageTarget::Web && !schemes.is_empty() {
         ui::warn(
             "nsh.json schemes: a web page opens from its address, so the schemes are left out",
@@ -489,7 +652,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // it claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
-        app_json(serde_json::json!({ "id": id, "name": name }), &schemes),
+        app_json(
+            serde_json::json!({ "id": id, "name": name }),
+            &schemes,
+            config.window.as_ref(),
+        ),
     )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
@@ -651,7 +818,12 @@ fn package_android(
     // The app's id, which names where it keeps its data.
     assets.push((
         "nsh/app.json".to_owned(),
-        app_json(serde_json::json!({ "id": id }), &config.schemes).into_bytes(),
+        app_json(
+            serde_json::json!({ "id": id }),
+            &config.schemes,
+            config.window.as_ref(),
+        )
+        .into_bytes(),
     ));
     for asset in &built.assets {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
@@ -871,8 +1043,11 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
-    let schemes = config.url_schemes()?;
-    fs::write(nsh.join("app.json"), app_json(info, &schemes))?;
+    let schemes = config.url_schemes();
+    fs::write(
+        nsh.join("app.json"),
+        app_json(info, &schemes, config.window.as_ref()),
+    )?;
     let icon = match &config.icon {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
@@ -1105,7 +1280,7 @@ fn info_plist(
     if let Some(setting) = config
         .status_bar
         .as_ref()
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(v).ok())
+        .map(nsh_core::StatusBarSetting::from_json)
     {
         if let Some(style) = setting.style {
             let style = match style {
@@ -1382,7 +1557,7 @@ mod tests {
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
-        let schemes = config.url_schemes().unwrap();
+        let schemes = config.url_schemes();
         assert_eq!(schemes, ["myapp", "myapp-dev"]);
         // The system opens the app for their links...
         let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
@@ -1398,9 +1573,12 @@ mod tests {
             .collect();
         assert_eq!(listed, ["myapp", "myapp-dev"]);
         // ...and the runner lets them through.
-        let json: serde_json::Value =
-            serde_json::from_str(&app_json(serde_json::json!({ "id": "com.a" }), &schemes))
-                .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&app_json(
+            serde_json::json!({ "id": "com.a" }),
+            &schemes,
+            None,
+        ))
+        .unwrap();
         assert_eq!(
             json,
             serde_json::json!({ "id": "com.a", "schemes": ["myapp", "myapp-dev"] })
@@ -1410,13 +1588,13 @@ mod tests {
         url_types(&mut info, "com.a", &[]);
         assert!(!info.contains_key("CFBundleURLTypes"));
         assert_eq!(
-            app_json(serde_json::json!({ "id": "com.a" }), &[]),
+            app_json(serde_json::json!({ "id": "com.a" }), &[], None),
             r#"{"id":"com.a"}"#
         );
-        // Schemes of the system and other apps are refused.
-        let config: AppConfig = serde_json::from_str(r#"{ "schemes": ["https"] }"#).unwrap();
-        let error = config.url_schemes().unwrap_err().to_string();
-        assert!(error.starts_with("nsh.json: schemes:"), "{error}");
+        // Schemes of the system and other apps are left out.
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
+        assert_eq!(config.url_schemes(), ["myapp"]);
     }
 
     #[test]
@@ -1460,6 +1638,82 @@ mod tests {
             plist::Value::String("public.app-category.finance".into())
         );
         assert!(!macos.contains_key("ITSAppUsesNonExemptEncryption"));
+    }
+
+    #[test]
+    fn nsh_json_ignores_keys_it_does_not_know() {
+        let (config, unknown) = parse_config(
+            r#"{
+                "name": "Orders",
+                "futureKey": { "anything": [1, 2] },
+                "web": { "base": "/orders/", "futureWebKey": true },
+                "updater": { "github": "acme/orders", "channel": "beta" },
+                "android": { "targetSdk": 35, "futureAndroidKey": 1 },
+                "tui": { "futureTuiKey": "x" },
+                "ios": { "futureIosKey": {} }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.name.as_deref(), Some("Orders"));
+        assert_eq!(config.web.base.as_deref(), Some("/orders/"));
+        assert_eq!(
+            config.updater.unwrap().github.as_deref(),
+            Some("acme/orders")
+        );
+        assert_eq!(config.android.target_sdk, Some(35));
+        let mut unknown = unknown;
+        unknown.sort();
+        assert_eq!(
+            unknown,
+            [
+                "unknown key `android.futureAndroidKey`",
+                "unknown key `futureKey`",
+                "unknown key `ios.futureIosKey`",
+                "unknown key `tui.futureTuiKey`",
+                "unknown key `updater.channel`",
+                "unknown key `web.futureWebKey`",
+            ]
+        );
+    }
+
+    #[test]
+    fn nsh_json_leaves_out_values_of_a_form_it_does_not_know() {
+        let (config, ignored) = parse_config(
+            r#"{
+                "name": "Orders",
+                "build": "7",
+                "icon": { "light": "a.png", "dark": "b.png" },
+                "schemes": ["orders", { "scheme": "x" }],
+                "web": { "base": "/orders/", "connect": ["a.com", 1] },
+                "android": { "targetSdk": "latest" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.name.as_deref(), Some("Orders"));
+        assert_eq!(config.build, None);
+        assert_eq!(config.icon, None);
+        assert_eq!(config.schemes, ["orders"]);
+        assert_eq!(config.web.base.as_deref(), Some("/orders/"));
+        assert_eq!(config.web.connect, ["a.com"]);
+        assert_eq!(config.android.target_sdk, None);
+        let mut at: Vec<&str> = ignored
+            .iter()
+            .map(|m| m.split_once(':').unwrap().0)
+            .collect();
+        at.sort();
+        assert_eq!(
+            at,
+            [
+                "android.targetSdk",
+                "build",
+                "icon",
+                "schemes[1]",
+                "web.connect[1]"
+            ]
+        );
+        // Text that is no JSON object is still an error.
+        assert!(parse_config("not json").is_err());
+        assert!(parse_config("[]").is_err());
     }
 
     #[test]

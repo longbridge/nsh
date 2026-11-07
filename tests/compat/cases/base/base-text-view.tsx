@@ -9,8 +9,9 @@
 // their scroll indicator (`codeBlockScrollbar`), tables without
 // theirs (`tableScrollbar`),
 // code blocks' actions (`codeBlockActions`, the built-in copy and one of
-// the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
-// images' presses (`onImagePress`), and the static functions
+// the app's: `onCodeBlockAction`), `selectable`, link presses
+// (`onLinkPress`, with the modifier keys held), images' presses
+// (`onImagePress`), and the static functions
 // (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`; emphasis
 // beside CJK text read by the CJK-friendly rule, a tag that names no
 // element read as text, bare URLs ending at CJK text, escaped brackets
@@ -78,7 +79,7 @@ function App() {
         codeBlockScrollbar={false}
         tableScrollbar={false}
         classes={{ root: "text-[#0000ff]" }}
-        onLinkPress={({ url }) => link.set(url)}
+        onLinkPress={({ url, modifiers }) => link.set(`${url} (Command: ${modifiers.platform})`)}
         codeBlockActions={[{ id: "copy", label: "Copy code" }, { id: "run", label: "Run code" }]}
         renderCodeBlockAction={(action) => <Text>{`Action ${action.id}`}</Text>}
         onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.language}`)}
