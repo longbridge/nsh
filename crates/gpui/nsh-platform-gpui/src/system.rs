@@ -181,6 +181,9 @@ pub(crate) fn simulate_system_scheme(dark: bool) {
     for surface in surfaces {
         update(&surface);
         surface.invalidate();
+        // Every window of the app's own draws again, its frame in the
+        // scheme unless its `colorScheme` fixes one.
+        crate::window::scheme_simulated(&surface);
     }
 }
 
@@ -232,6 +235,12 @@ fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
             Lifecycle::Inactive
         }
     })
+}
+
+/// The system appearance a test switched to (`nsh test --target`), if
+/// any: dark when true.
+pub(crate) fn simulated_scheme() -> Option<bool> {
+    SIMULATED.with(Cell::get)
 }
 
 /// True when the window looks dark (or a test made the system look so).

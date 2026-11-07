@@ -101,7 +101,8 @@ works and its runner only needs GTK.
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s widget fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
 | Accessibility | `access.rs` | `GtkAccessible` (AT-SPI): roles from `role` / text / press handlers / labelled images, labels, descriptions, values, states; `accessibilityElementsHidden` and `visibility: hidden` (as in a browser) hide the subtree (`AccessibleState::Hidden`); `testID` as the widget name; live regions emulated with `gtk_accessible_announce`; children in tree order, a scroll view's and a page list's (`ViewProps::screen_order`) as they are on screen (`NshView::reading_children`, through `GtkAccessible`'s first child and next sibling: the widgets keep their order, which is their paint order) |
 | Environment | `system.rs` | Color scheme: the app's appearance (`nsh.json` `"appearance"`, `setColorScheme`) when it forces one, else the XDG settings portal's (`org.freedesktop.appearance color-scheme`, live); hosted GTK widgets, dialogs and the root's background follow it, and a packaged app's window opens in it (`nsh/app.json`). The locale (`Intl`) from `LC_ALL` / `LC_TIME` / `LC_NUMERIC` / `LC_MESSAGES` / `LANG`, else GLib's language names. The preferred languages (`localeSettings()`'s `languages`): GLib's language names, most preferred first (`LANGUAGE`, else `LC_ALL` / `LC_MESSAGES` / `LANG`, with their fallbacks). The regional preferences (`localeSettings()`'s `hourCycle` and the like): the regions of the POSIX locales (`LC_TIME`'s times and weeks, `LC_MEASUREMENT`'s units; `LocaleSettings::parse`), with GNOME's `clock-format` (`org.gnome.desktop.interface`, where the schema is installed; live) over the hour cycle. Font scale from `gtk-xft-dpi`, reduce motion from `gtk-enable-animations`, the surface's (fractional) scale, GTK's text direction, AT-SPI's `ScreenReaderEnabled`; `platform.os` `"linux"`, idiom `desktop`, OS version the kernel's major.minor; safe area and keyboard height 0. The app's state (`lifecycle()`) from GDK's toplevel states, followed on the root's map and unmap and its toplevel's `state`: `background` while the surface's window is not shown (the root unmapped, the window `MINIMIZED`, or `SUSPENDED`: on another workspace or covered, where the compositor reports it), `active` while one of the app's windows is `FOCUSED`, `inactive` otherwise. The time zone (`localeSettings()`'s `timeZone`): the zone `TZ` names when it names one (`GMT`, `Europe/Berlin`; a POSIX rule such as `JST-9` names none: `TimeZone::posix`), which the process's local times follow, else `timedated`'s (`org.freedesktop.timedate1` `Timezone` on the system bus, live from its property changes), else the zone `/etc/localtime` links to, else `/etc/timezone`. |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | Title from `Window.setTitle`; the hidden title bar hides the window's header (the owner's `titlebar` or GTK's own `default-decoration` header bar), so GTK's client-side decorations keep their shadows and resize edges without the window being mapped again; a window the window manager decorates (X11, Wayland compositors that prefer server-side decorations, such as Hyprland) gets an empty, hidden `set_titlebar` box instead, which GTK can only apply by mapping the window again (it warns that the window is realized), with `gtk::WindowControls` for both ends over the app in the `AppView`'s overlay (the desktop's `gtk-decoration-layout`), their measured widths and the header's height (46 pt at least) reported as the environment's `title_bar` (0 in full screen). A primary drag on a `windowDrag` view moves the window (`gdk::Toplevel::begin_move`); a click reaches the app only if its original view remains under the pointer and draggable. Replacing the app cancels the pending press. A double press follows `gtk-titlebar-double-click`, a secondary press opens the window menu. The application menu is a `gio::Menu` (separators split sections; checkable items are stateful actions) with its actions in a group on the window (`nsh.item-N`), shown in a `gtk::PopoverMenuBar` above the app (`AppView::widget` is a box holding it and the overlay) unless the title bar is hidden or in full screen; its shortcuts are a capture-phase `gtk::ShortcutController` on the window, which GTK runs before the keymap's (each gives way to a `keymap` binding of the same keystroke that fires: `keymap::claims`; the editing roles' stay the text field's, and run as the focused field's `clipboard.*` / `selection.select-all` / `text.undo` / `text.redo` actions). Context menus are `gtk::PopoverMenu`s parented to the root, which presents its popovers on every allocation (else they keep the size of their first frame and scroll); they are made `NESTED` (`from_model_full`), so a submenu opens beside its item on hover as a menu of its own rather than sliding in as a page that needs a click. Every `popover.menu` (context menus and the menu bar's) is styled by a second application-priority style sheet made from the app's design tokens (`menu_style.rs`: `popover`, `popover-foreground`, `accent`, `accent-foreground`, `muted-foreground`, `border`, the default theme's where the app has none; light values everywhere, dark ones under `.nsh-dark`, which the root and the menu bar's slot carry), reloaded on `Command::Tokens`: gpui-base's popover and menu look (8 px corners, 4 px padding, 28 px rows of 6 px corners, 13 px text), with the submenu arrow, check and radio drawn by the sheet (box sides turned 45°, a round box) instead of the icon theme's. **A menu item's `icon` does not show**: `chrome.rs` sets the `gio::MenuItem`'s `icon` attribute (a lazy `GIcon`: bytes, a file or a URL, so nothing loads), but `GtkModelButton::update_visibility` shows its image only with `iconic` or without text (`has_icon && (iconic || !has_text)`, the same in GTK 4.14 and `main`), which is GTK's convention for menus; showing one would take `custom` children (`gtk::PopoverMenu::add_child`) for such items, with the look, focus and accelerators a model button gives for free |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | Title from the `title` attribute; the hidden title bar hides the window's header (the owner's `titlebar` or GTK's own `default-decoration` header bar), so GTK's client-side decorations keep their shadows and resize edges without the window being mapped again; a window the window manager decorates (X11, Wayland compositors that prefer server-side decorations, such as Hyprland) gets an empty, hidden `set_titlebar` box instead, which GTK can only apply by mapping the window again (it warns that the window is realized), with `gtk::WindowControls` for both ends over the app in the `AppView`'s overlay (the desktop's `gtk-decoration-layout`), their measured widths and the header's height (46 pt at least) reported as the environment's `title_bar` (0 in full screen). A primary drag on a `windowDrag` view moves the window (`gdk::Toplevel::begin_move`); a click reaches the app only if its original view remains under the pointer and draggable. Replacing the app cancels the pending press. A double press follows `gtk-titlebar-double-click`, a secondary press opens the window menu. The application menu is a `gio::Menu` (separators split sections; checkable items are stateful actions) with its actions in a group on the window (`nsh.item-N`), shown in a `gtk::PopoverMenuBar` above the app (`AppView::widget` is a box holding it and the overlay) unless the title bar is hidden or in full screen; its shortcuts are a capture-phase `gtk::ShortcutController` on the window, which GTK runs before the keymap's (each gives way to a `keymap` binding of the same keystroke that fires: `keymap::claims`; the editing roles' stay the text field's, and run as the focused field's `clipboard.*` / `selection.select-all` / `text.undo` / `text.redo` actions). Context menus are `gtk::PopoverMenu`s parented to the root, which presents its popovers on every allocation (else they keep the size of their first frame and scroll); they are made `NESTED` (`from_model_full`), so a submenu opens beside its item on hover as a menu of its own rather than sliding in as a page that needs a click. Every `popover.menu` (context menus and the menu bar's) is styled by a second application-priority style sheet made from the app's design tokens (`menu_style.rs`: `popover`, `popover-foreground`, `accent`, `accent-foreground`, `muted-foreground`, `border`, the default theme's where the app has none; light values everywhere, dark ones under `.nsh-dark`, which the root and the menu bar's slot carry), reloaded on `Command::Tokens`: gpui-base's popover and menu look (8 px corners, 4 px padding, 28 px rows of 6 px corners, 13 px text), with the submenu arrow, check and radio drawn by the sheet (box sides turned 45°, a round box) instead of the icon theme's. **A menu item's `icon` does not show**: `chrome.rs` sets the `gio::MenuItem`'s `icon` attribute (a lazy `GIcon`: bytes, a file or a URL, so nothing loads), but `GtkModelButton::update_visibility` shows its image only with `iconic` or without text (`has_icon && (iconic || !has_text)`, the same in GTK 4.14 and `main`), which is GTK's convention for menus; showing one would take `custom` children (`gtk::PopoverMenu::add_child`) for such items, with the look, focus and accelerators a model button gives for free |
+| Windows (`nsh/desktop`) | `window.rs` | Every window renders from the app's one engine: a window of the app's own (`<Window>`, `Window.open`) is a dialog root shown in a `gtk::Window` of its own, which shows once its first frame is mounted; the dialogs and popups opened in it show in it, with focus, Tab, Escape and the mouse's back button scoped to that window, the app's shortcuts work in it as in the main one, and its views reach the screen reader under it. Kinds arrive as resolved attributes: dialogs and panels are transient for their parent (`modal` makes the parent modal), popups and overlays undecorated, overlays let the pointer through with an empty input region. Attributes map to GTK where it has an API (title, frame, minimum size, resizable, deletable, a header bar whose decoration layout leaves out the buttons not allowed, hidden title bars with `gtk::WindowControls` over the app, transparency and the shadow as CSS classes); the policies (`closeOnPress`, `closeOnEscape`, `closeOnBlur`) are answered on the main thread; state is reported per window (the main window's in the environment, a resize once it settles) and the displays are GDK's monitors. `windowDrag`, `windowControl` and `windowResize` views are hit-tested in `input.rs`. Progress and attention go to the app's launcher entry where a dock listens. GTK 4 places windows itself and has no levels, taskbar or workspace hints, largest size or aspect ratio: those attributes and requests are left as they are, and a window's bounds start at the origin. nsh.json `window` is applied before the main window shows; with `restoreBounds` it opens at the size and in the mode the engine kept. |
 | Clipboard | `system.rs` | The display's `GdkClipboard`; reads are asynchronous (another app's text), `hasText` only looks at the formats on offer |
 | Networking | `nsh_engine::net` | ureq (rustls, webpki roots), one thread per request, streaming both ways; only connecting and the response head have deadlines |
 | Dev | `dev.rs` | The dev server client on its own thread; status line and error overlay above the surface; Ctrl+R reloads the latest build |
@@ -253,7 +254,119 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
 
 ### Programmatic window size
 
-`Window.setFrame` merges supplied dimensions with `gtk::Window::default_size`,
+`WindowRef.setBounds` merges supplied dimensions with `gtk::Window::default_size`,
 then calls `set_default_size`. GTK applies the request asynchronously, so merging
 with the widget allocation would discard earlier partial updates in the same batch.
 The window manager controls placement and stacking; resize animation is immediate.
+
+## Screenshot fidelity under Xvfb
+
+The test agent's screenshot is an offscreen rendering of the window's **content**,
+not a desktop capture: it omits the window decorations, cursor and anything covering
+it. `synth::shot` snapshots `GtkWidgetPaintable` into GSK render nodes and calls
+`window.renderer().render_texture`. It uses the same renderer as the visible window,
+including NGL (`GskGLRenderer`) or Vulkan (`GskVulkanRenderer`), not a separate Cairo
+renderer. `synth::after_paint` waits for the next painted frame before reading the
+retained nodes.
+
+### Styles comparison
+
+On 2026-11-07, the gallery at `b36cf29b6` was captured under Xvfb 21.1.25 with
+GTK 4.24.1, Mesa 26.2.5 (llvmpipe for NGL, lavapipe for Vulkan), light appearance
+and `GDK_SCALE=1`. A temporary diagnostic in `synth::shot` confirmed the actual
+renderer type in both runs; merely requesting `GSK_RENDERER=vulkan` is insufficient,
+since GTK can warn and fall back when no Vulkan device is available.
+
+For each renderer, `NSH_GALLERY_DEMO=Styles` and `NSH_GALLERY_SECTION` selected
+`Progressive blur`, `Shadows and glow`, or `3D transforms`. The app opened on a
+manual test clock, called `setViewport(1200, 1000)` and `setColorScheme("light")`,
+then saved an agent screenshot. While the same app remained open, `noop visual shot`
+captured the Xvfb display. The pointer was outside the window before either capture.
+The 5-pixel GTK decoration on each side was removed from the desktop image,
+leaving matching 1190 × 990 content images (1,178,100 pixels). No resampling,
+registration search, color conversion or tolerance was applied before comparing
+8-bit RGB samples.
+
+A changed pixel has at least one unequal channel. MAE is the mean absolute
+channel difference on the 0–255 scale. `>1` counts pixels with any channel differing
+by more than 1. The figures below cover the **whole content**, including the sidebar;
+the linked illustrations crop both images identically for readability, with the
+agent screenshot on the left and the window capture on the right.
+
+| Renderer | Section / comparison | Changed pixels | Pixels >1 | MAE | Max channel difference |
+| --- | --- | ---: | ---: | ---: | ---: |
+| NGL | Progressive blur | 7 | 0 | 0.000002 | 1 |
+| NGL | Shadows and glow | 48 | 0 | 0.000016 | 1 |
+| NGL | 3D transforms | 2,196 | 1,229 | 0.043830 | 190 |
+| Vulkan | Progressive blur | 1 | 0 | 0.0000003 | 1 |
+| Vulkan | Shadows and glow | 17 | 0 | 0.000009 | 1 |
+| Vulkan | 3D transforms | 2,163 | 1,224 | 0.043265 | 187 |
+
+The 3D demo's native Y-axis sway keeps running between the two captures; a manual
+engine clock does not freeze the platform animator. All differences greater than
+1 fall inside that moving specimen: NGL's bounding box is `(416, 472)–(529, 549)`,
+Vulkan's `(417, 472)–(528, 549)`, in content pixels, inclusive. Excluding only the
+perspective tile's stage (`x=279..657`, `y=460..563`) leaves 1,138,684 pixels,
+with **zero pixels differing by more than 1** for either renderer (MAE 0.000309
+NGL / 0.000301 Vulkan). The flip card, static X-axis tilt, skew and transform-origin
+examples remain in that comparison. The sequential captures do not establish
+pixel identity for moving content; matching a particular animation frame needs a
+separate synchronized capture, not a larger global image tolerance.
+
+Shadows and static transforms have no observed missing effects in the agent
+capture. The remaining one-level channel differences are consistent with render-to-texture
+versus presentation rounding; this comparison does not identify their exact cause.
+No screenshot-path change is warranted by these measurements.
+
+**Progressive blur is absent in both images.** This is a backend limitation,
+not an offscreen-capture difference: `decor.rs` does not draw `backdropFilter`
+or `mixBlendMode`. A widget snapshot does not expose the already-painted backdrop.
+GTK 4.22's copy/paste nodes could support another drawing path, but NSH targets
+GTK 4.14 and has no such path. Changing screenshot capture cannot supply a missing
+backdrop in the real window. `maskImage` is supported independently; a mask over an
+otherwise empty backdrop-filter layer cannot create the missing blur.
+
+### Repeating the comparison
+
+Build `nsh-cli` and `nsh-linux-host`, then use a dedicated Xvfb display, with
+`GDK_BACKEND=x11` and `WAYLAND_DISPLAY` empty (an inherited Wayland display can
+otherwise put the app on the real desktop). Set `TMPDIR` to a scratch directory
+outside the checkout. With Noop's visual tools:
+
+```sh
+noop visual start linux-shot 1600x1200
+# Set the demo/section and renderer in the command passed to visual run.
+noop visual run linux-shot -- env GDK_BACKEND=x11 GDK_SCALE=1 \
+  GSK_RENDERER=ngl NSH_GALLERY_DEMO=Styles \
+  NSH_GALLERY_SECTION='Shadows and glow' \
+  ./target/debug/nsh test examples/gallery/.nsh/capture.test.tsx --target linux -v
+# After the test saves offscreen.png, while its app is still open:
+noop visual shot linux-shot window.png
+noop visual stop linux-shot
+```
+
+Create the temporary `examples/gallery/.nsh/capture.test.tsx` before running the
+command (the gallery's manifest grants the two environment variables):
+
+```tsx
+import { open, test } from "nsh/test";
+
+test("capture", async () => {
+  const app = await open("../App.tsx", { clock: {} });
+  await app.setViewport(1200, 1000);
+  await app.setColorScheme("light");
+  await app.waitFor("Shadows and glow");
+  await app.screenshot("offscreen.png"); // use an absolute output path
+  await new Promise(resolve => setTimeout(resolve, 15000));
+});
+```
+
+Move the display's real pointer outside the window before taking the images;
+`noop visual shot` includes it. Repeat with `GSK_RENDERER=vulkan` and the other
+section titles, changing `waitFor` to match. Check for renderer fallback warnings;
+for an audit, inspect `window.renderer().type_().name()` in `synth::shot`.
+Crop the desktop image to the content bounds **observed for that display**; the
+5-pixel inset above is specific to this run's GTK decorations and scale. Compare
+raw RGB bytes, counting unequal pixels and absolute per-channel differences. Keep
+motion regions separate and record the excluded rectangle explicitly. Stop the
+visual session after capture and remove the temporary test file.

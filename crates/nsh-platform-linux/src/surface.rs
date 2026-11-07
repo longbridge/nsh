@@ -110,9 +110,12 @@ pub(crate) struct Surface {
     pub(crate) anim: RefCell<UiAnimation>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
-    /// The app's own windows (`Window.open`), by the dialog root each
-    /// shows ([`crate::window`]).
+    /// The app's own windows (`<Window>`, `Window.open`), by the dialog
+    /// root each shows ([`crate::window`]).
     pub(crate) windows: RefCell<rustc_hash::FxHashMap<nsh_core::NodeId, crate::window::AppWindow>>,
+    /// What the main window keeps: its attributes, its state's
+    /// bookkeeping ([`crate::window`]).
+    pub(crate) main_window: RefCell<crate::window::MainWindow>,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
     pub(crate) file_drop: crate::file_drop::State,
@@ -236,6 +239,7 @@ impl Surface {
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
             windows: RefCell::default(),
+            main_window: RefCell::default(),
             input: Default::default(),
             file_drop: Default::default(),
             engine: RefCell::new(None),
@@ -376,9 +380,14 @@ impl Surface {
         let family = crate::text::ui_family();
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.borrow().clone();
+        // The app reads the displays as it first renders.
+        let displays = crate::window::displays();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            if !displays.is_empty() {
+                control.set_displays(displays);
             }
         };
         match Engine::start_with(config, move || PangoTextEngine::new(family), sink, setup) {
@@ -395,6 +404,7 @@ impl Surface {
                 }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
+                crate::window::watch_displays(self);
                 for url in self.pending_links.take() {
                     self.open_url(&url);
                 }
@@ -419,6 +429,7 @@ impl Surface {
         crate::input::reset(self);
         crate::selectable_view::reset(self);
         crate::keymap::clear(self);
+        crate::window::clear(self);
         self.js_frame.set(false);
     }
 
@@ -488,6 +499,7 @@ impl Surface {
         });
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
+        crate::window::main_resized(self);
     }
 
     /// Applies what the engine sent.
@@ -561,6 +573,8 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        // Windows whose first frame this was show.
+        crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
