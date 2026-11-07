@@ -221,9 +221,44 @@ impl Screens {
                 if placed[child] {
                     continue;
                 }
-                let origin = (0..screens.len())
-                    .filter(|&parent| placed[parent])
-                    .find_map(|parent| adjacent(&screens[parent], &screens[child]));
+                // Next to a placed one it touches. A monitor beside a denser
+                // one can touch it and another monitor at once, and there
+                // the place next to one covers the other: it moves on the
+                // way it touches until it covers none, so that no point is
+                // on two displays (mixed scales can leave gaps). The place
+                // that moved least wins.
+                let size = screens[child].display.bounds.size;
+                let mut best: Option<(f32, Point<Points>)> = None;
+                for parent in (0..screens.len()).filter(|&parent| placed[parent]) {
+                    let Some((start, side)) = adjacent(&screens[parent], &screens[child]) else {
+                        continue;
+                    };
+                    let mut origin = start;
+                    for _ in 0..screens.len() {
+                        let bounds = Bounds::new(origin, size);
+                        let Some(other) = (0..screens.len())
+                            .filter(|&other| placed[other])
+                            .map(|other| screens[other].display.bounds)
+                            .find(|other| {
+                                let overlap = bounds.intersect(other);
+                                overlap.size.width.0 > 0.0 && overlap.size.height.0 > 0.0
+                            })
+                        else {
+                            break;
+                        };
+                        match side {
+                            Side::Right => origin.x = other.origin.x + other.size.width,
+                            Side::Left => origin.x = other.origin.x - size.width,
+                            Side::Below => origin.y = other.origin.y + other.size.height,
+                            Side::Above => origin.y = other.origin.y - size.height,
+                        }
+                    }
+                    let moved = (origin.x - start.x).0.abs() + (origin.y - start.y).0.abs();
+                    if best.is_none_or(|(least, _)| moved < least) {
+                        best = Some((moved, origin));
+                    }
+                }
+                let origin = best.map(|(_, origin)| origin);
                 if let Some(origin) = origin {
                     screens[child].display.bounds.origin = origin;
                     placed[child] = true;
@@ -310,9 +345,18 @@ impl Screens {
     }
 }
 
+/// The side of a monitor another touches.
+#[derive(Clone, Copy)]
+enum Side {
+    Right,
+    Left,
+    Below,
+    Above,
+}
+
 /// Where `child` goes in points when it touches `parent` (side by side or
-/// one above the other), `None` when it does not.
-fn adjacent(parent: &Screen, child: &Screen) -> Option<Point<Points>> {
+/// one above the other), and on which side of it; `None` when it does not.
+fn adjacent(parent: &Screen, child: &Screen) -> Option<(Point<Points>, Side)> {
     let p = parent.native;
     let c = child.native;
     let origin = parent.display.bounds.origin;
@@ -321,18 +365,24 @@ fn adjacent(parent: &Screen, child: &Screen) -> Option<Point<Points>> {
     let x = origin.x + Points((c.left - p.left) as f32 / parent.scale);
     if p.top.max(c.top) <= p.bottom.min(c.bottom) {
         if c.left == p.right {
-            return Some(point(origin.x + extent.width, y));
+            return Some((point(origin.x + extent.width, y), Side::Right));
         }
         if c.right == p.left {
-            return Some(point(origin.x - child.display.bounds.size.width, y));
+            return Some((
+                point(origin.x - child.display.bounds.size.width, y),
+                Side::Left,
+            ));
         }
     }
     if p.left.max(c.left) <= p.right.min(c.right) {
         if c.top == p.bottom {
-            return Some(point(x, origin.y + extent.height));
+            return Some((point(x, origin.y + extent.height), Side::Below));
         }
         if c.bottom == p.top {
-            return Some(point(x, origin.y - child.display.bounds.size.height));
+            return Some((
+                point(x, origin.y - child.display.bounds.size.height),
+                Side::Above,
+            ));
         }
     }
     None
@@ -407,6 +457,99 @@ mod tests {
                             source.native_bounds(source.display.visible_bounds),
                             source.work
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    /// No point of the screen is on two displays.
+    fn assert_disjoint(screens: &Screens) {
+        for (i, a) in screens.0.iter().enumerate() {
+            for b in &screens.0[i + 1..] {
+                let overlap = a.display.bounds.intersect(&b.display.bounds);
+                assert!(
+                    overlap.size.width.0 <= 0.0 || overlap.size.height.0 <= 0.0,
+                    "{:?} and {:?} overlap",
+                    a.display.bounds,
+                    b.display.bounds
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn monitors_stacked_beside_a_denser_primary_stay_apart() {
+        // A 200% primary, two 100% monitors one above the other on its
+        // right: the lower one touches the primary and the upper one.
+        for order in [[1, 2, 3], [3, 2, 1], [2, 3, 1]] {
+            let all = [
+                screen(1, rect(0, 0, 3840, 2160), 2.0, true),
+                screen(2, rect(3840, 0, 5760, 1080), 1.0, false),
+                screen(3, rect(3840, 1080, 5760, 2160), 1.0, false),
+            ];
+            let screens = Screens::layout(
+                order
+                    .iter()
+                    .map(|&id| all.iter().find(|s| s.display.id.0 == id).unwrap().clone())
+                    .collect(),
+            );
+            assert_disjoint(&screens);
+            let upper = screens.by_id(DisplayId(2)).unwrap();
+            let lower = screens.by_id(DisplayId(3)).unwrap();
+            assert_eq!(
+                upper.display.bounds.origin,
+                point(Points(1920.0), Points(0.0))
+            );
+            assert_eq!(
+                lower.display.bounds.origin,
+                point(Points(1920.0), Points(1080.0))
+            );
+            // A window on the upper one comes back there.
+            let native = rect(4000, 700, 4400, 1000);
+            let bounds = upper.bounds(native);
+            let target = screens.logical_screen(bounds).unwrap();
+            assert_eq!(target.display.id, DisplayId(2));
+            assert_eq!(target.native_bounds(bounds), native);
+        }
+    }
+
+    #[test]
+    fn three_monitors_at_any_scales_stay_apart_and_round_trip() {
+        let scales = [1.0, 1.25, 1.5, 2.0];
+        for a in scales {
+            for b in scales {
+                for c in scales {
+                    for (second, third) in [
+                        // Stacked on the right.
+                        (rect(3840, 0, 5760, 1080), rect(3840, 1080, 5760, 2160)),
+                        // One on each side.
+                        (rect(3840, 0, 5760, 1080), rect(-1920, 0, 0, 1080)),
+                        // Side by side above.
+                        (rect(0, -1080, 1920, 0), rect(1920, -1080, 3840, 0)),
+                        // Side by side below.
+                        (rect(0, 2160, 1920, 3240), rect(1920, 2160, 3840, 3240)),
+                        // In a row on the right.
+                        (rect(3840, 0, 5760, 1080), rect(5760, 0, 7680, 1080)),
+                    ] {
+                        let screens = Screens::layout(vec![
+                            screen(3, third, c, false),
+                            screen(1, rect(0, 0, 3840, 2160), a, true),
+                            screen(2, second, b, false),
+                        ]);
+                        assert_disjoint(&screens);
+                        for source in &screens.0 {
+                            let r = rect(
+                                source.native.left + 100,
+                                source.native.top + 100,
+                                source.native.left + 500,
+                                source.native.top + 400,
+                            );
+                            let bounds = source.bounds(r);
+                            let target = screens.logical_screen(bounds).unwrap();
+                            assert_eq!(target.display.id, source.display.id);
+                            assert_eq!(target.native_bounds(bounds), r);
+                        }
                     }
                 }
             }
