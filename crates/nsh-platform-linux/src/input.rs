@@ -986,9 +986,17 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     }
 }
 
-/// Focuses `widget` or the first focusable widget inside it.
+/// Focuses `widget` or the first focusable widget inside it. A text
+/// field keeps its selection and caret, as a click into it does: its
+/// `grab_focus` selects all its text (`gtk-entry-select-on-focus`), which
+/// the keys typed next would replace.
 #[cfg(feature = "dev")]
 fn focus_native(widget: &gtk::Widget) {
+    if let Some(text) = text_inside(widget)
+        && text.grab_focus_without_selecting()
+    {
+        return;
+    }
     if widget.grab_focus() {
         return;
     }
@@ -1000,6 +1008,22 @@ fn focus_native(widget: &gtk::Widget) {
         focus_native(&c);
         child = c.next_sibling();
     }
+}
+
+/// `widget` if it is a `GtkText`, else the first inside it.
+#[cfg(feature = "dev")]
+fn text_inside(widget: &gtk::Widget) -> Option<gtk::Text> {
+    if let Some(text) = widget.downcast_ref::<gtk::Text>() {
+        return Some(text.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(text) = text_inside(&c) {
+            return Some(text);
+        }
+        child = c.next_sibling();
+    }
+    None
 }
 
 // --- Hit testing --------------------------------------------------------------------
