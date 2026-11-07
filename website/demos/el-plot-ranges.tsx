@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Bar, Grid, Plot, PlotAxis, Rule } from "nsh/base/plot";
-import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // Bars that span a range of their own row: `Bar`'s `base` takes a field
 // name or a function of the row as well as a number, so each bar runs
@@ -95,7 +95,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
           <If
             when={chart() === "candles"}
             else={

@@ -1,6 +1,6 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, Radio, RadioGroup, Switch } from "nsh/base";
-import { alpha, Badge, Button, Card, colors, DemoPage, finish, focusRing, hovered, Icon, mono, Segmented, switchLook, terminal } from "../ui";
+import { Badge, Button, Card, colors, controlSize, DemoPage, finish, Icon, insetSurface, listRow, mono, RadioRing, ROW_BLEED, RowLabel, Segmented, switchLook } from "../ui";
 
 // `nsh/base`'s `Accordion` owns which triggers report what, the headings,
 // the expanded state screen readers hear and the panels' reveal; the app
@@ -12,44 +12,12 @@ import { alpha, Badge, Button, Card, colors, DemoPage, finish, focusRing, hovere
 // an accordion nested in its last one.
 
 const pointer = platform.desktop;
-/** The sizes of the page: a pointer's compact tier, a touch screen's roomier one. */
-const size = pointer
-  ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, icon: 12, control: 16, dot: 6, line: 32, switch: "small" as const }
-  : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, icon: 16, control: 22, dot: 8, line: 44, switch: "regular" as const };
-/** How far a row's hover fill reaches past its content on each side. */
-const BLEED = 8;
-/** The bleed a row's own box takes: none in a terminal, where a negative
- * margin rounds away but its padding stays a column, pushing the label in. */
-const ROW_BLEED = terminal ? 0 : BLEED;
-const pressed = { opacity: 0.7 };
-const dimmed = { opacity: 0.4 };
-
-/** A row the pointer hovers: its fill reaching `BLEED` past the content, rounded. */
-const hoverRow = (start = 0) => ({
-  minHeight: size.row,
-  flexDirection: "row" as const,
-  alignItems: "center" as const,
-  gap: size.gap,
-  paddingVertical: size.padding,
-  marginHorizontal: -ROW_BLEED,
-  paddingStart: ROW_BLEED + start,
-  paddingEnd: ROW_BLEED,
-  borderRadius: ROW_BLEED,
-});
+/** The sizes of the page (`controlSize`): a pointer's compact tier, a touch screen's roomier one. */
+const size = controlSize;
 
 /** The hairline between two items. */
 function Divider(props: { show: boolean }) {
   return <View style={{ height: props.show ? 1 : 0, backgroundColor: colors.line }} />;
-}
-
-/** A label, and a quieter line under it. */
-function Label(props: { label: string; detail?: string }) {
-  return (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
-      {props.detail ? <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.detail}</Text> : null}
-    </View>
-  );
 }
 
 /**
@@ -62,19 +30,15 @@ function Heading(props: { title: string; detail?: string; leading?: JSX.Element;
     <AccordionHeader level={props.level}>
       <AccordionTrigger
         class="group"
-        style={hoverRow()}
-        activeStyle={pressed}
-        hoverStyle={props.disabled ? undefined : hovered()}
-        focusStyle={focusRing()}
-        disabledStyle={dimmed}
+        {...listRow({ first: true, disabled: () => props.disabled })}
       >
         {props.leading}
-        <Label label={props.title} detail={props.detail} />
+        <RowLabel label={props.title} detail={props.detail} />
         <View
           class="transition-transform duration-200 motion-reduce:transition-none group-aria-expanded:rotate-180"
-          style={{ width: size.icon, height: size.icon, alignItems: "center", justifyContent: "center" }}
+          style={{ width: size.check, height: size.check, alignItems: "center", justifyContent: "center" }}
         >
-          <Icon name="chevron-down" size={size.icon} tint={colors.muted} />
+          <Icon name="chevron-down" size={size.check} tint={colors.muted} />
         </View>
       </AccordionTrigger>
     </AccordionHeader>
@@ -152,7 +116,7 @@ export function AccordionDemo() {
                     }}
                     class="transition-colors duration-200 motion-reduce:transition-none"
                   >
-                    <Icon name={q.icon} size={size.icon} tint={open().includes(q.value) ? colors.onAccent : colors.muted} />
+                    <Icon name={q.icon} size={size.check} tint={open().includes(q.value) ? colors.onAccent : colors.muted} />
                   </View>
                 }
               />
@@ -195,14 +159,11 @@ export function AccordionDemo() {
             props.set(checked);
             last.set(`${props.label}: ${checked ? "on" : "off"}`);
           }}
-          style={{ ...hoverRow(), flexDirection: "row-reverse" }}
-          activeStyle={pressed}
-          hoverStyle={hovered()}
-          focusStyle={focusRing()}
+          {...listRow({ first: true, style: { flexDirection: "row-reverse" } })}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >
-          <Label label={props.label} detail={props.detail} />
+          <RowLabel label={props.label} detail={props.detail} />
         </Switch>
       );
     }
@@ -216,25 +177,12 @@ export function AccordionDemo() {
             visibility.set(props.label);
             last.set(`Profile visible to: ${props.label}`);
           }}
-          style={hoverRow()}
-          activeStyle={pressed}
-          hoverStyle={hovered()}
-          focusStyle={focusRing()}
+          // The row is the group the ring sinks with.
+          class="group"
+          {...listRow({ first: true })}
         >
-          <View
-            style={{
-              width: size.control,
-              height: size.control,
-              borderRadius: size.control / 2,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              ...(on() ? finish.light : { backgroundColor: colors.field, borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow }),
-            }}
-          >
-            {on() ? <View style={{ width: size.dot, height: size.dot, borderRadius: size.dot / 2, backgroundColor: colors.onAccent }} /> : null}
-          </View>
-          <Label label={props.label} detail={props.detail} />
+          <RadioRing on={on()} />
+          <RowLabel label={props.label} detail={props.detail} />
         </Radio>
       );
     }
@@ -257,7 +205,7 @@ export function AccordionDemo() {
           <AccordionItem value="notifications">
             <Heading title="Notifications" detail={`${onCount()} of 3 on`} />
             <AccordionPanel reveal accessibilityLabel="Notifications">
-              <Body start={BLEED}>
+              <Body start={ROW_BLEED}>
                 <Toggle label="Messages" detail="A banner for every new message" on={alerts().messages} set={(on) => alerts.set({ ...alerts(), messages: on })} />
                 <Toggle label="Mentions" detail="When someone writes your name" on={alerts().mentions} set={(on) => alerts.set({ ...alerts(), mentions: on })} />
                 <Toggle label="Weekly digest" detail="A summary every Monday morning" on={alerts().digest} set={(on) => alerts.set({ ...alerts(), digest: on })} />
@@ -268,7 +216,7 @@ export function AccordionDemo() {
           <AccordionItem value="privacy">
             <Heading title="Privacy" detail={`Profile visible to ${visibility().toLowerCase()}`} />
             <AccordionPanel reveal accessibilityLabel="Privacy">
-              <Body start={BLEED}>
+              <Body start={ROW_BLEED}>
                 <RadioGroup>
                   <Choice label="Everyone" detail="Anyone with the app can find you" />
                   <Choice label="Contacts" detail="Only people in your address book" />
@@ -296,7 +244,7 @@ export function AccordionDemo() {
                   size={pointer ? "small" : "regular"}
                   fill
                 />
-                <View style={{ padding: 12, borderRadius: 8, backgroundColor: colors.inset, borderWidth: 1, borderColor: alpha(colors.text, 0.06) }}>
+                <View style={{ ...insetSurface(), padding: 12 }}>
                   <Text style={{ fontSize: { small: 13, default: 15, large: 18 }[textSize()], color: colors.text }}>The quick brown fox jumps over the lazy dog.</Text>
                 </View>
               </Body>
@@ -318,7 +266,7 @@ export function AccordionDemo() {
                   <AccordionItem value="network">
                     <Heading level={4} title="Network" detail={cellular() ? "Cellular data on" : "Wi-Fi only"} />
                     <AccordionPanel reveal accessibilityLabel="Network">
-                      <Body start={BLEED}>
+                      <Body start={ROW_BLEED}>
                         <Toggle label="Use cellular data" detail="Sync when Wi-Fi is not around" on={cellular()} set={(on) => cellular.set(on)} />
                       </Body>
                     </AccordionPanel>
@@ -327,7 +275,7 @@ export function AccordionDemo() {
                   <AccordionItem value="developer">
                     <Heading level={4} title="Developer" detail="Tools for building the app" />
                     <AccordionPanel reveal accessibilityLabel="Developer">
-                      <Body start={BLEED}>
+                      <Body start={ROW_BLEED}>
                         <Toggle label="Show layout bounds" detail="Outline every view on screen" on={bounds()} set={(on) => bounds.set(on)} />
                       </Body>
                     </AccordionPanel>

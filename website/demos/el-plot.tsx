@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Area, Bar, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
-import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // A price chart built from the plot's parts: the rows are the app's, the
 // look is the palette's (paint as styles: `stroke`, `fill`,
@@ -95,7 +95,7 @@ function SalesCard(props: { mode: Mode; onHover: (index: number | null) => void 
   const tip = { topLeft: 3, topRight: 3 };
   const labelStyle = () => ({ fontSize: 11, paddingBottom: 3, color: ui().muted, fontVariant: ["tabular-nums" as const] });
   return (
-    <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+    <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
       <View class="flex-row items-baseline gap-3">
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: size.label, fontWeight: "600", color: ui().text }}>Sales</Text>
@@ -154,7 +154,7 @@ function SalesCard(props: { mode: Mode; onHover: (index: number | null) => void 
           <PlotAxis
             placement="right"
             tickValues={[0, 40, 80, 120]}
-            labelStyle={{ width: 36, paddingLeft: 8, textAlign: "right", fontSize: 11, color: ui().muted, ...num }}
+            labelStyle={{ width: 36, paddingLeft: 8, fontSize: 11, color: ui().muted, ...num }}
           />
           <PlotAxis format={(i) => SALES[i].month} labelStyle={{ fontSize: 11, lineHeight: 14, paddingTop: 12, color: ui().muted }} />
         </Plot>
@@ -241,7 +241,7 @@ function App() {
             />
           }
         >
-          <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+          <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
             <View class="flex-row items-baseline gap-3">
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={{ fontSize: size.label, fontWeight: "600", color: ui().text }}>NSH Labs</Text>

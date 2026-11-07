@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Cell, Plot, PlotAxis } from "nsh/base/plot";
-import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // Heatmaps: a `Cell` per row in the band of its `x` category across and
 // of its `y` category down, both band scales, colored by its `value`
@@ -96,7 +96,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
           <If
             when={chart() === "returns"}
             else={

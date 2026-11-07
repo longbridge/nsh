@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { DiffView, type DiffViewRef } from "nsh/base";
-import { button, buttonText, desktop, Log, Panel, Segmented, size, Split, ui, wide } from "./palette";
+import { button, buttonText, desktop, Log, Panel, Segmented, size, Split, ui, wide, sectionSurface } from "./palette";
 
 const OLD = `fn greet(name: &str) -> String {
     format!("Hello, {}", name)
@@ -82,7 +82,7 @@ function App() {
           </>
         }
       >
-        <View style={{ height: wide() ? 360 : 320, ...ui().card, borderRadius: 14, overflow: "hidden" }}>
+        <View style={{ height: wide() ? 360 : 320, ...sectionSurface(), overflow: "hidden" }}>
           <DiffView
             ref={(r) => {
               diff = r;

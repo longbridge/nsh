@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Bar, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
-import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette";
+import { desktop, Log, Panel, Segmented, size, Split, tint, ui, sectionSurface } from "./palette";
 
 // Two y scales in one plot: the volume bars on the plot's `yScale`, the
 // close on its second one (`y2Scale`), which the line names with
@@ -71,7 +71,7 @@ function App() {
           </>
         }
       >
-        <View style={{ ...ui().card, borderRadius: 16, padding: desktop ? 16 : 14, gap: 12 }}>
+        <View style={{ ...sectionSurface({ padded: true }), gap: 12 }}>
           <View class="flex-row items-baseline gap-3">
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={{ fontSize: size.label, fontWeight: "600", color: ui().text }}>{symbol()}</Text>

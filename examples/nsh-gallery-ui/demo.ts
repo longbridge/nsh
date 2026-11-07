@@ -3,7 +3,9 @@ import { Text as __Text, View as __View } from "nsh";
 import { platform as __platform, windowSize as __windowSize } from "nsh";
 import { Segmented as GallerySegmented } from "./segmented";
 import { ui, tint } from "./palette";
-import { colors, finish, focusRing } from "./theme";
+import { radius } from "./theme";
+import { insetSurface } from "./look/surface";
+import { inputLook, type FieldLookOptions } from "./look/field";
 import { buttonLabel, buttonLook, type ButtonKind, type ButtonLookOptions } from "./look/button";
 export { ui, tint } from "./palette";
 export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
@@ -12,6 +14,11 @@ export { toggleGlyph, toggleLabel, toggleLook, toggleSizes, toolbarRule, toolbar
 export { menuHighlight, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, menuPressed, menuSeparator, menuSheet, MenuLabel, MenuPanel, SubmenuBack, SubmenuRow, type MenuItemDimensions, type MenuItemLookOptions, type MenuItemTextOptions } from "./look/menu";
 export { backdrop, dialogCard, dialogText, dialogTitle, popoverLook, sheetGrabber, sheetPanel, toastActionLabel, toastActionLook, toastCloseLook, toastLook, toastText, toastTitle, tooltipLook, tooltipNote, tooltipText, type PopoverLookOptions, type SheetSide, type TooltipLookOptions } from "./look/overlay";
 export { pressSink } from "./look/press";
+export { controlSize, density, insetSurface, listRow, plainRow, RowDivider, RowLabel, sectionSurface, type ListRowLook, type ListRowOptions, type PlainRowOptions, type SectionSurfaceOptions } from "./look/surface";
+export { CheckboxMark, checkboxLook, choiceTileLook, MARK_WEIGHT, RadioRing, type CheckboxLook, type CheckboxMarkKind, type ChoiceOptions, type ChoiceTileLook, type ChoiceTileOptions } from "./look/choice";
+export { segmentedLook, TabTitle, tabsLook, underlineTabsLook, type SegmentedLookOptions, type SegmentedSize, type TabLook, type TabState } from "./look/tabs";
+export { fieldLook, fieldSize, fieldText, inputLook, numberInputClasses, numberInputSteps, numberInputText, NumberStep, otpCellLook, otpCells, timeFieldClass, type FieldLookOptions, type FieldTextOptions, type OtpCellOptions } from "./look/field";
+export { calendarLook, CalendarItem, Chevron, clearButtonLook, ComboToggle, comboboxLook, datePickerLook, ListboxEmpty, listboxFooter, ListboxHeader, listboxPopup, listboxProps, listboxSearch, OptionRow, optionClass, Picker, pickerLook, TimeSegment, type ClearButtonOptions, type ComboboxLookOptions, type DatePickerLookOptions, type ListboxPopupOptions, type PickerLookOptions } from "./look/listbox";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
  * color over its surface, quieter than pressed and than selected. Leave it
@@ -88,57 +95,26 @@ export function buttonText(kind: ButtonKind = "secondary", o?: ButtonOptions) {
   return buttonLabel(kind, __look(o));
 }
 
-/** Options of `field`. */
-export interface FieldOptions {
-  /** The value fails its check: a border of `down`. */
-  invalid?: boolean | (() => boolean);
-  /** More style (a height for a multiline field, a margin), over the field's. */
-  style?: object | (() => object);
-}
+/** Options of `field`: `inputLook`'s (`invalid`, `readonly`, `disabled`, `multiline`, `style`). */
+export type FieldOptions = FieldLookOptions;
 
-/** A text field's props (spread them: `<Input {...field()} />`): a field
- * on the surface, a hair sunk, desktop density with a pointer (text 13,
- * radius 7, 28 points high), touch density otherwise (16, radius 10, about
- * 40). States: hover
- * (a stronger border), keyboard focus (`focusRing()`, as every control's),
- * invalid (a `down` border) and disabled (opacity 0.5). */
-export function field(o?: FieldOptions) {
-  return {
-    get style() {
-      return {
-        backgroundColor: colors.field,
-        borderWidth: 1,
-        borderColor: colors.fieldBorder,
-        ...finish.field,
-        fontSize: desktop ? 13 : 16,
-        color: ui().text,
-        placeholderColor: ui().faint,
-        borderRadius: desktop ? 7 : 10,
-        paddingHorizontal: desktop ? 8 : 12,
-        paddingVertical: desktop ? 5 : 9,
-        ...(__read<boolean | undefined>(o?.invalid) ? { borderColor: ui().down } : {}),
-        ...(__read<object | undefined>(o?.style) ?? {}),
-      };
-    },
-    get hoverStyle() {
-      return __read<boolean | undefined>(o?.invalid) ? {} : { borderColor: ui().faint };
-    },
-    get focusStyle() {
-      return focusRing();
-    },
-    disabledStyle: { opacity: 0.5 },
-  };
-}
+/** A lone text field's props (spread them: `<Input {...field()} />`), the
+ * gallery's field (`inputLook`): a recessed well, 28 points high with text
+ * 13 under a pointer, 46 with text 15 on a touch screen; a stronger edge
+ * under the pointer, the 2-point accent focus edge, the danger tone while
+ * invalid, 50% while disabled. */
+export const field = inputLook;
 
-/** The subject in a wide window: a bordered stage that takes the room and
- * centers its content, at most `width` across (440). */
+/** The subject in a wide window: a quiet bordered stage (the theme's card
+ * corners, a whisper of the text color) that takes the room and centers its
+ * content, at most `width` across (440). */
 export function Stage(props: { children?: __JSX.Element; width?: number; gap?: number }) {
   return __View({
     get style() {
       return {
         flex: 1,
         minWidth: 0,
-        borderRadius: 16,
+        borderRadius: radius.card,
         borderWidth: 1,
         borderColor: ui().line,
         backgroundColor: tint(ui().text, 0.02),
@@ -194,7 +170,7 @@ export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Eleme
               ? {
                   flex: 1,
                   minWidth: 0,
-                  borderRadius: 16,
+                  borderRadius: radius.card,
                   borderWidth: 1,
                   borderColor: ui().line,
                   backgroundColor: tint(ui().text, 0.02),
@@ -229,8 +205,8 @@ export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Eleme
   });
 }
 
-/** A recessed panel of state under a small title (`grow`: it takes the
- * column's free height). */
+/** A recessed panel of state under a small title, a well
+ * (`insetSurface`) in the page (`grow`: it takes the column's free height). */
 export function Panel(props: { title: string; children?: __JSX.Element; minHeight?: number; grow?: boolean }) {
   const title = __Text({
     get style() {
@@ -242,7 +218,7 @@ export function Panel(props: { title: string; children?: __JSX.Element; minHeigh
   });
   return __View({
     get style() {
-      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : undefined };
+      return { ...insetSurface(), padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : undefined };
     },
     get children() {
       return [title, props.children];
