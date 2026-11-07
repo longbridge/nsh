@@ -1827,6 +1827,11 @@ impl<M: TextEngine> Core<M> {
         self.paced_scratch = one;
     }
 
+    /// Whether events wait for [`Core::take_events`].
+    pub fn has_events(&self) -> bool {
+        !self.events.is_empty()
+    }
+
     /// Moves what the core hands JS (events it raised, such as
     /// `onLoadMore` and `onLayout`, Rust components' events, calls'
     /// results) into `out`, in order.
@@ -6149,7 +6154,12 @@ impl<M: TextEngine> Core<M> {
             let attachments =
                 !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
             let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
-            if attachments || !self.layout.measures_as_before(layout, measure) {
+            // A text sized by its style never resizes its box: no need to
+            // typeset it to know.
+            if attachments
+                || !(self.layout.sized_by_style(layout)
+                    || self.layout.measures_as_before(layout, measure))
+            {
                 self.layout.mark_dirty(layout);
                 self.needs_layout = true;
             }
@@ -8699,3 +8709,4 @@ fn leaf_context<P>(kind: Kind) -> Option<LeafContext<P>> {
         _ => None,
     }
 }
+
