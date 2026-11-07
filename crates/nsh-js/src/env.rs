@@ -1,7 +1,8 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, lifecycle, the desktop window's
-//! state and the displays) written when the platform reports a
+//! reduced motion, pixel ratio, locale, locale settings, lifecycle, the
+//! desktop window's state and the displays)
+//! written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -46,11 +47,13 @@ enum Part {
     TitleBar,
     Locale,
     Lifecycle,
+    LocaleSettings,
     WindowState,
     Displays,
+    Fps,
 }
 
-const PARTS: usize = 13;
+const PARTS: usize = 15;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -73,6 +76,11 @@ pub(crate) struct Env {
     /// The tokens the app's theme file gives ([`set_theme_tokens`]), taken
     /// in when the entry hands the theme to the renderer ([`take_theme`]).
     theme: RefCell<ThemeTokens>,
+    /// The theme file the app was built with (`nsh.json`), which
+    /// `setTheme(null)` gives back (`None`: it has none).
+    built_theme: RefCell<Option<String>>,
+    /// The displays the platform reported last.
+    displays: RefCell<Vec<Display>>,
 }
 
 impl Default for Env {
@@ -87,6 +95,8 @@ impl Default for Env {
             tokens_signal: Cell::new(UNDEFINED),
             tokens_version: Cell::new(0),
             theme: RefCell::new(ThemeTokens::default()),
+            built_theme: RefCell::default(),
+            displays: RefCell::default(),
         }
     }
 }
@@ -120,6 +130,9 @@ pub(crate) fn init(cx: *mut JsContext) {
         let initial = if i == Part::Displays as usize {
             // SAFETY: a new array, borrowed by the signal and freed after.
             unsafe { qjs::JS_NewArray(cx) }
+        } else if i == Part::Fps as usize {
+            // No performance monitor until the platform installs one.
+            boolean(false)
         } else {
             UNDEFINED
         };
@@ -166,11 +179,89 @@ pub(crate) fn set_theme_tokens(cx: *mut JsContext, theme: ThemeTokens) {
 /// op reaches it, after the turn of the first render, which reads them
 /// already.
 pub(crate) fn take_theme(cx: *mut JsContext, json: &str) {
-    let tokens = env(cx).theme.borrow().of(json);
+    let e = env(cx);
+    e.built_theme.replace(Some(json.to_owned()));
+    let tokens = e.theme.borrow().of(json);
     if let Some(tokens) = tokens {
         set_tokens(cx, Arc::new(tokens));
     }
 }
+
+/// A theme file that sets nothing: the default theme's tokens, which an app
+/// built without a theme has.
+const NO_THEME: &str = r#"{"cssVars":{}}"#;
+
+/// `setTheme(theme)`: the app's theme is `theme` from now on, as if
+/// `nsh.json` had it, read whole or not at all (a `TypeError` names each
+/// value it cannot read); `null` gives back the one the app was built with,
+/// as the entry gave it ([`take_theme`]). `token()` reads the new tokens at
+/// once; the core has them when this turn's ops reach it.
+unsafe extern "C" fn set_theme(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let e = env(cx);
+    let v = arg(argc, argv, 0);
+    // SAFETY: inline tag checks.
+    let nullish = unsafe { qjs::JS_IsNull(v) || qjs::JS_IsUndefined(v) };
+    // SAFETY: an inline tag check.
+    let object = unsafe { qjs::JS_IsObject(v) };
+    let (json, tokens) = if nullish {
+        let json = e.built_theme.borrow().clone();
+        let json = json.unwrap_or_else(|| NO_THEME.to_owned());
+        let tokens = e.theme.borrow().of(&json);
+        (json, tokens)
+    } else if object {
+        // SAFETY: a context reference and a dup for the converter.
+        let value = unsafe {
+            let rcx = rquickjs::Ctx::from_raw(ptr::NonNull::new_unchecked(cx));
+            rquickjs::Value::from_raw(rcx, qjs::JS_DupValue(cx, v))
+        };
+        let Ok(json) = crate::protocol::to_json(&value) else {
+            return qjs::JS_EXCEPTION;
+        };
+        let json = json.to_string();
+        let checked = e.theme.borrow().checked(&json);
+        match checked {
+            Some(Err(what)) => return type_error(cx, &format!("setTheme: {what}")),
+            Some(Ok(tokens)) => (json, Some(tokens)),
+            // No UI set reads themes: the core says so.
+            None => (json, None),
+        }
+    } else {
+        return type_error(cx, "setTheme: expected a theme ({ cssVars }) or null");
+    };
+    let op = nsh_core::Op::SetProp {
+        id: nsh_core::ROOT_ID,
+        prop: nsh_core::Prop::UiTheme(json.into()),
+    };
+    if let Err(err) = crate::dom::push_op(cx, op) {
+        return err;
+    }
+    if let Some(tokens) = tokens {
+        set_tokens(cx, Arc::new(tokens));
+    }
+    reactive::finish_value(cx, UNDEFINED)
+}
+
+/// Throws a `TypeError` of `message`.
+fn type_error(cx: *mut JsContext, message: &str) -> JsValue {
+    let message = std::ffi::CString::new(message.replace('\0', "")).unwrap_or_default();
+    // SAFETY: throws on a live context; `%s` reads the C string.
+    unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) }
+}
+
+/// `setTheme` of `nsh`.
+pub(crate) const SET_THEME_EXPORT: crate::modules::Item = (
+    "setTheme",
+    Export::Function(set_theme, 1),
+    Ts::function(
+        "Makes `theme` the app's theme while it runs, in place of `nsh.json`'s\n`\"theme\"` and over shadcn/ui's tokens as that one is: `token()` reads it\nat once, and classes naming tokens, `nsh/base` and Rust components'\n`theme()` follow with the next frame. An embedding app's theme overrides\nstill win. `null` gives back the theme the app was built with. The theme\nis read whole: a value NSH cannot read (a color it does not know, a value\nthat is no color in one appearance where the other's is) throws a\n`TypeError` naming it, and the theme shown stays.",
+        &["(theme: Theme | null): void"],
+    ),
+);
 
 /// `token(name)`: the design token `name` in the appearance shown (a
 /// color as `#rrggbbaa`, a number, a font family), `undefined` when there
@@ -382,6 +473,37 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
+    if changed(&|p| p.locale_settings == next.locale_settings) {
+        let settings = &next.locale_settings;
+        let mut tags: Vec<JsValue> = settings
+            .languages
+            .iter()
+            .map(|l| string(cx, l.as_str()))
+            .collect();
+        // SAFETY: the array takes the strings.
+        let languages = unsafe { qjs::JS_NewArrayFrom(cx, tags.len() as c_int, tags.as_mut_ptr()) };
+        let first_day_of_week = f32::from(settings.first_day_of_week.number());
+        writes.push((
+            Part::LocaleSettings,
+            object(
+                cx,
+                &[
+                    (c"languages", languages),
+                    (c"timeZone", string(cx, settings.time_zone.as_str())),
+                    (c"hourCycle", string(cx, settings.hour_cycle.name())),
+                    (c"firstDayOfWeek", number(first_day_of_week)),
+                    (
+                        c"measurementSystem",
+                        string(cx, settings.measurement_system.name()),
+                    ),
+                    (
+                        c"temperatureUnit",
+                        string(cx, settings.temperature_unit.name()),
+                    ),
+                ],
+            ),
+        ));
+    }
     if changed(&|p| p.screen_reader == next.screen_reader) {
         writes.push((Part::ScreenReader, boolean(next.screen_reader)));
     }
@@ -395,7 +517,10 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
         writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
     if changed(&|p| p.window_state == next.window_state) {
-        writes.push((Part::WindowState, to_js(cx, &next.window_state)));
+        writes.push((
+            Part::WindowState,
+            crate::window::state_value(cx, next.window_state.as_ref()),
+        ));
     }
     // The layout direction follows the user's language.
     // SAFETY: the state's renderer, by shared reference.
@@ -405,6 +530,8 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
             reactive::set_signal(cx, e.signals[part as usize].get(), value);
         }
     });
+    // The main window's listeners (`WindowRef.on`).
+    crate::window::main_changed(cx, next.window_state);
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -416,8 +543,33 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
 
 /// Takes in the displays the platform reports.
 pub(crate) fn set_displays(cx: *mut JsContext, displays: &[Display]) -> Result<(), ()> {
+    *env(cx).displays.borrow_mut() = displays.to_vec();
     let value = to_js(cx, &displays.to_vec());
-    reactive::set_signal(cx, env(cx).signals[Part::Displays as usize].get(), value);
+    let state = current(cx).window_state;
+    reactive::batch_with(cx, || {
+        reactive::set_signal(cx, env(cx).signals[Part::Displays as usize].get(), value);
+        // The windows' states name their displays: those objects change too.
+        let main = crate::window::state_value(cx, state.as_ref());
+        reactive::set_signal(cx, env(cx).signals[Part::WindowState as usize].get(), main);
+        crate::window::displays_changed(cx);
+    });
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+/// Takes in whether the platform's performance monitor measures
+/// (`fpsEnabled()`).
+pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), ()> {
+    reactive::set_signal(
+        cx,
+        env(cx).signals[Part::Fps as usize].get(),
+        boolean(enabled),
+    );
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -429,7 +581,7 @@ pub(crate) fn set_displays(cx: *mut JsContext, displays: &[Display]) -> Result<(
 
 /// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
 /// when it fails (it does not for the environment's plain objects).
-fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
+pub(crate) fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
     let host = crate::classes::host_outside_calls(cx);
     let converted = value
         .to_js(&host)
@@ -443,13 +595,18 @@ fn accessor(cx: *mut JsContext, part: Part) -> JsValue {
     unsafe { qjs::JS_DupValue(cx, env(cx).accessors[part as usize].get()) }
 }
 
-/// `titleBar()` (`nsh/desktop`): the hidden title bar's area (owned).
+/// The main window's hidden title bar area accessor (owned).
 pub(crate) fn title_bar(cx: *mut JsContext) -> JsValue {
     accessor(cx, Part::TitleBar)
 }
 
-/// `windowState()` (`nsh/desktop`): the window's bounds, mode and display
-/// (owned).
+/// The displays the platform reported last.
+pub(crate) fn display_list(cx: *mut JsContext) -> Vec<Display> {
+    env(cx).displays.borrow().clone()
+}
+
+/// The main window's state accessor (owned): `WindowRef.state()` of the
+/// main window.
 pub(crate) fn window_state(cx: *mut JsContext) -> JsValue {
     accessor(cx, Part::WindowState)
 }
@@ -467,6 +624,17 @@ pub(crate) fn current(cx: *mut JsContext) -> Environment {
 /// applies to what is formatted next.
 pub(crate) fn locale(cx: *mut JsContext) -> nsh_core::platform::Locale {
     current(cx).locale
+}
+
+/// The device's time zone (`Intl`'s default, `localeSettings().timeZone`),
+/// read where it is used as the locale is; `None` until the platform
+/// reports one.
+pub(crate) fn time_zone(cx: *mut JsContext) -> Option<nsh_core::platform::TimeZone> {
+    env(cx)
+        .current
+        .borrow()
+        .as_ref()
+        .map(|e| e.locale_settings.time_zone)
 }
 
 /// `safeAreaInsets()`: the insets of the nearest screen or modal (an
@@ -660,6 +828,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "fpsEnabled",
+        Export::Value(|cx| accessor(cx, Part::Fps)),
+        Ts::value(
+            "Whether the performance monitor measures (reactive): on with `--fps`,\n`NSH_FPS=1` or `setFpsEnabled(true)` where the platform has one.",
+            "Accessor<boolean>",
+        ),
+    ),
+    (
         "fontScale",
         Export::Value(|cx| accessor(cx, Part::FontScale)),
         Ts::value(
@@ -681,6 +857,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::value(
             "The user's locale as a BCP 47 tag (`\"en-US\"`, `\"zh-Hans-CN\"`), which\n`Intl` formats for by default (reactive): the system's, unless the\nembedding app set its own.",
             "Accessor<string>",
+        ),
+    ),
+    (
+        "localeSettings",
+        Export::Value(|cx| accessor(cx, Part::LocaleSettings)),
+        Ts::value(
+            "The user's locale settings beside the locale (reactive): the preferred\nlanguages, the device's time zone and the regional preferences, the\nsystem's settings, which change together. Their names and values are\n`Intl`'s, so they pass into its options as they are\n(`new Intl.DateTimeFormat(locale(), { timeZone, hourCycle })`). Read the\none a view shows in a `computed` to follow only it. In headless tests they\nare the locale's (it alone as the languages, its region's preferences)\nin UTC, unless `open` sets `localeSettings`.",
+            "Accessor<LocaleSettings>",
         ),
     ),
     (
@@ -718,6 +902,40 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+}
+
+/** The user's locale settings beside the locale (`localeSettings()`). */
+export interface LocaleSettings {
+  /** The preferred languages as BCP 47 tags, most preferred first: the
+   * system's list (`["de-DE", "en-US"]`), with the embedding app's own
+   * language first when it sets one. Show the app's text in the first it
+   * has, the others are its fallbacks. */
+  readonly languages: readonly string[];
+  /** The device's time zone as the system names it: an IANA name
+   * (`"Europe/Berlin"`, `"America/New_York"`), `"UTC"`, or an offset zone
+   * where the system has one (`"GMT+01:00"` on Android). It changes with the
+   * system's setting, as the user travels; `Intl` formats local time in it. */
+  readonly timeZone: string;
+  /** 12- or 24-hour time, as `Intl` names its hour cycles: `"h12"`
+   * (`12:30 PM`), `"h23"` (`00:30`), and the rarer `"h11"` (`0:30 PM`) and
+   * `"h24"` (`24:30`). The system's setting, else the region's; pass it as
+   * `Intl.DateTimeFormat`'s `hourCycle` to write times as the user reads
+   * them. `TimeField`'s and `DatePicker`'s `hourCycle` is `"h12"` for
+   * `"h11"` and `"h12"`, `"h23"` for the others. */
+  readonly hourCycle: "h11" | "h12" | "h23" | "h24";
+  /** The day weeks start on, as ISO 8601 numbers days (and `Intl.Locale`'s
+   * `firstDay`): 1 for Monday to 7 for Sunday. A calendar's first column.
+   * The system's setting, else the region's (7 in the US, 1 in Germany).
+   * `Calendar`'s and `DatePicker`'s `firstDayOfWeek` count from 0 for
+   * Sunday: pass `firstDayOfWeek % 7`. */
+  readonly firstDayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  /** The units of lengths, weights and volumes: `"metric"`, `"us"` (feet,
+   * miles, pounds, gallons) or `"uk"` (metric, with miles and pints). The
+   * system's setting, else the region's. */
+  readonly measurementSystem: "metric" | "us" | "uk";
+  /** The unit of temperatures: `"celsius"` or `"fahrenheit"`. The system's
+   * setting, else the region's. */
+  readonly temperatureUnit: "celsius" | "fahrenheit";
 }
 
 export interface PlatformInfo {

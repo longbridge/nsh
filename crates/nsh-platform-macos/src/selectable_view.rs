@@ -345,8 +345,8 @@ impl AreaSelection {
     /// Selects every text of the area last pressed (Cmd+A). False without
     /// one.
     pub(crate) fn select_all(&self, surface: &Surface) -> bool {
-        let mut active = self.active.borrow_mut();
-        let Some(active) = active.as_mut() else {
+        let mut guard = self.active.borrow_mut();
+        let Some(active) = guard.as_mut() else {
             return false;
         };
         let Some(area) = active.area() else {
@@ -355,7 +355,8 @@ impl AreaSelection {
         let texts = collect(&area);
         active.model.select_all(&texts);
         active.show(surface, &texts);
-        drop(active);
+        // `report` borrows the area again.
+        drop(guard);
         report(surface);
         true
     }

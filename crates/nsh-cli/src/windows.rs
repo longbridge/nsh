@@ -47,6 +47,13 @@ pub(crate) fn package(
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
     let runner = runtime::file(Platform::Windows, true)?;
+    // A runner built for another system would package fine and then not
+    // start on Windows ("not a valid application").
+    let mut magic = [0; 2];
+    let is_pe = fs::File::open(&runner)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut magic))
+        .is_ok_and(|()| magic == *b"MZ");
+    anyhow::ensure!(is_pe, "{} is not a Windows executable", ui::path(&runner));
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {

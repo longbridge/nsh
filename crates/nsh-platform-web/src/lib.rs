@@ -150,9 +150,18 @@ thread_local! {
 
 /// Exports one `nsh_part_<name>` per part of `nsh/base`: the page calls
 /// those of the parts its app uses, and a runtime linked for the app keeps
-/// only the parts it exports.
+/// only the parts it exports. The list must name every part of
+/// [`nsh_base::parts::ALL`] (checked at compile time): a part without its
+/// gate is never registered, and an app importing one of its exports fails
+/// to link ("does not provide an export named …").
 macro_rules! base_parts {
-    ($($name:ident => $export:ident),* $(,)?) => {$(
+    ($($name:ident => $export:ident),* $(,)?) => {
+        #[cfg(feature = "base-full")]
+        const _: () = assert!(
+            covers_every_part(&[$(stringify!($name)),*]),
+            "base_parts! must list every part of nsh_base::parts::ALL",
+        );
+        $(
         /// Adds this part of `nsh/base` to the apps started from now on.
         #[cfg(feature = "base-full")]
         #[unsafe(no_mangle)]
@@ -165,7 +174,45 @@ macro_rules! base_parts {
                 }
             });
         }
-    )*};
+        )*
+    };
+}
+
+/// Whether `names` are exactly the parts of [`nsh_base::parts::ALL`].
+#[cfg(feature = "base-full")]
+const fn covers_every_part(names: &[&str]) -> bool {
+    const fn same(a: &str, b: &str) -> bool {
+        let (a, b) = (a.as_bytes(), b.as_bytes());
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i < a.len() {
+            if a[i] != b[i] {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    let all = nsh_base::parts::ALL;
+    if names.len() != all.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < all.len() {
+        let mut j = 0;
+        let mut found = false;
+        while j < names.len() {
+            found |= same(all[i].0, names[j]);
+            j += 1;
+        }
+        if !found {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 base_parts!(
@@ -184,6 +231,7 @@ base_parts!(
     dock => nsh_part_dock,
     resizable => nsh_part_resizable,
     plot => nsh_part_plot,
+    term => nsh_part_term,
 );
 
 /// Makes `TextView`'s formulas typeset: no app imports this. A published
@@ -452,6 +500,49 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     {
         env.locale = locale;
     }
+    if let Some(languages) = value
+        .get("languages")
+        .and_then(|v| v.as_array())
+        .and_then(|tags| {
+            nsh_core::platform::Languages::parse(tags.iter().filter_map(|t| t.as_str()))
+        })
+    {
+        env.locale_settings.languages = languages;
+    }
+    if let Some(regional) = value.get("regional") {
+        // The region's preferences, with the browser's hour cycle and first
+        // day of the week where it has them.
+        let locale = regional.get("locale").and_then(|v| v.as_str());
+        let parsed =
+            nsh_core::platform::LocaleSettings::parse(locale.unwrap_or(env.locale.as_str()));
+        let preferences = &mut env.locale_settings;
+        preferences.hour_cycle = parsed.hour_cycle;
+        preferences.first_day_of_week = parsed.first_day_of_week;
+        preferences.measurement_system = parsed.measurement_system;
+        preferences.temperature_unit = parsed.temperature_unit;
+        if let Some(cycle) = regional
+            .get("hourCycle")
+            .and_then(|v| v.as_str())
+            .and_then(nsh_core::platform::HourCycle::parse)
+        {
+            preferences.hour_cycle = cycle;
+        }
+        if let Some(day) = regional
+            .get("firstDay")
+            .and_then(|v| v.as_u64())
+            .and_then(|d| u8::try_from(d).ok())
+            .and_then(nsh_core::platform::Weekday::from_number)
+        {
+            preferences.first_day_of_week = day;
+        }
+    }
+    if let Some(zone) = value
+        .get("timeZone")
+        .and_then(|v| v.as_str())
+        .and_then(nsh_core::platform::TimeZone::parse)
+    {
+        env.locale_settings.time_zone = zone;
+    }
     env.rtl = flag("rtl").unwrap_or(env.rtl);
     env.apple_keyboard = flag("appleKeyboard").unwrap_or(env.apple_keyboard);
     env.reduce_motion = flag("reduceMotion").unwrap_or(env.reduce_motion);
@@ -490,6 +581,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     send(|app| {
         let e = &mut app.environment;
         e.locale = env.locale;
+        e.locale_settings = env.locale_settings;
         e.rtl = env.rtl;
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
@@ -605,6 +697,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]

@@ -1,8 +1,19 @@
+/** Whether `a` and `b` are the same value, or objects (arrays) with the
+ * same members, compared `depth` levels down. */
+function same(a, b, depth) {
+  if (a === b) return true;
+  if (depth === 0 || !a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => same(a[key], b[key], depth - 1));
+}
+
 export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
-    lifecycle: "active" };
+    lifecycle: "active",
+    localeSettings: { languages: ["en-US"], timeZone: "UTC", hourCycle: "h12", firstDayOfWeek: 7,
+      measurementSystem: "us", temperatureUnit: "fahrenheit" } };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
   const tokens = reactive.signal(0);
   const insets = reactive.context(() => fields.safeArea());
@@ -23,7 +34,9 @@ export function createEnvironment(reactive, invoke, dom) {
   const device = {
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
-    lifecycle: () => fields.lifecycle(), platform,
+    localeSettings: () => fields.localeSettings(), lifecycle: () => fields.lifecycle(), platform,
+    // A browser page has no performance monitor (its developer tools measure it).
+    fpsEnabled: () => false,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   const api = {
@@ -31,6 +44,9 @@ export function createEnvironment(reactive, invoke, dom) {
     safeArea: () => fields.safeArea(), safeAreaInsets: () => insets(), keyboardFrame: () => fields.keyboard(),
     screenReader: () => fields.screenReader(),
     token(name) { tokens(); return invoke(402, [name, fields.colorScheme() === "dark"]); },
+    // nsh-js's `setTheme` (`env.rs`): the engine checks and applies it, or
+    // throws its `TypeError`; what read a token follows once it took.
+    setTheme(theme) { invoke(406, [theme]); tokens.update(value => value + 1); },
   };
   return {
     api, insets, host: () => fields.host(), titleBar: () => fields.titleBar(),
@@ -42,9 +58,10 @@ export function createEnvironment(reactive, invoke, dom) {
         for (const [name, signal] of Object.entries(fields)) {
           const value = name === "colorScheme" && appearance !== "system" ? appearance : next[name];
           const previous = reactive.untracked(signal);
-          const same = previous && value && typeof value === "object"
-            ? Object.keys(value).every(key => value[key] === previous[key]) : value === previous;
-          if (!same) signal.set(value);
+          // A part is written when it changed: a value, or an object's
+          // member (the locale settings' languages: one of them, or their
+          // number).
+          if (!same(value, previous, 2)) signal.set(value);
         }
       });
       dom.rootProp("layoutDirectionRtl", next.rtl);

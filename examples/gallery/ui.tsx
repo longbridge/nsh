@@ -5,6 +5,7 @@ import { Canvas, computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
 import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
+import { play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
 
@@ -124,7 +125,10 @@ export function ThemeToggle(props: { bar?: boolean }) {
   if (props.bar) {
     return (
       <Press
-        onPress={() => setColorScheme(isDark() ? "light" : "dark")}
+        onPress={() => {
+          play("toggle", { rate: isDark() ? 1 : 0.9 });
+          setColorScheme(isDark() ? "light" : "dark");
+        }}
         scale={0.92}
         accessibilityLabel={isDark() ? "Light appearance" : "Dark appearance"}
       >
@@ -139,9 +143,37 @@ export function ThemeToggle(props: { bar?: boolean }) {
       icon={isDark() ? "sun" : "moon"}
       label={isDark() ? "Light appearance" : "Dark appearance"}
       title="Theme"
-      onPress={() => setColorScheme(isDark() ? "light" : "dark")}
+      onPress={() => {
+          play("toggle", { rate: isDark() ? 1 : 0.9 });
+          setColorScheme(isDark() ? "light" : "dark");
+        }}
     />
   );
+}
+
+/** Turns the gallery's sounds on and off: the switch sounds as it turns on,
+ * and once more, lower, as it turns off. */
+export function SoundToggle(props: { bar?: boolean }) {
+  const label = () => (soundsOn() ? "Mute sounds" : "Turn sounds on");
+  const flip = () => {
+    if (soundsOn()) {
+      play("toggle", { rate: 0.9 });
+      setSoundsOn(false);
+    } else {
+      setSoundsOn(true);
+      play("toggle");
+    }
+  };
+  if (props.bar) {
+    return (
+      <Press onPress={flip} scale={0.92} accessibilityLabel={label()}>
+        <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+          <Icon name={soundsOn() ? "volume-high" : "volume-off"} size={18} tint={colors.text} />
+        </View>
+      </Press>
+    );
+  }
+  return <ToolButton icon={soundsOn() ? "volume-high" : "volume-off"} label={label()} title="Sound" onPress={flip} />;
 }
 
 /**

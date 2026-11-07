@@ -41,6 +41,7 @@ mod state;
 mod timers;
 mod touch;
 mod web;
+mod window;
 
 // The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
 // nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.

@@ -1,16 +1,19 @@
 import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
 import { windowSize } from "nsh";
 import { Button, Toggle } from "nsh/base";
-import { button, buttonText, ui } from "./palette";
+import { button, buttonText, toggleLabel, toggleLook, ui } from "./palette";
 
 // A short CC0 clip from MDN's examples.
 const FLOWER = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
 
-/** A video option that is on or off: a `Toggle`, sunk while on. */
+/** The look of a video option: a small toggle with a label, on a field's edge while off. */
+const option = { size: "small", variant: "outline", text: true } as const;
+
+/** A video option that is on or off: a `Toggle`, the on fill while on. */
 function Option(props: { label: string; on: boolean; onChange: (on: boolean) => void }) {
   return (
-    <Toggle pressed={props.on} onChange={({ pressed }) => props.onChange(pressed)} {...button("secondary", { on: () => props.on, size: "sm" })}>
-      <Text style={buttonText("secondary", { size: "sm" })}>{props.label}</Text>
+    <Toggle pressed={props.on} onChange={({ pressed }) => props.onChange(pressed)} {...toggleLook(option)}>
+      <Text style={toggleLabel(() => props.on, option)}>{props.label}</Text>
     </Toggle>
   );
 }
@@ -77,13 +80,17 @@ function App() {
           <Text style={{ color: ui().muted, fontFamily: "monospace", fontSize: 13 }}>
             {status()} · onEnd {ends()}×
           </Text>
+          {/* The commands, then the options: a raised button and an option
+              that is on are both filled, so each kind keeps a row of its own. */}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Action label={paused() ? "Play" : "Pause"} onPress={() => paused.set(!paused())} />
+            <Action label="seek(0)" onPress={() => video.seek(0)} />
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Option label="muted" on={muted()} onChange={(on) => muted.set(on)} />
             <Option label="repeat" on={repeat()} onChange={(on) => repeat.set(on)} />
             <Option label="rate 2" on={fast()} onChange={(on) => fast.set(on)} />
             <Option label="controls" on={controls()} onChange={(on) => controls.set(on)} />
-            <Action label="seek(0)" onPress={() => video.seek(0)} />
           </View>
         </View>
       </View>

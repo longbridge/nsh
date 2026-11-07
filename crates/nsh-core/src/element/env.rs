@@ -3,7 +3,7 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{Idiom, Lifecycle, Locale, Os},
+    platform::{Idiom, Lifecycle, Locale, LocaleSettings, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
@@ -41,6 +41,9 @@ pub struct Environment {
     pub idiom: Idiom,
     /// The user's locale, for formatting numbers and dates.
     pub locale: Locale,
+    /// The user's locale settings: the preferred languages, the time zone
+    /// and the regional preferences.
+    pub locale_settings: LocaleSettings,
     /// In a browser, it runs on an Apple platform: shortcuts follow Apple's
     /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
     /// theirs.
@@ -96,6 +99,7 @@ impl Default for Environment {
             os_version: (0, 0),
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
+            locale_settings: LocaleSettings::default(),
             apple_keyboard: false,
             ctrl_for_command: false,
             host: false,

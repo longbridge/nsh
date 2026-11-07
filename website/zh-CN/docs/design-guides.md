@@ -748,6 +748,26 @@ Motion policy 属于应用层。`nsh/base` 拥有 transition 所需的生命周�
 
 动效应遵循交互的连续性。指针或滚动位置在相关目标间移动时，预览表面保持稳定，只更新内容或位置；交互结束后再关闭。每次更新都淡出、重现，会被感知为闪烁。
 
+## 声音
+
+声音确认眼睛已经看到的变化，从不单独承载含义。保留一小组短而轻、同属一个家族的声音，每个只做一件事，让音色先告诉用户这是哪一类事件：一次选择、一次状态切换、打开或关闭、成功、警告、错误、结果到达、需要用户回应的提示。按职责选声音，而不是按控件：开关和复选框共用一个声音，分段控件和单选共用另一个。只在变化完成时播放（开关拨动、消息发出、toast 给出结果），不要在悬停、每次按键、每个流式 token 或持续刷新的数字上播放。默认是安静；用户操作时反复出现的声音很快就成了噪音。
+
+```rust tabs
+const TOGGLE: FileAsset = asset!("sounds/toggle.wav");
+
+let toggle = load_sound(TOGGLE.uri).await?; // 一次，在第一次按下之前
+toggle.play(0.6, if on { 1.0 } else { 0.9 }); // 关闭时略低
+```
+
+```tsx tabs
+import toggleFile from "./sounds/toggle.wav";
+
+const toggle = await Sound.load(toggleFile); // 一次，在第一次按下之前
+toggle.play({ volume: 0.6, rate: on ? 1 : 0.9 }); // 关闭时略低
+```
+
+提前加载一次声音，让它在所伴随的变化的同一帧内响起。先用 `rate` 变化同一个声音（开关的开与关），再考虑增加文件。音量低于系统自身的声音；关掉声音时界面也必须完全可理解：iOS 上声音跟随静音开关，很多人从来听不到。
+
 ## 数据密集界面
 
 Dense 不等于拥挤。在 table、tree、长列表与 editor 中：

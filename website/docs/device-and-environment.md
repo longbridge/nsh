@@ -21,6 +21,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `cx.insets()` | `safeAreaInsets()` (`nsh`) | The insets where the calling component renders (a page, a dialog). |
 | `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
+| `locale_settings()` | `localeSettings()` (`nsh`) | The user's locale settings: the preferred languages, the time zone, 12- or 24-hour time, the day weeks start on, the units of measurements and of temperatures ([Locale settings](#locale-settings)). |
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
@@ -247,9 +248,144 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
 
+## Locale settings
+
+`locale_settings()` (TSX: `localeSettings()`) holds what else the user set for their language and region: the
+preferred languages, the device's time zone, and how they read times, weeks and measurements. The systems keep these
+together (Language & Region on iPhone and Mac, the language and regional preferences on Android, Time & language on
+Windows) and change several at once, so they come as one value, and what reads it updates when any of them changes.
+The names and values are `Intl`'s, so they pass into its options as they are.
+
+To follow one of them alone, read it through a `computed`: what reads that updates only when that one
+changes, not when the user travels to another time zone or adds a language.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+// Updates when the user switches between 12- and 24-hour time, and only then.
+let twelve_hour = computed(|| locale_settings().hour_cycle.twelve_hour());
+text(move || if twelve_hour.get() { "3:00 PM" } else { "15:00" })
+```
+
+```tsx tabs
+import { Text } from "nsh";
+import { computed, localeSettings } from "nsh";
+
+// Updates when the user switches between 12- and 24-hour time, and only then.
+const twelveHour = computed(() => ["h11", "h12"].includes(localeSettings().hourCycle));
+
+<Text>{twelveHour() ? "3:00 PM" : "15:00"}</Text>
+```
+
+In tests, `open`'s `localeSettings` sets the ones it names over the locale's (the locale alone as the languages, its
+region's preferences, UTC), and `app.setLocaleSettings({ hourCycle: "h23" })` changes the ones it names, keeping the
+others ([Testing](./testing-and-trace.md#steps)).
+
+### Preferred languages
+
+`languages` is the user's list of preferred languages, most preferred first, as BCP 47 tags: the system's (Settings' language list on a phone, the UI languages of a desktop, the browser's on the web). Show the app's text in the first one it has a translation for, and fall back along the list: a user who prefers Swiss German, then German, then English gets German text from an app that has German and English. `locale()` is something else, the region format numbers and dates follow, which can be another (English text, German dates). The list is never empty, and what read it updates when the user changes it.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
+
+fn text_language() -> &'static str {
+    locale_settings()
+        .languages
+        .iter()
+        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
+        .unwrap_or("en")
+}
+```
+
+```tsx tabs
+import { localeSettings } from "nsh";
+
+const TRANSLATED = ["en", "de", "zh"];
+
+const textLanguage = () =>
+  localeSettings().languages.map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
+```
+
+An app shown inside a native app that sets its own language has that language first.
+
+### Regional preferences
+
+The systems keep a few settings of how the user reads times, weeks and measurements beside the language (Language & Region on iPhone and Mac, regional preferences on Android, Region on Windows):
+
+- `hour_cycle` (TSX: `hourCycle`): 12- or 24-hour time, as `Intl` names its hour cycles: `h12` (`12:30 PM`), `h23` (`00:30`), and the rarer `h11` (`0:30 PM`) and `h24` (`24:30`).
+- `first_day_of_week` (TSX: `firstDayOfWeek`): the day weeks start on, a calendar's first column; TSX numbers it as ISO 8601 does, 1 for Monday to 7 for Sunday.
+- `measurement_system` (TSX: `measurementSystem`): `metric`, `us` (feet, miles, pounds, gallons) or `uk` (metric, with miles and pints).
+- `temperature_unit` (TSX: `temperatureUnit`): `celsius` or `fahrenheit`.
+
+Each is the system's setting where the user made one, else the region's own (as the Unicode CLDR gives them: 12-hour time and weeks from Sunday in the US, 24-hour time and weeks from Monday in Germany).
+
+```rust tabs
+use nsh_core::{platform::TemperatureUnit, prelude::*};
+
+/// A temperature in degrees Celsius, in the user's unit.
+fn temperature(celsius: f32) -> String {
+    match locale_settings().temperature_unit {
+        TemperatureUnit::Celsius => format!("{celsius:.0} °C"),
+        TemperatureUnit::Fahrenheit => format!("{:.0} °F", celsius * 9.0 / 5.0 + 32.0),
+    }
+}
+
+/// A calendar's columns from the user's first day: 1 for Monday to 7 for
+/// Sunday.
+fn week_columns() -> [u8; 7] {
+    let first = locale_settings().first_day_of_week.number();
+    std::array::from_fn(|i| (first - 1 + i as u8) % 7 + 1)
+}
+```
+
+```tsx tabs
+import { localeSettings } from "nsh";
+
+const time = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: localeSettings().hourCycle });
+
+const temperature = (celsius: number) =>
+  localeSettings().temperatureUnit === "fahrenheit"
+    ? `${Math.round((celsius * 9) / 5 + 32)} °F`
+    : `${Math.round(celsius)} °C`;
+
+// A calendar's columns from the user's first day: 1 for Monday to 7 for Sunday.
+const weekColumns = () =>
+  Array.from({ length: 7 }, (_, i) => ((localeSettings().firstDayOfWeek - 1 + i) % 7) + 1);
+```
+
+`Intl` writes times in the locale's own hour cycle: pass `hourCycle` as its `hourCycle` option, as above, to write them as the user reads them. On the web, the browser tells no user settings of these: the hour cycle and the first day of the week are the browser's for its language, the units its region's.
+
+The base components show what the app passes them, in their own forms. `Calendar`'s and `DatePicker`'s
+`firstDayOfWeek` number the days from `0` for Sunday to `6` for Saturday: the user's first day is
+`localeSettings().firstDayOfWeek % 7` (Rust: `locale_settings().first_day_of_week.number() % 7`). `TimeField`'s and
+`DatePicker`'s `hourCycle` is `"h12"` or `"h23"`: the user's is `"h12"` where `localeSettings().hourCycle` is `"h11"`
+or `"h12"`, else `"h23"` (Rust: `HourCycle::H12` where `locale_settings().hour_cycle.twelve_hour()`).
+
+### Time zone
+
+`time_zone` (TSX: `timeZone`) is the device's time zone as the system names it: an IANA name such as `Europe/Berlin` or `America/New_York`, `UTC`, or an offset zone where the system has one (`GMT+01:00` on Android). It changes when the user changes the setting or the device moves to another zone, and what read it updates: a clock that names its zone, a list of times in the user's zone, a date saved with the zone it was made in.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+text(move || format!("Times in {}", locale_settings().time_zone))
+```
+
+```tsx tabs
+import { Text } from "nsh";
+import { localeSettings } from "nsh";
+
+<Text>{`Times in ${localeSettings().timeZone}`}</Text>
+```
+
+`Date`'s local times follow the system's zone, as they always have: `time_zone` names it. `Intl` formats local time in that zone and names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `localeSettings().timeZone`, and `{ timeZone: localeSettings().timeZone }` formats in local time. In tests, the zone `open` or `app.setLocaleSettings` gives (`UTC` otherwise) is the one `localeSettings()` reports; local times, `Date`'s and `Intl`'s, stay the machine's, and `Intl` names the machine's zone.
+
 ## In an embedding app
 
-An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./ios.md), `setLocale` and `setFontScale` in Java on [Android](./android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
+An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./ios.md), `setLocale` and `setFontScale` in Java on [Android](./android.md)) stand in for the system's language and text size. `locale()`, `localeSettings()`'s languages (the embedding app's language first), `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
 
 ## In the background
 
@@ -378,10 +514,11 @@ Settings > Personalization > Colors live, `fontScale()` the Text size setting (1
 animation effects setting, `pixelRatio()` the monitor's scale, and `Intl` formats in the user's regional format.
 
 In a browser ([the web runtime](./web.md)), `platform.os` is `"web"` and `platform.version` `"0.0"`. The idiom is
-`"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone,
-decided when the app starts. The locale, `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
-focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard
-height come from the browser and follow it live.
+`"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone, decided
+when the app starts. The locale, `localeSettings()` (the browser's preferred languages, its regional preferences for
+its language and its time zone), `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
+focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard height
+come from the browser and follow it live.
 
 In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal"`, `platform.desktop` is `true` and
 `platform.os` is the machine's own system. `colorScheme()` follows the terminal's background, `reduceMotion()` is

@@ -2,6 +2,7 @@ import { keymap, platform, signal, Text, View } from "nsh";
 import { Button, Command, type CommandItem, type CommandRef, Dialog } from "nsh/base";
 import type { IconName } from "../icons";
 import {
+  backdrop,
   Caption,
   Card,
   colors,
@@ -130,7 +131,7 @@ export function CommandDemo() {
           open={open()}
           animation="fade"
           onOpenChange={({ open: next }) => show(next)}
-          backdropStyle={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+          backdropStyle={backdrop()}
           style={
             desktop()
               ? { marginHorizontal: "auto", marginTop: "12%", width: 560, maxWidth: "92%" }

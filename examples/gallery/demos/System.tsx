@@ -3,8 +3,8 @@ import { createAnimatedValue, Easing } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh";
 import { AlertDialog, type AlertDialogAction, Dialog, type StatusBarForeground } from "nsh/base";
 import { keyboardFrame, safeArea } from "nsh";
-import { Menu, Window } from "nsh/desktop";
-import { keymap, platform } from "nsh";
+import { Menu } from "nsh/desktop";
+import { fpsEnabled, keymap, platform, setFpsEnabled } from "nsh";
 import { Icon, type IconName, lucideSvg } from "../icons";
 import { toast } from "../toast";
 import { Appear, Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, IconTile, isDark, Inset, Legend, Meter, mono, Press, Row, Segmented, Stat, tints, Toggle, type Tone, toneColor } from "../ui";
@@ -312,6 +312,13 @@ function FramesAndTimers() {
         <Meter value={running() ? fps() / 120 : 0} tone="up" marker={0.5} />
       </View>
       <Button label={running() ? "Stop counting frames" : "Count frames"} icon={running() ? "pause" : "play"} onPress={toggle} />
+      <Row>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={{ fontSize: 15, color: colors.text }}>Performance monitor</Text>
+          <Text style={{ fontSize: 12, color: colors.muted }}>{platform.os === "macos" ? "Frame and commit costs, CPU and memory" : "Frame and commit costs in the log"}</Text>
+        </View>
+        <Toggle value={fpsEnabled()} onChange={(on) => setFpsEnabled(on)} label="Performance monitor" />
+      </Row>
     </Card>
   );
 }
@@ -389,42 +396,6 @@ function ContextMenu() {
   );
 }
 
-/** Shared by the main window and the second one: one JS runtime renders
- * both, so a signal is all they need. */
-const sharedCount = signal(0);
-
-function SecondWindow() {
-  return (
-    <View style={{ flex: 1, padding: 20, gap: 12, backgroundColor: colors.background }}>
-      <Text style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>Second window</Text>
-      <Text testID="second-count" style={{ fontSize: 14, color: colors.muted }}>{`Shared count: ${sharedCount()}`}</Text>
-      <Button label="Add one" icon="plus" onPress={() => sharedCount.set(sharedCount() + 1)} />
-      <Button label="Close" onPress={() => Window.open(SecondWindow, { id: "second" }).close()} />
-    </View>
-  );
-}
-
-function Windows() {
-  const supported = platform.os === "linux" || platform.os === "windows";
-  return (
-    <Card icon="system" title="Windows" subtitle="nsh/desktop · Window.open">
-      <Text testID="main-count" style={{ fontSize: 14, color: colors.muted }}>
-        {supported ? `Shared count: ${sharedCount()}` : "Window.open is on Linux and Windows for now"}
-      </Text>
-      {supported && (
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button
-            label="Open second window"
-            icon="plus"
-            onPress={() => Window.open(SecondWindow, { id: "second", title: "Second window", size: { width: 360, height: 240 } }).focus()}
-          />
-          <Button label="Add one" onPress={() => sharedCount.set(sharedCount() + 1)} />
-        </View>
-      )}
-    </Card>
-  );
-}
-
 type Post = { id: number; title: string };
 
 function Network() {
@@ -490,6 +461,6 @@ function Network() {
 }
 
 export function System() {
-  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, Windows, Network];
+  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, Network];
   return <DemoPage cards={sections} />;
 }

@@ -115,6 +115,11 @@ pub(crate) fn back(tree: &mut Mounter, control: &EngineControl, app_first: bool)
                 let view = view.as_ref()?;
                 let stack = view.stack.as_ref()?;
                 (visible(tree, id)
+                    && nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(id), |&id| tree.get(id)?.parent)
+                            .filter(|&id| id != ROOT_ID)
+                            .filter_map(|id| Some(tree.get(id)?.frame)),
+                    )
                     && modal.is_none_or(|modal| crate::keyboard::contains(tree, modal, id))
                     && stack.takes_back(|screen| {
                         tree.get(screen)

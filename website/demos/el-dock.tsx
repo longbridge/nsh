@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, DockArea, type DockAreaLayout, type DockAreaRef, Toggle } from "nsh/base";
-import { button, buttonText, desktop, focusRing, Log, Panel, Split, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Log, Panel, Split, toggleLabel, toggleLook, ui, wide } from "./palette";
 
 // The panels' keys and what each shows. The layout lists the keys; the app
 // renders a panel's content from its key, and the content moves with it.
@@ -46,11 +46,12 @@ function App() {
   const log = (line: string) => events.set([line, ...events()].slice(0, 4));
   let area!: DockAreaRef;
 
-  // A dock shown or the layout locked is on or off: a `Toggle`. Reset is an
-  // action: a `Button`.
+  // A dock shown or the layout locked is on or off: a `Toggle` in the
+  // toggles' look. Reset is an action: a `Button`.
+  const toggleOptions = { size: "small", variant: "outline", text: true } as const;
   const toolbarToggle = (label: string, on: () => boolean, set: (on: boolean) => void) => (
-    <Toggle pressed={on()} onChange={({ pressed }) => set(pressed)} {...button("secondary", { size: "sm", on })}>
-      <Text style={buttonText("secondary", { size: "sm" })}>{label}</Text>
+    <Toggle pressed={on()} onChange={({ pressed }) => set(pressed)} {...toggleLook(toggleOptions)}>
+      <Text style={toggleLabel(on, toggleOptions)}>{label}</Text>
     </Toggle>
   );
   const toolbarButton = (label: string, onPress: () => void) => (
@@ -114,7 +115,7 @@ function App() {
             dropIndicatorClass="rounded-(--radius) border-2 border-primary bg-primary/10"
             drawerClass="bg-background border-r border-border"
             sheetClass="rounded-t-(--radius-lg) bg-background"
-            backdropClass="bg-black/30"
+            backdropClass="bg-scrim"
             renderTab={(tab) => (
               // One view inside the tab: a row holding the title and the close button.
               <View class="flex-row items-center gap-1.5">

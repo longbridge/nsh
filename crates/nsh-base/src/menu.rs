@@ -121,7 +121,10 @@ impl Why {
     fn add(self, id: u32, report: Report) {
         self.reports.with(|r| r.push((id, report)));
         let reports = self.reports;
-        cleanup(move || reports.with(|r| r.retain(|(i, _)| *i != id)));
+        // The menu's own state may go before a submenu inside it.
+        cleanup(move || {
+            reports.try_with(|r| r.retain(|(i, _)| *i != id));
+        });
     }
 
     /// Reports the closings of the submenus other than `id` not reported

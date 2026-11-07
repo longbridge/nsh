@@ -109,7 +109,7 @@ mount(App);
 
 ## 月份与视图
 
-`numberOfMonths` 从显示的月份起并排显示这么多个月；"上一个"和"下一个"每次翻一个月。`firstDayOfWeek` 是每周的第一天，`0` 为星期日（默认）到 `6` 为星期六。
+`numberOfMonths` 从显示的月份起并排显示这么多个月；"上一个"和"下一个"每次翻一个月。`firstDayOfWeek` 是每周的第一天，`0` 为星期日（默认）到 `6` 为星期六；用户的是 `localeSettings().firstDayOfWeek % 7`（[地区偏好](../docs/device-and-environment.md#地区偏好)）。
 
 头部包含"上一个"、两个切换按钮和"下一个"：
 

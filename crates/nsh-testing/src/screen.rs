@@ -162,6 +162,13 @@ pub struct Screen {
     viewport: Option<Size<Points>>,
     /// The nodes each canvas's drawing has, as views of the model.
     canvas_nodes: HashMap<NodeId, Vec<NodeId>>,
+    /// The app's windows of its own, in the order they opened: each one's
+    /// root (a modal the platform shows in a window of its own,
+    /// `DesktopCommand::OpenWindow`) and the app's id for it.
+    windows: Vec<(NodeId, String)>,
+    /// Those not on screen (minimized, hidden, closed by a policy of
+    /// theirs), as the driver keeps them: their views are not found.
+    hidden_windows: HashSet<NodeId>,
     /// The id the next canvas node gets.
     next_canvas_node: NodeId,
 }
@@ -224,6 +231,9 @@ struct View {
     attributed: Option<Arc<nsh_core::AttributedText>>,
     /// Which touches it and its subtree receive (`pointerEvents`).
     pointer_events: PointerEvents,
+    /// Its children are read in screen order along this axis (a list in
+    /// its parent's viewport, `ViewProps::screen_order`).
+    screen_order: Option<nsh_core::geometry::Axis>,
     /// A node of a canvas's drawing, not a view of its own.
     canvas_node: bool,
 }
@@ -348,6 +358,7 @@ impl Screen {
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
+                self.forget_window(*id);
             }
             MountItem::Delete { id } => {
                 self.drop_spans(*id);
@@ -357,6 +368,7 @@ impl Screen {
                 self.children.remove(id);
                 self.popped.remove(id);
                 self.closed.remove(id);
+                self.forget_window(*id);
                 if self.focused == Some(*id) {
                     self.focused = None;
                 }
@@ -394,6 +406,7 @@ impl Screen {
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
                 view.pointer_events = props.pointer_events;
+                view.screen_order = props.screen_order;
             }
             MountItem::Keymap(keymap) => self.keymap = Some(keymap.clone()),
             MountItem::TrackStates { id, states } => {
@@ -539,11 +552,17 @@ impl Screen {
                 self.file_answers.push((*id, (**request).clone()));
             }
             Command::Back => self.back_asked = true,
-            Command::Desktop(desktop) => {
-                if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
+            Command::Desktop(desktop) => match &**desktop {
+                nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } => {
                     self.menu = Some(items.clone());
                 }
-            }
+                nsh_core::desktop::DesktopCommand::OpenWindow(open)
+                    if !self.windows.iter().any(|(root, _)| *root == id) =>
+                {
+                    self.windows.push((id, open.options.id.clone()));
+                }
+                _ => {}
+            },
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -736,7 +755,7 @@ impl Screen {
         let mut out = Vec::new();
         let mut stack = vec![ROOT];
         while let Some(id) = stack.pop() {
-            if self.closed.contains(&id) {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
             if id != ROOT {
@@ -769,7 +788,7 @@ impl Screen {
         // parent shows.
         let mut stack = vec![(ROOT, Point::default(), window, false, true)];
         while let Some((id, origin, clip, hidden, parent_shown)) = stack.pop() {
-            if self.closed.contains(&id) {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
             // The root is the platform's: no batch creates it.
@@ -781,7 +800,8 @@ impl Screen {
             };
             let hidden = hidden || view.hidden;
             // A modal is presented over the window, wherever it is in the
-            // tree.
+            // tree; a window of the app's own is a window of its own, as
+            // large as the main one (its root fills it).
             let (origin, clip) = if view.kind == Some(ViewKind::Modal) {
                 (Point::default(), window)
             } else {
@@ -840,11 +860,35 @@ impl Screen {
             } else if view.clips && id != ROOT {
                 inner = inner.within(bounds);
             }
-            let children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+            let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
                 self.screens(id).last().copied().into_iter().collect()
             } else {
                 self.children.get(&id).cloned().unwrap_or_default()
             };
+            // A scroll view's content, and a list's cells in its parent's
+            // viewport, in the order they are on screen, as macOS, iOS and
+            // Android order Tab and screen readers: a list's recycled cells
+            // are in the order they were made.
+            let horizontal = view.scroll.as_ref().map(|s| s.horizontal).or(view
+                .screen_order
+                .map(|a| a == nsh_core::geometry::Axis::Horizontal));
+            if let Some(horizontal) = horizontal
+                && children.len() > 1
+            {
+                let start = |child: &NodeId| {
+                    let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
+                    let (main, cross) = if horizontal {
+                        (frame.origin.x, frame.origin.y)
+                    } else {
+                        (frame.origin.y, frame.origin.x)
+                    };
+                    (main.0, cross.0)
+                };
+                children.sort_by(|a, b| {
+                    let (a, b) = (start(a), start(b));
+                    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+                });
+            }
             stack.extend(
                 children
                     .into_iter()
@@ -876,7 +920,8 @@ impl Screen {
 
     /// What going back does now, as a platform's back does it: in the
     /// newest modal (else the whole screen) the innermost stack that can go
-    /// back pops its top screen, or asks it when it prevents going back;
+    /// back and is laid out with a size (`shown_in_layout`) pops its top
+    /// screen, or asks it when it prevents going back;
     /// without one, the newest modal asks to close.
     pub(crate) fn back_target(&self) -> Back {
         let attached = self.attached();
@@ -884,7 +929,7 @@ impl Screen {
             .iter()
             .rev()
             .copied()
-            .find(|id| self.kind(*id) == Some(ViewKind::Modal));
+            .find(|id| self.kind(*id) == Some(ViewKind::Modal) && !self.is_window(*id));
         let can_go_back = |stack: NodeId| {
             let screens = self.screens(stack);
             screens.len() >= 2
@@ -899,6 +944,11 @@ impl Screen {
                 self.kind(*id) == Some(ViewKind::Stack)
                     && modal.is_none_or(|m| self.is_inside(*id, m))
                     && can_go_back(*id)
+                    && nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(*id), |id| self.nodes.get(id)?.parent)
+                            .filter(|id| *id != ROOT)
+                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
+                    )
             })
             .collect();
         let innermost = stacks
@@ -933,9 +983,60 @@ impl Screen {
         self.closed.insert(modal);
     }
 
-    /// The modals presented since the last call.
+    /// The modals presented since the last call (not the windows of the
+    /// app's own: the platform shows those in windows of their own).
     pub(crate) fn take_presented(&mut self) -> Vec<NodeId> {
-        std::mem::take(&mut self.presented)
+        let mut presented = std::mem::take(&mut self.presented);
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether `id` is the root of a window of the app's own.
+    pub(crate) fn is_window(&self, id: NodeId) -> bool {
+        self.windows.iter().any(|(root, _)| *root == id)
+    }
+
+    /// The root of the window view `id` is in: a window of the app's own,
+    /// else the main window's root.
+    pub(crate) fn window_of(&self, mut id: NodeId) -> NodeId {
+        loop {
+            if self.is_window(id) {
+                return id;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return ROOT,
+            }
+        }
+    }
+
+    /// The root of the window the app calls `id` (`"main"`: the main
+    /// window's), while it is open.
+    pub(crate) fn window_root(&self, id: &str) -> Option<NodeId> {
+        if id == "main" {
+            return Some(ROOT);
+        }
+        self.windows
+            .iter()
+            .find(|(_, own)| own == id)
+            .map(|(root, _)| *root)
+    }
+
+    /// Window `root` of the app's own is on screen (`!hidden`) or not
+    /// (minimized, hidden, closed by a policy until the app removes it).
+    pub(crate) fn set_window_hidden(&mut self, root: NodeId, hidden: bool) {
+        if hidden {
+            self.hidden_windows.insert(root);
+        } else {
+            self.hidden_windows.remove(&root);
+        }
+    }
+
+    /// Node `id` left the tree: when it was a window's root, the window
+    /// closed.
+    fn forget_window(&mut self, id: NodeId) {
+        self.windows.retain(|(root, _)| *root != id);
+        self.hidden_windows.remove(&id);
     }
 
     /// Whether the app asked for a back since the last call.
@@ -1036,10 +1137,12 @@ impl Screen {
     /// topmost modal's first (the last presented), then the rest.
     fn by_layer(&self) -> Vec<NodeId> {
         let attached = self.shown();
+        // Windows of the app's own are side by side with the main one, not
+        // over it: their views are found in tree order.
         let modals: Vec<NodeId> = attached
             .iter()
             .copied()
-            .filter(|id| self.kind(*id) == Some(ViewKind::Modal))
+            .filter(|id| self.kind(*id) == Some(ViewKind::Modal) && !self.is_window(*id))
             .collect();
         let Some(top) = modals.last() else {
             return attached;
@@ -1085,7 +1188,8 @@ impl Screen {
         self.nodes.get(&id)?.kind
     }
 
-    /// The texts on screen, in tree order.
+    /// The texts on screen, in tree order (a scroll view's content in
+    /// screen order).
     pub fn texts(&self) -> Vec<&str> {
         self.shown()
             .into_iter()
@@ -1336,11 +1440,71 @@ impl Screen {
             .then_some((view.parent?, view.frame.center()))
     }
 
-    /// The view a pointer at `at` (in the root) reaches: the topmost,
-    /// innermost one there that receives touches. Canvas nodes are not views.
-    fn hit_pointer(&self, at: Point<Points>) -> NodeId {
-        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
-        self.hit_in(ROOT, at, &attached).unwrap_or(ROOT)
+    /// The view that takes a pointer at `at` (in the root) instead of
+    /// `target`: one drawn over it there, neither in it nor around it.
+    /// `None` when the pointer reaches `target` (or a view in it), only
+    /// views around it (a target scrolled out of view or of no size, which
+    /// a press still reaches as before), or a view that handles presses or
+    /// touches itself.
+    pub(crate) fn covering(&self, target: NodeId, at: Point<Points>) -> Option<NodeId> {
+        let hit = self.hit_pointer(at, self.window_of(target));
+        let reaches = hit == target || self.is_inside(hit, target) || self.is_inside(target, hit);
+        if reaches {
+            return None;
+        }
+        // A view over the target that hears presses or touches itself (a
+        // data table's or an editor's input layer) takes the press and
+        // places it as the app wants; only one that hears neither swallows
+        // it.
+        let mut id = hit;
+        loop {
+            if id == target || self.is_inside(target, id) {
+                return Some(hit);
+            }
+            if self.hears(id, EventKind::Press) || self.hears(id, EventKind::Touch) {
+                return None;
+            }
+            id = self.nodes.get(&id).and_then(|v| v.parent)?;
+        }
+    }
+
+    /// `id` as a selector a test would write: its test id, else the first
+    /// text in it, else `view:<id>`.
+    pub(crate) fn selector_of(&self, id: NodeId) -> String {
+        if let Some(test_id) = self.nodes.get(&id).and_then(|v| v.test_id.as_deref()) {
+            return format!("`id:{test_id}`");
+        }
+        match self
+            .down_to(id, |v| v.text.is_some())
+            .and_then(|t| self.nodes.get(&t)?.text.as_deref())
+        {
+            Some(text) => format!("`{}`", text.trim()),
+            None => format!("`view:{id}`"),
+        }
+    }
+
+    /// The view a pointer at `at` (in the root of `window`, a window's
+    /// root) reaches in that window: the topmost, innermost one there that
+    /// receives touches. Canvas nodes are not views, and the windows of the
+    /// app's own are windows of their own.
+    fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
+        let order = self.attached();
+        let attached: HashSet<NodeId> = order.iter().copied().collect();
+        // The dialogs presented over this window first, the last one on
+        // top: a dialog is over its window wherever its node is in the
+        // tree, so the views around that node (a card that clips) take no
+        // part in where it is hit.
+        let dialogs = order.iter().rev().copied().filter(|id| {
+            self.kind(*id) == Some(ViewKind::Modal)
+                && !self.is_window(*id)
+                && self.window_of(*id) == window
+        });
+        for dialog in dialogs {
+            if let Some(hit) = self.hit_in(dialog, at, &attached) {
+                return hit;
+            }
+        }
+        self.hit_in(window, at, &attached).unwrap_or(window)
     }
 
     fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
@@ -1349,7 +1513,9 @@ impl Screen {
         if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
             return None;
         }
-        let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
+        let inside = id == ROOT
+            || self.is_window(id)
+            || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
         // Unclipped children can receive a pointer outside their parent's box.
         if !inside
             && (receives == PointerEvents::BoxOnly
@@ -1362,7 +1528,9 @@ impl Screen {
         {
             for &child in children.iter().rev() {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
-                if node || !attached.contains(&child) {
+                // Windows are windows of their own; dialogs were tried
+                // first ([`Screen::hit_pointer`]).
+                if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
                     continue;
                 }
                 if let Some(hit) = self.hit_in(child, at, attached) {
@@ -1381,7 +1549,7 @@ impl Screen {
         if let [id] = matches[..]
             && let Some(at) = self.canvas_node_center(id)
         {
-            let Some(target) = self.up_to(self.hit_pointer(at), |v| {
+            let Some(target) = self.up_to(self.hit_pointer(at, self.window_of(id)), |v| {
                 v.events.contains(EventKind::Press)
             }) else {
                 return Pick::None;
@@ -1644,7 +1812,12 @@ impl Screen {
         }
         let view = self.nodes.get(&id)?;
         let mut origin = view.frame.origin;
-        let mut at = view.parent;
+        // A modal (a window of the app's own too) is placed over its
+        // window, wherever it is in the tree: what it holds is where it
+        // is in it, in that window's points.
+        let mut at = (view.kind != Some(ViewKind::Modal))
+            .then_some(view.parent)
+            .flatten();
         while let Some(parent) = at {
             let Some(p) = self.nodes.get(&parent) else {
                 break;
@@ -1652,6 +1825,9 @@ impl Screen {
             origin += p.frame.origin;
             if let Some(scroll) = &p.scroll {
                 origin -= nsh_core::Point::new(scroll.x, scroll.y);
+            }
+            if p.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = p.parent;
         }
@@ -1807,7 +1983,8 @@ impl Screen {
         self.key_focus = id;
     }
 
-    /// Tab's stops, in tree order, as macOS and the web have them: the
+    /// Tab's stops, in tree order (a scroll view's content in screen
+    /// order), as macOS and the web have them: the
     /// inputs that edit and the views [`nsh_core::ViewProps::focus_stop`]
     /// takes (those that take presses unless `focusable={false}`, and
     /// `focusable={true}` ones whether or not they do), shown and enabled.

@@ -267,6 +267,12 @@ pub(crate) struct Surface {
     /// The embedding app's locale and text size, standing in for the
     /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
     pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
+    /// The app's windows of its own besides the main one, oldest first
+    /// ([`crate::window`]).
+    pub(crate) windows: RefCell<Vec<Rc<crate::window::AppWindow>>>,
+    /// While one of those windows handles input, its root: the views input
+    /// picks are in it ([`Surface::input_root`], [`crate::window::enter`]).
+    pub(crate) input_root: RefCell<Option<NshView>>,
 }
 
 impl Surface {
@@ -331,6 +337,8 @@ impl Surface {
             transparent: Cell::new(false),
             host_dark: Cell::new(None),
             host_environment: Cell::default(),
+            windows: RefCell::default(),
+            input_root: RefCell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -366,6 +374,15 @@ impl Surface {
                     .map(Rc::new)
             })
             .clone()
+    }
+
+    /// The root input picks views in: a window's of the app's own while it
+    /// handles input ([`crate::window::enter`]), else the main one.
+    pub(crate) fn input_root(&self) -> NshView {
+        self.input_root
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| self.root.clone())
     }
 
     /// The surface's size in points.
@@ -427,6 +444,9 @@ impl Surface {
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
                 }
+                if self.stats.borrow().is_some() {
+                    engine.control().set_perf_monitor(Some(Default::default()));
+                }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
             }
@@ -441,6 +461,7 @@ impl Surface {
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
         self.rx.borrow_mut().take();
+        crate::window::close_all(self);
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
@@ -460,6 +481,14 @@ impl Surface {
     }
 
     /// Calls `f` with the engine's control, if an app runs.
+    /// Logs frame statistics once a second, or stops
+    /// ([`crate::AppView::set_fps_monitor`]). The engine measures its
+    /// commits meanwhile, which `fpsEnabled()` follows.
+    pub(crate) fn set_stats(&self, on: bool) {
+        *self.stats.borrow_mut() = on.then(Default::default);
+        self.control(|c| c.set_perf_monitor(on.then(Default::default)));
+    }
+
     pub(crate) fn control(&self, f: impl FnOnce(&EngineControl)) {
         if let Some(control) = &*self.control.borrow() {
             f(control);
@@ -570,19 +599,31 @@ impl Surface {
     /// Hosted items drawn by the frame just drawn, with their window
     /// bounds: tells them, and the ones no longer drawn.
     pub(crate) fn items_placed(&self, drawn: Vec<(Rc<dyn Hosted>, gpui::Bounds<gpui::Pixels>)>) {
-        let mut placed = self.placed.borrow_mut();
-        for old in placed.iter() {
-            if !drawn.iter().any(|(item, _)| Rc::ptr_eq(item, old)) {
-                old.placed(None);
-            }
-        }
-        placed.clear();
-        for (item, rect) in drawn {
-            item.placed(Some(rect));
-            placed.push(item);
+        place_items(&self.placed, drawn);
+    }
+}
+
+/// Hosted items drawn by a window's frame just drawn, with their window
+/// bounds: tells them, and those of `placed` (the window's last frame's)
+/// no longer drawn.
+pub(crate) fn place_items(
+    placed: &RefCell<Vec<Rc<dyn Hosted>>>,
+    drawn: Vec<(Rc<dyn Hosted>, gpui::Bounds<gpui::Pixels>)>,
+) {
+    let mut placed = placed.borrow_mut();
+    for old in placed.iter() {
+        if !drawn.iter().any(|(item, _)| Rc::ptr_eq(item, old)) {
+            old.placed(None);
         }
     }
+    placed.clear();
+    for (item, rect) in drawn {
+        item.placed(Some(rect));
+        placed.push(item);
+    }
+}
 
+impl Surface {
     /// Applies what the engine sent.
     pub(crate) fn drain(self: &Rc<Self>) {
         self.pending.borrow().store(false, Ordering::Release);
@@ -858,20 +899,22 @@ impl Drop for Surface {
     }
 }
 
-/// Notifies the views of this thread's surfaces that changed.
+/// Notifies the views of this thread's surfaces that changed, and those
+/// of their windows of their own.
 pub(crate) fn flush_all(cx: &mut gpui::App) {
     let ids: Vec<gpui::EntityId> = SURFACES.with(|s| {
-        s.borrow()
-            .values()
-            .filter_map(Weak::upgrade)
-            .filter(|surface| surface.invalid.get())
-            .filter_map(|surface| {
-                if let Some(stats) = surface.stats.borrow_mut().as_mut() {
-                    stats.notified();
-                }
-                surface.entity.get()
-            })
-            .collect()
+        let mut ids = Vec::new();
+        for surface in s.borrow().values().filter_map(Weak::upgrade) {
+            crate::window::changed_windows(&surface, &mut ids);
+            if !surface.invalid.get() {
+                continue;
+            }
+            if let Some(stats) = surface.stats.borrow_mut().as_mut() {
+                stats.notified();
+            }
+            ids.extend(surface.entity.get());
+        }
+        ids
     });
     for id in ids {
         cx.notify(id);

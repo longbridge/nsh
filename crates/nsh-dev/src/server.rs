@@ -14,7 +14,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -87,6 +87,8 @@ pub struct AppInfo {
     /// The app's id (`nsh.json` `"id"`), which names where it keeps its
     /// data.
     pub id: Option<String>,
+    /// The main window's launch-time options (`nsh.json` `"window"`, JSON).
+    pub window: Option<String>,
 }
 
 struct Bundle {
@@ -96,6 +98,7 @@ struct Bundle {
     source_map: Option<axum::body::Bytes>,
     capabilities: Option<String>,
     app_id: Option<String>,
+    window: Option<String>,
     /// The UI sets it imports.
     ui_sets: Arc<[String]>,
 }
@@ -412,6 +415,7 @@ impl DevServer {
             source_map: source_map.map(Into::into),
             capabilities: app.capabilities,
             app_id: app.id,
+            window: app.window,
             ui_sets,
         })));
     }
@@ -474,7 +478,7 @@ async fn asset(
     let Ok(bytes) = tokio::fs::read(&file).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let kind = content_type(&file);
+    let kind = nsh_core::platform::content_type(&file.to_string_lossy());
     let range = headers
         .get(header::RANGE)
         .and_then(|r| r.to_str().ok())
@@ -536,16 +540,29 @@ fn byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
 }
 
 /// The web host's page and runtime ([`DevServer::serve_web`]); never
-/// cached, as they change with the runtime.
-async fn web_file(State(shared): State<Arc<Shared>>, uri: axum::http::Uri) -> Response {
+/// cached, as they change with the runtime. A browser loading one of the
+/// app's own paths gets the page ([`wants_page`]).
+async fn web_file(
+    State(shared): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path == "index.html" { "" } else { path };
-    let bytes = shared.web.lock().expect("web lock").get(path).cloned();
+    let bytes = {
+        let web = shared.web.lock().expect("web lock");
+        match web.get(path) {
+            Some(bytes) => Some((path, bytes.clone())),
+            None if wants_page(&method, &uri, &headers) => web.get("").map(|b| ("", b.clone())),
+            None => None,
+        }
+    };
     match bytes {
-        Some(bytes) => {
+        Some((path, bytes)) => {
             let content_type = match path {
                 "" => "text/html; charset=utf-8",
-                path => content_type(std::path::Path::new(path)),
+                path => nsh_core::platform::content_type(path),
             };
             (
                 [
@@ -560,48 +577,27 @@ async fn web_file(State(shared): State<Arc<Shared>>, uri: axum::http::Uri) -> Re
     }
 }
 
-/// The media type of a file, by its extension: what browsers need to
-/// load scripts, WebAssembly (compiled while it streams only as
-/// `application/wasm`), images, fonts and media.
-pub(crate) fn content_type(path: &std::path::Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("json" | "map") => "application/json",
-        Some("webmanifest") => "application/manifest+json",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css; charset=utf-8",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("avif") => "image/avif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("heic") => "image/heic",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("mp4" | "m4v") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("mov") => "video/quicktime",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("aac") => "audio/aac",
-        Some("wav") => "audio/wav",
-        Some("ogg" | "oga" | "opus") => "audio/ogg",
-        Some("flac") => "audio/flac",
-        Some("aif" | "aiff") => "audio/aiff",
-        Some("caf") => "audio/x-caf",
-        _ => "application/octet-stream",
-    }
+/// Whether a request is a browser loading the page at one of the app's own
+/// paths (`/sports/football`, a link into the app or a reload after it
+/// moved there): a `GET` of a path whose last segment has no extension,
+/// accepting HTML. The page answers it where no file does, as hosts of
+/// single-page apps rewrite such paths to `index.html`; requests for files
+/// (`/logo.png`) and the app's own requests (`fetch` accepts `*/*`) still
+/// get their 404.
+pub(crate) fn wants_page(method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
+    let name = uri.path().rsplit('/').next().unwrap_or_default();
+    (method == Method::GET || method == Method::HEAD)
+        && !name.contains('.')
+        && headers
+            .get_all(header::ACCEPT)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .map(|kind| kind.split(';').next().unwrap_or_default().trim())
+            .any(|kind| {
+                kind.eq_ignore_ascii_case("text/html")
+                    || kind.eq_ignore_ascii_case("application/xhtml+xml")
+            })
 }
 
 async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> Response {
@@ -965,6 +961,7 @@ async fn send_event(
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
                     app_id: bundle.app_id.clone(),
+                    window: bundle.window.clone(),
                     limits,
                 },
             )
@@ -984,6 +981,35 @@ async fn send_event(
 
 #[cfg(test)]
 mod tests {
+    use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
+
+    fn wants_page(method: Method, path: &str, accept: &str) -> bool {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ACCEPT, HeaderValue::from_str(accept).unwrap());
+        super::wants_page(&method, &path.parse::<Uri>().unwrap(), &headers)
+    }
+
+    #[test]
+    fn browsers_loading_the_apps_paths_get_the_page() {
+        let browser = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+        assert!(wants_page(Method::GET, "/sports/football", browser));
+        assert!(wants_page(
+            Method::GET,
+            "/sports/football?tab=live",
+            browser
+        ));
+        assert!(wants_page(Method::GET, "/sports/", browser));
+        assert!(wants_page(Method::HEAD, "/v1.2/teams", browser));
+        assert!(wants_page(Method::GET, "/a", "application/xhtml+xml"));
+        // Files, the app's own requests and other methods are not pages.
+        assert!(!wants_page(Method::GET, "/logo.png", browser));
+        assert!(!wants_page(Method::GET, "/sports/app.js", browser));
+        assert!(!wants_page(Method::GET, "/api/teams", "*/*"));
+        assert!(!wants_page(Method::GET, "/api/teams", "application/json"));
+        assert!(!wants_page(Method::POST, "/sports/football", browser));
+        assert!(!wants_page(Method::GET, "/api", "text/htmlx"));
+    }
+
     #[test]
     fn a_host_that_cannot_run_the_app_is_told_why() {
         let message = super::cannot_run_message(

@@ -7,8 +7,9 @@
 import { cleanup, computed, createMotion, Overlay, signal, Text, View } from "nsh";
 import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
 import { safeArea } from "nsh";
+import { play, type SoundName } from "../nsh-gallery-ui/sound";
 import { LucideIcon, type LucideIconName } from "./icons";
-import { alpha, colors, desktop, finish, hovered, radius, TERMINAL_COLUMN, terminal } from "./ui";
+import { colors, desktop, TERMINAL_COLUMN, terminal, toastActionLabel, toastActionLook, toastCloseLook, toastLook, toastText, toastTitle } from "./ui";
 
 /** What a toast is about: the icon and the tone it shows. */
 export type ToastKind = "success" | "error" | "warning" | "info" | "loading";
@@ -51,6 +52,10 @@ const chosen = new Map<string, string>();
 const lingering = new Map<string, number>();
 let ticking: ReturnType<typeof setInterval> | undefined;
 let count = 0;
+
+/** The sound a toast of a kind makes as it shows: none while it loads, none
+ * without a kind. */
+const voices: Partial<Record<ToastKind, SoundName>> = { success: "success", error: "error", warning: "warning", info: "attention" };
 
 function sync() {
   shown.set(manager.visible(LIMIT));
@@ -99,6 +104,8 @@ export function toast(content: ToastContent): Promise<string | null> {
   // The manager holds the id alone: the content stays in `contents`, where
   // `updateToast` changes it.
   manager.push(id, id, { timeout: content.duration ?? 5000 });
+  const voice = content.kind && voices[content.kind];
+  if (voice) play(voice);
   run();
   return new Promise((resolve) => answers.set(id, resolve));
 }
@@ -112,6 +119,9 @@ export function updateToast(id: string, change: Partial<ToastContent>): boolean 
   const content = contents()[id];
   if (!content) return false;
   contents.set({ ...contents(), [id]: { ...content, ...change } });
+  // A loading toast becoming its result sounds as a new one would.
+  const voice = change.kind && change.kind !== content.kind && voices[change.kind];
+  if (voice) play(voice);
   if (change.duration !== undefined) {
     if (Number.isFinite(change.duration)) lingering.set(id, change.duration);
     else lingering.delete(id);
@@ -214,24 +224,13 @@ function Item(props: { entry: ToastEntry }) {
       startingClass="opacity-0 translate-y-4"
       endingClass="opacity-0 scale-95"
       swipingClass="transition-none"
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        borderRadius: radius.inset,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.raised,
-        ...finish.raised,
-      }}
+      style={toastLook()}
     >
       {() => (kind() ? <KindIcon kind={kind()!} /> : null)}
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ fontSize: 14, fontWeight: "600", color: colors.text }}>{content().title}</Text>
+        <Text style={toastTitle()}>{content().title}</Text>
         <If when={content().description}>
-          <Text style={{ fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"] }}>{content().description}</Text>
+          <Text style={toastText()}>{content().description}</Text>
         </If>
         <If when={content().progress !== undefined}>
           <View style={{ height: 4, marginTop: 6, borderRadius: 2, overflow: "hidden", backgroundColor: colors.track }}>
@@ -251,14 +250,8 @@ function Item(props: { entry: ToastEntry }) {
         </If>
       </View>
       <If when={content().action}>
-        <View
-          role="button"
-          onPress={() => choose(props.entry.id, content().action!)}
-          hoverStyle={{ opacity: 0.92 }}
-          activeStyle={{ opacity: 0.7, transform: [{ scale: 0.96 }] }}
-          style={{ paddingHorizontal: 10, height: 28, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.light, transitionProperty: "opacity, transform", transitionDuration: 120 }}
-        >
-          <Text class="text-sm font-medium text-primary-foreground">{content().action}</Text>
+        <View role="button" onPress={() => choose(props.entry.id, content().action!)} {...toastActionLook()}>
+          <Text style={toastActionLabel()}>{content().action}</Text>
         </View>
       </If>
       <If when={content().close}>
@@ -266,9 +259,7 @@ function Item(props: { entry: ToastEntry }) {
           role="button"
           accessibilityLabel={content().close}
           onPress={() => dismissToast(props.entry.id)}
-          hoverStyle={hovered()}
-          activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
-          style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 12 }}
+          {...toastCloseLook()}
         >
           <LucideIcon name="x" size={14} tint={colors.muted} />
         </View>

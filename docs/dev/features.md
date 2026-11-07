@@ -9,6 +9,7 @@ The large optional parts of a native runtime are Cargo features of the platform 
 | `editor` | `Editor`, `DiffView`, ropey, imara-diff | Importing them fails |
 | `rich-editor` | `RichEditor` and its classes | Importing them fails |
 | `plot` | `nsh/base/plot` | Importing it fails |
+| `term` | `Terminal`, vte | Importing it fails |
 | `highlight` | syntect and its syntaxes | Code shows plain |
 | `math` | RaTeX, the KaTeX fonts | A formula shows as its TeX, or as the app's `renderMath` |
 | `zlib` | the JS module `zlib` (implies `js`) | Importing it fails |

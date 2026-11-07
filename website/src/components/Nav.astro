@@ -23,7 +23,6 @@ export interface Props {
 const { lang = 'en', locale = lang, currentPath = '', langHref, languages } = Astro.props;
 const isZh = lang === 'zh-CN';
 const hrefs = await sectionHrefs(locale);
-const home = url(isZh ? 'zh-CN' : '');
 const switchHref = langHref ?? url(isZh ? '' : 'zh-CN');
 
 // The section is the path segment after the base and the optional locale.
@@ -31,10 +30,11 @@ const rest = currentPath.startsWith(BASE) ? currentPath.slice(BASE.length) : cur
 const localeSegment = new RegExp(`^(?:${['zh-CN', ...machineLocales.map((l) => l.code)].join('|')})(/|$)`);
 const activeSection = rest.replace(localeSegment, '').split('/')[0];
 const isMachinePage = locale !== lang;
+const home = url(isMachinePage ? locale : isZh ? 'zh-CN' : '');
 const menu = languages ?? [
   { code: 'en', name: 'English', href: url('') },
-  { code: 'zh-CN', name: '中文', href: url('zh-CN') },
-  ...machineLocales.map(({ code, name }) => ({ code, name, href: url(`${code}/docs`) })),
+  { code: 'zh-CN', name: '简体中文', href: url('zh-CN') },
+  ...machineLocales.map(({ code, name }) => ({ code, name, href: url(code) })),
 ];
 const currentLanguage = menu.find((l) => l.code === locale)?.name ?? locale;
 

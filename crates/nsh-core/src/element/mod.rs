@@ -208,11 +208,12 @@ pub use crate::{
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
     EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, KeyboardAppearance,
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
-    LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, Measurement,
-    ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior,
-    PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType,
-    ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, MacOsBackdrop,
+    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation,
+    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
+    PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
+    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
+    TouchEvent, TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,
@@ -223,7 +224,10 @@ pub use crate::{
         transparent_black, transparent_white, white, yellow,
     },
     overlay::{Align, Placement},
-    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Lifecycle, Locale, Os},
+    platform::{
+        Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
+        Locale, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
+    },
     style::Color,
 };
 

@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, Switch, Toggle } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, size, Stage, switchLook, ui, wide } from "./palette";
+import { button, buttonText, desktop, Inspector, Panel, Stage, switchLook, toggleLabel, toggleLook, ui, wide } from "./palette";
 
 
 function App() {
@@ -37,22 +37,17 @@ function App() {
       <Text style={label()}>{wide() ? (disabled() ? "Enable it" : "Disable it") : disabled() ? "Enable the button above" : "Disable the button above"}</Text>
     </Switch>
   );
-  // On / off formatting is a `Toggle` (a button is an action): the
-  // secondary button's look, sunk while pressed.
-  const toggle = (name: string, on: () => boolean, set: (on: boolean) => void, text: () => object, glyph: string) => (
-    <Toggle
-      pressed={on()}
-      onChange={({ pressed }) => set(pressed)}
-      accessibilityLabel={name}
-      {...button("secondary", { on, align: "flex-start", style: { width: size.control, paddingHorizontal: 0 } })}
-    >
-      <Text style={{ ...text(), color: buttonText("secondary").color }}>{glyph}</Text>
+  // On / off formatting is a `Toggle` (a button is an action), in the
+  // toggles' look: on a field's edge while off, the on fill while on.
+  const toggle = (name: string, on: () => boolean, set: (on: boolean) => void, mark: object, glyph: string) => (
+    <Toggle pressed={on()} onChange={({ pressed }) => set(pressed)} accessibilityLabel={name} {...toggleLook({ variant: "outline" })}>
+      <Text style={{ ...toggleLabel(on), ...mark }}>{glyph}</Text>
     </Toggle>
   );
   const toggles = () => (
     <>
-      {toggle("Bold", bold, (on) => bold.set(on), () => ({ ...label(), fontWeight: "800" }), "B")}
-      {toggle("Italic", italic, (on) => italic.set(on), () => ({ ...label(), fontStyle: "italic" }), "I")}
+      {toggle("Bold", bold, (on) => bold.set(on), { fontWeight: "800" }, "B")}
+      {toggle("Italic", italic, (on) => italic.set(on), { fontStyle: "italic" }, "I")}
     </>
   );
   const caption = (text: string) => <Text style={{ fontSize: 12, color: ui().muted }}>{text}</Text>;

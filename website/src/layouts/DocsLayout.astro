@@ -38,7 +38,7 @@ const langHref = counterpart?.href ?? otherSection?.href;
 // Every language of this page, for the language menu and hreflang.
 const languages = [
   { code: 'en', name: 'English', page: english },
-  { code: 'zh-CN', name: '中文', page: await same('zh-CN') },
+  { code: 'zh-CN', name: '简体中文', page: await same('zh-CN') },
   ...(await Promise.all(machineLocales.map(async ({ code, name }) => ({ code, name, page: await same(code) })))),
 ];
 const alternates = Object.fromEntries(languages.filter((l) => l.page?.translated).map((l) => [l.code, l.page!.route]));
@@ -112,6 +112,7 @@ const sectionOf = (p: Page) => label(SECTIONS.find((s) => s.id === p.section)!.l
 <script>
   import { initDemos } from '../lib/demo-client';
   import { initCodeTabs } from '../lib/code-tabs-client';
+  import { playSound } from '../lib/sound';
 
   const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
   const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
@@ -131,6 +132,7 @@ const sectionOf = (p: Page) => label(SECTIONS.find((s) => s.id === p.section)!.l
     button.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(code.textContent ?? '');
+        playSound('success', 0.3);
         button.dataset.copied = '';
         button.setAttribute('aria-label', copiedLabel);
         button.innerHTML = checkIcon;

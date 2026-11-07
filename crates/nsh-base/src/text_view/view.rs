@@ -7,6 +7,7 @@ use nsh_core::{
     color::Hsla,
     element::{Renderer, Style, StyleRefinement},
     geometry::{DefiniteLength, Length},
+    keymap::Modifiers,
     prelude::*,
 };
 
@@ -227,6 +228,9 @@ pub struct TextViewLinkPressEvent {
     /// The link's URL (`#anchor` for a heading of the document,
     /// `#footnote-<label>` for a footnote).
     pub url: SharedString,
+    /// The modifier keys held when the press began: none when the
+    /// keyboard or an assistive technology pressed the link.
+    pub modifiers: Modifiers,
 }
 
 /// A press on a code block's action (`onCodeBlockAction`).
@@ -521,11 +525,12 @@ impl Cx {
 
     /// What a press on a link to `url` does: reported, and opened outside
     /// the app when `links` says so.
-    fn link_press(&self, url: SharedString) -> impl Fn() + Clone + 'static {
+    fn link_press(&self, url: SharedString) -> impl Fn(&PressEvent) + Clone + 'static {
         let (scope, links) = (self.scope, self.links);
-        move || {
+        move |press: &PressEvent| {
             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
                 url: url.clone(),
+                modifiers: press.modifiers,
             }));
             if links == TextViewLinks::Open && !url.starts_with('#') {
                 // Whether it opened is the platform's to show; a refused
@@ -1712,9 +1717,10 @@ impl Cx {
                         .text_size(rems(0.75))
                         .text_color(move || theme().primary)
                         .role(AccessibilityRole::Link)
-                        .on_press(move || {
+                        .on_press(move |press: &PressEvent| {
                             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
                                 url: url.clone(),
+                                modifiers: press.modifiers,
                             }))
                         }),
                     Part::FootnoteReference,
@@ -1775,8 +1781,8 @@ impl Cx {
         let is_link = link.is_some();
         let link = link.map(|url| self.link_press(url));
         // In a link it is the link's; else a press reports the image.
-        let press = Some(move || match &link {
-            Some(press) => press(),
+        let press = Some(move |e: &PressEvent| match &link {
+            Some(press) => press(e),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
         });
         let role = if is_link {

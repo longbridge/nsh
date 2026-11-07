@@ -126,7 +126,7 @@ function PressableSheet() {
       <Sheet
         open={sheet()}
         onOpenChange={({ open }) => sheet.set(open)}
-        backdropStyle={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        backdropClass="bg-scrim"
         popupStyle={{
           gap: 16,
           padding: 20,

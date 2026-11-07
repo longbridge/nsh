@@ -24,6 +24,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # What each workflow builds and tests (its `-p` packages), and the files
 # outside those crates it reads (tests' fixtures, `include_bytes!`).
 WORKFLOWS = {
+    "website.yml": {
+        "packages": ["nsh-platform-web", "nsh-bundler", "nsh-cli", "xtask"],
+        "files": [
+            "website/**", "skills/**", "examples/tasks/**", "examples/tasks-rs/**",
+            "examples/gallery/**",
+        ],
+    },
     "tui.yml": {
         "packages": ["nsh-platform-tui", "nsh-base"],
         "files": ["examples/counter/**"],
@@ -33,7 +40,8 @@ WORKFLOWS = {
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
             "nsh-bundler", "nsh-package", "nsh-updater", "nsh-base", "nsh-testing",
         ],
-        # The fonts nsh-core's, nsh-macros' and nsh-bundler's tests read.
+        # The fonts nsh-core's, nsh-macros', nsh-bundler's and nsh-engine's
+        # tests read.
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/bench/**",
             "tests/compat/cases/layout/fonts/**",
@@ -54,7 +62,7 @@ WORKFLOWS = {
             "nsh-cli", "nsh-dev", "xtask",
         ],
         # `nsh test --target` runs the examples' tests.
-        "files": ["examples/counter/**", "examples/gallery/**"],
+        "files": ["crates/gpui/**", "examples/counter/**", "examples/gallery/**"],
     },
     "windows.yml": {
         "packages": [
@@ -74,7 +82,7 @@ WORKFLOWS = {
     },
 }
 
-ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml"]
+ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml", ".github/actions/cargo/**"]
 
 
 def crates():
@@ -121,6 +129,9 @@ def filtered(workflow):
     return None
 
 
+PULL_REQUEST_TYPES = ["opened", "synchronize", "reopened", "ready_for_review", "closed"]
+
+
 def main():
     graph = crates()
     failed = False
@@ -133,6 +144,12 @@ def main():
             if not isinstance(group, dict) or group.get("types") != ["checks_requested"]:
                 failed = True
                 print(f"{path.name} must handle merge_group: checks_requested")
+            # Drafts wait for `ready_for_review`; `closed` cancels what a
+            # merged or closed pull request still has queued (AGENTS.md "CI").
+            types = (events["pull_request"] or {}).get("types")
+            if types != PULL_REQUEST_TYPES:
+                failed = True
+                print(f"{path.name} must take pull_request types {PULL_REQUEST_TYPES}")
     for name, spec in WORKFLOWS.items():
         want = needed(name, spec, graph)
         if "--print" in sys.argv:
