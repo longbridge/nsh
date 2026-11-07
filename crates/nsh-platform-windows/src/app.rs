@@ -302,7 +302,14 @@ impl AppView {
 
     /// Shows a top-level view's window.
     pub fn show(&self) {
+        // Composite the window only once its background is drawn: DWM
+        // otherwise shows and animates the default light client surface,
+        // which flashes white on a dark appearance until the first frame.
+        crate::window::set_cloaked(self.hwnd, true);
+        crate::window::fill_background(&self.surface, self.hwnd);
+        self.surface.paint();
         crate::window::show(self.hwnd);
+        crate::window::set_cloaked(self.hwnd, false);
         // The taskbar adds a tab for a window being shown.
         crate::chrome::reapply_skip_taskbar(&self.surface);
     }

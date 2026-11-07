@@ -28,12 +28,13 @@ use std::{
 use nsh_core::NodeId;
 use windows::{
     Win32::{
-        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
-            Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
+            Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
             Gdi::{
-                BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST,
-                MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ScreenToClient, UpdateWindow,
+                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
+                GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+                MonitorFromWindow, PAINTSTRUCT, ReleaseDC, ScreenToClient, UpdateWindow,
                 ValidateRect,
             },
         },
@@ -534,6 +535,34 @@ pub(crate) fn wake(hwnd: isize) {
     }
 }
 
+/// Fills the window's client area with its background before the first
+/// frame. Windows composites and animates a window that has not painted yet
+/// with its default light surface, which flashes white on a dark appearance;
+/// its swap chain does not cover that surface until the first present.
+pub(crate) fn fill_background(surface: &Surface, hwnd: HWND) {
+    if surface.transparent() {
+        return;
+    }
+    // `Color` is 0xRRGGBBAA; a GDI color is 0x00BBGGRR.
+    let color = crate::system::window_background(surface).0;
+    let brush = unsafe {
+        CreateSolidBrush(COLORREF(
+            ((color >> 24) & 0xff) | ((color >> 8) & 0xff00) | ((color & 0xff00) << 8),
+        ))
+    };
+    // SAFETY: GDI calls on a window of this thread; the brush is freed here.
+    unsafe {
+        let dc = GetDC(Some(hwnd));
+        if !dc.is_invalid() {
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let _ = FillRect(dc, &rect, brush);
+            let _ = ReleaseDC(Some(hwnd), dc);
+        }
+        let _ = DeleteObject(brush.into());
+    }
+}
+
 /// Asks for `WM_PAINT`.
 pub(crate) fn invalidate(hwnd: HWND) {
     if !hwnd.is_invalid() {
@@ -581,6 +610,22 @@ unsafe extern "system" fn dispatch_proc(
     }
     // SAFETY: default handling.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Keeps the window out of DWM's composition (cloaked) while its first
+/// background is prepared. A window shown without this is composited and
+/// animated with its default light client surface before the app paints.
+pub(crate) fn set_cloaked(hwnd: HWND, cloaked: bool) {
+    let value: i32 = cloaked.into();
+    // SAFETY: a BOOL-sized attribute value.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            &value as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
 }
 
 /// Darkens (or not) a top-level window's title bar.
