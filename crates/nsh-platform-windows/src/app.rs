@@ -620,9 +620,9 @@ pub fn run_app_with(
 /// it later.
 #[derive(Clone, Copy)]
 pub struct AppContext {
-    /// Nothing: the type stands for the app's thread, and only this crate
-    /// makes one.
-    _private: (),
+    /// The app's thread, as its message-only dispatcher: only this crate
+    /// makes one (on the thread that runs the loop).
+    ui: crate::window::UiThread,
 }
 
 impl AppContext {
@@ -639,7 +639,7 @@ impl AppContext {
 
     /// Runs `f` on the app's thread: queued to its loop, returns at once.
     pub fn run(&self, f: impl FnOnce() + Send + 'static) {
-        crate::window::invoke(f);
+        self.ui.invoke(f);
     }
 }
 
@@ -776,7 +776,9 @@ fn run_on_this_thread(
     // The setup hook: the host opens its host windows here, on this
     // thread, as the main window is, and keeps them itself (a host
     // window lives until the host drops it).
-    setup(&AppContext { _private: () });
+    setup(&AppContext {
+        ui: crate::window::UiThread::current(),
+    });
     let code = crate::window::run_loop();
     APP_THREAD.with(|app| app.set(false));
     view.stop();

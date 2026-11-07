@@ -568,12 +568,15 @@ pub fn run_app_with(
     let source = RefCell::new(Some(source));
     let setup = RefCell::new(Some(setup));
     app.connect_activate(move |app| {
-        let Some(setup) = setup.borrow_mut().take() else {
+        // Activated again with the window already up (a second launch
+        // handing it a file): just bring it back.
+        let Some(source) = source.borrow_mut().take() else {
             if let Some((window, _)) = &*shown.borrow() {
                 window.present();
             }
             return;
         };
+        let setup = setup.borrow_mut().take();
         // nsh.json `window`: known before the window is made, so its first
         // frame has it.
         // A JS bundle's or a Rust app's root's.
@@ -641,7 +644,9 @@ pub fn run_app_with(
         // The setup hook: the host opens its host windows here, on this
         // thread, as the main window is, and keeps them itself (a host
         // window lives until the host drops it).
-        setup(&AppContext { _private: () });
+        if let Some(setup) = setup {
+            setup(&AppContext { _private: () });
+        }
         window.present();
     });
     // GTK must not parse the host's own arguments: only the URL the app

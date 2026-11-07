@@ -38,8 +38,9 @@ use std::{
 };
 
 use gtk4::{self as gtk, glib, prelude::*};
+pub use nsh_core::desktop::HostWindowError;
 use nsh_core::{
-    desktop::{HostWindowError, WindowAttributes, WindowFrameStyle, WindowOptions},
+    desktop::{WindowAttributes, WindowFrameStyle, WindowOptions},
     geometry::{Points, Size},
 };
 
@@ -95,9 +96,8 @@ impl HostWindow {
         let view = AppView::new(view_options);
         let window = gtk::Window::new();
         // The app's application, so the window lives and quits with it.
-        if let Some(app) = gtk::Application::default() {
-            window.set_application(Some(&app));
-        }
+        let app = gtk::Application::default();
+        window.set_application(Some(&app));
         window.set_title(Some(attributes.title.as_deref().unwrap_or("nsh")));
         window.set_default_size(size.0.max(1), size.1.max(1));
         window.set_decorated(attributes.frame != Some(WindowFrameStyle::None));

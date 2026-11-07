@@ -1,9 +1,9 @@
-//! What can go wrong when a host opens its own window (the platforms'
-//! `HostWindow`), reported by [`HostWindowError`].
+//! What can go wrong when a host opens its own window (a platform
+//! crate's `HostWindow`), reported by [`HostWindowError`].
 
 use std::fmt;
 
-/// Why opening a [`HostWindow`](crate::platform) failed.
+/// Why opening a platform's `HostWindow` failed.
 ///
 /// The platforms open a host's second window on the thread that runs the
 /// app; the error says when a caller tried elsewhere.
