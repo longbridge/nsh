@@ -1307,6 +1307,17 @@ impl Nav {
     }
 }
 
+/// Whether `view` is inside the newest modal of its own window.
+pub(crate) fn in_focus_scope(surface: &Surface, view: &NshView) -> bool {
+    let root = crate::window::root_of(surface, view);
+    let nav = surface.nav.borrow();
+    let scope = nav
+        .newest_in(surface, root.id())
+        .and_then(|id| nav.modals.get(&id))
+        .and_then(|modal| modal.view.as_ref());
+    scope.is_none_or(|scope| view == scope || view.is_ancestor(scope))
+}
+
 /// Goes back (the newest modal, the innermost stack or the app's
 /// `onBackPress`): whether something took it.
 pub(crate) fn go_back(surface: &Rc<Surface>) -> bool {

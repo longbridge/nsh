@@ -332,7 +332,7 @@ impl Mounter {
                 view.state_mut().props = props.clone();
                 crate::input::props_changed(surface, view);
                 crate::selectable_view::props_changed(surface, view);
-                crate::access::props_changed(view);
+                crate::access::props_changed(surface, view);
             }
             MountItem::LayoutAnimation(a) => self.layout_animation = Some(*a),
             MountItem::Input { id, config } => {
