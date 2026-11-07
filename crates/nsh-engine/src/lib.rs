@@ -1805,7 +1805,9 @@ struct Driver<M: TextEngine + 'static> {
     /// come here while the engine runs.
     _host: host_channel::HostAttachment,
     /// [`Bundle::trial`], told the app is healthy when the engine stops
-    /// after its first frame.
+    /// after its first frame. Only the native engine thread ([`run`]) stops
+    /// that way; WebAssembly has no such stop.
+    #[cfg(not(target_arch = "wasm32"))]
     trial: Option<Arc<dyn Trial>>,
 }
 
@@ -2024,6 +2026,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             context: config.context.clone(),
             last_frame: None,
             _host: config.host.attach(host_tx, rx.clone()),
+            #[cfg(not(target_arch = "wasm32"))]
             trial: trial.clone(),
         };
         let eval_us = match &config.app {

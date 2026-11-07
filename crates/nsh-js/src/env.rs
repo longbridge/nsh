@@ -76,6 +76,9 @@ pub(crate) struct Env {
     /// The tokens the app's theme file gives ([`set_theme_tokens`]), taken
     /// in when the entry hands the theme to the renderer ([`take_theme`]).
     theme: RefCell<ThemeTokens>,
+    /// The theme file the app was built with (`nsh.json`), which
+    /// `setTheme(null)` gives back (`None`: it has none).
+    built_theme: RefCell<Option<String>>,
     /// The displays the platform reported last.
     displays: RefCell<Vec<Display>>,
 }
@@ -92,6 +95,7 @@ impl Default for Env {
             tokens_signal: Cell::new(UNDEFINED),
             tokens_version: Cell::new(0),
             theme: RefCell::new(ThemeTokens::default()),
+            built_theme: RefCell::default(),
             displays: RefCell::default(),
         }
     }
@@ -175,11 +179,89 @@ pub(crate) fn set_theme_tokens(cx: *mut JsContext, theme: ThemeTokens) {
 /// op reaches it, after the turn of the first render, which reads them
 /// already.
 pub(crate) fn take_theme(cx: *mut JsContext, json: &str) {
-    let tokens = env(cx).theme.borrow().of(json);
+    let e = env(cx);
+    e.built_theme.replace(Some(json.to_owned()));
+    let tokens = e.theme.borrow().of(json);
     if let Some(tokens) = tokens {
         set_tokens(cx, Arc::new(tokens));
     }
 }
+
+/// A theme file that sets nothing: the default theme's tokens, which an app
+/// built without a theme has.
+const NO_THEME: &str = r#"{"cssVars":{}}"#;
+
+/// `setTheme(theme)`: the app's theme is `theme` from now on, as if
+/// `nsh.json` had it, read whole or not at all (a `TypeError` names each
+/// value it cannot read); `null` gives back the one the app was built with,
+/// as the entry gave it ([`take_theme`]). `token()` reads the new tokens at
+/// once; the core has them when this turn's ops reach it.
+unsafe extern "C" fn set_theme(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let e = env(cx);
+    let v = arg(argc, argv, 0);
+    // SAFETY: inline tag checks.
+    let nullish = unsafe { qjs::JS_IsNull(v) || qjs::JS_IsUndefined(v) };
+    // SAFETY: an inline tag check.
+    let object = unsafe { qjs::JS_IsObject(v) };
+    let (json, tokens) = if nullish {
+        let json = e.built_theme.borrow().clone();
+        let json = json.unwrap_or_else(|| NO_THEME.to_owned());
+        let tokens = e.theme.borrow().of(&json);
+        (json, tokens)
+    } else if object {
+        // SAFETY: a context reference and a dup for the converter.
+        let value = unsafe {
+            let rcx = rquickjs::Ctx::from_raw(ptr::NonNull::new_unchecked(cx));
+            rquickjs::Value::from_raw(rcx, qjs::JS_DupValue(cx, v))
+        };
+        let Ok(json) = crate::protocol::to_json(&value) else {
+            return qjs::JS_EXCEPTION;
+        };
+        let json = json.to_string();
+        let checked = e.theme.borrow().checked(&json);
+        match checked {
+            Some(Err(what)) => return type_error(cx, &format!("setTheme: {what}")),
+            Some(Ok(tokens)) => (json, Some(tokens)),
+            // No UI set reads themes: the core says so.
+            None => (json, None),
+        }
+    } else {
+        return type_error(cx, "setTheme: expected a theme ({ cssVars }) or null");
+    };
+    let op = nsh_core::Op::SetProp {
+        id: nsh_core::ROOT_ID,
+        prop: nsh_core::Prop::UiTheme(json.into()),
+    };
+    if let Err(err) = crate::dom::push_op(cx, op) {
+        return err;
+    }
+    if let Some(tokens) = tokens {
+        set_tokens(cx, Arc::new(tokens));
+    }
+    reactive::finish_value(cx, UNDEFINED)
+}
+
+/// Throws a `TypeError` of `message`.
+fn type_error(cx: *mut JsContext, message: &str) -> JsValue {
+    let message = std::ffi::CString::new(message.replace('\0', "")).unwrap_or_default();
+    // SAFETY: throws on a live context; `%s` reads the C string.
+    unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) }
+}
+
+/// `setTheme` of `nsh`.
+pub(crate) const SET_THEME_EXPORT: crate::modules::Item = (
+    "setTheme",
+    Export::Function(set_theme, 1),
+    Ts::function(
+        "Makes `theme` the app's theme while it runs, in place of `nsh.json`'s\n`\"theme\"` and over shadcn/ui's tokens as that one is: `token()` reads it\nat once, and classes naming tokens, `nsh/base` and Rust components'\n`theme()` follow with the next frame. An embedding app's theme overrides\nstill win. `null` gives back the theme the app was built with. The theme\nis read whole: a value NSH cannot read (a color it does not know, a value\nthat is no color in one appearance where the other's is) throws a\n`TypeError` naming it, and the theme shown stays.",
+        &["(theme: Theme | null): void"],
+    ),
+);
 
 /// `token(name)`: the design token `name` in the appearance shown (a
 /// color as `#rrggbbaa`, a number, a font family), `undefined` when there

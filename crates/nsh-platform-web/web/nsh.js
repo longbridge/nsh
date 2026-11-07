@@ -7095,13 +7095,12 @@ class Player {
    * `onContextMenu` of the nearest view around `e`'s target that listens,
    * unless a field or selectable text is nearer (it keeps the browser's
    * menu); true when a view took it. The browser raises `contextmenu` for
-   * right clicks, Control-clicks on macOS, the keyboard's Menu key and
-   * Shift+F10 (on the focused element), and screen readers' "show menu"
-   * action. Those come with no pointer (an empty `pointerType` or no button): the
-   * event names none (`pointerType: null`) and is placed at the view's
-   * bottom-start corner, where a menu opened below it starts.
+   * pointer gestures and accessibility actions. `keyDown` handles the Menu
+   * key and Shift+F10 too: Chromium on macOS does not raise that event for
+   * them. Keyboard requests name no pointer and start at the view's
+   * bottom-start corner.
    */
-  contextMenu(e) {
+  contextMenu(e, keyboard = false) {
     const view = this.viewOf(e.target);
     if (!view) return false;
     for (const el of this.ancestors(view)) {
@@ -7110,7 +7109,7 @@ class Player {
         const r = el.getBoundingClientRect();
         // Chromium can name a mouse for keyboard context menus, but no
         // button (-1). Older MouseEvents without pointerType are mouse input.
-        const pointerType = e.button === -1 ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
+        const pointerType = keyboard || e.button === -1 ? null : e.pointerType === undefined ? "mouse" : e.pointerType || null;
         let at = e;
         if (pointerType === null) {
           const rtl = getComputedStyle(el).direction === "rtl";
@@ -7245,6 +7244,11 @@ class Player {
         focus.blur();
       }
       return;
+    }
+    if (inRoot && plain && ((e.key === "F10" && e.shiftKey) || (e.key === "ContextMenu" && !e.shiftKey))) {
+      // Prevent the native default when handled, so browsers that also
+      // generate contextmenu do not open the same menu twice.
+      if (this.contextMenu(e, true)) return;
     }
     if (this.selectionKey(e)) return;
     if (inRoot && focus._pressable && plain && !e.shiftKey && (e.key === "Enter" || e.key === " ")) {

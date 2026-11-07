@@ -169,9 +169,26 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
 
 - a press is the mouse's down and up at the view's middle through `input::simulate` (after a hover), and a release on
   a hosted widget (a text field) focuses it, as a real click would;
-- typing inserts each character into the focused `GtkText` / `GtkTextView` at its caret (`insert_text`, so the
-  field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`, select
-  all selects the field's text;
+- keys (typing, `keyboard.press`, `keyboard.down` / `up`, Return, Backspace, select all) take one of two paths:
+  - **under X11** (Xvfb, Xorg, Xwayland: GDK's display is a `GdkX11Display` and the server has XTest), they are real
+    key events (`xtest.rs`): the window gets the X input focus, and `XTestFakeKeyEvent` presses and releases the
+    keys on GDK's own connection, so GTK's whole key path runs on them as on a keyboard's: the window's shortcut
+    controllers (the app's `nsh/keymap` shortcuts, the menu bar's), the focused widget's key bindings (Tab, arrows,
+    Shift+arrows, Ctrl+A) and the input method. A character needing Shift is typed with it; one the layout cannot
+    type with just Shift (including AltGr or another group) is put on a spare keycode first
+    (`XChangeKeyboardMapping`, as `xdotool` does), restored after GTK handles
+    it. `keyboard.down` holds modifier keys down for real too, and individual strokes leave them held until
+    `keyboard.up`, so the keys typed meanwhile carry them. libX11 and libXtst are loaded when the
+    agent first types (`dlopen`) and GDK's X11 functions looked up in the loaded GTK, so no X11 libraries are linked.
+    Loading them moves the X pointer to the screen's corner: Xvfb starts it in the middle, over the window, and the
+    view under it would take its hover back whenever a key comes (an open list's highlight), while the agent's
+    pointer is simulated. The press that focuses a field keeps its text unselected
+    (`grab_focus_without_selecting`), as a click does, so real keys typed next do not replace it;
+  - **elsewhere** (Wayland, a GTK without the X11 backend, a server without XTest), they are the widgets' signals:
+    typing inserts each character into the focused `GtkText` / `GtkTextView` at its caret (`insert_text`, so the
+    field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`,
+    select all selects the field's text, a keystroke goes to the app's shortcuts (`keymap::press`) and Escape or
+    Left to going back; other keys do nothing;
 - a scroll is smooth wheel events of at most 20 points, a frame apart;
 - back is Escape (`navigation::key_pressed`), twice when a field has the focus (the first only leaves it);
 - a dialog's button is the `GtkButton` with that label, clicked; closing it without one is its dismissal (a click
@@ -189,9 +206,16 @@ echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await 
   | xvfb-run -a ./target/debug/nsh test examples/gallery/App.tsx --target linux   # steps from stdin
 ```
 
-The agent's keys are the field's signals rather than key events (GTK 4 cannot make one). For real key events
-(modifiers, input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a
-window manager such as openbox makes full screen work):
+For the agent's keys to be real key events, the host has to run on the X server: `xvfb-run` sets `DISPLAY` but
+keeps `WAYLAND_DISPLAY`, and on a Wayland desktop GTK would open the window there (with the signals' keys, and
+presses that miss). Leave it out there:
+
+```sh
+env -u WAYLAND_DISPLAY GDK_BACKEND=x11 xvfb-run -a -s '-screen 0 1280x1024x24' ./target/debug/nsh test examples/gallery --target linux
+```
+
+To drive the host by hand with real input, run it under Xvfb with the X11 backend and use `xdotool` (a window
+manager such as openbox makes full screen work):
 
 ```sh
 Xvfb :77 & export DISPLAY=:77 GDK_BACKEND=x11
