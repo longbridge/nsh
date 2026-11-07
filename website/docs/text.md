@@ -146,12 +146,14 @@ text("Made with ")
 </Text>
 ```
 
-Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out.
+Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out. Text inside an
+inline element takes the color of the text around it, as CSS's `color` reaches an inline block, unless it sets its own
+(the `LIVE` badge above does); its font and line height stay its own.
 
 The style key `verticalAlign` places an inline element in its line, as CSS's `vertical-align` places an image:
 `"baseline"` (the default) stands its bottom on the baseline, `"text-top"` and `"text-bottom"` put its top or bottom
 at the top or bottom of the text's font, and `"middle"` centers it half the font's x height above the baseline. The
-line grows to hold the element wherever it reaches past the font. An icon at the start of a paragraph that should
+line grows to hold the element wherever it reaches past the font, also with a fixed `lineHeight`. An icon at the start of a paragraph that should
 line up with the text's bottom, as Android's `ImageSpan` draws it, takes `"text-bottom"`. The classes are
 `align-baseline`, `align-text-top`, `align-text-bottom` and `align-middle`; in Rust `.align_text_bottom()` and the
 others of the same names.
@@ -169,7 +171,7 @@ others of the same names.
 | `color` | A [color](./styling.md#colors). Default black | `.text_color(..)` |
 | `fontSize` | Points. Default 14 | `.text_size(px(..))`, `.text_sm()`, `.text_lg()`, ... |
 | `fontWeight` | `"normal"` (400), `"bold"` (700), or `100`–`900` (number or string) | `.font_weight(FontWeight::BOLD)` |
-| `fontStyle` | `"normal"`, `"italic"` | `.italic()` |
+| `fontStyle` | `"normal"`, `"italic"`: color emoji stay upright | `.italic()` |
 | `fontFamily` | A system family, a generic family, or an [imported font](./fonts.md) | `.font_family(..)` |
 | `lineHeight` | Points | `.line_height(px(..))` |
 | `letterSpacing` | Points | `.letter_spacing(px(..))` |
@@ -281,6 +283,11 @@ text(order_number).select_text().selection_color(rgb(0x7c3aed))
 ```
 
 To copy from code (a Copy button), use `set_clipboard(..)` in Rust or [`Clipboard`](../modules/nsh.md#clipboard) in TSX.
+
+In the terminal host, drag across a selectable view or Text to select whole graphemes; a double click selects a word and a triple click its paragraph, and dragging on from either extends the selection by words or paragraphs.
+Selected Cells use reversed colors. Copy with Ctrl+C, Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C; the host sends the
+text through OSC 52 to the terminal clipboard. Shift+click extends the selection, Ctrl+A / Cmd+A selects the area,
+and Esc or any other key clears it. With nothing selected, Ctrl+C quits the terminal host.
 
 ## onTextLayout
 

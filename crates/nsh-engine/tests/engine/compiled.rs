@@ -82,6 +82,9 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
+        audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -246,6 +249,9 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
+        audio: None,
+        windows: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -1324,7 +1330,7 @@ mount(() => (
 "#;
 
 /// `setRoutes` keeps the page of a route that stays; pages, stacks,
-/// dialogs and their backdrops take test ids.
+/// dialogs and their backdrops take test ids; a backdrop is no Tab stop.
 #[test]
 fn set_routes_keeps_pages_that_stay_and_parts_take_test_ids() {
     let (_engine, rx) = start_app(SET_ROUTES);
@@ -1356,4 +1362,16 @@ fn set_routes_keeps_pages_that_stay_and_parts_take_test_ids() {
     ] {
         assert!(ids.iter().any(|i| i == wanted), "{wanted} in {ids:?}");
     }
+    // The backdrop's presses are the pointer's: it is no stop of Tab,
+    // which would hold the dialog's focus where Return closes it.
+    let backdrop = batches
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewProps { props, .. } if props.test_id.as_deref() == Some("backdrop") => {
+                Some(props.focusable)
+            }
+            _ => None,
+        });
+    assert_eq!(backdrop, Some(Some(false)), "the backdrop is no Tab stop");
 }

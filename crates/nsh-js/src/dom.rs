@@ -440,6 +440,24 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         decl!("`WebView`: sends `data` to the page (a `message` event on `window`)."),
     ),
     (
+        "sendInput",
+        1,
+        decl!(
+            "(input: { type: \"click\"; x: number; y: number } | { type: \"text\"; text: string } | { type: \"key\"; key: \"Enter\" | \"Tab\" | \"Escape\" | \"Backspace\" }): void"
+        ),
+        decl!(
+            "`WebView`: gives the page input as the user's own, so its events are trusted (`isTrusted`), which `injectJavaScript` cannot do: a click at a point of the viewport in CSS pixels (as `getBoundingClientRect()` reports), text typed into what has the page's focus, or a key. A click's events can still be on their way when the next call starts: let it settle (a frame or so) before typing after it. It takes the keyboard focus for the web view. Needs `\"webview\": { \"input\": true }` in `nsh.json`'s capabilities, also when the app declares none. macOS only for now; elsewhere it does nothing (`WebView.inputAvailable()` tells)."
+        ),
+    ),
+    (
+        "load",
+        1,
+        decl!("(options: { src: string; headers?: Record<string, string> }): void"),
+        decl!(
+            "`WebView`: loads `src`, sending `headers` with the page's own request only, not with its images, scripts or other subresources, its later navigations or reloads; e.g. `Authorization` for a signed-in page, without putting the token in the URL. The page then shows as with `src` (a later change of the `src` prop loads that instead). Its host must be one `webview.hosts` allows, else nothing loads. A header whose name is not an HTTP token or whose value holds a line break throws. Header values are not logged. macOS, iOS, Android, Windows, Linux and the GPUI backend send them; the browser backend has no way to and does nothing."
+        ),
+    ),
+    (
         "seek",
         1,
         decl!("(seconds: number): void"),
@@ -672,6 +690,11 @@ pub(crate) fn shared(cx: *mut JsContext) -> Rc<Shared> {
 pub(crate) fn merge_values(cx: *mut JsContext, values: &mut [JsValue]) -> JsValue {
     // SAFETY: borrowed arguments, as `merge` takes them.
     unsafe { merge(cx, UNDEFINED, values.len() as c_int, values.as_mut_ptr()) }
+}
+
+/// The surface's root node (borrowed).
+pub(crate) fn root_value(cx: *mut JsContext) -> JsValue {
+    dom(cx).root.get()
 }
 
 /// Queues `op` (for the components' glue).
@@ -1067,7 +1090,8 @@ fn content_of(cx: *mut JsContext, parent: JsValue, child: JsValue) -> JsValue {
 /// `contentStyle` / `contentClass` (React Native's
 /// content container: `flexGrow: 1` with `justifyContent: "center"`
 /// centers what is shorter than the viewport and still scrolls what is
-/// longer).
+/// longer). The browser runtime's renderer has its own
+/// (`nsh-platform-web`'s `browser/dom.rs`): a change here goes there too.
 fn scroll_content(cx: *mut JsContext, node: JsValue) -> Result<JsValue, JsValue> {
     let p = node_ptr(cx, node);
     // SAFETY: live node data, read briefly.
@@ -1246,38 +1270,28 @@ fn set_prop(
             };
             return set_prop(cx, content, name, value, prev);
         }
-        "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
-        | "checkedStyle" | "indeterminateStyle" | "expandedStyle" | "pressedStyle"
-        | "headerStyle" => {
-            let patch = part_style(cx, name, value)?;
-            let prop = match name {
-                "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
-                "hoverStyle" => nsh_core::Prop::HoverStyle(patch),
-                "focusStyle" => nsh_core::Prop::FocusStyle(patch),
-                "disabledStyle" => nsh_core::Prop::DisabledStyle(patch),
-                "selectedStyle" => nsh_core::Prop::SelectedStyle(patch),
-                "checkedStyle" => nsh_core::Prop::CheckedStyle(patch),
-                "indeterminateStyle" => nsh_core::Prop::IndeterminateStyle(patch),
-                "expandedStyle" => nsh_core::Prop::ExpandedStyle(patch),
-                "pressedStyle" => nsh_core::Prop::PressedStyle(patch),
-                _ => nsh_core::Prop::HeaderStyle(patch),
-            };
-            return dom(cx).push(cx, Op::SetProp { id, prop });
-        }
-        "headerClass" | "contentClass" => {
-            // SAFETY: an inline tag check.
-            let names: Box<str> = if unsafe { qjs::JS_IsString(value) } {
-                string_arg(cx, value).unwrap_or_default().into()
-            } else {
-                Box::default()
-            };
-            let prop = match name {
-                "headerClass" => nsh_core::Prop::HeaderClass(names),
-                _ => nsh_core::Prop::ListContentClass(names),
-            };
-            return dom(cx).push(cx, Op::SetProp { id, prop });
-        }
+        "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
+    }
+    if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
+        let prop = prop(part_style(cx, name, value)?);
+        return dom(cx).push(cx, Op::SetProp { id, prop });
+    }
+    // SAFETY: live node data.
+    if let Some(prop) = nsh_core::js::host::part_class_prop(name, unsafe { (*p).tag }) {
+        // SAFETY: an inline tag check.
+        let names: Box<str> = if unsafe { qjs::JS_IsString(value) } {
+            string_arg(cx, value).unwrap_or_default().into()
+        } else {
+            Box::default()
+        };
+        return dom(cx).push(
+            cx,
+            Op::SetProp {
+                id,
+                prop: prop(names),
+            },
+        );
     }
     if let Some(prop) = crate::touch::touch_prop(name) {
         return set_touch(cx, p, prop, value);
@@ -1356,6 +1370,16 @@ fn set_prop(
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => Err(throw_type(cx, &format!("nsh: prop `{name}`: {e}"))),
     }
+}
+
+/// Whether `set_prop` follows `value` (borrowed) of prop `name` with a
+/// bound prop of its own: a `tooltip` given by a function (in a development
+/// bundle a component's element is its hot proxy's memo). That binding goes
+/// when the computation that set the prop runs again, so such a value is
+/// set again on every run, even unchanged.
+fn followed(cx: *mut JsContext, name: &str, value: JsValue) -> bool {
+    // SAFETY: an inline check of a borrowed value.
+    name == "tooltip" && unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null()
 }
 
 /// Sets the handler of `event` on node `p` to `value` (borrowed; not a
@@ -1620,7 +1644,11 @@ unsafe extern "C" fn bind_prop_run(
     if unsafe { qjs::JS_IsException(next) } {
         return next;
     }
-    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) } {
+    // The name is read only for an unchanged function ([`followed`]).
+    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) }
+        && !(unsafe { qjs::JS_IsFunction(cx, next) }
+            && to_string(cx, name).is_some_and(|name| followed(cx, &name, next)))
+    {
         return next;
     }
     let Some(name) = to_string(cx, name) else {
@@ -1721,7 +1749,7 @@ unsafe extern "C" fn spread_run(
             } else {
                 UNDEFINED
             };
-            let r = if qjs::JS_IsStrictEqual(cx, old, v) {
+            let r = if qjs::JS_IsStrictEqual(cx, old, v) && !followed(cx, &name_str, v) {
                 Ok(())
             } else {
                 set_prop(cx, node, &name_str, v, old)
@@ -3081,10 +3109,10 @@ unsafe extern "C" fn setup(
     {
         crate::env::take_theme(cx, &json);
     }
-    // Checked by the bundler; a hand-made bundle's wrong value is ignored.
+    // What this runtime cannot read (a newer NSH's) is left out.
     let status_bar = string_arg(cx, arg(argc, argv, 3))
         .and_then(|json| serde_json::from_str(&json).ok())
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok());
+        .map(|v| nsh_core::StatusBarSetting::from_json(&v));
     if let Some(setting) = status_bar
         && let Err(e) = push_op(
             cx,
@@ -4397,6 +4425,73 @@ mod tests {
                 .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
             "{ops:?}"
         );
+    }
+
+    /// A `tooltip` given by a memo (a component's element in a development
+    /// bundle: its hot proxy's) is the element the memo gives, and follows it.
+    #[test]
+    fn a_tooltip_given_by_a_memo_follows_it() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { element, prop } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            prop(element("view"), "tooltip", computed(() => tips[shown()]));
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(tooltips(&host), ["Node(2)", "Node(4)"]);
+    }
+
+    /// A tooltip memo stays followed when what set it runs again with the
+    /// same memo: a spread after another of its props changed, a bound prop
+    /// after something else it read did. Each run sets the memo's element
+    /// again (the core keeps it as it is).
+    #[test]
+    fn a_tooltip_memo_is_followed_after_what_set_it_ran_again() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { bindProp, element, spread } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            const id = signal("a");
+            const tip = computed(() => tips[shown()]);
+            spread(element("view"), {
+                get testID() { return id(); },
+                get tooltip() { return tip; },
+            });
+            bindProp(element("view"), "tooltip", () => (id(), tip));
+            id.set("b");
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            tooltips(&host),
+            [
+                "Node(2)", "Node(2)", "Node(2)", "Node(2)", "Node(4)", "Node(4)"
+            ]
+        );
+    }
+
+    /// The tooltips the ops since the last call set.
+    fn tooltips(host: &Host) -> Vec<String> {
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.into_iter()
+            .filter_map(|o| match o {
+                Op::SetProp {
+                    prop: nsh_core::Prop::Tooltip(content),
+                    ..
+                } => Some(format!("{content:?}")),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]

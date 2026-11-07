@@ -1,9 +1,10 @@
 import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, Easing, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
-import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Button as BaseButton, type CalendarEntry, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectEntry, type SelectGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, tints, type Tone, toneColor, toneTint } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor, toneTint } from "../ui";
+import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -16,10 +17,13 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRin
 /**
  * The sizes of the page. Touch screens take the standard tier (44 pt and
  * more to press); a pointer the compact one desktops' settings and filters
- * use: smaller controls, rows and type, whatever the window's width.
+ * use: smaller controls, rows and type, whatever the window's width. The
+ * terminal's rows are one Cell row each, an indicator's box three Cells wide
+ * for its glyph (`[x]`).
  */
-const size =
-  platform.desktop
+const size = terminal
+  ? { row: TERMINAL_ROW, padding: 0, gap: TERMINAL_COLUMN, label: 14, detail: 12, control: 3 * TERMINAL_COLUMN, corner: 0, check: 12, dot: 6, tabs: TERMINAL_ROW, line: TERMINAL_ROW, clear: 2 * TERMINAL_COLUMN, switch: "small" as const }
+  : platform.desktop
     ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, clear: 16, switch: "small" as const }
     : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, clear: 20, switch: "regular" as const };
 const pointer = platform.desktop;
@@ -31,7 +35,7 @@ const row = (first: boolean) => ({
   alignItems: "center" as const,
   gap: size.gap,
   paddingVertical: size.padding,
-  borderTopWidth: first ? 0 : 1,
+  borderTopWidth: first || terminal ? 0 : 1,
   borderTopColor: colors.line,
 });
 /** How far a row's hover fill reaches past its content on each side, and its corners. */
@@ -49,14 +53,15 @@ const hoverRow = (first: boolean, start = 0) => ({
   marginHorizontal: -BLEED,
   paddingStart: BLEED + start,
   paddingEnd: BLEED,
-  paddingTop: size.padding + (first ? 0 : 1),
+  paddingTop: size.padding + (first || terminal ? 0 : 1),
   borderRadius: BLEED,
 });
 
-/** The hairline above a `hoverRow` that is not the first. */
+/** The hairline above a `hoverRow` that is not the first (none in the
+ * terminal, whose rows are one row each). */
 function Divider(props: { show: boolean }) {
   return (
-    <If when={props.show}>
+    <If when={props.show && !terminal}>
       <View style={{ position: "absolute", top: 0, left: BLEED, right: BLEED, height: 1, backgroundColor: colors.line }} />
     </If>
   );
@@ -85,15 +90,22 @@ const centered = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, a
 
 type Mark = "check" | "dash" | null;
 
-/** A box's or ring's size: `scale` times the page's (0.8 small, 1.25 large). */
-const dims = (scale = 1) => ({ control: Math.round(size.control * scale), check: Math.round(size.check * scale), corner: Math.round(size.corner * scale), dot: Math.round(size.dot * scale) });
+/** A box's or ring's size: `scale` times the page's (0.8 small, 1.25 large);
+ * one row high in the terminal, where it is a glyph three Cells wide. */
+const dims = (scale = 1) => ({
+  control: Math.round(size.control * scale),
+  height: terminal ? TERMINAL_ROW : Math.round(size.control * scale),
+  check: Math.round(size.check * scale),
+  corner: Math.round(size.corner * scale),
+  dot: Math.round(size.dot * scale),
+});
 
 /** A checkbox's box: its frame, empty; `BoxMark` fills it. `round`: a circle (a task's, as reminders draw it). */
 const box = (scale = 1, round = false) => {
   const d = dims(scale);
   return {
     width: d.control,
-    height: d.control,
+    height: d.height,
     borderRadius: round ? d.control / 2 : d.corner,
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -136,7 +148,7 @@ function BoxMark(props: { mark: Mark; scale?: number; round?: boolean }) {
   // "Children, slots and rows"), so layers placed only absolutely made it
   // 0 × 0 and the fill a speck at the box's middle.
   return (
-    <View style={{ width: d.control - 2, height: d.control - 2 }}>
+    <View style={{ width: d.control - 2, height: d.height - 2 }}>
       <Lit on={on} radius={props.round ? d.control / 2 : d.corner} />
       {glyph(check, "check")}
       {glyph(dash, "minus")}
@@ -151,7 +163,7 @@ function Ring(props: { on: boolean; scale?: number }) {
   return (
     <View
       class={sink}
-      style={{ width: d.control, height: d.control, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...empty() }}
+      style={{ width: d.control, height: d.height, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...empty() }}
     >
       <Lit on={on} radius={d.control / 2} />
       <View
@@ -295,7 +307,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        height: h,
+        height: terminal ? undefined : h,
         // The lead (a face, a dot) close to the start.
         paddingLeft: 3,
         paddingRight: 3,
@@ -313,11 +325,13 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         accessibilityLabel={props.remove}
         onPress={props.onRemove}
         class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-        // Nearly the chip's height under a finger.
-        style={{ width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
+        // Nearly the chip's height under a finger; a terminal's is its mark, as text.
+        style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
         focusStyle={focusRing()}
       >
-        <Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />
+        <If when={terminal} else={<Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />}>
+          <Text style={{ color: colors.muted }}>×</Text>
+        </If>
       </BaseButton>
     </View>
   );
@@ -361,8 +375,11 @@ const ICON_ROOM = 14 + 6;
  * indicator arrives. It keeps its natural width (never truncated) and
  * reports it without the icon (`onWidth`): the same whether the icon shows
  * or not, so a row deciding on its icons by it never flips back.
+ * `underline`: a terminal marks the selected tab of an underlined strip by
+ * underlining its label, where the strip's indicator, thinner than a Cell,
+ * does not show.
  */
-function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; onWidth?: (bare: number) => void }) {
+function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; underline?: boolean; onWidth?: (bare: number) => void }) {
   const on = follow(() => (props.selected ? 1 : 0), motion.move);
   const away = on.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   return (
@@ -381,7 +398,15 @@ function TabTitle(props: { name: string; selected: boolean; count?: number; icon
           </View>
         </View>
       </If>
-      <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }) }}>
+      <Text
+        style={{
+          numberOfLines: 1,
+          fontSize: 13,
+          fontWeight: "500",
+          color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }),
+          textDecorationLine: terminal && props.underline && props.selected ? "underline" : "none",
+        }}
+      >
         {props.name}
       </Text>
       <If when={props.count !== undefined}>
@@ -418,13 +443,28 @@ function titles(count: number) {
   };
 }
 
-/** A label, and a quieter line under it. */
-function Label(props: { label: string; detail?: string }) {
+/** The terminal's labels' column, so the details after them line up. */
+const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
+/** The least a terminal's detail keeps beside its label: narrower, it wraps under it. */
+const DETAIL_WIDTH = 24 * TERMINAL_COLUMN;
+
+/** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
+/** The terminal's text for each step button's icon. */
+const STEP_GLYPHS = { plus: "+", minus: "−" } as const;
+
+const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names.map((n) => n.length * TERMINAL_COLUMN));
+
+/** A label, and a quieter line under it (after it in the terminal). */
+function Label(props: { label: string; detail?: string; width?: number }) {
   return (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
+    // A terminal's gap is in the label's column: a row's gaps give first
+    // when its detail wraps, which would move the details off their column.
+    <View style={terminal ? { flex: 1, flexDirection: "row", flexWrap: "wrap" } : { flex: 1, gap: 2 }}>
+      <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) + TERMINAL_GAP : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
+        {/* Beside the label in a terminal, it wraps rather than lose its end to `…`;
+            with less than DETAIL_WIDTH beside it, it goes under the label, as on a phone. */}
+        <Text style={{ numberOfLines: terminal ? undefined : 1, flexShrink: 1, ...(terminal ? { flexGrow: 1, flexBasis: DETAIL_WIDTH } : {}), fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -802,7 +842,7 @@ export type Control =
  * it for, then in other looks, sizes and states (choice cards, tiles,
  * underlined tabs, an accordion), above the last event it reported.
  */
-export function Controls(props: { show: Control }) {
+export function Controls(props: { show: Control; firsts?: Control[] }) {
   const last = signal("—");
 
   function Settings() {
@@ -945,6 +985,7 @@ export function Controls(props: { show: Control }) {
             checked={all()}
             indeterminate={mark() === "dash"}
             onChange={({ checked: on }) => {
+              sound("toggle", { rate: on ? 1 : 0.9 });
               shown.set(on ? KINDS.map((k) => k.name) : []);
               last.set(`Select all: ${on}`);
             }}
@@ -964,6 +1005,7 @@ export function Controls(props: { show: Control }) {
               <Checkbox
                 checked={has(kind().name)}
                 onChange={({ checked: on }) => {
+                  sound("toggle", { rate: on ? 1 : 0.9 });
                   shown.set(on ? KINDS.map((k) => k.name).filter((n) => n === kind().name || has(n)) : shown().filter((n) => n !== kind().name));
                   last.set(`${kind().name}: ${on}`);
                 }}
@@ -1000,6 +1042,7 @@ export function Controls(props: { show: Control }) {
         <Checkbox
           checked={has(props.task)}
           onChange={({ checked: on }) => {
+            sound("toggle", { rate: on ? 1 : 0.9 });
             done.set(on ? [...done(), props.task] : done().filter((t) => t !== props.task));
             last.set(`${props.task}: ${on ? "done" : "to do"}`);
           }}
@@ -1054,6 +1097,7 @@ export function Controls(props: { show: Control }) {
                 checked={c().required || has(c().name)}
                 disabled={c().required}
                 onChange={({ checked }) => {
+                  sound("toggle", { rate: checked ? 1 : 0.9 });
                   set(checked ? [...allowed(), c().name] : allowed().filter((n) => n !== c().name));
                   last.set(`${c().name}: ${checked}`);
                 }}
@@ -1069,7 +1113,12 @@ export function Controls(props: { show: Control }) {
                 indicator={<BoxMark mark={c().required || has(c().name) ? "check" : null} />}
               >
                 <Divider show={i() !== 0} />
-                <Label label={c().required ? `${c().name} (always on)` : c().name} detail={c().detail} />
+                {/* A terminal keeps the names in one column: "always on" goes with the description. */}
+                <Label
+                  label={c().required && !terminal ? `${c().name} (always on)` : c().name}
+                  detail={c().required && terminal ? `Always on · ${c().detail}` : c().detail}
+                  width={labelColumn(COOKIES.map((k) => k.name))}
+                />
               </Checkbox>
             )}
           </Each>
@@ -1112,6 +1161,7 @@ export function Controls(props: { show: Control }) {
                 checked={has(c().name)}
                 disabled={c().disabled}
                 onChange={({ checked }) => {
+                  sound("toggle", { rate: checked ? 1 : 0.9 });
                   on.set(checked ? [...on(), c().name] : on().filter((n) => n !== c().name));
                   last.set(`${c().name}: ${checked}`);
                 }}
@@ -1148,7 +1198,10 @@ export function Controls(props: { show: Control }) {
           checked={props.mark === "check"}
           indeterminate={props.mark === "dash"}
           disabled={props.disabled}
-          onChange={({ checked }) => props.onChange?.(checked)}
+          onChange={({ checked }) => {
+            sound("toggle", { rate: checked ? 1 : 0.9 });
+            props.onChange?.(checked);
+          }}
           class="group"
           style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
           activeStyle={pressed}
@@ -1203,6 +1256,7 @@ export function Controls(props: { show: Control }) {
                 checked={plan() === p().name}
                 disabled={p().disabled}
                 onChange={() => {
+                  sound("select");
                   plan.set(p().name);
                   last.set(`Plan: ${p().name}`);
                 }}
@@ -1244,6 +1298,7 @@ export function Controls(props: { show: Control }) {
                 checked={speed() === d().name}
                 disabled={d().disabled}
                 onChange={() => {
+                  sound("select");
                   speed.set(d().name);
                   last.set(`Delivery: ${d().name}`);
                 }}
@@ -1281,6 +1336,7 @@ export function Controls(props: { show: Control }) {
                 checked={choice() === t().name}
                 disabled={t().disabled}
                 onChange={() => {
+                  sound("select");
                   choice.set(t().name);
                   last.set(`Text size: ${t().name}`);
                 }}
@@ -1414,7 +1470,7 @@ export function Controls(props: { show: Control }) {
                     focusStyle={focusRing()}
                     disabledStyle={dimmed}
                   >
-                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} />
+                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} underline />
                   </Tab>
                 )}
               </Each>
@@ -1442,7 +1498,7 @@ export function Controls(props: { show: Control }) {
     pointer
       ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
       : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
-  const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+  const backdrop = { backgroundColor: token("scrim") };
   /** The clear button's inset from the trigger's end: centered where the chevron's lane is. The button is in the
       select's view, outside the trigger, so its inset counts the trigger's 1 pt border too. */
   const clearInset = 1 + 10 + size.check / 4 - size.clear / 2;
@@ -1463,6 +1519,28 @@ export function Controls(props: { show: Control }) {
    * as under the pointer). `lead` goes before the title (a flag, a status's dot, faces); `error` edges it in the
    * danger tone.
    */
+  /**
+   * A field's focus ring, as the Input demo's: a 2-point accent edge around the border, fading in while the field
+   * (`group-focus:`) or a view in it (`group-focus-within:`) has the focus. It lies over the field and takes no touches.
+   */
+  function FieldRing(props: { within?: boolean; error?: boolean }) {
+    return (
+      <View
+        class={`opacity-0 transition-opacity duration-150 motion-reduce:transition-none ${props.within ? "group-focus-within:opacity-100" : "group-focus:opacity-100"}`}
+        style={{
+          pointerEvents: "none",
+          position: "absolute",
+          top: -2,
+          left: -2,
+          right: -2,
+          bottom: -2,
+          borderRadius: radius.control + 1,
+          borderWidth: 2,
+          borderColor: props.error ? colors.danger : colors.accent,
+        }}
+      />
+    );
+  }
   function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean; lead?: JSX.Element; error?: boolean }) {
     return (
       <View
@@ -1471,9 +1549,12 @@ export function Controls(props: { show: Control }) {
           alignItems: "center",
           gap: 8,
           height: size.line,
+          // Room for the list's rows, which are as wide as the trigger.
+          minWidth: pointer ? 180 : undefined,
           paddingLeft: 10,
-          // Room for the clear button, which goes over the trigger's end in place of the chevron.
-          paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
+          // Room for the clear button, which goes over the trigger's end in place of the chevron. In the terminal the
+          // select's own marks go over the end, each in a slot of three Cells: ` ▾ `, or ` ×  ▾ `.
+          paddingRight: terminal ? (props.clearable ? 6 : 3) * TERMINAL_COLUMN : props.clearable ? clearInset + size.clear + 8 : 10,
           borderRadius: radius.control,
           borderWidth: 1,
           borderColor: props.error ? colors.danger : props.open ? colors.faint : colors.border,
@@ -1486,23 +1567,30 @@ export function Controls(props: { show: Control }) {
         }}
         hoverStyle={props.disabled || props.error ? undefined : { borderColor: colors.faint }}
         activeStyle={pressed}
-        focusStyle={focusRing()}
+        class="group"
         disabledStyle={dimmed}
       >
         {props.lead}
-        <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-        <Chevron open={props.open} hidden={props.clearable} />
+        <Text style={{ flex: 1, numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+        {/* The terminal's select draws its own `▾` there. */}
+        <Chevron open={props.open} hidden={props.clearable || terminal} />
+        <FieldRing error={props.error} />
       </View>
     );
   }
   /**
-   * A row of the list, its look on the row (`itemClass`), which the list keeps while it draws the row's content
-   * again: lit while highlighted (`focus:`, the keys or the pointer on it), the fill and edge fading between rows as
-   * the highlight moves; at once with reduced motion.
+   * A row of the list, its look on the row (`itemClass`): lit while highlighted (`focus:`, the keys or the pointer
+   * on it), the fill and edge fading between rows as the highlight moves (at once with reduced motion), dimmed while
+   * disabled. Every state is the row's class (`group`), so the list draws a row's content once per item and the
+   * highlight moves without drawing anything.
    */
-  const optionClass = "rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70";
-  /** A row's content: bolder with a check while chosen; `lead` before the title (a flag, a dot, a face, an icon), `note` after it. */
-  function Option(props: { item: SelectItemState; note?: string; lead?: JSX.Element; detail?: string }) {
+  const optionClass =
+    "group rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-35";
+  /**
+   * A row's content: bolder with a check while chosen (`group-selected:`); `lead` before the title (a flag, a dot, a
+   * face, an icon), `note` after it.
+   */
+  function Option(props: { item: SelectEntry; note?: string; lead?: JSX.Element; detail?: string }) {
     return (
       <View
         style={{
@@ -1511,13 +1599,15 @@ export function Controls(props: { show: Control }) {
           gap: 8,
           // The row's 1-point border on each side.
           height: props.detail ? (pointer ? 38 : 52) : pointer ? 30 : 44,
-          paddingHorizontal: 7,
-          opacity: props.item.disabled ? 0.35 : 1,
+          // With its border and the popup's padding, the trigger's inset: a select's chosen row lies over the trigger, title on title.
+          paddingHorizontal: pointer ? 3 : 7,
         }}
       >
         {props.lead}
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>{props.item.title}</Text>
+          <Text class="font-normal group-selected:font-semibold" style={{ numberOfLines: 1, fontSize: 14, color: colors.text }}>
+            {props.item.title}
+          </Text>
           <If when={props.detail}>
             <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>{props.detail}</Text>
           </If>
@@ -1525,10 +1615,8 @@ export function Controls(props: { show: Control }) {
         <If when={props.note}>
           <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
         </If>
-        <View style={{ width: 16, alignItems: "center" }}>
-          <If when={props.item.selected}>
-            <Icon name="check" size={14} tint={colors.accent} />
-          </If>
+        <View class="opacity-0 group-selected:opacity-100" style={{ width: 16, alignItems: "center" }}>
+          <Icon name="check" size={14} tint={colors.accent} />
         </View>
       </View>
     );
@@ -1545,6 +1633,33 @@ export function Controls(props: { show: Control }) {
     backgroundColor: colors.field,
     ...finish.field,
   });
+  /**
+   * A combobox's field, shadcn's input group: the root draws the box, the input types inside it, and the chevron
+   * opens and closes the list.
+   */
+  const comboStyle = (open: boolean) => ({
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    // A set width with a pointer, as a select's; the row's on a touch screen.
+    ...(pointer ? { width: 260 } : { alignSelf: "stretch" as const }),
+    minHeight: size.line,
+    paddingLeft: 10,
+    paddingRight: 4,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: open ? colors.faint : colors.fieldBorder,
+    backgroundColor: colors.field,
+    ...finish.field,
+  });
+  const comboInputStyle = () => ({ flex: 1, minWidth: 40, height: size.line - 2 });
+  /** A combobox's toggle: the chevron in a square that lights under the pointer. */
+  function ComboToggle(props: { id: string; open: boolean }) {
+    return (
+      <View testID={props.id} style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 6 }} hoverStyle={{ backgroundColor: colors.track }}>
+        <Chevron open={props.open} />
+      </View>
+    );
+  }
   /** What a list shows while its search matches nothing. */
   function Empty(props: { label: string }) {
     return <Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>{props.label}</Text>;
@@ -1590,7 +1705,7 @@ export function Controls(props: { show: Control }) {
               margin={8}
               align="end"
               // Wider than the trigger with a pointer: the titles whole.
-              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
@@ -1610,20 +1725,21 @@ export function Controls(props: { show: Control }) {
               accessibilityLabel="Font"
               searchable
               searchPlaceholder="Search fonts"
+              searchAccessibilityLabel="Search fonts"
               searchClass={searchClass}
               searchStyle={searchStyle()}
               empty={<Empty label="No font matches" />}
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 260 } : surface()}
+              popupStyle={pointer ? { ...surface(), minWidth: 260 } : surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={clearGlyph()}
               trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
@@ -1638,22 +1754,26 @@ export function Controls(props: { show: Control }) {
     );
   }
 
-  /** What the lists of the cards below share: at the trigger's end with a pointer (`width` wide), a sheet on a phone. */
-  const listProps = (width?: number) => ({
+  /** What the lists of the cards below share: as wide as the trigger with a pointer (wider with `minWidth`), a sheet on a phone. */
+  const listProps = (minWidth?: number) => ({
     offset: 4,
     margin: 8,
     align: "end" as const,
-    popupStyle: pointer && width ? { ...surface(), width } : surface(),
+    popupStyle: pointer && minWidth ? { ...surface(), minWidth } : surface(),
     backdropStyle: backdrop,
     itemClass: optionClass,
   });
   /** A clear button over the trigger's end, in place of its chevron (`Picker`'s `clearable`). */
+  /** A clear button's mark: an × in a terminal, which draws no icons. */
+  const clearGlyph = () => (terminal ? <Text style={{ color: colors.muted }}>×</Text> : <Icon name="close" size={size.clear - 6} tint={colors.muted} />);
   const clearProps = (label: string) => ({
     cleanable: true,
     clearButtonAccessibilityLabel: label,
     clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track",
-    clearButtonStyle: { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
-    clearButton: <Icon name="close" size={size.clear - 6} tint={colors.muted} />,
+    // A terminal sets the clear button after the value, in the row: placed
+    // over it, its label ("Clear the deadline") would cover the value.
+    clearButtonStyle: terminal ? undefined : { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
+    clearButton: clearGlyph(),
   });
 
   function Downloads() {
@@ -1721,7 +1841,10 @@ export function Controls(props: { show: Control }) {
               >
                 <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
                 <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
-                <Chevron open={open()} />
+                {/* In the terminal, room after the gap for the select's own `▾` and the blank after it, two Cells (a bare trigger takes no padding there). */}
+                <If when={terminal} else={<Chevron open={open()} />}>
+                  <View style={{ width: TERMINAL_COLUMN + 1 }} />
+                </If>
               </View>
             }
             renderItem={(item) => <Option item={item} />}
@@ -1744,7 +1867,7 @@ export function Controls(props: { show: Control }) {
             {(f, i) => (
               <View style={{ ...row(i() === 0), paddingVertical: 4 }}>
                 <IconTile name={f().icon} size={pointer ? 26 : 32} tint={colors.muted} />
-                <Label label={f().name} detail={detail(f())} />
+                <Label label={f().name} detail={detail(f())} width={labelColumn(DOWNLOADS.map((d) => d.name))} />
                 <Text style={{ fontSize: size.detail, color: colors.text, fontVariant: ["tabular-nums"] }}>{trailing(f())}</Text>
               </View>
             )}
@@ -1788,6 +1911,7 @@ export function Controls(props: { show: Control }) {
             accessibilityLabel="Country"
             searchable
             searchPlaceholder="Search countries"
+            searchAccessibilityLabel="Search countries"
             searchClass={searchClass}
             searchStyle={searchStyle()}
             empty={<Empty label="We do not ship there" />}
@@ -1821,7 +1945,7 @@ export function Controls(props: { show: Control }) {
     const file = () => {
       if (team() === null) {
         tried.set(true);
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         last.set("Issue: a team is required");
         return;
       }
@@ -1912,25 +2036,27 @@ export function Controls(props: { show: Control }) {
               onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
               onOpenChange={opened((open) => topicsOpen.set(open))}
               accessibilityLabel="Topics"
-              searchable
-              searchPlaceholder="Search topics"
-              searchClass={searchClass}
-              searchStyle={searchStyle()}
+              class="group"
+              prefix={<FieldRing within />}
+              style={comboStyle(topicsOpen())}
+              placeholder={topics().length ? topicsTitle() : "Add topics"}
+              inputClass={searchClass}
+              inputStyle={comboInputStyle()}
+              triggerButton={<ComboToggle id="topics-toggle" open={topicsOpen()} />}
               empty={<Empty label="No topic matches" />}
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 240 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the topics"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
-              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+              clearButtonStyle={{ width: size.clear, height: size.clear }}
+              clearButton={clearGlyph()}
+              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
               footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
-              trigger={<Picker title={topics().length ? topicsTitle() : "Add topics"} open={topicsOpen()} placeholder={!topics().length} clearable={topics().length > 0} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
             />
@@ -1949,10 +2075,16 @@ export function Controls(props: { show: Control }) {
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
-              trigger={<Picker title={names(REVIEWERS, reviewer())[0] ?? "Nobody"} open={reviewerOpen()} placeholder={!reviewer().length} />}
+              class="group"
+              prefix={<FieldRing within />}
+              style={comboStyle(reviewerOpen())}
+              placeholder={"Nobody"}
+              inputClass={searchClass}
+              inputStyle={comboInputStyle()}
+              triggerButton={<ComboToggle id="reviewer-toggle" open={reviewerOpen()} />}
               renderItem={(item) => <Option item={item} />}
             />
           </View>
@@ -1962,7 +2094,8 @@ export function Controls(props: { show: Control }) {
   }
 
   /** The chips of a combobox's values, under its row: they pop in, and the others close up as one goes. */
-  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 };
+  // A terminal keeps two Cells between the chips, whose × is pressed.
+  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: terminal ? TERMINAL_GAP : 6 };
 
   function People() {
     const people = signal<string[]>(["ada", "grace"]);
@@ -1987,29 +2120,27 @@ export function Controls(props: { show: Control }) {
             onChange={({ value }) => set(value)}
             onOpenChange={opened((o) => open.set(o))}
             accessibilityLabel="Assignees"
-            searchable
-            searchPlaceholder="Search people"
-            searchClass={searchClass}
-            searchStyle={searchStyle()}
-            empty={<Empty label="Nobody by that name" />}
-            {...listProps(260)}
-            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
-            footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
-            trigger={
-              <Picker
-                title={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
-                placeholder={!people().length}
-                open={open()}
-                lead={
-                  // The faces overlap, each ringed in the card's color.
-                  <If when={people().length}>
-                    <View style={{ flexDirection: "row" }}>
-                      <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
-                    </View>
-                  </If>
-                }
-              />
+            class="group"
+            style={comboStyle(open())}
+            placeholder={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
+            inputClass={searchClass}
+            inputStyle={comboInputStyle()}
+            triggerButton={<ComboToggle id="assignees-toggle" open={open()} />}
+            prefix={
+              <>
+              <FieldRing within />
+              {/* The faces overlap, each ringed in the card's color; a terminal's initials stand a Cell apart, then a gap. */}
+              <If when={people().length}>
+                <View style={{ flexDirection: "row", marginRight: terminal ? TERMINAL_GAP : 6 }}>
+                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? (terminal ? TERMINAL_COLUMN : -6) : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                </View>
+              </If>
+              </>
             }
+            empty={<Empty label="Nobody by that name" />}
+            {...listProps()}
+            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
+            footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
             renderItem={(item) => (
               <Option
                 item={item}
@@ -2080,12 +2211,14 @@ export function Controls(props: { show: Control }) {
               if (!o) query.set("");
             }}
             accessibilityLabel="Labels"
-            searchable
-            searchPlaceholder="Search or create labels"
-            searchClass={searchClass}
-            searchStyle={searchStyle()}
-            {...listProps(240)}
-            trigger={<Picker title={labels().length ? `${labels().length} ${labels().length === 1 ? "label" : "labels"}` : "Add labels"} placeholder={!labels().length} open={open()} />}
+            class="group"
+            prefix={<FieldRing within />}
+            style={comboStyle(open())}
+            placeholder={"Search or create labels"}
+            inputClass={searchClass}
+            inputStyle={comboInputStyle()}
+            triggerButton={<ComboToggle id="labels-toggle" open={open()} />}
+            {...listProps()}
             renderItem={(item) =>
               item.value.startsWith(NEW_LABEL) && !label(item.value) ? (
                 <Option item={item} lead={<Icon name="plus" size={14} tint={colors.accent} />} note={pointer ? "Return" : undefined} />
@@ -2133,43 +2266,45 @@ export function Controls(props: { show: Control }) {
           }}
           onOpenChange={opened((o) => open.set(o))}
           accessibilityLabel="Command"
-          searchable
-          searchPlaceholder="Type a command"
-          searchClass={searchClass}
-          searchStyle={searchStyle()}
-          empty={<Empty label="No command matches" />}
-          {...listProps(300)}
-          align="start"
-          trigger={
-            // A field that opens the list, as a command palette's: the search icon, a hint, the shortcut.
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                height: size.line,
-                paddingHorizontal: 10,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: open() ? colors.faint : colors.fieldBorder,
-                backgroundColor: colors.field,
-                ...finish.field,
-                transitionProperty: "border-color",
-                transitionDuration: reduceMotion() ? 0 : 120,
-              }}
-              hoverStyle={{ borderColor: colors.faint }}
-              activeStyle={pressed}
-              focusStyle={focusRing()}
-            >
-              <Icon name="search" size={size.check} tint={colors.faint} />
-              <Text style={{ flex: 1, fontSize: size.label, color: colors.faint }}>Search commands…</Text>
-              <If when={pointer}>
-                <Text style={{ paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+          class="group"
+          style={comboStyle(open())}
+          placeholder={"Search commands…"}
+          inputClass={searchClass}
+          inputStyle={comboInputStyle()}
+          triggerButton={<ComboToggle id="command-toggle" open={open()} />}
+          prefix={
+            <>
+              <FieldRing within />
+              {/* A terminal shows no icons: the placeholder says what the field does. */}
+              <If when={!terminal}>
+                <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
               </If>
-            </View>
+            </>
           }
+          suffix={
+            <If when={pointer}>
+              <Text style={{ ...(terminal ? { marginRight: TERMINAL_COLUMN } : { marginHorizontal: 4 }), paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+            </If>
+          }
+          empty={<Empty label="No command matches" />}
+          {...listProps()}
+          align="start"
           renderItem={(item) => (
-            <Option item={item} lead={<Icon name={command(item.value).icon} size={14} tint={item.highlighted ? colors.text : colors.muted} />} note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined} />
+            <Option
+              item={item}
+              lead={
+                // The icon takes the text's color while its row is highlighted.
+                <View style={{ width: 14, height: 14 }}>
+                  <View class="group-focus:hidden">
+                    <Icon name={command(item.value).icon} size={14} tint={colors.muted} />
+                  </View>
+                  <View class="hidden group-focus:flex">
+                    <Icon name={command(item.value).icon} size={14} tint={colors.text} />
+                  </View>
+                </View>
+              }
+              note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined}
+            />
           )}
           renderGroup={(group) => <Header group={group} />}
         />
@@ -2195,16 +2330,34 @@ export function Controls(props: { show: Control }) {
    */
   const toggleWidth = () => Math.floor((windowSize().width - 2 * 10) / 2 - cell);
   /**
-   * An item of the calendar (`renderItem`): Previous and Next as chevrons, the month and year toggles
-   * (or each month's title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent`
-   * fill (gpui-component's), the selected ones on the accent's, the days of a complete range on a band from end to end (`range` says where it
-   * starts and ends), the other months' days and the disabled ones faint.
+   * The calendar's items (`itemClass`): pressed at 70%; `group`, so the drawing inside follows the item's states.
    */
-  function CalendarItem(props: { item: CalendarItemState; range?: [string | null, string | null] | null }) {
+  const calendarItemClass = "group active:opacity-70";
+  /**
+   * An item of the calendar (`renderItem`), drawn once from what it is, its states the item's classes: Previous and
+   * Next as chevrons (faint while they take no press), the month and year toggles (or each month's title, with
+   * `months` over one) by name, the open view's toggle in the accent, the weekdays' initials, and the days: today on
+   * the theme's quiet `accent` fill (gpui-component's), the selected date and a range's ends on the accent's, the days
+   * of a complete range on a band from end to end (`data-range-*`), the other months' days and the disabled ones faint,
+   * the keyboard's day ringed.
+   */
+  function CalendarItem(props: { item: CalendarEntry; months?: number }) {
     const kind = props.item.kind;
+    if (terminal) {
+      // The terminal's calendar draws its days, years and arrows itself, on its grid of two-Cell columns: the
+      // labels are plain text at their own size (the painter bands the open view's toggle, from its state).
+      if (kind === "weekday") return <Text style={{ color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
+      if (kind === "month") return <Text>{MONTHS[props.item.value - 1].slice(0, 3)}</Text>;
+      const title = kind === "monthToggle" && (props.months ?? 1) > 1;
+      return (
+        <Text style={{ fontWeight: "600" }}>
+          {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
+        </Text>
+      );
+    }
     if (kind === "previous" || kind === "next") {
       return (
-        <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center", opacity: props.item.disabled ? 0.3 : 1 }}>
+        <View class="group-disabled:opacity-30" style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
           <View style={{ transform: [{ rotate: kind === "previous" ? "180deg" : "0deg" }] }}>
             <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>
@@ -2213,16 +2366,16 @@ export function Controls(props: { show: Control }) {
     }
     if (kind === "monthToggle" || kind === "yearToggle") {
       // A month's title in a calendar of several takes no press: the month and its year, over the month.
-      const title = kind === "monthToggle" && props.item.disabled;
+      const title = kind === "monthToggle" && (props.months ?? 1) > 1;
       return (
         <Text
+          class="text-foreground group-selected:text-brand"
           style={{
             width: !pointer ? toggleWidth() : title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
             paddingHorizontal: 3,
             textAlign: title ? "center" : kind === "monthToggle" ? "right" : "left",
             fontSize: size.label,
             fontWeight: "600",
-            color: props.item.active ? colors.accent : colors.text,
           }}
         >
           {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
@@ -2233,55 +2386,45 @@ export function Controls(props: { show: Control }) {
       return <Text style={{ minWidth: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, fontWeight: "600", color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
     }
     if (kind === "month" || kind === "year") {
-      // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month.
+      // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month; the shown one
+      // filled.
       return (
         <View
-          style={{
-            minWidth: (7 * cell) / (kind === "month" ? 3 : 5),
-            height: cell + 6,
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: radius.control,
-            backgroundColor: props.item.active ? colors.accentFill : "transparent",
-          }}
+          class="group-selected:bg-brand-fill"
+          style={{ minWidth: (7 * cell) / (kind === "month" ? 3 : 5), height: cell + 6, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}
         >
-          <Text style={{ fontSize: size.label, color: props.item.active ? colors.onAccent : colors.text }}>
+          <Text class="text-foreground group-selected:text-on-brand" style={{ fontSize: size.label }}>
             {kind === "month" ? MONTHS[props.item.value - 1].slice(0, 3) : String(props.item.value)}
           </Text>
         </View>
       );
     }
-    // A day, as wide as its column (the calendar's columns share its width). The band reaches from the start's middle
-    // to the end's.
-    const band = () => {
-      const r = props.range;
-      if (!props.item.inRange || !r || r[0] === r[1]) return null;
-      return { left: props.item.date === r[0] ? ("50%" as const) : 0, right: props.item.date === r[1] ? ("50%" as const) : 0 };
-    };
+    // A day, as wide as its column (the calendar's columns share its width). The band spans a range's middle days
+    // and reaches from its ends' middles; a range of one day has none. The circle fills for the selected date and a
+    // range's ends (not its middle days), else for today.
+    const own = props.item.outside ? "text-faint" : "text-foreground";
     return (
       <View style={{ minWidth: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ position: "absolute", top: 2, bottom: 2, left: band()?.left ?? 0, right: band()?.right ?? 0, backgroundColor: band() ? tints.accent : "transparent" }} />
         <View
-          style={{
-            width: cell - 4,
-            height: cell - 4,
-            borderRadius: (cell - 4) / 2,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1.5,
-            // The keyboard's day ringed.
-            borderColor: props.item.focused ? colors.accent : "transparent",
-            backgroundColor: props.item.active ? colors.accentFill : props.item.today ? token("accent") : "transparent",
-          }}
+          class={
+            "absolute inset-y-0.5 left-0 right-0 hidden group-data-range-middle:flex group-data-range-start:flex group-data-range-start:left-1/2 " +
+            "group-data-range-end:flex group-data-range-end:right-1/2 group-data-range-start:group-data-range-end:hidden"
+          }
+          style={{ backgroundColor: tints.accent }}
+        />
+        <View
+          class={
+            `${props.item.today ? "bg-accent" : ""} border-[1.5px] border-transparent group-focus:border-brand ` +
+            "group-selected:bg-brand-fill group-data-range-middle:bg-transparent"
+          }
+          style={{ width: cell - 4, height: cell - 4, borderRadius: (cell - 4) / 2, alignItems: "center", justifyContent: "center" }}
         >
           <Text
-            style={{
-              fontSize: pointer ? 13 : 15,
-              fontVariant: ["tabular-nums"],
-              fontWeight: props.item.active || props.item.today ? "600" : "400",
-              color: props.item.active ? colors.onAccent : props.item.muted ? colors.faint : colors.text,
-              opacity: props.item.disabled ? 0.5 : 1,
-            }}
+            class={
+              `${own} ${props.item.today ? "font-semibold" : "font-normal"} group-selected:font-semibold group-selected:text-on-brand ` +
+              `group-data-range-middle:${own} group-disabled:text-faint group-disabled:opacity-50`
+            }
+            style={{ fontSize: pointer ? 13 : 15, fontVariant: ["tabular-nums"] }}
           >
             {String(props.item.value)}
           </Text>
@@ -2289,19 +2432,14 @@ export function Controls(props: { show: Control }) {
       </View>
     );
   }
-  /** The time field's segments (`renderSegment`): the selected one filled while the field has the keys. */
-  function Segment(props: { label: string; selected: boolean }) {
+  /**
+   * The time field's segments: filled while the field has the keys on one (`focus:` on the segment, `segmentClass`),
+   * its digits (`renderSegment`) in the color on the fill (`group-focus:`), so moving between them draws nothing.
+   */
+  const segmentClass = "group rounded-[4px] active:opacity-70 focus:bg-brand-fill";
+  function Segment(props: { label: string }) {
     return (
-      <Text
-        style={{
-          paddingHorizontal: 3,
-          borderRadius: 4,
-          fontSize: size.label,
-          fontVariant: ["tabular-nums"],
-          color: props.selected ? colors.onAccent : colors.text,
-          backgroundColor: props.selected ? colors.accentFill : "transparent",
-        }}
-      >
+      <Text class="text-foreground group-focus:text-on-brand" style={{ paddingHorizontal: 3, fontSize: size.label, fontVariant: ["tabular-nums"] }}>
         {props.label}
       </Text>
     );
@@ -2369,13 +2507,13 @@ export function Controls(props: { show: Control }) {
               backdropStyle={backdrop}
               calendarStyle={calendar}
               headerStyle={header}
-              itemClass="active:opacity-70"
+              itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} />}
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={clearGlyph()}
               trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
@@ -2404,9 +2542,9 @@ export function Controls(props: { show: Control }) {
               presetClass="enabled:hover:bg-accent active:opacity-70"
               calendarStyle={calendar}
               headerStyle={header}
-              bodyStyle={{ gap: monthGap }}
-              itemClass="active:opacity-70"
-              renderItem={(item) => <CalendarItem item={item} range={trip()} />}
+              bodyStyle={terminal ? undefined : { gap: monthGap }}
+              itemClass={calendarItemClass}
+              renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
               trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
             />
           </View>
@@ -2431,15 +2569,15 @@ export function Controls(props: { show: Control }) {
               backdropStyle={backdrop}
               calendarStyle={calendar}
               headerStyle={header}
-              itemClass="active:opacity-70"
+              itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} />}
               timeStyle={time}
               timeLabel={<Text style={{ fontSize: size.label, color: colors.muted }}>Time</Text>}
               timeAccessibilityLabel="Meeting time"
               timeFieldClass={timeField}
-              segmentClass="active:opacity-70"
+              segmentClass={segmentClass}
               separatorStyle={{ color: colors.faint, fontSize: size.label }}
-              renderSegment={(segment) => <Segment label={segment.label} selected={segment.selected} />}
+              renderSegment={(segment) => <Segment label={segment.label} />}
               trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
             />
           </View>
@@ -2457,7 +2595,7 @@ export function Controls(props: { show: Control }) {
     backdropStyle: backdrop,
     calendarStyle: calendar,
     headerStyle: header,
-    itemClass: "active:opacity-70",
+    itemClass: calendarItemClass,
   });
   /** A line of a bill: what it is for, and the amount rolling to each new value. */
   function BillLine(props: { label: string; amount: number; total?: boolean }) {
@@ -2524,8 +2662,8 @@ export function Controls(props: { show: Control }) {
           numberOfMonths={twoMonths() ? 2 : 1}
           disabledMatcher={closed}
           {...calendarProps("start")}
-          bodyStyle={{ gap: monthGap }}
-          renderItem={(item) => <CalendarItem item={item} range={stay()} />}
+          bodyStyle={terminal ? undefined : { gap: monthGap }}
+          renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
           trigger={
             // Both ends in one field, parted by a hairline; the whole field opens the calendar.
             <View
@@ -2537,6 +2675,8 @@ export function Controls(props: { show: Control }) {
                 borderWidth: 1,
                 borderColor: open() ? colors.faint : colors.border,
                 backgroundColor: colors.raised,
+                // Room for the date picker's ` ▾ ` over the field's end in the terminal.
+                paddingRight: terminal ? 3 * TERMINAL_COLUMN : 0,
                 ...finish.raised,
                 transitionProperty: "border-color",
                 transitionDuration: reduceMotion() ? 0 : 120,
@@ -2650,7 +2790,8 @@ export function Controls(props: { show: Control }) {
     const free = () => (day() ? SLOTS.filter((_, i) => !slotTaken(day()!, i)).length : 0);
     /** A time's chip: raised while free, in the accent while chosen (faded), struck through while taken. */
     const chip = (on: boolean) => ({
-      width: pointer ? 62 : ("31.5%" as const),
+      // A terminal's chips are as wide as their text, two Cells apart.
+      width: terminal ? undefined : pointer ? 62 : ("31.5%" as const),
       height: pointer ? 30 : 40,
       alignItems: "center" as const,
       justifyContent: "center" as const,
@@ -2683,13 +2824,14 @@ export function Controls(props: { show: Control }) {
           />
         </View>
         <View style={settle(t)}>
-          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
+          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: terminal ? TERMINAL_GAP : 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
             <Each of={SLOTS}>
               {(s, i) => (
                 <Radio
                   checked={slot() === s()}
                   disabled={!day() || slotTaken(day()!, i())}
                   onChange={() => {
+                    sound("select");
                     slot.set(s());
                     last.set(`Slot: ${day()} ${s()}`);
                   }}
@@ -2823,8 +2965,13 @@ export function Controls(props: { show: Control }) {
         <Collapsible
           open={open() === props.q}
           content={
-            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24 }}>
-              <Text style={{ fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
+            // A terminal's answer lines up under the question, past its
+            // two-column mark (a box of text takes one column of padding).
+            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24, flexDirection: terminal ? "row" : undefined }}>
+              <If when={terminal}>
+                <View style={{ width: 2 * TERMINAL_COLUMN, flexShrink: 0 }} />
+              </If>
+              <Text style={{ flex: terminal ? 1 : undefined, fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
             </View>
           }
         >
@@ -2982,7 +3129,7 @@ export function Controls(props: { show: Control }) {
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Icon name={props.icon} size={size.control} tint={colors.muted} />
-            <Label label={props.name} detail={props.size} />
+            <Label label={props.name} detail={props.size} width={labelColumn(FILES.map((f) => f.name))} />
             <View style={{ width: 40, height: 20, alignItems: "flex-end", justifyContent: "center" }}>
               <View style={{ ...centered, alignItems: "flex-end", opacity: away }}>
                 <Text style={{ fontSize: size.detail, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${props.value}%`}</Text>
@@ -3048,7 +3195,8 @@ export function Controls(props: { show: Control }) {
     }
     return (
       <Card title="Steps" subtitle="A setup in four steps: the bar fills to the step you are on" right={<Badge label={step() >= STEPS.length ? "Done" : `Step ${step() + 1} of ${STEPS.length}`} tone={step() >= STEPS.length ? "up" : "neutral"} />}>
-        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot. */}
+        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot
+            (a terminal's first and last start and end at theirs, off the card's border). */}
         <View style={{ height: DOT + 24, marginHorizontal: 24 }}>
           <View style={{ position: "absolute", left: DOT / 2, right: DOT / 2, top: (DOT - 4) / 2 }}>
             <Progress value={value()} accessibilityLabel="Setup" trackStyle={rail(4)} indicatorClass={glide} indicatorStyle={{ ...fillOf(4), translate: remaining(value()) }} />
@@ -3057,8 +3205,19 @@ export function Controls(props: { show: Control }) {
             <Each of={STEPS}>
               {(name, i) => (
                 <View style={{ width: DOT }}>
-                  <StepDot done={i() < step()} current={i() === step()} />
-                  <View style={{ position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }}>
+                  {/* A terminal shows the steps by their labels: a dot would sit on the bar's row. */}
+                  <If when={!terminal}>
+                    <StepDot done={i() < step()} current={i() === step()} />
+                  </If>
+                  <View
+                    style={
+                      terminal && i() === 0
+                        ? { position: "absolute", top: DOT + 6, left: 0, width: 64, alignItems: "flex-start" }
+                        : terminal && i() === STEPS.length - 1
+                          ? { position: "absolute", top: DOT + 6, right: 0, width: 64, alignItems: "flex-end" }
+                          : { position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }
+                    }
+                  >
                     <Text style={{ fontSize: 12, fontWeight: i() === step() ? "600" : "400", color: i() <= step() ? colors.text : colors.faint }}>{name()}</Text>
                   </View>
                 </View>
@@ -3182,24 +3341,27 @@ export function Controls(props: { show: Control }) {
             </View>
           </Level>
           <Level label="Price" detail={`${listings(price())} listings between the two`} value={`$${price()[0]} – $${price()[1]}`}>
-            {/* How many listings each price has: the bars in the range light up as the thumbs move. */}
-            <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
-              <Each of={HISTOGRAM}>
-                {(n, i) => (
-                  <View
-                    class="transition-colors duration-150 motion-reduce:transition-none"
-                    style={{
-                      flex: 1,
-                      height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
-                      minHeight: 2,
-                      borderTopLeftRadius: 2,
-                      borderTopRightRadius: 2,
-                      backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
-                    }}
-                  />
-                )}
-              </Each>
-            </View>
+            {/* How many listings each price has: the bars in the range light up as the thumbs move.
+                A terminal's two rows would draw them as blank Cells: the count in the label says it. */}
+            <If when={!terminal}>
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
+                <Each of={HISTOGRAM}>
+                  {(n, i) => (
+                    <View
+                      class="transition-colors duration-150 motion-reduce:transition-none"
+                      style={{
+                        flex: 1,
+                        height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
+                        minHeight: 2,
+                        borderTopLeftRadius: 2,
+                        borderTopRightRadius: 2,
+                        backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
+                      }}
+                    />
+                  )}
+                </Each>
+              </View>
+            </If>
             <Slider
               value={price()}
               min={0}
@@ -3240,6 +3402,31 @@ export function Controls(props: { show: Control }) {
     };
     return (
       <Card title="Vertical" subtitle="An equalizer: five bands from −12 to +12 dB, and presets" right={<Segmented options={EQ_PRESETS} value={preset()} onChange={apply} size="small" />}>
+        {/* A terminal's controls are one row each: a band a row, its name, its slider across, its value. */}
+        <If when={terminal}>
+          <View style={{ gap: 4 }}>
+            {BANDS.map((name, i) => (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP }}>
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: colors.muted }}>{name}</Text>
+                <Slider
+                  value={bands[i]()}
+                  min={-12}
+                  max={12}
+                  accessibilityLabel={`${name} band`}
+                  onChange={({ value }) => bands[i].set(value as number)}
+                  onChangeEnd={({ value }) => last.set(`${name}: ${value} dB`)}
+                  rangeStyle={sliderFill(0, (bands[i]() + 12) / 24)}
+                  {...sliderLook()}
+                  style={{ flex: 1 }}
+                />
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: bands[i]() === 0 ? colors.faint : colors.text, fontVariant: ["tabular-nums"] }}>
+                  {`${bands[i]() > 0 ? "+" : ""}${bands[i]()}`}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </If>
+        <If when={!terminal}>
         <View style={{ flexDirection: "row", justifyContent: "space-around", paddingTop: 4 }}>
           {BANDS.map((name, i) => (
             <View style={{ alignItems: "center", gap: 6 }}>
@@ -3261,6 +3448,7 @@ export function Controls(props: { show: Control }) {
             </View>
           ))}
         </View>
+        </If>
       </Card>
     );
   }
@@ -3271,12 +3459,64 @@ export function Controls(props: { show: Control }) {
   // the buttons light up under the pointer and while pressed (still with
   // reduced motion) and fade where a step does nothing (at the minimum
   // or maximum) or while the input is locked, without their hover.
-  const frame = [
-    pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
-    "flex-row items-stretch overflow-hidden border border-input bg-field",
-    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
-  ].join(" ");
-  const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  //
+  // In a terminal an input is one band a row high, as a select's trigger:
+  // a column inside its start, the prefix, the value at the end of the
+  // field, then a column (the caret's), the suffix, and − and + at the
+  // band's end, each a mark in a slot of three Cells that all take the
+  // press (` − ` ` + `, touching; the last slot's blank Cell is the
+  // band's end column). Every input has its steppers there, and a suffix
+  // takes the width of the widest, so the values and the suffixes of
+  // inputs stacked one above another line up. A band is its own edge, so
+  // no border, and nothing inside it is filled again; a disabled input
+  // dims all of it.
+  const frame = terminal
+    ? "h-4 flex-row items-stretch bg-field pl-2 disabled:opacity-50"
+    : [
+        pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+        "flex-row items-stretch overflow-hidden border border-input bg-field",
+        "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+      ].join(" ");
+  const press = terminal
+    ? "justify-center disabled:opacity-35"
+    : "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  /** − before the field and + after it. */
+  const stepBefore = (w: string) => `${w} ${press} border-r border-line`;
+  const stepAfter = (w: string) => `${w} ${press} border-l border-line`;
+  /** A pair at the well's end: the increment over the decrement. */
+  const pairClass = (w: string) => `${w} border-l border-line`;
+  const pairButton = (top: boolean) => `flex-1 ${press}${top ? " border-b border-line" : ""}`;
+  /**
+   * The step buttons: − before the field and + after it (`split`), or a pair of chevrons at the well's end (`pair`);
+   * in a terminal always − and + at the band's end, each in a slot of three Cells (as `nsh-base`'s `mark_slot`).
+   */
+  const steps = (kind: "split" | "pair", w: string, icon: number) =>
+    terminal
+      ? {
+          controlsRight: true,
+          controlsClass: "flex-row",
+          decrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          incrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          decrementButton: <Step name="minus" size={icon} />,
+          incrementButton: <Step name="plus" size={icon} />,
+        }
+      : kind === "split"
+        ? {
+            decrementButtonClass: stepBefore(w),
+            incrementButtonClass: stepAfter(w),
+            decrementButton: <Step name="minus" size={icon} />,
+            incrementButton: <Step name="plus" size={icon} />,
+          }
+        : {
+            controlsRight: true,
+            controlsClass: pairClass(w),
+            incrementButtonClass: pairButton(true),
+            decrementButtonClass: pairButton(false),
+            incrementButton: <Step name="chevron-up" size={icon - 2} />,
+            decrementButton: <Step name="chevron-down" size={icon - 2} />,
+          };
+  /** The field's own spacing besides {@link field}'s. A terminal's field keeps {@link field}'s column before its value and none after it: the caret's column is the column after the value. */
+  const spaced = (style: { paddingLeft?: number; paddingRight?: number; paddingHorizontal?: number }) => (terminal ? { paddingRight: 0 } : style);
   const field = () => ({
     flex: 1,
     minWidth: 0,
@@ -3285,9 +3525,14 @@ export function Controls(props: { show: Control }) {
     color: colors.text,
     placeholderColor: colors.faint,
     fontVariant: ["tabular-nums" as const],
+    // A terminal sets every number at the end, as a column of numbers reads.
+    ...(terminal ? { textAlign: "right" as const } : {}),
   });
-  /** A step button's glyph: the gallery's icon, in the muted text color. */
+  /** Centered between its steppers, but at the end in a terminal (as {@link field}). */
+  const stepAlign = terminal ? ("right" as const) : ("center" as const);
+  /** A step button's glyph: the gallery's icon, in the muted text color; a terminal's text glyph. */
   function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+    if (terminal && (props.name === "plus" || props.name === "minus")) return <Text style={{ color: colors.muted }}>{STEP_GLYPHS[props.name]}</Text>;
     return <Icon name={props.name} size={props.size} tint={colors.muted} />;
   }
   /** A quantity: its label and the input at the trailing edge. */
@@ -3298,7 +3543,7 @@ export function Controls(props: { show: Control }) {
           <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
           {props.detail}
         </View>
-        <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+        <View style={{ width: terminal ? 18 * TERMINAL_COLUMN : pointer ? 132 : 152 }}>{props.children}</View>
       </View>
     );
   }
@@ -3309,7 +3554,17 @@ export function Controls(props: { show: Control }) {
   /** A unit or a currency in a number input's well, before or after its field. */
   function Affix(props: { label: string; end?: boolean }) {
     return (
-      <View style={{ height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }}>
+      <View
+        style={
+          terminal
+            ? // A prefix at the band's start; a suffix after the field's caret column, after the value, as wide as the
+              // widest (three Cells); the steppers' slots keep their own blank Cell after it.
+              props.end
+              ? { justifyContent: "center", width: 3 * TERMINAL_COLUMN }
+              : { justifyContent: "center" }
+            : { height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }
+        }
+      >
         <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>{props.label}</Text>
       </View>
     );
@@ -3335,11 +3590,8 @@ export function Controls(props: { show: Control }) {
                 last.set(`Seats: ${show(next)}`);
               }}
               class={`${frame} disabled:opacity-50`}
-              inputStyle={{ ...field(), textAlign: "center" }}
-              decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
-              incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
+              inputStyle={{ ...field(), ...spaced({}), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-8" : "w-11", pointer ? 14 : 16)}
             />
           </Amount>
           <Amount label="Price" detail={<Detail>Steps of 0.5</Detail>}>
@@ -3349,18 +3601,13 @@ export function Controls(props: { show: Control }) {
               step={0.5}
               placeholder="Free"
               accessibilityLabel="Price"
-              controlsRight
               onChange={({ value: next }) => {
                 price.set(next);
                 last.set(`Price: ${show(next)}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingLeft: 4 }}
-              controlsClass={`${pointer ? "w-6" : "w-9"} border-l border-line`}
-              incrementButtonClass={`flex-1 ${press} border-b border-line`}
-              decrementButtonClass={`flex-1 ${press}`}
-              incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
-              decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4 }) }}
+              {...steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16)}
               prefix={<Affix label="$" />}
             />
           </Amount>
@@ -3402,7 +3649,7 @@ export function Controls(props: { show: Control }) {
             <Text style={{ numberOfLines: 1, fontSize: size.label, color: colors.text }}>{item.name}</Text>
             <Message label={atStock() ? `Only ${item.stock} left` : `${item.detail} · ${money(item.price)}`} tone={atStock() ? "warn" : undefined} />
           </View>
-          <View style={{ width: pointer ? 92 : 108 }}>
+          <View style={{ width: terminal ? 13 * TERMINAL_COLUMN : pointer ? 92 : 108 }}>
             <NumberInput
               value={n()}
               min={1}
@@ -3415,11 +3662,8 @@ export function Controls(props: { show: Control }) {
                 last.set(`${item.name}: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: "center" }}
-              decrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 12 : 14} />}
-              incrementButton={<Step name="plus" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingHorizontal: 2 }), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-7" : "w-9", pointer ? 12 : 14)}
             />
           </View>
           <View style={{ width: pointer ? 64 : 70 }}>
@@ -3472,14 +3716,7 @@ export function Controls(props: { show: Control }) {
       return c < 19 ? { label: "Cool", tone: "info" } : c <= 24 ? { label: "Comfortable", tone: "up" } : { label: "Warm", tone: "warn" };
     };
     /** The buttons at the well's end, the increment over the decrement (new glyphs for each input). */
-    const right = () => ({
-      controlsRight: true,
-      controlsClass: `${pointer ? "w-6" : "w-9"} border-l border-line`,
-      incrementButtonClass: `flex-1 ${press} border-b border-line`,
-      decrementButtonClass: `flex-1 ${press}`,
-      incrementButton: <Step name="chevron-up" size={pointer ? 12 : 14} />,
-      decrementButton: <Step name="chevron-down" size={pointer ? 12 : 14} />,
-    });
+    const right = () => steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16);
     return (
       <Card title="Units and limits" subtitle="A percentage, a currency with its code, a temperature in half degrees, a read-only rate">
         <View>
@@ -3504,7 +3741,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`Tip: ${value ?? "none"}%`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3524,7 +3761,7 @@ export function Controls(props: { show: Control }) {
               class={frame}
               // Over the balance, the well is edged in the danger tone.
               style={over() ? { borderColor: colors.danger } : undefined}
-              inputStyle={{ ...field(), paddingLeft: 4, paddingRight: 2 }}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4, paddingRight: 2 }) }}
               prefix={<Affix label="$" />}
               suffix={<Affix label="USD" end />}
               {...right()}
@@ -3550,7 +3787,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`Thermostat: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="°C" end />}
               {...right()}
             />
@@ -3561,7 +3798,7 @@ export function Controls(props: { show: Control }) {
               readonly
               accessibilityLabel="Interest rate"
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2, color: colors.muted }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }), color: colors.muted }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3573,12 +3810,32 @@ export function Controls(props: { show: Control }) {
 
   // The codes' cells, shared by their cards: recessed wells, the one that
   // takes the next digit ringed while the code has the focus, its caret
-  // blinking there (steady with reduced motion: the input's own). A verdict
-  // edges and tints them all in its tone, the change faded
-  // (`transition-colors`).
+  // blinking there (steady with reduced motion: the input's own). A cell
+  // that holds a digit (a bullet too) lifts out of its well, a card's fill
+  // under a firmer edge (`data-filled:`). A verdict edges and tints them
+  // all in its tone, over that; each change fades (`transition-colors`).
+  //
+  // In a terminal a cell is a framed box, three rows high and three Cells inside, its digit in the middle: its line
+  // only, no fill. The cell that takes the next digit has its line in the accent, a verdict's tone edges them all, a
+  // disabled code dims.
   const cellClass = (cells: string) =>
-    `${cells} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
-  const cellStyle = (tone?: Tone) => ({ ...finish.inset, backgroundColor: tone ? toneTint(tone) : colors.inset, borderWidth: 1, borderColor: tone ? toneColor(tone) : colors.line });
+    terminal
+      ? "w-10 h-12 items-center justify-center border border-line font-semibold text-foreground focus:border-info disabled:opacity-50"
+      : `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
+  const cellStyle = (tone?: Tone) =>
+    terminal ? (tone ? { borderColor: toneColor(tone) } : {}) : tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset;
+  /** The codes' groups: three Cells apart in a terminal (a Cell's gap and a Cell of margin each side), their cells one. */
+  const codeClass = terminal ? "flex-row items-center gap-2" : "flex-row items-center gap-3";
+  const groupClass = terminal ? "flex-row gap-2 mx-2" : "flex-row gap-1.5";
+  /**
+   * A blank row between a code's framed cells and the caption above or the message below them in a terminal (a
+   * card's gaps take no row there: its border sets its content apart).
+   */
+  const CodeSpace = () => (
+    <If when={terminal}>
+      <View style={{ height: TERMINAL_ROW }} />
+    </If>
+  );
   const sixCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
 
   function Verify() {
@@ -3590,7 +3847,7 @@ export function Controls(props: { show: Control }) {
     cleanup(() => shake.stop());
     const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
     return (
-      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them; a wrong code shakes">
+      <Card icon="controls" title="One-time code" subtitle={terminal ? "Six digits: type or paste them; a wrong code marks the cells" : "Six digits: type or paste them; a wrong code shakes"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3604,18 +3861,19 @@ export function Controls(props: { show: Control }) {
               }}
               onComplete={({ value }) => {
                 verdict.set(value === CODE ? "Verified" : "That code is not right");
-                if (value !== CODE) shake.play("shake");
+                if (value !== CODE && !terminal) shake.play("shake");
                 last.set(`Code complete: ${value}`);
               }}
               accessibilityLabel="Verification code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
           <Button
             label="Clear"
@@ -3689,7 +3947,7 @@ export function Controls(props: { show: Control }) {
         const rest = tries() - 1;
         tries.set(rest);
         code.set("");
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         phase.set(rest === 0 ? "locked" : "wrong");
         last.set(rest === 0 ? "Sign-in: locked" : `Sign-in: wrong code, ${rest} left`);
         if (rest > 0) input?.focus();
@@ -3724,7 +3982,7 @@ export function Controls(props: { show: Control }) {
       );
     }
     return (
-      <Card title="Sign in" subtitle="Send a code, then wait to resend it; a wrong one shakes, three lock the cells">
+      <Card title="Sign in" subtitle={terminal ? "Send a code, then wait to resend it; a wrong one empties the cells, three lock them" : "Send a code, then wait to resend it; a wrong one shakes, three lock the cells"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3742,14 +4000,15 @@ export function Controls(props: { show: Control }) {
                 verify(value);
               }}
               accessibilityLabel="Sign-in code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <If when={phase() === "done"}>
               <Signed />
@@ -3805,9 +4064,10 @@ export function Controls(props: { show: Control }) {
     const done = () => (step() === "confirm" ? 1 : step() === "set" ? 2 : 0);
     const pinCells = pointer ? "w-11 h-11 text-xl" : "w-13 h-13 text-2xl";
     return (
-      <Card title="PIN" subtitle="Four masked digits, entered twice: a mismatch shakes and starts over" right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
+      <Card title="PIN" subtitle={terminal ? "Four masked digits, entered twice: a mismatch starts over" : "Four masked digits, entered twice: a mismatch shakes and starts over"} right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
-          <View style={{ flexDirection: "row", gap: 6 }}>
+          {/* The steps' bars; a terminal shows the step in the badge alone. */}
+          <View style={{ flexDirection: "row", gap: 6, display: terminal ? "none" : "flex" }}>
             <Each of={[0, 1]}>
               {(i) => (
                 <View
@@ -3824,6 +4084,7 @@ export function Controls(props: { show: Control }) {
             </Each>
           </View>
           <Message label={message().label} tone={message().tone} />
+          <CodeSpace />
           <View style={shake.style}>
             <OtpInput
               length={4}
@@ -3841,19 +4102,21 @@ export function Controls(props: { show: Control }) {
                   step.set("set");
                   last.set("PIN: set");
                 } else {
-                  shake.play("shake");
+                  if (!terminal) shake.play("shake");
                   step.set("mismatch");
                   last.set("PIN: no match");
                 }
               }}
               accessibilityLabel="PIN, 4 digits"
               class="flex-row items-center gap-2"
+              groupClass="flex-row gap-2"
               cellClass={cellClass(pinCells)}
               cellStyle={cellStyle(step() === "mismatch" ? "danger" : step() === "set" ? "up" : undefined)}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", gap: size.gap }}>
             <Button
               label={shown() ? "Hide digits" : "Show digits"}
@@ -3904,7 +4167,9 @@ export function Controls(props: { show: Control }) {
     NumberInput: [Quantities, Cart, Units],
     OtpInput: [Verify, SignIn, Pin],
   };
-  return <DemoPage cards={[...cards[props.show], Last]} />;
+  // `firsts`: the first card of each named control on one page, above one last event (the TUI host's acceptance tests).
+  const shown = props.firsts ? props.firsts.map((control) => cards[control][0]) : cards[props.show];
+  return <DemoPage cards={[...shown, Last]} />;
 }
 
 export const SwitchDemo = () => <Controls show="Switch" />;

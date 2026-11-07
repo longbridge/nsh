@@ -152,6 +152,44 @@ pub trait NativeComponent {
     fn set_animated_color(&mut self, name: &str, argb: u32) {
         self.set_prop(name, Some(&JsonValue::from(argb)));
     }
+
+    /// A wheel or touchpad scroll over the component (an image viewer
+    /// zooms with it). True when it took it; otherwise the scroll views
+    /// around it scroll, as they do by default. Presses, moves and
+    /// releases go to its view's handlers (`onPress`, `onMouseMove`).
+    fn wheel(&mut self, event: &Wheel) -> bool {
+        let _ = event;
+        false
+    }
+}
+
+/// A wheel or touchpad scroll over a component ([`NativeComponent::wheel`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct Wheel {
+    /// Where the pointer is (points, the component's coordinates).
+    pub x: f32,
+    /// Where, vertically.
+    pub y: f32,
+    /// How far to scroll the content (points; positive toward the end:
+    /// right, down), as scroll views do.
+    pub dx: f32,
+    /// How far, vertically.
+    pub dy: f32,
+    /// The same in wheel notches (a mouse wheel's clicks): fractions from
+    /// precision touchpads and high-resolution wheels.
+    pub notches_x: f32,
+    /// In notches, vertically.
+    pub notches_y: f32,
+    /// From a precision touchpad or a high-resolution wheel (not whole
+    /// notches).
+    pub precise: bool,
+    /// Shift held.
+    pub shift: bool,
+    /// Ctrl held.
+    pub ctrl: bool,
+    /// Alt held.
+    pub alt: bool,
 }
 
 /// What a component can tell its app. Cheap to clone; usable from any
@@ -160,8 +198,10 @@ pub trait NativeComponent {
 pub struct ComponentContext {
     id: NodeId,
     control: EngineControl,
-    /// The surface's key and window, to draw again from any thread.
+    /// The surface's key and the UI thread it lives on, to draw again
+    /// from any thread.
     surface: u64,
+    ui: crate::window::UiThread,
 }
 
 impl std::fmt::Debug for ComponentContext {
@@ -196,7 +236,7 @@ impl ComponentContext {
     /// thread).
     pub fn redraw(&self) {
         let key = self.surface;
-        crate::window::invoke(move || {
+        self.ui.invoke(move || {
             if let Some(surface) = Surface::by_key(key) {
                 surface.invalidate();
             }
@@ -355,6 +395,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             id,
             component: RefCell::new(None),
             window: Cell::new(None),
+            parent: Cell::new(None),
             placement: Placement::default(),
         })),
     };
@@ -412,10 +453,15 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
         id: view.id(),
         control,
         surface: surface.key(),
+        ui: surface.ui_thread(),
     });
     if let Some(hwnd) = made.window() {
-        adopt(surface.hwnd(), hwnd);
+        // A child of the window its view shows in (it moves with the view
+        // to another window, [`ComponentItem::placed`]).
+        let parent = crate::app_window::hwnd_showing(surface, view);
+        adopt(parent, hwnd);
         item.window.set(Some(hwnd));
+        item.parent.set(Some(parent));
     }
     *item.component.borrow_mut() = Some(made);
     view.changed();
@@ -580,6 +626,8 @@ struct ComponentItem {
     component: RefCell<Option<Box<dyn NativeComponent>>>,
     /// The component's own window.
     window: Cell<Option<HWND>>,
+    /// The window it is a child of: the one its view shows in.
+    parent: Cell<Option<HWND>>,
     placement: Placement,
 }
 
@@ -633,7 +681,83 @@ impl Hosted for ComponentItem {
         let (Some(hwnd), Some(surface)) = (self.window.get(), self.surface.upgrade()) else {
             return;
         };
+        if rect.is_some()
+            && let Some(view) = view_of(&surface, self.id)
+        {
+            let parent = crate::app_window::hwnd_showing(&surface, &view);
+            if self.parent.replace(Some(parent)) != Some(parent) {
+                adopt(parent, hwnd);
+                self.placement.last.set(None);
+            }
+        }
         self.placement.apply(&surface, self.id, hwnd, rect);
+    }
+
+    fn wheel(&self, x: f32, y: f32, event: &crate::input::WheelEvent) -> bool {
+        // Not while its own code runs (it asked for something that scrolls).
+        let Ok(mut component) = self.component.try_borrow_mut() else {
+            return false;
+        };
+        let Some(component) = component.as_mut() else {
+            return false;
+        };
+        let notch = crate::window::lines_per_notch() * 16.0;
+        component.wheel(&Wheel::new(x, y, event, notch))
+    }
+}
+
+impl Wheel {
+    /// `event` at `(x, y)` (component coordinates), `notch` points to a
+    /// notch.
+    fn new(x: f32, y: f32, event: &crate::input::WheelEvent, notch: f32) -> Self {
+        Wheel {
+            x,
+            y,
+            dx: event.dx,
+            dy: event.dy,
+            notches_x: event.dx / notch,
+            notches_y: event.dy / notch,
+            precise: event.precise,
+            shift: event.modifiers.shift,
+            ctrl: event.modifiers.ctrl,
+            alt: event.modifiers.alt,
+        }
+    }
+}
+
+/// The native window `hwnd` of a window of the app's own is about to go:
+/// the web views in it close (their views go with the window's root), and
+/// the components' windows it holds go back to the main window, hidden, so
+/// that they are not destroyed with it.
+pub(crate) fn window_closing(surface: &Surface, hwnd: HWND) {
+    let (webs, components): (Vec<_>, Vec<_>) = {
+        let hosts = surface.native.hosts.borrow();
+        let webs = hosts
+            .values()
+            .filter_map(|h| match h {
+                Host::Web(w) if w.hwnd() == Some(hwnd) => Some(w.clone()),
+                _ => None,
+            })
+            .collect();
+        let components = hosts
+            .values()
+            .filter_map(|h| match h {
+                Host::Component(c) if c.parent.get() == Some(hwnd) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        (webs, components)
+    };
+    for web in webs {
+        web.close();
+    }
+    let main = surface.hwnd();
+    for item in components {
+        if let Some(child) = item.window.get() {
+            adopt(main, child);
+        }
+        item.parent.set(Some(main));
+        item.placement.last.set(None);
     }
 }
 
@@ -785,7 +909,7 @@ fn intersect(a: RECT, b: RECT) -> Option<RECT> {
 
 /// Where a video's source is.
 #[derive(Debug, PartialEq)]
-enum Location {
+pub(crate) enum Location {
     /// A URL Media Foundation opens (`https://`, `file://`, ...).
     Url(String),
     /// A file path.
@@ -794,7 +918,7 @@ enum Location {
 
 impl Location {
     /// The URL the media engine opens.
-    fn url(&self) -> String {
+    pub(crate) fn url(&self) -> String {
         match self {
             Location::Url(url) => url.clone(),
             Location::Path(path) => file_url(&path.to_string_lossy()),
@@ -803,7 +927,7 @@ impl Location {
 }
 
 /// Resolves `source` (`asset:/` URIs against `base`).
-fn locate(source: &str, base: Option<&AssetBase>) -> Option<Location> {
+pub(crate) fn locate(source: &str, base: Option<&AssetBase>) -> Option<Location> {
     if let Some(path) = source.strip_prefix("asset:/") {
         let path = path.trim_start_matches('/');
         return match base {
@@ -947,5 +1071,39 @@ mod tests {
         assert!(components.factory(&"com.example.map".into()).is_some());
         assert!(components.factory(&"com.example.none".into()).is_none());
         assert_eq!(format!("{components:?}"), r#"{"com.example.map"}"#);
+    }
+
+    #[test]
+    fn wheel_counts_notches() {
+        use crate::input::{Modifiers, WheelEvent};
+        // A notch up with three lines of 16 points to a notch, Ctrl held.
+        let event = WheelEvent {
+            x: 300.0,
+            y: 200.0,
+            dx: 0.0,
+            dy: -48.0,
+            precise: false,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            },
+            time: 0.0,
+        };
+        let wheel = Wheel::new(12.0, 34.0, &event, 48.0);
+        assert_eq!((wheel.x, wheel.y), (12.0, 34.0));
+        assert_eq!((wheel.dx, wheel.dy), (0.0, -48.0));
+        assert_eq!((wheel.notches_x, wheel.notches_y), (0.0, -1.0));
+        assert!(wheel.ctrl && !wheel.shift && !wheel.alt && !wheel.precise);
+        // A touchpad's fraction of a notch, sideways.
+        let event = WheelEvent {
+            dx: 12.0,
+            dy: 0.0,
+            precise: true,
+            modifiers: Modifiers::default(),
+            ..event
+        };
+        let wheel = Wheel::new(0.0, 0.0, &event, 48.0);
+        assert_eq!((wheel.notches_x, wheel.notches_y), (0.25, 0.0));
+        assert!(wheel.precise && !wheel.ctrl);
     }
 }

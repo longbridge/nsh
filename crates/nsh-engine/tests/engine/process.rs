@@ -80,6 +80,7 @@ mount(() => <Text>{{shown()}}</Text>);
             websocket: None,
             refuse_connections: None,
             filesystem: None,
+            windows: None,
             assets: None,
             environment: Environment {
                 os: Os::Linux,
@@ -98,6 +99,8 @@ mount(() => <Text>{{shown()}}</Text>);
             clipboard: None,
             host: Default::default(),
             picker: None,
+            speech: None,
+            audio: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let data = root.join("data/com.example.process");

@@ -223,12 +223,20 @@ pub struct Attrs {
     pub(crate) class: Option<SharedString>,
     /// The view is a selectable view ([`crate::selection`]).
     pub(crate) selectable_view: bool,
+    /// The text continues the one before it ([`Element::continues_text`]).
+    pub(crate) continues_text: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u16,
+    /// The `data-*` attributes it shows as a component's part, sorted
+    /// ([`Interactive::project_data`]).
+    pub(crate) projected_data: Vec<&'static str>,
     /// Where a JS renderer's content goes (the element is its
     /// placeholder: [`super::Renderer::render`]).
     pub(crate) render: Option<super::renderer::RenderAt>,
+    /// A window of the app's own: the dialog root it shows
+    /// ([`super::desktop::window`]).
+    pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
 }
 
 impl Attrs {
@@ -280,8 +288,14 @@ impl Attrs {
         if self.selectable_view != old.selectable_view {
             out.push(Prop::SelectableView(self.selectable_view));
         }
+        if self.continues_text != old.continues_text {
+            out.push(Prop::ContinuesText(self.continues_text));
+        }
         if self.projected_states != old.projected_states {
             out.push(Prop::ProjectedStates(self.projected_states));
+        }
+        if self.projected_data != old.projected_data {
+            out.push(Prop::ProjectedData(self.projected_data.as_slice().into()));
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -416,6 +430,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) alignment: Option<crate::ListAlignment>,
     pub(crate) viewport: Option<crate::ListViewport>,
 }
 
@@ -446,6 +461,9 @@ impl ListConfig {
         }
         if self.follow_end != old.follow_end {
             out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        }
+        if self.alignment != old.alignment {
+            out.push(Prop::ListAlignment(self.alignment.unwrap_or_default()));
         }
         if self.viewport != old.viewport {
             out.push(Prop::ListViewport(self.viewport.unwrap_or_default()));
@@ -884,6 +902,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// Marks a text as the continuation of the text before it in document
+    /// order: a long line a component draws as several texts, one per
+    /// wrapped part (`DiffView`'s soft wrap). In a selectable view
+    /// ([`Self::selectable`]) a copy joins the parts with nothing between
+    /// them, as the one line they are, and a double or triple click
+    /// selects a word or the whole line across them
+    /// ([`crate::selection::SelectionTexts::continues`]). Off by default.
+    fn continues_text(mut self, continues: impl IntoReactive<bool>) -> Self {
+        self.node()
+            .bind_attr(continues, |a, continues| a.continues_text = continues);
+        self
+    }
+
     /// Tailwind classes the app passed (a prop naming the classes of one
     /// of the component's parts: `classes={{ heading: "text-2xl" }}`),
     /// after the element's own styles, as the app's `class` on a
@@ -966,6 +997,27 @@ impl Style {
         typed.extend_as(Variant::default(), over.1.clone());
         style.1 = typed;
         style
+    }
+
+    /// The color it fills its view with in no state (`backgroundColor`,
+    /// Rust's `bg`), if it sets one that is no gradient and not
+    /// transparent: what a part's terminal form draws its text in (a
+    /// progress bar's run in its indicator's color). The typed styles'
+    /// over the declarations; their bound parts are left out.
+    pub fn background_color(&self) -> Option<crate::element::AdaptiveColor> {
+        let typed = self.1.static_color(crate::StyleKey::BackgroundColor);
+        let declared = || {
+            self.decls().iter().rev().find_map(|decl| match decl {
+                crate::StyleDecl::Set(
+                    crate::StyleKey::BackgroundColor,
+                    crate::PropertyValue::Color(color),
+                ) => Some(color.map(crate::element::AdaptiveColor::from)),
+                _ => None,
+            })?
+        };
+        typed
+            .or_else(declared)
+            .filter(|c| *c != crate::element::AdaptiveColor::from(crate::Color::TRANSPARENT))
     }
 
     /// Its declarations, in order (not its typed styles').
@@ -1418,6 +1470,23 @@ pub trait Interactive: Element {
         )
     }
 
+    /// The selection across the texts of a selectable view
+    /// ([`Self::selectable`]) changed: the selected text, as a copy gives
+    /// it, empty once nothing is selected, and where it starts in the
+    /// view's whole text (TSX `onSelectionChange` of a `<View selectable>`,
+    /// `{ text, start }`). Only the outermost selectable view of an area
+    /// reports it; an [`Input`](super::Input)'s own selection is its
+    /// `on_selection_change`.
+    fn on_text_selection_change<M>(
+        self,
+        listener: impl IntoListener<super::TextSelectionEvent, M>,
+    ) -> Self {
+        self.on(
+            EventKind::SelectionChange,
+            events::typed(listener.into_listener(), events::selected_text),
+        )
+    }
+
     /// It took the keyboard focus: an input, or a view that takes presses
     /// reached by Tab (or `focus()`) on the platforms that move the focus
     /// between pressables.
@@ -1699,8 +1768,8 @@ pub trait Interactive: Element {
     }
 
     /// Presses also count this far outside it.
-    fn hit_slop(mut self, insets: EdgeInsets) -> Self {
-        super::host::set(self.node(), Prop::HitSlop(insets));
+    fn hit_slop(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        super::host::bind_prop(self.node(), insets, Prop::HitSlop);
         self
     }
 
@@ -1737,11 +1806,29 @@ pub trait Interactive: Element {
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.
+    /// On macOS and Linux, background clicks reach the app on release,
+    /// including ancestor press handlers; dragging does not deliver a click.
     /// Set false on a child to exclude it from its parent's drag region.
     fn window_drag(mut self, enabled: impl IntoReactive<bool>) -> Self {
         super::host::bind_prop(self.node(), enabled, |enabled| {
             Prop::WindowDrag(Some(enabled))
         });
+        self
+    }
+
+    /// Makes the view one of the system's window buttons in a title bar the
+    /// app draws (TS: `desktop={{ windowControl }}`): the platform hit-tests
+    /// it as that button (the snap layouts over a maximize button on
+    /// Windows) and carries out its press.
+    fn window_control(mut self, control: crate::desktop::WindowControl) -> Self {
+        super::host::set(self.node(), Prop::WindowControl(Some(control)));
+        self
+    }
+
+    /// Pressing the view resizes a frameless window by `edge` (TS:
+    /// `desktop={{ windowResize }}`).
+    fn window_resize(mut self, edge: crate::desktop::ResizeEdge) -> Self {
+        super::host::set(self.node(), Prop::WindowResize(Some(edge)));
         self
     }
 
@@ -1783,6 +1870,16 @@ pub trait Interactive: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while it or an element inside it is focused (Tailwind's
+    /// `focus-within:`; TS: `focusWithinStyle`): a field's frame ringed
+    /// while the input in it edits. An overlay's content is inside the
+    /// element the overlay is in.
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::FOCUS_WITHIN, s);
         self
     }
 
@@ -1894,6 +1991,28 @@ pub trait Interactive: Element {
     fn project_focused(mut self, focused: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(focused, |a, focused| {
             project(a, crate::tailwind::state::FOCUSED, focused)
+        });
+        self
+    }
+
+    /// Gives it the boolean `data-*` attribute `name` (without `data-`)
+    /// while `on` holds, as Tailwind's `data-<name>:` variant reads it: its
+    /// `data-<name>:` classes apply, and with `group` the
+    /// `group-data-<name>:` classes inside it (a calendar's day at the
+    /// start of a range: `project_data("range-start", ..)`). For what a
+    /// component's part shows beyond the states screen readers hear; the
+    /// attribute tells them nothing. A view whose classes read none of its
+    /// attributes sends nothing when they change.
+    fn project_data(mut self, name: &'static str, on: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(on, move |a, on| {
+            let at = a.projected_data.binary_search(&name);
+            match (at, on) {
+                (Err(i), true) => a.projected_data.insert(i, name),
+                (Ok(i), false) => {
+                    a.projected_data.remove(i);
+                }
+                _ => {}
+            }
         });
         self
     }
@@ -2404,6 +2523,14 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS_WITHIN, s);
+        self
+    }
+
     /// Styles while its root is disabled (`disabled:`): the component's
     /// view disables it ([`Interactive::disabled`], a `disabled` prop).
     pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
@@ -2560,6 +2687,14 @@ pub trait ComponentBuilder: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS_WITHIN, s);
         self
     }
 

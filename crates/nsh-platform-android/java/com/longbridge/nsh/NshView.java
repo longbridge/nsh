@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -95,6 +94,10 @@ public class NshView extends FrameLayout {
     private final Object hostLock = new Object();
     private float density;
     private final Box root;
+    /** The screen effect or transition drawing over the surface, if any. */
+    Box screen;
+    /** The page and dialog transitions through a shader running, by stack or dialog id. */
+    final android.util.SparseArray<ShaderFrames> navFrames = new android.util.SparseArray<>();
     private final Mounter mounter;
     private final TouchTracker touches;
 
@@ -199,21 +202,7 @@ public class NshView extends FrameLayout {
         // The keyboard's curve and duration, as it starts to move: what makes
         // room for it moves with it (`LayoutCurve::Keyboard`).
         if (Build.VERSION.SDK_INT >= 30) {
-            setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
-                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
-                @Override
-                public void onPrepare(WindowInsetsAnimation animation) {
-                    // Before the end state's insets are applied.
-                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
-                    keyboardDuration = animation.getDurationMillis();
-                    mounter.keyboardMotion(animation.getInterpolator(), keyboardDuration);
-                }
-
-                @Override
-                public WindowInsets onProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> running) {
-                    return insets;
-                }
-            });
+            KeyboardAnimation.install(this, mounter);
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
@@ -379,7 +368,7 @@ public class NshView extends FrameLayout {
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
-            Native.load(handle, code, false, map, capabilities, app);
+            Native.load(handle, code, false, map, capabilities, app, null);
             return true;
         } catch (Exception e) {
             reportError("cannot read bundle " + file + ": " + e);
@@ -395,15 +384,27 @@ public class NshView extends FrameLayout {
      * @return false (reported to the error listener) if it cannot be read
      */
     public boolean loadAssetBundle(String dir) {
+        return loadAssetBundle(dir, false);
+    }
+
+    /**
+     * {@link #loadAssetBundle(String)} for the activity of packaged apps
+     * ({@link AppActivity}): with {@code packages}, a newer signed package of
+     * the app's code it downloaded ({@code nsh/updater}'s
+     * {@code downloadPackage}) runs instead, when the app's
+     * {@code assets/nsh-updater.json} trusts package roots.
+     */
+    boolean loadAssetBundle(String dir, boolean packages) {
         try {
             byte[] code = Net.readAll(getContext().getAssets().open(dir + "/bundle.nshc"));
             // Null when the app declares no capabilities / has no id.
             String capabilities = readAssetText(dir + "/capabilities.json");
             String app = readAssetText(dir + "/app.json");
+            String updater = packages ? readAssetText(dir + "/assets/nsh-updater.json") : null;
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
-            Native.load(handle, code, true, null, capabilities, app);
+            Native.load(handle, code, true, null, capabilities, app, updater);
             return true;
         } catch (Exception e) {
             reportError("cannot read the app bundle: " + e);
@@ -527,6 +528,41 @@ public class NshView extends FrameLayout {
         Native.setOpenUrlHandler(handle, handler != null);
     }
 
+    /**
+     * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
+     * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
+     * the app's launcher activity.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleNotificationIntent(android.content.Intent intent) {
+        Notifications.handleIntent(intent);
+    }
+
+    /**
+     * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
+     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     *
+     * @param url the URL
+     */
+    public void openUrl(String url) {
+        if (url == null || handle == 0) return;
+        mounter.eventMap(1, Native.URL_SCHEME, new String[] {"url"}, new Object[] {url});
+    }
+
+    /**
+     * Hands the app the URL {@code intent} carries, if it is an {@code ACTION_VIEW} intent with one ({@link #openUrl}).
+     * The activity showing this view calls it from {@code onCreate} (with the launch intent, when it is not being
+     * recreated) and {@code onNewIntent}.
+     *
+     * @param intent the activity's intent
+     */
+    public void handleUrlSchemeIntent(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data != null) openUrl(data.toString());
+    }
+
     /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
     void openUrlMessage(String url, long request) {
         main.post(() -> {
@@ -585,21 +621,56 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        mounter.cancelAnimations();
+        endShaders();
     }
 
     /**
      * Called by the native side when the running app stopped because another
      * one replaced it ({@code Host::load}). Batches the old app sent before
-     * are already queued, so its components go after them and before the
-     * new app's first batch.
+     * are already queued, so its components and shaders go after them and
+     * before the new app's first batch.
      */
     void appStopped() {
-        main.post(mounter::destroyComponents);
+        main.post(() -> {
+            mounter.destroyComponents();
+            mounter.cancelAnimations();
+            endShaders();
+        });
+    }
+
+    /**
+     * The app stopped: libnsh forgot its shaders, so the frames they left go
+     * too (its page and dialog transitions, its screen shader's, its
+     * effects'), and none stays frozen over the next app.
+     */
+    private void endShaders() {
+        for (int i = navFrames.size() - 1; i >= 0; i--) {
+            ShaderFrames frames = navFrames.valueAt(i);
+            if (frames instanceof NavTransition) ((NavTransition) frames).cancel();
+        }
+        navFrames.clear();
+        mounter.dropShaders();
+    }
+
+    /**
+     * A view in the surface draws anew (its own invalidation brings the
+     * window frame): a screen shader pictures the surface again before it.
+     * The screen shader's own frames invalidate this view, not a descendant.
+     */
+    @Override
+    public void onDescendantInvalidated(View child, View target) {
+        super.onDescendantInvalidated(child, target);
+        if (screen != null) screen.surfaceChanged();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (screen != null) {
+            screen.shaderSize();
+            screen.picturesChanged();
+        }
         // The environment follows in onLayout.
         if (handle != 0 && w > 0 && h > 0) Native.resize(handle, w / density, h / density);
     }
@@ -607,8 +678,13 @@ public class NshView extends FrameLayout {
     // --- Environment ---------------------------------------------------------
 
     private float keyboard;
+    /**
+     * Whether the app is in use (`lifecycle()`): its activity's state, 0 resumed (active), 1 paused or started
+     * again (inactive: visible without the focus), 2 stopped (background). Active until the activity says otherwise.
+     */
+    private int lifecycle;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
-    private long keyboardDuration = 250;
+    long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
     private java.util.Locale hostLocale;
     private float hostFontScale;
@@ -720,7 +796,81 @@ public class NshView extends FrameLayout {
             Build.VERSION.SDK_INT,
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
-        }, dark, locale.toLanguageTag());
+            lifecycle,
+            // 24-hour time: the user's setting, else the locale's.
+            android.text.format.DateFormat.is24HourFormat(getContext()) ? 1 : 0,
+        }, dark, locale.toLanguageTag(), timeZone,
+                // The user's list (an app's own language first, Android 13's
+                // per-app language included), after the embedding app's own.
+                (hostLocale != null ? hostLocale.toLanguageTag() + "," : "") + c.getLocales().toLanguageTags(),
+                // The system's, whatever the embedding app's language: Android
+                // 14 keeps the first day of the week and the temperature unit
+                // in its extension.
+                java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
+    }
+
+    /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
+    private String timeZone = java.util.TimeZone.getDefault().getID();
+
+    /**
+     * The system's time zone changed (the user's setting, or a new zone with
+     * automatic time zones): the broadcast names it, before the process's
+     * default zone may have caught up. Or the time changed, as when the user
+     * switches 24-hour time (`localeSettings()`'s `hourCycle`).
+     */
+    private final android.content.BroadcastReceiver timeChanged = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, android.content.Intent intent) {
+            if (android.content.Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())) {
+                String zone = intent.getStringExtra(android.content.Intent.EXTRA_TIMEZONE);
+                timeZone = zone != null ? zone : java.util.TimeZone.getDefault().getID();
+            }
+            publishEnvironment(getRootWindowInsets());
+        }
+    };
+
+    /** The view's activity reported `state` (`lifecycle()`'s values). */
+    private void activityState(Activity activity, int state) {
+        if (activity != activity(getContext()) || state == lifecycle) return;
+        lifecycle = state;
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
+     * The activities going through their lifecycle: `lifecycle()`. One callback per application, registered by the
+     * first view attached and kept for the process, so it knows each activity's last state while views come and go: a
+     * view attached again starts from its activity's state then, whatever the activity did while it was detached.
+     */
+    private static final class Lifecycles implements android.app.Application.ActivityLifecycleCallbacks {
+        private static Lifecycles registered;
+        private final java.util.WeakHashMap<Activity, Integer> states = new java.util.WeakHashMap<>();
+        private final java.util.ArrayList<NshView> views = new java.util.ArrayList<>();
+
+        static Lifecycles of(Activity activity) {
+            if (registered == null) {
+                registered = new Lifecycles();
+                activity.getApplication().registerActivityLifecycleCallbacks(registered);
+            }
+            return registered;
+        }
+
+        /** The last state `activity` reported, or null before it reported one. */
+        Integer state(Activity activity) {
+            return states.get(activity);
+        }
+
+        private void state(Activity activity, int state) {
+            states.put(activity, state);
+            for (NshView view : new java.util.ArrayList<>(views)) view.activityState(activity, state);
+        }
+
+        @Override public void onActivityResumed(Activity a) { state(a, 0); }
+        @Override public void onActivityPaused(Activity a) { state(a, 1); }
+        @Override public void onActivityStarted(Activity a) { state(a, 1); }
+        @Override public void onActivityStopped(Activity a) { state(a, 2); }
+        @Override public void onActivityCreated(Activity a, android.os.Bundle b) {}
+        @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) {}
+        @Override public void onActivityDestroyed(Activity a) { states.remove(a); }
     }
 
     private android.view.accessibility.AccessibilityManager accessibility() {
@@ -823,6 +973,20 @@ public class NshView extends FrameLayout {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         accessibility().addTouchExplorationStateChangeListener(screenReader);
+        Activity activity = activity(getContext());
+        if (activity != null) {
+            Lifecycles lifecycles = Lifecycles.of(activity);
+            lifecycles.views.add(this);
+            // What the activity did while the view was detached.
+            Integer state = lifecycles.state(activity);
+            if (state != null) activityState(activity, state);
+        }
+        // The zone may have changed while the view was detached. The
+        // broadcasts are the system's alone: no export flag is needed.
+        timeZone = java.util.TimeZone.getDefault().getID();
+        android.content.IntentFilter time = new android.content.IntentFilter(android.content.Intent.ACTION_TIMEZONE_CHANGED);
+        time.addAction(android.content.Intent.ACTION_TIME_CHANGED);
+        getContext().registerReceiver(timeChanged, time);
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
     }
@@ -831,6 +995,8 @@ public class NshView extends FrameLayout {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
+        if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
+        getContext().unregisterReceiver(timeChanged);
     }
 
     /** `BackHandler.exitApp()`: what the back button does without the app. */
@@ -876,14 +1042,37 @@ public class NshView extends FrameLayout {
         if (handle != 0) Native.frame(handle);
     };
 
+    /** Where a shader's frames show. */
+    interface ShaderFrames {
+        /**
+         * A new frame: {@code pixels} (null for an empty frame) are only valid
+         * during the call; whether it {@code replaces} what it covers, how far
+         * it reaches beyond the box ({@code overflow}, points).
+         */
+        void shaderFrame(java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow);
+    }
+
     /**
      * A shader view's new frame, called by libnsh on the UI thread during
-     * {@link Native#tick}: {@code pixels} (null for an empty frame) are only
-     * valid during the call.
+     * {@link Native#tick}.
      */
-    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height) {
-        View v = mounter.view(id);
-        if (v instanceof Box) ((Box) v).shaderFrame(pixels, width, height);
+    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow) {
+        ShaderFrames nav = navFrames.get(id);
+        View v = nav == null ? mounter.view(id) : null;
+        if (nav == null && v instanceof ShaderFrames) nav = (ShaderFrames) v;
+        if (nav != null) nav.shaderFrame(pixels, width, height, replaces, overflow);
+    }
+
+    /** A screen shader's frame where it replaces the surface. */
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        if (screen != null && screen.drawScreen(canvas)) return;
+        super.dispatchDraw(canvas);
+    }
+
+    /** The surface as it is (a screen shader's picture). */
+    void drawSurface(android.graphics.Canvas canvas) {
+        super.dispatchDraw(canvas);
     }
 
     /** JS waits for a display frame (`requestAnimationFrame`). */

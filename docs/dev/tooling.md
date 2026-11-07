@@ -80,13 +80,6 @@ Default bundles and packages are `.nsh/out/`; `--out` still overrides that locat
 `target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not add Cargo configuration to relocate it.
 Existing directories are never deleted automatically. Follow the CoC project constraint in `AGENTS.md`.
 
-## LayerFS trial
-
-The opt-in [LayerFS trial](layerfs.md) exercises Git, Cargo, build-output snapshots and branch isolation on Linux.
-`./scripts/layerfs prepare`, `smoke` and `status` prepare and inspect it; macOS preparation runs in a local Linux
-Docker container. Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache
-and has a manual GitHub Actions workflow. It is separate from the platform checks.
-
 ## Output
 
 
@@ -118,18 +111,28 @@ step, the details only when something fails. Every command prints through it:
 before every `cargo run`): `✓` lines for its builds, cargo's and the tools' output only when they fail, `-v` /
 `NSH_VERBOSE` to see it all (`cargo xtask clippy-android` streams clippy's output: it is what the task is for).
 
+For `nsh run --target tui` (and `nsh dev --target tui`), app preparation and host builds show progress
+on stderr, with Cargo's current crate when a host is built (a checkout or a Rust app); `-v` streams tool output. Immediately before launching the host,
+the CLI routes diagnostics to the app's `.nsh/tui.log` until the host stops, including hot rebuilds.
+Spinners and colors are disabled there; verbose subprocess output is captured into the same file.
+A Rust restart restores terminal output for preparation before the next host launches. The terminal host inherits stdin/stdout and appends stderr and its logger
+to that file. `C-h e` opens its log/error panel; closing it gives every row back to the app.
+
 ## Dev server (nsh dev / nsh run)
 
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, or `--port`) to all
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
+- Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
+  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
   exit through its normal cleanup path; the replacement waits up to ten seconds for the lock before
   starting. A second simultaneous takeover fails. Locks release on process exit, and stale stop files
   are cleared by the next owner. All cooperating commands use the same cache directory. A listener
-  outside this mechanism (including an older CLI) produces a bind error naming the port; `--port 0`
+  outside this mechanism (including an older CLI) given by `--port` produces a bind error naming the port; `--port 0`
   asks the OS for a free port. The control files stay local to the machine.
 - Imported source directories and theme files outside the entry directory are watched too, using the last
   successful bundle's dependencies. The gallery and website demos share `examples/nsh-gallery-ui`; saving one of
@@ -142,6 +145,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`, `/nsh.version`, and for a runtime whose crates call JS through wasm-bindgen its glue, `/nsh-bindgen.js`,
   with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
+  A browser loading another path that names no file gets the page (`server::wants_page`: a `GET` accepting
+  `text/html` of a path whose last segment has no extension), as a single-page app's host rewrites it; `SiteServer`
+  (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
@@ -157,6 +163,13 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   process group of its own (`CREATE_NEW_PROCESS_GROUP`), out of the console's Ctrl-C, so a stop is not taken for the
   host failing, and in a job object that kills it when the job closes (`run::KillOnClose`): Windows ends a child with
   its parent only in a job, so the host goes with `nsh` however it ends (a closed console, a killed process).
+- `nsh run --target tui` runs `nsh-tui-host` in the current terminal while the CLI serves and watches in process.
+  It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
+  panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
+  `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
+  raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
   `android::Reverse`) and removes that rule, and only that one (`adb reverse --remove tcp:<port>`), however the run
   ends: normally, by an error, by Ctrl-C or SIGTERM, or for a restart of an app with a Rust crate (`rust_app::Restart`;
@@ -249,7 +262,8 @@ looks inside the previous part's matches, `nth=<n>`
 keeps one. A part starting with a lowercase word and a colon (`[a-z][a-z0-9-]*:`) that is no known prefix is a parse
 error, never a bare string, so adding a prefix cannot change what an existing selector matches; such a text is
 written `text:tapped: solo`. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
-order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
+order below the root (a scroll view's content in the order it is on screen, as the platforms' Tab and
+screen readers take it: a list's recycled cells are not in their rows' order in the tree), of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
 visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
 clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`ScrollBehavior::enabled`) or the window
 (`Screen::set_viewport`: the headless viewport; on a host the platform's, which `Agent::sync_viewport` tells the model
@@ -318,7 +332,8 @@ report it:
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
-  presses (a press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
+  presses (a press of the pointer takes it off), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
@@ -327,7 +342,8 @@ report it:
   (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms and no native animation runs that ends by itself (2 s at most). Native animations that loop forever (a
+for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
+waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
 time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
@@ -342,13 +358,18 @@ sleeping thread, and while it is set or a native animation that ends by itself r
 a long press's hold and scroll frames move the clock by their time; `run_for` / `fast_forward` / `set_system_time` are
 the test's (`app.clock`); a loop that never ends takes no frames of its own (it would move the clock for as long as
 a step or `waitFor` waits), its values move as the clock does; the settle limit is also 2 s of the clock's time; `StubNetwork::with_clock` holds delayed
-responses back as the clock's alarms. A wait for the screen (`wait_until`, so `waitFor`) moves the clock too, a frame
-at a time (`Headless::wait_frame`: the frame, the batches it brought, then `FRAME_LOOK`, 1 ms of real time, for what
-the clock does not bring, a route's JS function), looking after each frame, by its timeout at most: a timer's result
-shows as the test waits for it, in a moment of real time. It fails once the clock moved by the timeout and as much
-real time passed (then it waits as on the system's clock, `pump`), so what comes from outside the app keeps the time
-it had. Quiet detection stays real time.
-`Headless::set_viewport` and
+responses back as the clock's alarms. A step settles without waiting for quiet (`Headless::idle_on_manual_clock`):
+`EngineControl::flush` has the engine run what was sent to it and what is due at the clock's time, again while that
+queues more (a task's wake, a response answered at once), then answer, after the batches of what ran, whether it is
+idle (nothing left queued or due now, no request in flight); the step returns once that answer is idle, the batches
+applied brought none, and no frame is wanted. While a request is in flight (its answer comes from another thread: a
+handler, the test's JS) or work keeps coming, it waits for 100 ms of quiet as on the system's clock. Work the app hands
+to other threads that has not woken the engine yet (file I/O, a task awaiting a thread) is not waited for: `waitFor`
+waits for what it shows. A wait for the screen (`wait_until`, so `waitFor`) moves the clock a frame at a time
+(`Headless::wait_frame`), looking after each frame, by its timeout at most; `FRAME_LOOK` gives work the clock does not
+bring (such as a route's JS function) 1 ms of real time to arrive. Once the clock has moved by the timeout, it waits
+for the rest of that real-time deadline for work from outside the app. The 2 s settle limits stay, `waitFor` timeouts
+remain real time, and quiet detection stays real time. `Headless::set_viewport` and
 `set_environment` change the window and the environment while the app runs, as a rotation or a system setting does.
 
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
@@ -358,16 +379,21 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   fed the mount items' animation ops and scroll values, its finished animations reported (`animations_finished`); a
   step is quiet only when no animation that ends by itself runs;
 - a back (`Headless::back`, and the app's `Command::Back`) does what `nsh-platform-macos`'s `default_back` does: in the
-  newest modal, else the screen, the innermost stack that can go back pops its top screen (hidden in the model until
+  newest modal, else the screen, the innermost stack that can go back and is laid out with a size
+  (`nsh_core::navigation::shown_in_layout`) pops its top screen (hidden in the model until
   the app removes it, `onDismiss`) or asks it (`preventBack`: `onBackRequest`); else the newest modal gets
   `onRequestClose`, and `onDismiss` when it is `dismissible`;
 - dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else
   `default_answer` (the cancel button, else dismissed when cancelable, else the step fails); `nsh/test`'s `App` answers
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
-- picks (`Command::PickImages`) are answered with `onPick` (`EventPayload::Picked`): by the test's files
+- picks (`Command::PickImages`, `Command::PickFiles`) are answered with `onPick` (`EventPayload::Picked`): by the test's files
   (`Headless::on_pick`, `app.onPick`; given as they are, nothing scaled), else cancelled (no files); `nsh/test`'s `App`
   answers them after each step and its dialogs (`answer_picks_myself`), and `app.picks()` lists what was asked; a real
   platform shows its own picker, which the driver does not answer;
+- speech sessions run on a fake recognizer (`headless/speech.rs`, unless the test's `EngineConfig::speech` is set): a
+  session starts at once, `Headless::hear` (`app.hear(text)`) reports `text` as the transcript so far, `stop` and
+  `Headless::end_speech` (`app.endSpeech(error?)`) end it with the last transcript as final (`no-speech` when nothing
+  was heard), and `app.speechRequests()` lists what was asked (`lang`, `interim`);
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
 - with `TestRun::page_host` (`nsh test`'s `--web-host`, else `nsh.json` `web.host`; `TestRequest::page_host` for an
@@ -497,7 +523,7 @@ test's side prints them under the step `Remote` took last (named as `Headless` n
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
-`windows`, `gpui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
+`windows`, `gpui`, `tui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
 monitor's readings once a second, shown with `-v` (`docs/dev/linux.md` "Performance", `docs/dev/windows.md`
 "Performance"). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
@@ -509,7 +535,25 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. Synthesized input is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
+it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+`Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
+it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
+without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
+the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
+"Checking a change"). A left button press into a web view of the inactive app goes to the `WKWebView` directly
+(`agent::mouse`), since AppKit gives an inactive window's first click only to views that accept the first mouse. A
+window that is not the
+key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
+for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
+Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
+key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
+the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+An item is not checked for being enabled (AppKit validates against the key window's responders:
+with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
+checks of this are `crates/nsh-platform-macos/tests/host`
+(`nsh test crates/nsh-platform-macos/tests/host --target macos`, also with `--foreground`).
+Synthesized input is
 window-relative on macOS (posted `NSEvent`s carry the window's number and a window point; wheels a location that
 makes their window point the agent's), so the tests run the same on any display. A host whose hello says `tests` takes steps:
 `DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the
@@ -519,9 +563,13 @@ The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
-view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
-one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+`Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
+the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
+itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
+it has the most room, then a quarter of the way from the other; between gestures it waits only for the view to stop
+moving, `Agent::stopped`, and once it is in view for the app to settle, so a page that is never quiet, a ticking
+timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
 text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input
@@ -536,16 +584,18 @@ menus of its own; the web, whose `Menu.popup` is the app's own UI, has none), th
 `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
 moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
 `keymap::Key::virtual_key`, the web's CDP key events (printable keys carry their physical code, modifiers and US-layout
-text, so shortcuts get the key before a field types it), Linux's bindings fired as its shortcut controller would, as GTK
-takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
+text, so shortcuts get the key before a field types it), Linux's XTest key events under X11 / Xvfb (GTK shortcut
+controllers, focused widgets and input methods handle them; without XTest the agent uses widget signals and calls
+the bindings directly, `docs/dev/linux.md` "Checking a change"); iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
 real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation that ends by itself ran for 100 ms (`Native::animating`:
-the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s; 2 s at most; the web's page counts its own
+the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s, and on macOS a view's
+transitions but not its keyframes repeating forever, `animate-ping`'s or `animate-spin`'s, which have no `Live::deadline`; 2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
-on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
-test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
+on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
+on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults serve the main window, so a platform starts with that and adds the app's own windows. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
@@ -597,6 +647,21 @@ web the realm's global `WebSocket` is the browser's, so `testing.js` puts one in
 `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
 (`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
 
+Terminal (`nsh-platform-tui`, feature `dev`): the CLI accepts `--target tui` and starts `nsh-tui-host --headless`
+with null stdin. The host selects ratatui's in-memory `TestBackend` before terminal setup and runs the ordinary
+surface loop. `--window-size` carries `open`'s point viewport, rounded up to whole Cells; `nsh.json`'s
+`tui.pointsPerCell` sets the scale. The dev session attaches the test Model before loading the bundle, and the
+private `TuiNative` sends requests to the view's inbox. Render applies batches and draws before servicing requests;
+synthetic pointer, key, wheel and paste events go through `AppView::handle`. `app.screenshot("cells.json")` returns
+and saves UTF-8 JSON with `format: "nsh-tui-cells"`, `version: 1`, Cell `width`/`height` and `rows[y][x]` holding
+`symbol`, `fg`, `bg`, `underline`, and ordered `modifiers`. See [the terminal backend](tui.md#platform-tests-and-cell-screenshots)
+for the encoding and the current interaction boundaries. The same tests run with redirected standard streams:
+
+```sh
+./target/debug/nsh test examples/counter --target tui
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+```
+
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
 and key events, `NSView` frames converted to the content's top-left points, `NSAlert`
 buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
@@ -626,11 +691,15 @@ app; the screen keeps its device's size. Android (`nsh-platform-android`, featur
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
 (`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
-each on the UI thread: `MotionEvent`s dispatched to the window's views (or the dialog's) as a finger's, with drags
-that rest before they lift as on iOS; typing as a keyboard's `KeyEvent`s (`KeyCharacterMap`; what no key types is
+each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
+topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
+iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
-screenshots draw the window and the dialog into a bitmap. A step waits for the native animation graph and for anything
+screenshots copy the activity's window and every window over it (each shown `<modal>`'s dialog in order, then the
+system alert) from their surfaces with `PixelCopy` after a frame drawn with the current state, each composited at its
+place over its dim, so they hold what the GPU draws (video, filters, the backdrop's blur), on an emulator without a
+window too; a window without a surface is drawn into the bitmap instead. A step waits for the native animation graph and for anything
 that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
 system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
 use `nsh_testing::agent::Tester`, which turns the dev client's
@@ -653,8 +722,11 @@ mouse presses, wheel events of 20 px a frame apart, key events with macOS's edit
 them), `history.back()` for back, `Emulation.*` for the viewport and the color scheme and `Page.captureScreenshot`.
 Headless Chromium finds no input device and reports `pointer: none` / `hover: none`, which `nsh.js`'s `measureIdiom`
 reads as a touch screen; `cdp.rs` launches it with `--blink-settings` giving it a fine, hovering pointer (as
-Playwright does), so the page measures as a browser with a mouse: the desktop idiom at least 600 wide, a phone below
-(`open`'s `width`).
+Playwright does), so the page measures as a browser with a mouse: the desktop idiom at any width (`open`'s `width`). A desktop's `platform` (`macos`, `windows`, `linux`) skips the measuring: `run.rs`'s
+`launch_idiom` puts `TestIdiom::Desktop` in the setup (`TestEnvironment::idiom`), and the page starts the apps it runs
+in the desktop idiom at any width (`nsh.js`'s `testSetup`, before the `idiom` option's fallback to `measureIdiom`), as
+every other target runs them as desktops; `platform.os` stays `web`. Without a `platform`, or with `web`, the page
+measures as a real browser does.
 
 ## New apps (`nsh init --template`)
 
@@ -747,6 +819,18 @@ program that describes them, builds the hosts and runners with them, and does ev
     with Rust components"). `gpui-host` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
     target_os = "macos", windows))`) is a workspace of its own in `.nsh/rust/gpui` (excluded from the main one), written
     only when the GPUI host is built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
+    The hosts and runners of Windows, macOS, Linux and iOS (`<platform>-host`, `<platform>-app`, `rust-<platform>`;
+    `components_platform`) also register each crate's native components: `#[native_components(<platform>)]`
+    (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
+    under the platform's `cfg`, a hidden entry `__nsh_native_components_<platform>`, which the generated
+    `app_components()` calls for each listed crate (a glob of the crate in a block over NSH's stand-in
+    `no_native_components`, which registers nothing: most crates have none; its parameter is `__nsh_components`, since
+    the glob would shadow a `components` with a value of that name the crate exports) and `main` passes to the platform's
+    `set_components` before the host starts; each `AppView` the backend makes calls it on its own registry (its
+    `components`), as an embedding app registers. The entry's parameter is hygienic (`Span::mixed_site`), so the app's
+    function may share its name. Root checks and a second entry fail as `#[native_module]`'s do. Android's components
+    are Java, which a Rust function cannot register, and the web has none; `gpui-host` registers none either, since a
+    crate depending on `nsh-platform-gpui` under the desktops' `cfg` would build GPUI for every desktop target.
 
   They take nsh's crates where the app's crates do (`rust_app::Nsh::of`, from each crate's dependencies through `cargo
   metadata`): from crates.io at the version of the running `nsh` (`=0.1.1` for nsh 0.1.1: the code it
@@ -842,9 +926,17 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
+(`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
+to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
+host on every `nsh run`. The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
+
+The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
+is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
+are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 
 ## Releases
 

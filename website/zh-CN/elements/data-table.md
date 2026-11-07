@@ -58,7 +58,7 @@ mount(App);
 
 ## 行和列
 
-`data` 是行：对象（字段由各列的 `key` 指定），或按位置被各列索引的数组。数字、布尔值和字符串显示为文本。列是一个 `DataTableColumn`：
+`data` 是行：对象（字段由各列的 `key` 指定），或按位置被各列索引的数组。数字、布尔值和字符串显示为文本。Rust 按字段逐列给出这些行，每列一种类型：`DataTableRows::new(2).texts("symbol", ["AAPL", "MSFT"]).numbers("change", [1.2, -0.4])`。列是一个 `DataTableColumn`：
 
 | 字段 | 说明 |
 |---|---|
@@ -147,7 +147,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 键盘
 
-按下表格，或用 Tab 移到表格上（macOS、Web），会让它获得键盘，直到再次按下别处、焦点移走或调用 `blur()`；应用可以用 `focus()` 让它获得键盘。整张表格是 Tab 的一个停靠点：在表格里 Tab 移动选择，Escape 交出键盘。
+按下表格，或用 Tab 移到表格上（macOS、Web），会让它获得键盘，直到再次按下别处、焦点移走或调用 `blur()`；应用可以用 `focus()` 让它获得键盘。整张表格是 Tab 的一个停靠点：在表格里 Tab 移动选择，Escape 交出键盘。列的调整宽度手柄只接受指针，在终端里也是如此；在终端里，指针移到手柄上时它才显示分隔线，标题的排序用一个字符表示（`▲`、`▼`，未排序时为 `↕`）。
 
 | 按键 | 作用 |
 |---|---|
@@ -314,8 +314,8 @@ const columns: DataTableColumn[] = [
 | `rowCount` | `.row_count(..)` | `number` | 已持有的行数 | 行的总数。 |
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | 所给各行的类名，按它们在 `data` 中的位置对应：行自己的外观，不需要每行调用 JS。 |
-| `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点。 |
-| `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度。 |
+| `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点；在终端里一行就是一个 Cell。 |
+| `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度；在终端里标题行就是一个 Cell。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |
 | `sort` | `.sort(..)` | `DataTableSort` | | 数据的排序依据，显示在标题上。 |
 | `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | 按下和按键可以选择行。 |

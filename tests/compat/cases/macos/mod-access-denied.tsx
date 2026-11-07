@@ -1,12 +1,13 @@
 // A case of the API's test suite (docs/dev/compatibility.md): what the
-// macos domain's capabilities (files in the data directory, nothing else)
-// do not grant of `nsh`'s modules. Each call returns a promise that rejects
-// with `ERR_ACCESS_DENIED`, naming the capability (`permission`) and what
-// was asked for (`resource`, `""` when the capability has none); a refused
-// `fetch` rejects as every failed fetch does, with a `TypeError`. Nothing
-// throws. A WebSocket refused: `websocket`'s `connect` rejects the same way,
-// and the global `WebSocket` reports it as a browser's does a connection that
-// fails: `error`, then `close` (1006, not clean). Its script checks each.
+// macos domain's capabilities (files in the data directory and web views'
+// trusted input, nothing else) do not grant of `nsh`'s modules. Each call
+// returns a promise that rejects with `ERR_ACCESS_DENIED`, naming the
+// capability (`permission`) and what was asked for (`resource`, `""` when
+// the capability has none); a refused `fetch` rejects as every failed fetch
+// does, with a `TypeError`. Nothing throws. A WebSocket refused:
+// `websocket`'s `connect` rejects the same way, and the global `WebSocket`
+// reports it as a browser's does a connection that fails: `error`, then
+// `close` (1006, not clean). Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Clipboard, Image, Picker, openUrl } from "nsh";
 import { connect } from "websocket";
@@ -55,6 +56,7 @@ function App() {
             `Clipboard: ${clipboard[1]}`,
             `Clipboard denied: ${clipboard.filter((r) => r === clipboard[1]).length} of ${clipboard.length}`,
             `Picker: ${await settle(() => Picker.pickImages())}`,
+            `Picker files: ${await settle(() => Picker.pickFiles())}`,
             `Open: ${await settle(() => openUrl("https://example.com/docs"))}`,
             `Image size: ${await settle(() => Image.getSize("https://example.com/a.png"))}`,
             `Image prefetch: ${await settle(() => Image.prefetch("https://example.com/b.png"))}`,

@@ -71,6 +71,18 @@ pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "Scroll", Compiled::Host("scroll")),
     ("nsh", "Overlay", Compiled::Host("overlay")),
     ("nsh", "Shader", Compiled::Host("shader")),
+    ("nsh", "ShaderEffect", Compiled::Host("shadereffect")),
+    (
+        "nsh",
+        "ShaderTransition",
+        Compiled::Host("shadertransition"),
+    ),
+    ("nsh", "ScreenEffect", Compiled::Host("screeneffect")),
+    (
+        "nsh",
+        "ScreenTransition",
+        Compiled::Host("screentransition"),
+    ),
     ("nsh", "Image", Compiled::Host("image")),
     ("nsh", "WebView", Compiled::Host("webview")),
     ("nsh", "Video", Compiled::Host("video")),
@@ -300,7 +312,10 @@ fn decode_entities(s: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+        // Search the bytes rather than slice the text: byte 12 may fall
+        // inside a character (`& 中文测试`). `;` is ASCII, so its index is a
+        // character boundary, which the slices below rely on.
+        let Some(end) = rest.bytes().take(12).position(|b| b == b';') else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -1396,6 +1411,24 @@ mod tests {
     /// The code with whitespace collapsed, for comparisons.
     fn flat(code: &str) -> String {
         code.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn entities_beside_multibyte_text_decode() {
+        // Slicing 12 bytes after an `&` could split a character: it panicked.
+        assert_eq!(decode_entities("A & 中文测试"), "A & 中文测试");
+        assert_eq!(decode_entities("&中文测试试&amp;"), "&中文测试试&");
+        assert_eq!(
+            decode_entities("&amp;中文 &lt;b&gt; &#x4e2d;"),
+            "&中文 <b> 中"
+        );
+        assert_eq!(decode_entities("日本&"), "日本&");
+        let code = compile(
+            r#"import { Text } from "nsh";
+            export const a = <Text>A & 中文测试</Text>;"#,
+        )
+        .unwrap();
+        assert!(code.contains("A & 中文测试"), "{code}");
     }
 
     #[test]

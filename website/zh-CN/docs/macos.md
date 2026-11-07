@@ -50,12 +50,16 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 
 `--window-size` 是窗口的初始尺寸（TSX 应用）；窗口可以调整大小。`--display <n>`（`nsh run` / `nsh test --target macos --display <n>`）让窗口在第 `n` 个显示器上居中打开：`1` 是主显示器，即带菜单栏的那个。
 
-`nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试，有副显示器时窗口开在副显示器上（主屏留给你用；`--display <n>` 可以另选）：测试打开的每个应用都有自己的窗口，尺寸就是测试要求的尺寸，显示器比窗口矮时也一样；步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。
+`nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试，有副显示器时窗口开在副显示器上（主屏留给你用；`--display <n>` 可以另选）：测试打开的每个应用都有自己的窗口，尺寸就是测试要求的尺寸，显示器比窗口矮时也一样；步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里（`--foreground` 让它们成为当前活跃的应用）。
 
 ### 性能监视器
 
 `--fps`（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`，嵌入时用 `AppView::set_fps_monitor(true)`，
-以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`）会在应用右上角显示一个每秒刷新两次的面板：
+以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`、环境变量
+`NSH_FPS=1`，或应用自己调用 `setFpsEnabled(true)`）会在应用右上角显示一个每秒刷新两次的面板。打包后的 TSX 应用也可以在
+`Info.plist` 中把 `NSHPerformanceMonitor` 设为 `true`，这样无论从哪里打开应用都会显示面板。通过 `nsh.json` 的
+`macos.infoPlist` 添加这个键（见[打包](./packaging.md#infoplist-键与-entitlements)）。打包应用也可以从 `Info.plist` 的
+`LSEnvironment` 取得 `NSH_FPS`。
 
 | 行 | 测量内容 |
 |---|---|
@@ -134,6 +138,8 @@ view.load(Bundle::source(code).into());
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
+`AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
+
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
@@ -149,7 +155,10 @@ view.load(Bundle::source(code).into());
 设置 `AppOptions { keep_alive_on_close: true, ..Default::default() }` 可以在关闭窗口后保留独立应用的会话。
 关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
-`nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
+应用自己的代码用 `nsh_core::element::desktop::quit()`（TS：`Application.quit()`）以同样的方式退出，而
+`current_window().close()`（`nsh_core::element::desktop`）遵循所选的窗口关闭策略。
+`nsh_core::element::desktop::restart()`（TS：`Application.restart()`）以同样的方式退出，进程结束后由 `run_app`
+以相同的参数重新启动应用：`.app` 包里的应用通过 Launch Services（`open -n`）打开，与用户打开它时相同。
 
 ## macOS 上的差异
 
@@ -162,6 +171,14 @@ Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
 `AlertDialog` 以 `NSAlert` 表单的形式显示在窗口上：不超过两个操作的提示框操作排成一行（取消操作在最左边，最后一个普通操作是
 Return 的默认操作）；更多操作以及操作表的操作按顺序竖排，取消操作在最后，没有默认操作；Escape 选择取消操作。
+
+### 表格无障碍
+
+VoiceOver 和 UI 自动化工具将 `Table` 和 `Grid` 读取为 `AXTable`，将 `Row` 读取为 `AXRow`，将 `Cell` 和
+`ColumnHeader` 读取为 `AXCell`。表格会提供已挂载的行和列、可见的行和单元格，以及表头。
+行和单元格的索引按树中的顺序从零开始，包含表头行，每个单元格占一行一列。
+表格、列和单元格都关联到相应的列标题。带有 `onPress` 的行保留按压操作和行角色，
+无障碍客户端仍可读取标签和文本子元素。
 
 ### 键盘
 

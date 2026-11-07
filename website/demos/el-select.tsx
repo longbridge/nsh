@@ -1,6 +1,6 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
-import { Button, type OpenChangeReason, Select, type SelectGroup, type SelectItemState, Switch } from "nsh/base";
-import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, tint, ui } from "./palette";
+import { type JSX, mount, signal, Text, token, View } from "nsh";
+import { Button, type OpenChangeReason, Select, type SelectEntry, type SelectGroup, Switch } from "nsh/base";
+import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
 // Two selects in a settings card: a plain one (typeahead jumps by letter)
 // and a searchable one with sections, a disabled item and an empty state.
@@ -52,24 +52,26 @@ const surface = () =>
     ? { ...ui().card, borderRadius: 12, padding: 4 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30, maxHeight: "70%" as const };
 
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+const backdrop = () => ({ backgroundColor: token("scrim") });
 
 /** The trigger: the shared button's look, the chosen title at the start and a chevron in a lane as wide as it. */
 function Trigger(props: { title?: string; placeholder: string; open: boolean; disabled?: boolean; clearable?: boolean }) {
   const look = button("secondary", {
+    disabled: () => !!props.disabled,
     style: () => ({
       flexDirection: "row",
       justifyContent: "space-between",
       gap: 8,
       ...(desktop ? { width: 260 } : {}),
-      // Open: the border stays lit while the list is up; disabled, dimmed.
+      // Open: the border stays lit while the list is up. Disabled, dimmed
+      // here: the select is disabled, not this view, so its `disabledStyle`
+      // does not apply.
       ...(props.open ? { borderColor: ui().faint } : {}),
       ...(props.disabled ? { opacity: 0.4 } : {}),
     }),
   });
   return (
-    // No hover while disabled.
-    <View {...look} hoverStyle={props.disabled ? undefined : look.hoverStyle}>
+    <View {...look}>
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: props.title ? ui().text : ui().muted }}>
         {props.title ?? props.placeholder}
       </Text>
@@ -91,34 +93,32 @@ function Trigger(props: { title?: string; placeholder: string; open: boolean; di
   );
 }
 
-/** A row: the title, a quieter detail at the end, the check in its own lane. */
-function Row(props: { item: SelectItemState; detail?: string }) {
+/**
+ * A row's look, on the row itself (`itemClass`): the accent tint while
+ * highlighted (the keys or the pointer, as the menus' rows), dimmed while
+ * disabled. The states are the row's classes (`group`), so the list draws a
+ * row's content once per item and the highlight moves without drawing.
+ */
+const rowClass =
+  "group rounded-lg border border-transparent transition-colors duration-100 motion-reduce:transition-none " +
+  "focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-40";
+
+/**
+ * A row's content: the title (bolder while chosen), a quieter detail at the
+ * end, the check in its own lane (`group-selected:`).
+ */
+function Row(props: { item: SelectEntry; detail?: string }) {
   return (
-    <View
-      style={{
-        height: size.rowSm,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 8,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: "transparent",
-        opacity: props.item.disabled ? 0.4 : 1,
-        // Highlighted (the keys or the pointer): the accent tint, as the menus' rows.
-        ...(props.item.highlighted ? { backgroundColor: tint(ui().accent, 0.08), borderColor: tint(ui().accent, 0.24) } : {}),
-      }}
-    >
-      <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, fontWeight: props.item.selected ? "600" : "400", color: ui().text }}>
+    // The row's 1-point border on each side.
+    <View style={{ height: size.rowSm - 2, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 7 }}>
+      <Text class="font-normal group-selected:font-semibold" style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: ui().text }}>
         {props.item.title}
       </Text>
       <If when={props.detail}>
         <Text style={{ fontSize: 12, color: ui().faint }}>{props.detail}</Text>
       </If>
-      <View style={{ width: 16 }}>
-        <If when={props.item.selected}>
-          <CheckMark size={16} tint={ui().accent} />
-        </If>
+      <View class="opacity-0 group-selected:opacity-100" style={{ width: 16 }}>
+        <CheckMark size={16} tint={ui().accent} />
       </View>
     </View>
   );
@@ -174,7 +174,7 @@ function App() {
               <Button
                 disabled={region() === null}
                 onPress={() => region.set(null)}
-                {...button("secondary", { size: "sm", style: { marginTop: 6 } })}
+                {...button("secondary", { size: "sm", disabled: () => region() === null, style: { marginTop: 6 } })}
               >
                 <Text style={buttonText("secondary", { size: "sm" })}>Clear region</Text>
               </Button>
@@ -184,10 +184,7 @@ function App() {
                 class={`-mx-2 mt-1 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
-                trackStyle={locked() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
-                thumbStyle={locked() ? { backgroundColor: ui().onAccent } : ui().raised}
+                {...switchLook(() => locked())}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Region disabled</Text>
               </Switch>
@@ -210,8 +207,8 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              backdropStyle={backdrop()}
+              itemClass={rowClass}
               trigger={<Trigger title={titleOf(LANGUAGES, language())} placeholder="Choose a language" open={languageOpen()} />}
               renderItem={(item) => <Row item={item} />}
             />
@@ -229,6 +226,7 @@ function App() {
               accessibilityLabel="Region"
               searchable
               searchPlaceholder="Search regions"
+              searchAccessibilityLabel="Search regions"
               searchClass={`${desktop ? "text-sm" : "text-base"} placeholder:text-[${ui().faint}] text-[${ui().text}]`}
               searchStyle={{ ...ui().inset, borderRadius: 8, height: size.control, paddingHorizontal: 8, marginBottom: 4 }}
               empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 13, color: ui().muted }}>No region matches</Text>}
@@ -236,8 +234,8 @@ function App() {
               margin={8}
               // Wider than the trigger on the desktops: the titles and their codes side by side.
               popupStyle={desktop ? { ...surface(), width: 340 } : surface()}
-              backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              backdropStyle={backdrop()}
+              itemClass={rowClass}
               // As wide as the trigger, so the clear button lands over its end.
               style={desktop ? { width: 260 } : undefined}
               cleanable

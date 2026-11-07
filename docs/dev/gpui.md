@@ -95,14 +95,26 @@ import -window root -display :170 whole.png        # the display, if the window'
 ```
 
 - With `DISPLAY` set, `nsh test` starts the host without `WAYLAND_DISPLAY`, which makes GPUI use X11: screenshots
-  read the window back from the X server (`GetImage`), and web views only embed in X11 windows.
+  read a redirected window pixmap from the X server (X Composite 0.2 or later), and web views only embed in X11 windows.
+  Automatic redirection starts before requesting a fresh GPUI frame; after it is presented, capture names the current
+  backing pixmap and reads that with `GetImage`. A covering window cannot replace the captured pixels. The screenshot
+  connection releases the pixmap and its redirection on drop, including on errors. Resizing is safe because each shot
+  names the pixmap after drawing.
+- Linux's GPUI Fast 0.1.13 window does not implement `render_to_image`; its renderer and scene are private, so NSH
+  cannot use the macOS / Windows offscreen path. Pure Wayland screenshots remain unsupported; use an isolated Xvfb
+  or Xwayland `-shm` display. The X server must support Composite; capture reports an error otherwise. This captures
+  X11 child windows (including embedded web views), rather than only GPUI's scene.
 - `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a screenshot waits for the blanks the last frame
   waits for (about 3 s each); with `-shm` frames are copied in as GPUI presents them.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: where WebKit cannot allocate GBM buffers ("Failed to create GBM buffer" in the
   log, common under Xwayland), pages stay black without it.
 - A tiling window manager tiles the rootful Xwayland window and its root shrinks with it: make it float at its full
   size (Hyprland: `hyprctl dispatch` float, resize and move it to a special workspace).
+- The covered-window and resize regression test runs on a real X server:
+  `xvfb-run -a cargo test --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-platform-gpui --features dev screenshot_keeps_obscured_pixels_and_follows_resize -- --ignored`.
 - GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
+
+A fully covering window does not change the gallery capture: `app.screenshot` while covered is byte-identical to its unobscured capture.
 
 ## Architecture
 
@@ -139,6 +151,16 @@ import -window root -display :170 whole.png        # the display, if the window'
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
+  A window that is not presented (minimized, hidden, a suspended Wayland toplevel) or a surface whose view is not
+  rendered gets no frames, yet what changes the app's state when an animation ends still happens on time: a
+  transition detaching its view, a screen or modal settling with `onShow` / `onDismiss`, an animation's `finished`, a
+  scroll's end. Each frame client tells its next such deadline (`Next::At`, from the core's `Animator::deadline`,
+  `Live::deadline`, `Transitions::deadline` and `scroll::deadline`), and the surface keeps the earliest with one
+  `rt::after_ms` timer 50 ms past it (`Surface::keep_deadline`): if no tick ran since it came due, the timer runs the
+  same tick outside the paint (nothing in it needs the window; what it changes is drawn when the window shows again)
+  and schedules the next. A batch applied while frame clients run is due at once, as it may have moved what they
+  reported. While frames come they always tick first and the timer only schedules on; what only draws (an endless
+  loop, a fade, a shader, a JS frame request) gives no deadline, so a hidden window with a spinner does no work.
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
@@ -157,8 +179,9 @@ import -window root -display :170 whole.png        # the display, if the window'
   window itself (its bounds, a GPUI Kit `Root` around the view) calls `AppView::own_window` in the window's build
   closure, best with the window opened with `titlebar_options`: the app's title, title bar, application menu and window
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
-  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Window.close()`, the close
-  button) to the host, which quits or closes when it is ready (after saving, say). `AssetBase::Directories` looks
+  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `WindowRef.close()`, the close
+  button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
+  nothing here, restarting is the host's. `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
@@ -174,35 +197,61 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 | Area | Module | GPUI |
 |---|---|---|
-| Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place) |
+| Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place); `fontFamily` lists: the first installed candidate is the font's family, the others its `FontFallbacks`, before `TEXT_FALLBACKS` |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). A `drop-shadow()` filter's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
 | Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
-| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view and kept on horizontal views with `scrollbar={false}` (as on Linux); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
+| Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
+| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
 | Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onMouseEnter` / `onMouseLeave` / `onMouseMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
-| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer; Cmd on macOS where Ctrl is used elsewhere |
+| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer while its field has the focus of an active window that is presented (a minimized or suspended window keeps the field, its caret still), and on Linux stays shown after 18 blinks (GTK's `gtk-cursor-blink-timeout` of 10 s) until the next edit, caret move or focus change; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
 | Alerts (`AlertDialog`) | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
 | Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws NSH's own bar |
 | Web views | `native/web.rs` | Feature `webview`: wry. Linux: WebKitGTK 4.1 on GTK 3 (X11 only: GPUI must run on X11 or Xwayland) in a GPUI Fast native composition surface (an X11 child window) sized to the visible part of its view, GTK's loop pumped from GPUI's; macOS / Windows: wry's `WKWebView` / WebView2 child at the view's box |
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
-| Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions; the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
-| Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0 |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Window.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access |
+| Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions, a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`) in the order they are on screen (as Tab: a list's recycled cells are not in their rows' order); the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
+| Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0. The app's state (`lifecycle()`) from the window's activation and visibility (`observe_window_activation`, `observe_window_visibility`): `background` while the surface's window is not presented (`WindowVisibility::Hidden`), `active` while one of the windows showing a surface is the active one, `inactive` otherwise. The preferred languages (`localeSettings()`'s `languages`): `GetUserPreferredUILanguages` on Windows, `CFLocaleCopyPreferredLanguages` on macOS, gettext's `LANGUAGE` / `LC_ALL` / `LC_MESSAGES` / `LANG` with their fallbacks on Linux. The regional preferences (`localeSettings()`'s `hourCycle` and the like), over the region's (`LocaleSettings::parse`): on macOS the hours of `CFDateFormatterCreateDateFormatFromTemplate`'s `j` format, `CFCalendar`'s first weekday, `kCFLocaleMeasurementSystem` and the `AppleTemperatureUnit` preference; on Windows the regional format's `LOCALE_STIMEFORMAT`, `LOCALE_IFIRSTDAYOFWEEK` and `LOCALE_IMEASURE`; on Linux the regions of `LC_TIME` (times, weeks) and `LC_MEASUREMENT` (units), with the settings portal's `clock-format` (`org.gnome.desktop.interface`, live) over the hour cycle. The time zone (`localeSettings()`'s `timeZone`) as the native backends name it: on Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its IANA name from the ICU Windows ships (loaded at run time), elsewhere the zone `TZ` names when it names one (`GMT`, `Europe/Berlin`; a POSIX rule such as `JST-9` names none: `TimeZone::posix`), else the zone `/etc/localtime` links to (else `/etc/timezone`); read again whenever a window becomes the active one (GPUI reports no change of it). |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Menu.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access. A menu item's `icon` (`menus.rs`: not the bar's titles) draws in those rows, in a column of its own that moves a level's labels; it loads when its level first shows and comes in with a redraw, an SVG painted in the row's text color and a bitmap as it is. GPUI's native menu bar on macOS shows none, as `gpui::MenuItem` has no image |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
+| File drops | `file_drop.rs` | GPUI makes a drag from another application an internal drag of `ExternalPaths` that only its own elements hear, and the surface's hitbox blocks the mouse for those behind it: while a drag is active the `AppView` lays a layer over the surface whose drag moves and drop pick the destination (the closest `onFileDrop` listener under the pointer, within its modal: `input::file_drop_target`) and deliver absolute paths as `file:` URLs; moving between destinations leaves one and enters the next, and leaving the window, dropping, removal or disablement clear it. The first report after a drag enters is the platform's next move (the layer comes with the drag's frame) |
 | Networking | `nsh_engine::net` | ureq, the stack Windows and Linux use |
 | Dev | `dev.rs` | `AppView::connect_dev_server` (also what `AppSource::DevServer` runs): the dev client on its own thread (reconnecting with a backoff); its events, runtime errors and the reload key drained by a foreground task of the view, which ends when the view connects again; the status line and the error overlay are GPUI elements over the surface; the surface reports errors to the overlay and to the embedding app's `on_error` alike |
 
 ## Frame statistics: `--fps`
 
-`nsh-gpui-host --fps` (`AppOptions::fps`, `AppView::set_fps_monitor` for embedders) logs one `nsh::perf` line a
+`nsh-gpui-host --fps` (`AppOptions::fps`, `NSH_FPS=1`, `AppView::set_fps_monitor` for embedders, the app's `setFpsEnabled`) logs one `nsh::perf` line a
 second (`stats.rs`): `fps 145 active 0/145 gap … tick … paint … canvas 0.04 paths 26.0 raf 145 notifies 0`. Frames
 drawn and how many of them GPUI counted active (unfocused windows run at 30 fps unless `inactive_frame_interval` is
 `None`), the gaps between frames, the animation tick (prepaint) and the tree's paint (milliseconds as
 mean/p50/p95/max), the paint's milliseconds rasterizing canvases and its paths per frame (each batch of paths is a
 viewport-sized MSAA pass for GPUI), the animation frames requested and the notifies sent (what made GPUI draw). GPUI's
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
-real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
+real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks (its
+animations' ends are kept by a timer instead, above).
+
+## Idle windows
+
+A window with nothing animating draws no frames and NSH's threads sleep: the engine thread waits on its channel, the
+main thread on GPUI's event loop, and nothing NSH schedules runs again on its own (the caret's timer stops when its
+window is inactive or hidden, and on Linux after its blinks; a hidden window's animations wake it only at their ends,
+above). Measured on Linux (voluntary context switches
+per thread, `/proc/<pid>/task/*/status`, an app showing static text, `nsh-gpui-host --bundle`, software Vulkan):
+
+- Wayland: about 4 a second, all of them the two idle threads of the `blocking` crate's pool (a dependency of
+  GPUI's and zbus' async I/O; 1.7 keeps idle threads, each waking every 500 ms). GPUI Fast's Wayland windows ask
+  for frames only while they are invalidated or have a next-frame callback, and a suspended toplevel gets none.
+- X11: GPUI's main thread wakes at the refresh rate (about 64 a second under Xvfb) with nothing drawn: GPUI Fast's
+  X11 client runs a periodic timer per visible window (`X11Client::start_refresh_loop`, `RefreshState::PeriodicRefresh`)
+  that asks the window for a frame on every tick, and GPUI skips the draw when nothing is invalid. Nothing in NSH
+  can stop it; it stops while the window is unmapped or obscured.
+- Driver threads: with NVIDIA's driver installed its Vulkan ICD loads (wgpu enumerates every adapter) and starts
+  threads that wake about 115 times a second (`libnvidia-glcore`), whichever adapter draws.
+
+A frame costs more than its main-thread wakeup: under lavapipe each one wakes the four `llvmpipe` threads and the
+renderer's (about 30 wakeups a frame), so an app that changes once a second wakes about 35 times a second, and a
+blinking caret about 65. Check an app's idle cost with `--fps` (no `nsh::perf` line while nothing is drawn) and the
+per-thread counts above.
 
 ## Checking a change: `nsh test --target gpui`
 
@@ -217,9 +266,9 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 comes before the first bundle.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
-again, whatever covers it. On Linux GPUI cannot read a frame back, so the window is read from the X server: the host
-runs under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a window covering this one
-shows in the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
+again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
+pixmap after requesting a fresh frame. The host runs under X11 or Xwayland (see "Looking at a change on Linux");
+covering windows do not affect the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
 and Windows.
 
 ## Not implemented, or different
@@ -237,6 +286,9 @@ and Windows.
   narrower for `maxWidth`, gradients paint it in their middle color, `strokeText` fills, its shadows are not blurred,
   composite operations and `clearRect` do not apply to it.
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored.
+- **Shader effects and transitions**: only shader fills draw (GPUI has no offscreen passes to picture children
+  in): an effect's or a transition's children show as they are and a transition changes them at once, a screen effect
+  or transition draws nothing, and pages and dialogs with `transitionShader` come and go as they would without it.
 - **Video** needs feature `video`, which is built on Linux only (GStreamer); on macOS and Windows a video is a neutral
   placeholder reporting `onError`. Rounded clips do not cut the picture; audio-only sources show nothing.
 - **Web views** sit above everything GPUI draws at their place (NSH content drawn over one is under it) and are
@@ -244,7 +296,7 @@ and Windows.
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
-- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.9 uses it): the adapters pass on only `Click`, `Focus`,
+- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.13 uses it): the adapters pass on only `Click`, `Focus`,
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
@@ -264,13 +316,27 @@ and Windows.
 - **Dev logs** (feature `dev`): the log forwarder is per process (`dev.rs`' `CLIENT` / `CONNECTED`), so with several
   `AppView`s connected to dev servers every view's logs go to the most recent session.
 
-### Programmatic window frame and level
+### Windows
 
-The host chooses window bounds and level when opening a GPUI window.
-`Window.setFrame` and `Window.setLevel` commands leave those host settings intact.
+The main window is the one the surface fills (`chrome.rs`): the window protocol's attributes and requests on the
+root node act on it when the surface is standalone (`open_app_window`, `run_app`, `AppView::own_window`); an
+embedded view leaves its host's window alone. Runners read the app's `window` options (`bundle.main_window`) before
+they open it, so its first frame has them, and open it where it was kept with `restoreBounds`.
 
-`Window.orderFront` activates a standalone window through a main-thread
-window update, including while it is minimized and no frames are drawn. macOS
-restores miniaturized windows before activation; Windows restores minimized
-windows through GPUI. Linux window managers decide whether to grant activation.
-Embedded views leave window activation to their host.
+Windows of the app's own (`<Window>`, `Window.open`) are GPUI windows the backend opens itself (`window.rs`): its
+built-in window backend, which a host replaces with `AppOptions::windows`. Each shows one root of the app's single
+engine; its input, focus, keys, drawing, accessibility tree, native components and web views run in that window,
+popups and dialogs opened in it show in it, and it shows with its first frame. Kinds map
+to GPUI's: `normal` and `dialog` to a normal window (a dialog belongs to its parent, a modal one holds the
+parent's input), `panel` to a floating one, `popup` and `overlay` to a pop-up one. The attributes and requests GPUI
+has calls for go through GPUI; the others go to the native window under it (`window/native.rs`: AppKit's window
+on macOS, the Win32 window on Windows; levels, workspaces, showing and hiding, moving, ownership and the like). The
+close, Escape and blur policies are answered on the main thread; states, close presses and title bar areas are
+reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
+on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
+buttons and the frame's edges.
+
+What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
+workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; hiding minimizes);
+Windows keeps the title bar a window opened with and applies size limits when the window opens; progress shows
+nowhere; close presses from the taskbar, the system menu or Alt+F4 are reported as the close button's.

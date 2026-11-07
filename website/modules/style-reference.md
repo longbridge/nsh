@@ -361,7 +361,7 @@ const angle = createAnimatedValue(0);
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`, `.brightness(…)`, `.contrast(…)`, `.grayscale(…)`, `.hue_rotate(…)`, `.invert(…)`, `.saturate(…)`, `.sepia(…)` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`. |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`, `.backdrop_brightness(…)`, ... | CSS filters of what is behind the view, such as `"blur(10px)"` for frosted glass. |
-| `maskImage` | `string` | | A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included. |
+| `maskImage` | `string` | | A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. Not drawn on Windows and GPUI. |
 | `glassEffect` | `"none" \| "regular" \| "clear"` | `.glass_effect(GlassEffect::Regular)` | Liquid Glass behind the view's content on iOS 26 and macOS 26 and later. `"regular"` uses the standard material; `"clear"` takes less color from the background. `"none"` is the default. Pair with `backdropFilter` for the blur shown on earlier iOS versions and other platforms. |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | How the view blends with what is behind it. |
 
@@ -410,6 +410,7 @@ Built-in keyframe animations, run natively (Tailwind's `animate-*`).
 | `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | Delay before the first iteration. |
 | `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | The easing curve. |
 | `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | How many times it runs. |
+| `animationFrameRate` | `number` | `.animation(KeyframeAnimation { … })` | The highest frame rate it needs, in Hz (default: the screen's highest); macOS and iOS lower the screen's rate for it. |
 
 For animations driven by values, gestures or springs, use [`nsh`'s animation API](./nsh.md#animation) instead.
 
@@ -417,7 +418,7 @@ For animations driven by values, gestures or springs, use [`nsh`'s animation API
 
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...` (every CSS cursor keyword, and `"none"`) | `.cursor(Cursor)`, `.cursor_pointer()` | The pointer shape over the view, for pointers (iPad trackpads, Mac Catalyst, desktops). |
+| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...` (every CSS cursor keyword, and `"none"`) | `.cursor(Cursor)`, `.cursor_pointer()` | The pointer shape over the view, for pointers (iPad trackpads, Mac Catalyst, desktops). Diagonal resize keywords keep their axis: `nwse-resize` / `nw-resize` / `se-resize` (`Cursor::NwseResize`) and `nesw-resize` / `ne-resize` / `sw-resize` (`Cursor::NeswResize`). Windows, Linux, Android, the web and GPUI show diagonal cursors; AppKit uses them on macOS 15+, with an open hand on macOS 14. UIKit uses pointer effects on iPad and Mac Catalyst. |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `.pointer_events(PointerEvents::BoxNone)` | Which touches the view and the views in it take (`pointer-events-none`, `pointer-events-auto`). `"none"`: none, for the views in it too unless one sets `"auto"`, inherited as in CSS. `"box-none"`: none on the view itself, the views in it take theirs; `"box-only"`: the view itself takes them, the views in it none (both React Native's, for the view only). Default `"auto"`. See [touch and gestures](../docs/touch-and-gestures.md#pointerevents). |
 | `userSelect` | `"auto" \| "none" \| "text"` | `.select_text()`, `.select_none()` | Whether a `<Text>` can be selected and copied (`"text"`, `select-text`) or not (`"none"`, `select-none`); a view's reaches the texts in it that set none. `"auto"` (`select-auto`), the default, leaves it to the view around it, else to the platform. See [text](../elements/text.md). |
 
@@ -444,7 +445,7 @@ Text styles apply to `<Text>` and `<Input>`. They are also inherited, as in CSS:
 | `color` | `ColorValue \| AnimatedNode` | `.text_color(c)`, `.bind_color(&node)` | Text color. Takes a native animated color. Also the color of borders and outlines that set none. |
 | `fontSize` | `number` | `.text_size(s)`, `.text_sm()`, `.text_lg()`, ... | Size in points. |
 | `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `.font_weight(FontWeight::SEMIBOLD)` | `"normal"` (400), `"bold"` (700) or 100–900. |
-| `fontFamily` | `string` | `.font_family(name)` | A system family, or the name an imported font evaluates to (`import Inter from "./Inter.ttf"`). See [Fonts](../docs/fonts.md). |
+| `fontFamily` | `string` | `.font_family(name)` | A system family, or the name an imported font evaluates to (`import Inter from "./Inter.ttf"`), or a list of them, most preferred first (`"Brand, 'Noto Sans SC', sans-serif"`). See [Fonts](../docs/fonts.md#fallback-lists). |
 | `fontStyle` | `"normal" \| "italic"` | `.italic()` | Italic. |
 | `fontVariant` | `FontVariantName[] \| string` | `.small_caps()`, `.oldstyle_nums()`, `.lining_nums()`, `.tabular_nums()`, `.proportional_nums()` | OpenType number and letter forms, a list (`["tabular-nums"]`) or CSS's names separated by spaces (`"tabular-nums small-caps"`). `tabular-nums` keeps digits the same width, useful for counters and timers. |
 

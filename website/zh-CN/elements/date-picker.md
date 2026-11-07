@@ -112,7 +112,7 @@ mount(App);
 
 - 单个日期：按下某一天会设置值并关闭弹出层。
 - 在 `range` 时，第一次按压开始范围，第二次结束范围，与[日历的](./calendar.md#value)相同；完整的范围设置值并关闭弹出层。
-- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期；再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同；再次打开面板即可设置时间。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法。
+- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期；再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同；再次打开面板即可设置时间。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法，与 [TimeField](./time-field.md) 的相同，包括用户的。
 
 `cleanable` 会在有值时加一个清除按钮：按下它会清除值（`onChange({ value: null })`）。这个按钮在触发元素之后，不在它里面，所以按它不会打开弹出层；由应用摆放并填充内容（`clearButton`），和[选择框的清除按钮](./select.md#value)一样。
 
@@ -158,7 +158,7 @@ mount(App);
 | `presetClass`、`presetStyle` | `.preset_class(..)`、`.preset_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个预设按钮。 |
 | `calendarClass`、`calendarStyle` | `.calendar_class(..)`、`.calendar_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 日历。 |
 | `headerClass` … `itemStyle` | 同 `Calendar` | 同 `Calendar` | 无 | 日历的头部、主体、各月、各行和各条目。 |
-| `renderItem` | `.render_item(..)` | `(item: CalendarItemState) => JSX.Element` | 无 | 由应用绘制的日历条目。 |
+| `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | 无 | 由应用根据条目本身绘制的日历条目；状态是条目的类，与 `Calendar` 的相同。 |
 | `timeClass`、`timeStyle` | `.time_class(..)`、`.time_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 时间行：开头是它的标签，末尾是输入框。 |
 | `timeLabel` | `.time_label(..)` | `JSX.Element` | 无 | 时间行在输入框前显示的内容。 |
 | `timeFieldClass`、`timeFieldStyle` | `.time_field_class(..)`、`.time_field_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 时间输入框。 |

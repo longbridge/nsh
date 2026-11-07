@@ -33,7 +33,7 @@
 //! pushed again). Without a composition, `realize` is one test of an
 //! `Option`: the frame is the one swap chain, as before.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use nsh_core::{
     BlendMode, Bounds, Color, Points, ViewKind,
@@ -397,6 +397,22 @@ impl<'a> DrawCx<'a> {
         if let (Err(err), Some(split)) = (ended, &mut self.split) {
             split.error.get_or_insert(err);
         }
+    }
+
+    /// Runs `f`, which draws a picture rather than the window (a shader's
+    /// content): the composed items (web views) it reaches are left out.
+    /// Their pages are not in the picture, so they are not placed (hidden,
+    /// [`crate::surface::Surface::composed_placed`]) and what follows
+    /// starts no layer above them.
+    pub(crate) fn uncomposed<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let len = self.composed.len();
+        let pending = self.split.as_ref().map(|s| s.pending);
+        let r = f(self);
+        self.composed.truncate(len);
+        if let (Some(split), Some(pending)) = (&mut self.split, pending) {
+            split.pending = pending;
+        }
+        r
     }
 
     /// Takes the composed items a nested pass reached (in window
@@ -785,11 +801,12 @@ fn paints_one_shape(view: &NshView, state: &ViewState) -> bool {
 }
 
 /// Where a view paints itself (not its children), in its coordinates: its
-/// bounds, out by its shadows and outline, and the items it hosts.
+/// bounds, out by its shadows, outline and shader's overflow (an effect's
+/// frames reach beyond its box), and the items it hosts.
 fn own_area(state: &ViewState) -> D2D_RECT_F {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     // A point more for the antialiased edges.
-    let o = crate::decor::outset(state) + 1.0;
+    let o = crate::decor::outset(state).max(crate::shader::overflow(state)) + 1.0;
     let mut area = D2D_RECT_F {
         left: -o,
         top: -o,
@@ -862,7 +879,7 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
     let state = view.state();
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     // A point more for the antialiased edges.
-    let o = crate::decor::outset(&state) + 1.0;
+    let o = crate::decor::outset(&state).max(crate::shader::overflow(&state)) + 1.0;
     let mut area = D2D_RECT_F {
         left: -o,
         top: -o,
@@ -910,6 +927,7 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
 /// bounds, the children, the hosted items, the scroll indicator, the
 /// border and outline.
 pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
+    crate::shader::take_backdrop(cx, view);
     let state = view.state();
     crate::decor::draw_backdrop(cx, &state);
     crate::decor::draw_background(cx, &state);
@@ -934,27 +952,31 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         cx.pop();
     }
     let natives = state.natives.clone();
+    let effect = crate::shader::effect(&state);
     drop(state);
-    // Inside a clip (a scroll view's content), children out of sight are
-    // left out: drawing them would issue their commands for nothing.
-    let visible = if clip { cx.visible() } else { None };
-    view.with_children(|children| {
-        for child in children {
-            let origin = {
-                let s = child.state();
-                view.state().child_origin(s.frame, s.shift)
-            };
-            if let Some(visible) = &visible
-                && hidden_by_clips(child, world, origin, visible)
-            {
-                if cx.records {
-                    child.set_painted(None);
+    // An effect's children are its shader's content.
+    if !effect || !crate::shader::draw_effect(cx, view, world) {
+        // Inside a clip (a scroll view's content), children out of sight
+        // are left out: drawing them would issue their commands for nothing.
+        let visible = if clip { cx.visible() } else { None };
+        view.with_children(|children| {
+            for child in children {
+                let origin = {
+                    let s = child.state();
+                    view.state().child_origin(s.frame, s.shift)
+                };
+                if let Some(visible) = &visible
+                    && hidden_by_clips(child, world, origin, visible)
+                {
+                    if cx.records {
+                        child.set_painted(None);
+                    }
+                    continue;
                 }
-                continue;
+                draw_view(cx, child, world, origin);
             }
-            draw_view(cx, child, world, origin);
-        }
-    });
+        });
+    }
     cx.set_transform(world);
     for native in &natives {
         let r = native.rect;
@@ -992,7 +1014,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         cx.realize();
     }
     cx.set_transform(world);
-    crate::scroll::draw_indicator(cx, &state);
+    crate::scroll::draw_indicator(cx, view, &state);
     if clip {
         cx.pop();
     }
@@ -1123,38 +1145,218 @@ fn draw_flat(cx: &mut DrawCx<'_>, view: &mut NshView, base: Mat4) {
     s.fade = saved_fade;
 }
 
+/// Draws with `f` into `target` (a target bitmap of `scale` pixels per
+/// point, cleared first) outside the window's pass: a shader transition's
+/// picture of its children before a batch changes them. False when drawing
+/// failed.
+pub(crate) fn draw_offscreen(
+    surface: &Rc<Surface>,
+    target: &ID2D1Image,
+    scale: f32,
+    f: impl FnOnce(&mut DrawCx<'_>),
+) -> bool {
+    let Ok(gfx) = gfx::get() else { return false };
+    crate::decor::layer::with_context(&gfx, |dc| {
+        // SAFETY: COM calls on a context nobody else draws with; `EndDraw`
+        // follows `BeginDraw`.
+        unsafe {
+            dc.SetTarget(target);
+            dc.SetDpi(96.0 * scale, 96.0 * scale);
+            dc.BeginDraw();
+            dc.SetTransform(&Matrix3x2::identity());
+            dc.Clear(Some(&color_f(Color::TRANSPARENT)));
+        }
+        match DrawCx::with_dc(&gfx, dc, scale, crate::system::dark(surface), surface.now()) {
+            Ok(mut cx) => {
+                // Nothing behind it to read, no window to place items in.
+                cx.offscreen = true;
+                cx.backdrop = false;
+                f(&mut cx);
+            }
+            Err(err) => log::debug!("render: offscreen pass not started: {err}"),
+        }
+        // SAFETY: closes the `BeginDraw` above.
+        unsafe { dc.EndDraw(None, None) }.is_ok()
+    })
+    .unwrap_or(false)
+}
+
+/// A bitmap of `size` pixels Direct2D draws into (`scale` pixels per
+/// point).
+pub(crate) fn target_bitmap(
+    dc: &ID2D1DeviceContext,
+    size: (u32, u32),
+    scale: f32,
+) -> windows::core::Result<ID2D1Bitmap1> {
+    bitmap(dc, size, scale, D2D1_BITMAP_OPTIONS_TARGET)
+}
+
+fn bitmap(
+    dc: &ID2D1DeviceContext,
+    (width, height): (u32, u32),
+    scale: f32,
+    options: windows::Win32::Graphics::Direct2D::D2D1_BITMAP_OPTIONS,
+) -> windows::core::Result<ID2D1Bitmap1> {
+    // SAFETY: a COM call on the live context.
+    unsafe {
+        dc.CreateBitmap(
+            D2D_SIZE_U { width, height },
+            None,
+            0,
+            &D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0 * scale,
+                dpiY: 96.0 * scale,
+                bitmapOptions: options,
+                colorContext: std::mem::ManuallyDrop::new(None),
+            },
+        )
+    }
+}
+
+/// Reads `rect` of `source` (a bitmap of `dc`'s device) back, its rows
+/// packed: premultiplied BGRA.
+pub(crate) fn read_back(
+    dc: &ID2D1DeviceContext,
+    source: &ID2D1Bitmap1,
+    rect: D2D_RECT_U,
+) -> windows::core::Result<Pixels> {
+    let mut once = Readback::default();
+    once.read(dc, source, rect)?;
+    Ok(once.pixels)
+}
+
+/// The bitmaps a picture is drawn into and read back through, and the
+/// pixels it is read into: kept while its size, its scale and the device
+/// stay, so a picture taken again makes no bitmap and allocates nothing.
+/// (Direct2D maps a CPU-readable bitmap only once the copy into it is
+/// done: the read waits for the GPU.)
+#[derive(Default)]
+pub(crate) struct Readback {
+    target: Option<(BitmapKey, ID2D1Bitmap1)>,
+    read: Option<(BitmapKey, ID2D1Bitmap1)>,
+    pixels: Pixels,
+}
+
+/// What a kept bitmap was made for: its size in pixels, its scale (an
+/// `f32`'s bits) and the device generation ([`gfx::generation`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BitmapKey((u32, u32), u32, u64);
+
+impl Readback {
+    /// Its target bitmap: `size` pixels at `scale` pixels per point, made
+    /// again for another size or scale, or after a device loss.
+    pub(crate) fn target(
+        &mut self,
+        dc: &ID2D1DeviceContext,
+        size: (u32, u32),
+        scale: f32,
+    ) -> windows::core::Result<ID2D1Bitmap1> {
+        let key = BitmapKey(size, scale.to_bits(), gfx::generation());
+        if let Some((k, bitmap)) = &self.target
+            && *k == key
+        {
+            return Ok(bitmap.clone());
+        }
+        let bitmap = target_bitmap(dc, size, scale)?;
+        self.target = Some((key, bitmap.clone()));
+        Ok(bitmap)
+    }
+
+    /// `rect` of `source` (a bitmap of `dc`'s device) read back into its
+    /// pixels, rows packed: premultiplied BGRA.
+    pub(crate) fn read(
+        &mut self,
+        dc: &ID2D1DeviceContext,
+        source: &ID2D1Bitmap1,
+        rect: D2D_RECT_U,
+    ) -> windows::core::Result<&Pixels> {
+        let size = (rect.right - rect.left, rect.bottom - rect.top);
+        let key = BitmapKey(size, 1.0f32.to_bits(), gfx::generation());
+        let read = match &self.read {
+            Some((k, bitmap)) if *k == key => bitmap.clone(),
+            _ => {
+                let bitmap = bitmap(
+                    dc,
+                    size,
+                    1.0,
+                    D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                )?;
+                self.read = Some((key, bitmap.clone()));
+                bitmap
+            }
+        };
+        let (width, height) = size;
+        let data = &mut self.pixels.data;
+        data.clear();
+        // SAFETY: COM calls on bitmaps of the live device; the mapped memory
+        // is copied before `Unmap`.
+        unsafe {
+            read.CopyFromBitmap(Some(&D2D_POINT_2U { x: 0, y: 0 }), source, Some(&rect))?;
+            let mapped = read.Map(D2D1_MAP_OPTIONS_READ)?;
+            data.reserve((width * height * 4) as usize);
+            for row in 0..height {
+                let start = mapped.bits.add((row * mapped.pitch) as usize);
+                data.extend_from_slice(std::slice::from_raw_parts(start, (width * 4) as usize));
+            }
+            read.Unmap()?;
+        }
+        self.pixels.width = width;
+        self.pixels.height = height;
+        Ok(&self.pixels)
+    }
+}
+
 /// Draws the surface's window: the whole tree, then presents it.
-pub(crate) fn frame(surface: &Rc<Surface>) {
+///
+/// Returns true when the frame is deferred: the swap chain has no room for
+/// it yet (`SwapChain::ready`), the surface stays invalid and `WM_NSH_PAINT`
+/// comes when it has.
+pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     // Shader views that came into sight render for the frames after it.
     crate::shader::reveal();
-    let Ok(gfx) = gfx::get() else { return };
+    let Ok(gfx) = gfx::get() else { return false };
     let hwnd = surface.hwnd();
     if hwnd.is_invalid() {
-        return;
+        return false;
     }
     let scale = surface.scale();
     let size = surface.pixel_size();
     if size.0 == 0 || size.1 == 0 {
-        return;
+        return false;
     }
     let mut swap = surface.swap.borrow_mut();
     if swap.as_ref().is_some_and(|s| s.stale()) {
         *swap = None;
     }
     if swap.is_none() {
-        match gfx::SwapChain::new(&gfx, hwnd, size) {
+        let base = surface.base.borrow().clone();
+        match gfx::SwapChain::new(&gfx, hwnd, size, base.as_deref()) {
             Ok(s) => *swap = Some(s),
             Err(err) => {
                 log::error!("cannot create the swap chain: {err}");
-                return;
+                return false;
             }
         }
     }
-    let Some(chain) = swap.as_mut() else { return };
+    let Some(chain) = swap.as_mut() else {
+        return false;
+    };
+    chain.set_background(crate::system::window_background(surface));
+    let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
         *swap = None;
-        return;
+        return false;
+    }
+    // A window that is resized draws now (never stretched pixels); the
+    // others wait until the compositor has room, so that no window's
+    // present holds the thread up for another's vblank. The damage stays.
+    if !resized && !chain.ready() {
+        return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
         chain.drop_target();
@@ -1164,7 +1366,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         Ok(t) => t,
         Err(err) => {
             log::error!("cannot get the back buffer: {err}");
-            return;
+            return false;
         }
     };
     // Only a window with web views has a composition: without one the
@@ -1175,10 +1377,20 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
     let damage = surface.take_damage();
     let changed = damage
         .filter(|_| composition.is_none())
-        .map(|rects| merged(pixel_rects(&rects, scale, size)))
-        .filter(|rects| !rects.is_empty());
-    // What the back buffer, two presents old, needs drawn again.
-    let redraw = chain.to_draw(changed.as_deref()).map(merged);
+        .map(|rects| merged(pixel_rects(&rects, scale, size)));
+    // All of it outside the window (an animation scrolled away): the window
+    // already shows this frame, and drawing it whole would cost every frame.
+    if changed.as_ref().is_some_and(Vec::is_empty) && chain.shows_a_frame() {
+        return false;
+    }
+    let changed = changed.filter(|rects| !rects.is_empty());
+    // What the back buffer, two presents old, needs drawn again, with
+    // the whole area of each shader reading what is behind it that this
+    // meets: what it reads is then all this frame's.
+    let redraw = chain.to_draw(changed.as_deref()).map(|rects| {
+        let readers = crate::shader::backdrop_areas(surface);
+        with_backdrops(merged(rects), &pixel_rects(&readers, scale, size))
+    });
     let areas: Option<Vec<D2D_RECT_F>> = redraw.as_ref().map(|rects| {
         rects
             .iter()
@@ -1200,6 +1412,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         false,
         composition.as_deref(),
         areas.as_deref(),
+        None,
     );
     let painted = started.map(|s| s.elapsed());
     match drawn {
@@ -1210,14 +1423,14 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
-                return;
+                return false;
             }
             let shown = std::time::Instant::now();
             if let Err(err) = chain.present(changed) {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
-                return;
+                return false;
             }
             if let (Some(fps), Some(painted)) = (&fps, painted) {
                 fps.painted(painted, shown.elapsed());
@@ -1237,6 +1450,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
             surface.invalidate();
         }
     }
+    false
 }
 
 /// The union of `rects` as one geometry.
@@ -1347,7 +1561,34 @@ fn touching(a: &RECT, b: &RECT) -> bool {
     a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom
 }
 
+/// `rects` (what a partial frame draws, in pixels) with every reader's
+/// area (where a shader reads what is behind it) that they meet, merged,
+/// again until they meet no more: outside the rectangles the back buffer
+/// still holds an earlier frame, the reader's own output of it included.
+fn with_backdrops(mut rects: Vec<RECT>, readers: &[RECT]) -> Vec<RECT> {
+    let mut added = vec![false; readers.len()];
+    loop {
+        let mut grew = false;
+        for (reader, done) in readers.iter().zip(added.iter_mut()) {
+            if !*done && rects.iter().any(|r| overlap(r, reader)) {
+                rects.push(*reader);
+                *done = true;
+                grew = true;
+            }
+        }
+        if !grew {
+            return rects;
+        }
+        // A merge draws the box around what it joins, which may meet a
+        // reader none of its parts met.
+        rects = merged(rects);
+    }
+}
+
 fn device_lost(surface: &Rc<Surface>) {
+    // The pages and dialogs changing through a shader drew with the lost
+    // device: they end at once.
+    crate::navigation::device_lost(surface);
     *surface.swap.borrow_mut() = None;
     if let Some(c) = surface.composition() {
         c.device_lost();
@@ -1366,6 +1607,128 @@ struct Drawn {
     layers: Vec<usize>,
 }
 
+/// A window of the app's own as its frame draws it
+/// ([`crate::app_window`]).
+pub(crate) struct WindowFrame<'a> {
+    /// Its root view.
+    pub(crate) root: &'a NshView,
+    /// Its native window.
+    pub(crate) hwnd: windows::Win32::Foundation::HWND,
+    /// A see-through window's composition, its swap chain at the bottom.
+    pub(crate) base: Option<&'a Composition>,
+    /// The composition its web views are in (the base one, or one over
+    /// its own swap chain).
+    pub(crate) composition: Option<&'a Composition>,
+    /// Its swap chain, and the scale of the chain's target.
+    pub(crate) swap: &'a mut Option<gfx::SwapChain>,
+    pub(crate) target_scale: &'a std::cell::Cell<f32>,
+    /// Its client area in pixels, and its pixels per point.
+    pub(crate) size: (u32, u32),
+    pub(crate) scale: f32,
+    /// The hosted items and the composed items its last frame drew.
+    pub(crate) placed: &'a RefCell<Vec<(Rc<dyn Hosted>, RECT)>>,
+    pub(crate) composed: &'a RefCell<Vec<Rc<dyn Hosted>>>,
+}
+
+/// Draws a window of the app's own whole, then presents it: its web
+/// views between the layers of its composition, its hosted items' own
+/// windows placed where their views were drawn.
+///
+/// Returns true when the frame is deferred, as the main window's
+/// ([`frame`]).
+pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> bool {
+    let WindowFrame {
+        root,
+        hwnd,
+        base,
+        composition,
+        swap,
+        target_scale,
+        size,
+        scale,
+        placed,
+        composed,
+    } = frame;
+    let Ok(gfx) = gfx::get() else { return false };
+    if size.0 == 0 || size.1 == 0 {
+        return false;
+    }
+    if swap.as_ref().is_some_and(|s| s.stale()) {
+        *swap = None;
+    }
+    if swap.is_none() {
+        match gfx::SwapChain::new(&gfx, hwnd, size, base) {
+            Ok(s) => *swap = Some(s),
+            Err(err) => {
+                log::error!("cannot create a window's swap chain: {err}");
+                return false;
+            }
+        }
+    }
+    let Some(chain) = swap.as_mut() else {
+        return false;
+    };
+    // Its own background (its scheme, see-through or not).
+    chain.set_background(crate::app_window::background(surface, root.id()));
+    let resized = chain.size != (size.0.max(1), size.1.max(1));
+    if let Err(err) = chain.resize(&gfx, size) {
+        log::error!("cannot resize a window's swap chain: {err}");
+        *swap = None;
+        return false;
+    }
+    // As the main window's ([`frame`]): resized, it draws now; otherwise it
+    // waits until its swap chain has room.
+    if !resized && !chain.ready() {
+        return true;
+    }
+    if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {
+        chain.drop_target();
+    }
+    let target = match chain.target(&gfx, scale) {
+        Ok(t) => t,
+        Err(err) => {
+            log::error!("cannot get a window's back buffer: {err}");
+            return false;
+        }
+    };
+    let window = Some((root, size));
+    match draw_into(
+        surface,
+        &gfx,
+        &target,
+        scale,
+        false,
+        composition,
+        None,
+        window,
+    ) {
+        Ok(drawn) => {
+            if let Some(c) = composition
+                && let Err(err) = c.present(drawn.layers.len())
+            {
+                log::warn!("present failed: {err}");
+                *swap = None;
+                device_lost(surface);
+                return false;
+            }
+            if let Err(err) = chain.present(None) {
+                log::warn!("present failed: {err}");
+                *swap = None;
+                device_lost(surface);
+                return false;
+            }
+            crate::surface::items_placed(placed, drawn.items, None);
+            crate::surface::composed_placed(composed, composition, drawn.composed, &drawn.layers);
+        }
+        Err(err) if err.code() == D2DERR_RECREATE_TARGET => {
+            *swap = None;
+            device_lost(surface);
+        }
+        Err(err) => log::error!("drawing a window failed: {err}"),
+    }
+    false
+}
+
 /// Draws the tree into `target` (its DPI set for `scale`), and into the
 /// layers of `composition` above its web views.
 #[allow(clippy::too_many_arguments)]
@@ -1377,9 +1740,22 @@ fn draw_into(
     offscreen: bool,
     composition: Option<&Composition>,
     areas: Option<&[D2D_RECT_F]>,
+    window: Option<(&NshView, (u32, u32))>,
 ) -> windows::core::Result<Drawn> {
+    let (window, pixels) = match window {
+        Some((root, pixels)) => (Some(root), pixels),
+        None => (None, surface.pixel_size()),
+    };
     let dc = &gfx.dc;
-    let background = color_f(crate::system::window_background(surface));
+    let background = color_f(match window {
+        Some(root) => crate::app_window::background(surface, root.id()),
+        None => crate::system::window_background(surface),
+    });
+    // The window drawn into, for its caption buttons.
+    let hwnd = match window {
+        Some(root) => crate::app_window::hwnd_of(surface, root.id()).unwrap_or_default(),
+        None => surface.hwnd(),
+    };
     // SAFETY: COM calls on the live context and target; `EndDraw` always
     // follows `BeginDraw`.
     unsafe {
@@ -1400,23 +1776,31 @@ fn draw_into(
         }
     };
     cx.offscreen = offscreen;
-    cx.records = !offscreen;
-    let (w, h) = surface.size();
+    // A window of the app's own draws its root alone; where its views were
+    // painted is not the main window's.
+    cx.records = !offscreen && window.is_none();
+    let (w, h) = match window {
+        Some(root) => {
+            let size = root.state().frame.size;
+            (size.width.0, size.height.0)
+        }
+        None => surface.size(),
+    };
     cx.window = Some(rect_f(0.0, 0.0, w, h));
     cx.split = composition.map(|composition| Split {
         composition,
-        size: surface.pixel_size(),
+        size: pixels,
         layers: Vec::new(),
         pending: false,
         error: None,
     });
-    let root = surface.root.clone();
+    let root = window.unwrap_or(&surface.root).clone();
     match areas {
         None => {
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             // The caption buttons, last: in the topmost layer, above web
             // views.
-            crate::chrome::draw(surface, dc, scale);
+            crate::chrome::draw(surface, hwnd, dc, scale, w);
         }
         // A partial frame: each area cleared and drawn again, the rest of
         // the back buffer kept.
@@ -1442,7 +1826,7 @@ fn draw_into(
             unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
-            crate::chrome::draw(surface, dc, scale);
+            crate::chrome::draw(surface, hwnd, dc, scale, w);
             cx.damage = None;
             cx.clip_skip = 0;
             cx.set_transform(Mat4::new());
@@ -1471,8 +1855,9 @@ fn draw_into(
     })
 }
 
-/// Pixels of a snapshot: BGRA, premultiplied, `width * 4` bytes per row.
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
+/// Pixels read back (a snapshot, a shader's picture): BGRA,
+/// premultiplied, `width * 4` bytes per row.
+#[derive(Default)]
 pub(crate) struct Pixels {
     /// Width in pixels.
     pub(crate) width: u32,
@@ -1485,74 +1870,40 @@ pub(crate) struct Pixels {
 /// Draws the surface offscreen at `scale` and reads the pixels back,
 /// whatever covers the window.
 #[cfg_attr(not(feature = "dev"), allow(dead_code))]
-pub(crate) fn snapshot(surface: &Rc<Surface>, scale: f32) -> windows::core::Result<Pixels> {
+/// `window`: the root view of a window of the app's own to draw instead of
+/// the main window's.
+pub(crate) fn snapshot(
+    surface: &Rc<Surface>,
+    scale: f32,
+    window: Option<&NshView>,
+) -> windows::core::Result<Pixels> {
     let gfx = gfx::get()?;
-    let (w, h) = surface.size();
+    let (w, h) = match window {
+        Some(root) => {
+            let size = root.state().frame.size;
+            (size.width.0, size.height.0)
+        }
+        None => surface.size(),
+    };
     let px = (
         (w * scale).round().max(1.0) as u32,
         (h * scale).round().max(1.0) as u32,
     );
-    let size = D2D_SIZE_U {
-        width: px.0,
-        height: px.1,
-    };
-    let format = D2D1_PIXEL_FORMAT {
-        format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-    };
-    // SAFETY: COM calls on the live context; the mapped memory is copied
-    // before `Unmap`.
-    unsafe {
-        let target = gfx.dc.CreateBitmap(
-            size,
-            None,
-            0,
-            &D2D1_BITMAP_PROPERTIES1 {
-                pixelFormat: format,
-                dpiX: 96.0 * scale,
-                dpiY: 96.0 * scale,
-                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET,
-                colorContext: std::mem::ManuallyDrop::new(None),
-            },
-        )?;
-        // Web views are not in it: their pages are composed by the system.
-        let drawn = draw_into(surface, &gfx, &target, scale, true, None, None)?;
-        drop(drawn);
-        let read = gfx.dc.CreateBitmap(
-            size,
-            None,
-            0,
-            &D2D1_BITMAP_PROPERTIES1 {
-                pixelFormat: format,
-                dpiX: 96.0 * scale,
-                dpiY: 96.0 * scale,
-                bitmapOptions: D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                colorContext: std::mem::ManuallyDrop::new(None),
-            },
-        )?;
-        read.CopyFromBitmap(
-            Some(&D2D_POINT_2U { x: 0, y: 0 }),
-            &target,
-            Some(&D2D_RECT_U {
-                left: 0,
-                top: 0,
-                right: px.0,
-                bottom: px.1,
-            }),
-        )?;
-        let mapped = read.Map(D2D1_MAP_OPTIONS_READ)?;
-        let mut data = Vec::with_capacity((px.0 * px.1 * 4) as usize);
-        for row in 0..px.1 {
-            let start = mapped.bits.add((row * mapped.pitch) as usize);
-            data.extend_from_slice(std::slice::from_raw_parts(start, (px.0 * 4) as usize));
-        }
-        read.Unmap()?;
-        Ok(Pixels {
-            width: px.0,
-            height: px.1,
-            data,
-        })
-    }
+    let target = target_bitmap(&gfx.dc, px, scale)?;
+    // Web views are not in it: their pages are composed by the system.
+    let window = window.map(|root| (root, px));
+    let drawn = draw_into(surface, &gfx, &target, scale, true, None, None, window)?;
+    drop(drawn);
+    read_back(
+        &gfx.dc,
+        &target,
+        D2D_RECT_U {
+            left: 0,
+            top: 0,
+            right: px.0,
+            bottom: px.1,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1709,7 +2060,7 @@ mod tests {
         boxed(8, rect(0.0, 100.0, 240.0, 40.0), 0x88888888);
         let back = target(&gfx, size);
         let whole = |into: &ID2D1Bitmap1| {
-            draw_into(&surface, &gfx, into, 1.0, false, None, None).unwrap();
+            draw_into(&surface, &gfx, into, 1.0, false, None, None, None).unwrap();
         };
         whole(&back);
         assert!(surface.take_damage().is_none(), "the first frame is whole");
@@ -1738,13 +2089,26 @@ mod tests {
             .map(|r| (r.right - r.left) * (r.bottom - r.top))
             .sum();
         assert!(covered < (size.0 * size.1) as f32 * 0.6, "{areas:?}");
-        draw_into(&surface, &gfx, &back, 1.0, false, None, Some(&areas)).unwrap();
+        draw_into(&surface, &gfx, &back, 1.0, false, None, Some(&areas), None).unwrap();
 
         let fresh = target(&gfx, size);
         whole(&fresh);
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
         // Nothing changed since: nothing to draw.
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
+    }
+
+    /// A change wholly outside the window leaves nothing to draw, which
+    /// `frame` tells apart from `None`, the whole window.
+    #[test]
+    fn changes_outside_the_window_leave_no_pixels() {
+        let outside = D2D_RECT_F {
+            left: 10.0,
+            top: 900.0,
+            right: 50.0,
+            bottom: 940.0,
+        };
+        assert!(merged(pixel_rects(&[outside], 1.5, (300, 300))).is_empty());
     }
 
     #[test]
@@ -1762,6 +2126,59 @@ mod tests {
         // Never more than MAX_AREAS.
         let many: Vec<RECT> = (0..20).map(|i| r(i * 50, 0, 10, 10)).collect();
         assert!(merged(many).len() <= MAX_AREAS);
+    }
+
+    #[test]
+    fn a_partial_frame_draws_a_backdrop_reader_whole() {
+        let r = |l, t, w, h| RECT {
+            left: l,
+            top: t,
+            right: l + w,
+            bottom: t + h,
+        };
+        // A spinner behind part of a panel that reads what is behind it,
+        // another reader over the panel's edge, and one far from both.
+        let spinner = r(100, 100, 20, 20);
+        let panel = r(110, 90, 200, 100);
+        let over = r(300, 150, 100, 100);
+        let far = r(600, 600, 50, 50);
+        let drawn = with_backdrops(vec![spinner], &[far, over, panel]);
+        let covered = |a: &RECT| {
+            drawn.iter().any(|d| {
+                d.left <= a.left && d.top <= a.top && d.right >= a.right && d.bottom >= a.bottom
+            })
+        };
+        assert!(
+            covered(&spinner) && covered(&panel) && covered(&over),
+            "{drawn:?}"
+        );
+        assert!(!drawn.iter().any(|d| overlap(d, &far)), "{drawn:?}");
+        // Rectangles that meet no reader stay as they are.
+        let alone = vec![r(0, 0, 10, 10)];
+        assert_eq!(with_backdrops(alone.clone(), &[panel, far]), alone);
+    }
+
+    #[test]
+    fn a_reader_the_merged_areas_meet_is_drawn_whole() {
+        let r = |l, t, w, h| RECT {
+            left: l,
+            top: t,
+            right: l + w,
+            bottom: t + h,
+        };
+        // The strip meets neither the spinner nor the panel, but the box
+        // their merge draws.
+        let spinner = r(0, 0, 10, 10);
+        let panel = r(5, 5, 45, 45);
+        let strip = r(40, 0, 20, 4);
+        assert!(!overlap(&spinner, &strip) && !overlap(&panel, &strip));
+        let drawn = with_backdrops(vec![spinner], &[panel, strip]);
+        let covered = |a: &RECT| {
+            drawn.iter().any(|d| {
+                d.left <= a.left && d.top <= a.top && d.right >= a.right && d.bottom >= a.bottom
+            })
+        };
+        assert!(covered(&panel) && covered(&strip), "{drawn:?}");
     }
 
     #[test]
@@ -1843,6 +2260,30 @@ mod tests {
         a.state_mut().style.hidden = false;
         parent.state_mut().style.overflow_hidden = true;
         assert_eq!(area(&parent), (-1.0, -1.0, 101.0, 101.0));
+    }
+
+    #[test]
+    fn a_shader_effect_paints_its_overflow() {
+        let surface = Surface::new(Default::default());
+        surface.without_shader_renderer();
+        let v = view(
+            Some(&surface.root),
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 16.0, 16.0),
+        );
+        let shader = nsh_core::shader::Shader::compile(
+            "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }",
+        )
+        .expect("a shader");
+        let layer = nsh_core::shader::ShaderLayer::new(shader, &[], &mut Vec::new())
+            .with_role(nsh_core::shader::ShaderRole::Effect)
+            .with_overflow(Points(8.0));
+        crate::shader::set(&surface, &v, Some(std::sync::Arc::new(layer)));
+        // Where it was painted, drawn again when it moves: its frames too.
+        let a = own_area(&v.state());
+        assert_eq!((a.left, a.top, a.right, a.bottom), (-9.0, -9.0, 25.0, 25.0));
+        assert_eq!(area(&v), (-9.0, -9.0, 25.0, 25.0));
     }
 
     #[test]

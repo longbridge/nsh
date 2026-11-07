@@ -111,7 +111,11 @@ quotes, tables, code blocks, disclosures, footnotes), streaming, styles by part,
 The content is one of three props, read in this order:
 
 - **`markdown`**: CommonMark with GitHub's additions (tables, task lists, strikethrough, autolinks, footnotes, alerts),
-  formulas (`$…$` and `$$…$$`) and HTML inside the Markdown.
+  formulas (`$…$` and `$$…$$`) and HTML inside the Markdown. Emphasis beside Chinese, Japanese and Korean text
+  reads as the CJK-friendly amendment to CommonMark reads it, so `**涨幅：**5%` is bold up to the colon, and a bare
+  URL ends where CJK text or a curly quote starts: `https://example.com。下一句` links `https://example.com`. A URL
+  written in angle brackets (`<https://zh.wikipedia.org/wiki/中文>`) or as a link keeps every character.
+  A tag that names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through; scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
@@ -247,8 +251,8 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
 | `link` | `Link` | Links (in the theme's `primary` color, underlined). |
 | `image` | `Image` | Images. |
-| `math` | `Math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
-| `mathBlock` | `MathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |
+| `math` | `Math` | Formulas in text, typeset when there is no `renderMath`. |
+| `mathBlock` | `MathBlock` | Formula blocks, typeset and centered when there is no `renderMath`. |
 | `table` | `Table` | Tables: `renderTableActions`' content, then the scroll view of the cells. |
 | `tableScroll` | `TableScroll` | The horizontal scroll view of a table's cells: columns fit their content when there is room, wrap down to a floor when the view is narrower, and past that the table scrolls. |
 | `tableRow` | `TableRow` | Every row of a table: a view behind its cells, for backgrounds and borders (text styles go on `tableCell`). |
@@ -321,7 +325,10 @@ blocks can fade in with the app's animations.
 Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with `{ url }`; the app decides what it opens (a page of its own, a
 [`WebView`](./web-view.md), a scroll to a heading). Headings have anchors (GitHub's: `## Getting started` is
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
-`#footnote-<label>`.
+`#footnote-<label>`. In a terminal Tab reaches each link and footnote reference in turn, and Return presses the focused
+one: `onLinkPress` hears it as it hears a press. The event also has the modifier keys held when the press began
+(`modifiers`, as a press's), so an app can open a Command-click (Control off macOS) in the browser and route a plain
+one itself; a press from the keyboard or an assistive technology holds none.
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};
@@ -462,7 +469,7 @@ import { Image, View } from "nsh";
 ```
 
 `Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
-highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` a formula shows as its TeX in monospace (`math` and `mathBlock` parts).
+highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts) with KaTeX's TeX support and fonts, in the text's color, the same on every platform; TeX it cannot read shows as its source in monospace.
 
 ## Markdown extensions
 
@@ -586,6 +593,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 `BarChart` (`bar_chart` in Rust) stands for the app's own chart. The mention pattern's group is in
 `node.attributes?.["1"]` (`node.attributes["1"]` in Rust: `ada`) and the whole match in `node.text` (`@ada`). A custom node with no render function shows its content.
+A view returned for an inline node (a chip) sits in its line by its own `verticalAlign`: `align-middle`
+(`verticalAlign: "middle"`) centers it on the text, and its line keeps the paragraph's `lineHeight` unless the view is taller.
 
 ### Options
 
@@ -594,7 +603,7 @@ same fields (`MarkdownOptions { streaming: true, ..Default::default() }`):
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `math` | `boolean` | `true` | Formulas: `$…$` in text, `$$…$$` blocks. |
+| `math` | `boolean` | `true` | Formulas: `$…$` and `\(…\)` in text, `$$…$$` and `\[…\]` blocks. Escaped brackets around a reference number or CJK words (`\[1\]\[3\]`, `\[注\]`) show as text. |
 | `html` | `boolean` | `true` | HTML inside the Markdown is read as the `html` prop reads it; `false` shows it as text. |
 | `alerts` | `boolean` | `true` | GitHub's alerts: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`. |
 | `frontmatter` | `boolean` | `false` | YAML front matter (`---` … `---` first) becomes a custom node `frontmatter` whose `text` is the YAML. |
@@ -807,8 +816,17 @@ parts with [`TextViewParts`](#typed-part-styles).
 
 | Event | Rust | Description |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url, modifiers }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote, and the modifier keys held. |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | The selection of a `selectable` `TextView` changed: `{ text, start }`, the selected text as Copy takes it, `""` once nothing is selected ([Reading the selection](./text-selection.md#reading-the-selection)). Inside a selectable view the outer view reports instead. |
+
+## Methods
+
+`ref` gives `TextViewRef` (`TextViewApi` in Rust, through `component_ref::<TextView>()`). Methods return a `Promise` in JS.
+
+| Method | Rust | Description |
+|---|---|---|
+| `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | The selection of a `selectable` view: `format` `"plain"` (default, as Copy takes it), `"markdown"` or `"html"`, the selected nodes rebuilt; the source as written when all of it is selected ([As Markdown or HTML](./text-selection.md#as-markdown-or-html)). `""` when nothing is selected. |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | An image not in a link was pressed: `{ image }`, for the app to show it larger (a zoomable viewer of its own). |
 
 ## Accessibility

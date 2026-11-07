@@ -361,7 +361,7 @@ const angle = createAnimatedValue(0);
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
-| `maskImage` | `string` | | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 |
+| `maskImage` | `string` | | 一个 CSS 渐变，它的 alpha 决定视图绘制多少：不透明处完全绘制，透明处完全不绘制：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`。遮罩视图绘制的一切，包括它的背景滤镜。 此时模糊不带系统材质的色调。Windows 和 GPUI 上不绘制。 |
 | `glassEffect` | `"none" \| "regular" \| "clear"` | `.glass_effect(GlassEffect::Regular)` | 在 iOS 26、macOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
@@ -410,6 +410,7 @@ view()
 | `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | 首次开始前的延迟。 |
 | `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | 缓动曲线。 |
 | `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | 重复次数。 |
+| `animationFrameRate` | `number` | `.animation(KeyframeAnimation { … })` | 它需要的最高帧率，单位 Hz（默认为屏幕的最高帧率）；macOS 和 iOS 会据此降低屏幕帧率。 |
 
 由数值、手势或弹簧驱动的动画请使用 [`nsh` 的动画 API](./nsh.md#animation)。
 
@@ -417,7 +418,7 @@ view()
 
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
-| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | `.cursor(Cursor)`、`.cursor_pointer()` | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。 |
+| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | `.cursor(Cursor)`、`.cursor_pointer()` | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。斜向 resize 关键字保留对应轴：`nwse-resize` / `nw-resize` / `se-resize`（`Cursor::NwseResize`）及 `nesw-resize` / `ne-resize` / `sw-resize`（`Cursor::NeswResize`）。Windows、Linux、Android、web 和 GPUI 显示斜向光标；AppKit 在 macOS 15+ 使用斜向光标，在 macOS 14 使用张开的手形。iPad 和 Mac Catalyst 使用 UIKit 指针效果。 |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `.pointer_events(PointerEvents::BoxNone)` | 视图及其中的视图接收哪些触摸（`pointer-events-none`、`pointer-events-auto`）。`"none"`：都不接收，其中的视图也不接收，除非某个视图设置了 `"auto"`，与 CSS 一样会继承。`"box-none"`：视图本身不接收，其中的视图照常接收；`"box-only"`：视图本身接收，其中的视图都不接收（两者都来自 React Native，只作用于该视图）。默认为 `"auto"`。见 [触摸与手势](../docs/touch-and-gestures.md#pointerevents)。 |
 | `userSelect` | `"auto" \| "none" \| "text"` | `.select_text()`、`.select_none()` | `<Text>` 能否被选择和复制：`"text"`（`select-text`）可以，`"none"`（`select-none`）不可以；设在视图上时，作用于其中未自行设置的文本。`"auto"`（`select-auto`）为默认值，交给外层视图决定，没有则由平台决定。见 [text](../elements/text.md)。 |
 
@@ -443,7 +444,7 @@ CSS 中 SVG 图形的绘制属性：任何元素都可以设置，并像在浏�
 | `color` | `ColorValue \| AnimatedNode` | `.text_color(c)`、`.bind_color(&node)` | 文字颜色。接受原生动画颜色。也是未设置颜色的边框和轮廓线的颜色。 |
 | `fontSize` | `number` | `.text_size(s)`、`.text_sm()`、`.text_lg()` 等 | 字号，单位为点。 |
 | `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `.font_weight(FontWeight::SEMIBOLD)` | `"normal"`（400）、`"bold"`（700）或 100–900。 |
-| `fontFamily` | `string` | `.font_family(name)` | 系统字体族，或导入字体得到的名字（`import Inter from "./Inter.ttf"`）。见 [字体](../docs/fonts.md)。 |
+| `fontFamily` | `string` | `.font_family(name)` | 系统字体族，或导入字体得到的名字（`import Inter from "./Inter.ttf"`），或按偏好从高到低排列的它们的列表（`"Brand, 'Noto Sans SC', sans-serif"`）。见 [字体](../docs/fonts.md#回退列表)。 |
 | `fontStyle` | `"normal" \| "italic"` | `.italic()` | 斜体。 |
 | `fontVariant` | `FontVariantName[] \| string` | `.small_caps()`、`.oldstyle_nums()`、`.lining_nums()`、`.tabular_nums()`、`.proportional_nums()` | OpenType 数字与字母形式，可以是列表（`["tabular-nums"]`），也可以是用空格分隔的 CSS 名称（`"tabular-nums small-caps"`）。`tabular-nums` 让数字等宽，适合计数器和计时器。 |
 

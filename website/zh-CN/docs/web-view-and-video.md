@@ -64,7 +64,7 @@ mount(App);
 
 ### 属性
 
-在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`、`incognito`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -76,6 +76,7 @@ mount(App);
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
 | `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `userAgent` | `string` | | 浏览器的 user agent 字符串。 |
+| `incognito` | `boolean` | `false` | 页面的网站数据只与网页视图同存亡，各平台的做法见[下文](#网站数据)。在网页视图创建时读取。 |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS：滑动在页面历史中前进后退。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 
@@ -93,7 +94,7 @@ mount(App);
 
 ### 带前进后退的浏览器
 
-Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)` 和 `post_message` / `postMessage(data)`：
+Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)`、`post_message` / `postMessage(data)`、`load` / `load({ src, headers })`（见[下文](#已登录的页面请求头)）和 `send_input` / `sendInput(input)`（见[下文](#像用户一样输入)）：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -281,6 +282,108 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### 已登录的页面：请求头
+
+要显示应用已登录的某个服务的页面，把凭据放在页面请求的请求头里，而不是 URL 里：URL 会留在历史记录、日志和 `Referer` 中。ref 的 `load` 加载一个页面，并只给这一个请求带上请求头：
+
+```rust tabs
+use nsh_core::{WebLoad, prelude::*};
+
+fn open(web: &ElementRef, token: &str) {
+    let headers = vec![("Authorization".to_owned(), format!("Bearer {token}"))];
+    if let Some(load) = WebLoad::new("https://docs.example.com/", headers) {
+        web.load(load);
+    }
+}
+```
+
+```tsx tabs
+web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer ${token}` } });
+```
+
+- 只有页面自身的请求带这些请求头：它的图片、脚本等子资源不带，之后的导航和 `reload()` 也不带，所以凭据不会发给页面用到的其他主机。页面再次需要它时（点链接、重新加载），用 `load` 再加载一次，并为那次请求生成新值（DPoP proof 与 URL 绑定）。
+- 之后页面的显示与 `src` 加载的一样；之后 `src` 属性一变，就改为加载那个页面。
+- 它的主机必须是 `webview.hosts` 允许的（[`webview`](./sandbox-and-capabilities.md#webview)），与 `src` 相同；否则什么也不加载，核心会在日志里说明要添加哪个主机。
+- 请求头的名字不是 HTTP token、或值里有换行时，抛出 `TypeError`（`WebLoad::new` 返回 `None`），一个请求头不能借此开始另一个。NSH 的日志只写请求头的名字，从不写值。
+- macOS、iOS、Mac Catalyst、Android、Windows、Linux 和 GPUI 后端会发送这些请求头；浏览器后端做不到（iframe 无法设置请求头），调用不做任何事。
+
+### 像用户一样输入
+
+`injectJavaScript` 只能产生合成事件，页面会把它们视为不可信（`event.isTrusted` 为 `false`），有些控件会忽略它们。ref 的 `send_input`（`sendInput(input)`）以用户亲手操作的方式把输入交给页面，因此页面收到的事件是可信的：
+
+- `{ type: "click", x, y }` 点击视口中的一个点，单位为 CSS 像素（即 `getBoundingClientRect()` 报告的值）。
+- `{ type: "text", text }` 把文本逐键输入到页面中当前有焦点的元素：每个字符用 US 布局上对应的键，换行按 Enter，US 键盘打不出的字符（`é`、中日韩文字、emoji）不对应任何键（`code` 为 `"Unidentified"`）。
+- `{ type: "key", key }` 按下 `Enter`、`Tab`、`Escape` 或 `Backspace`。
+
+```rust tabs
+use nsh_core::{WebInput, WebKey, prelude::*};
+use std::time::Duration;
+
+fn search(web: &ElementRef) {
+    web.send_input(WebInput::Click { x: px(120.0), y: px(40.0) });
+    let web = *web;
+    set_timeout(Duration::from_millis(50), move || {
+        web.send_input(WebInput::Text("espresso".into()));
+        web.send_input(WebInput::Key(WebKey::Enter));
+    });
+}
+```
+
+```tsx tabs
+web.sendInput({ type: "click", x: 120, y: 40 });
+setTimeout(() => {
+  web.sendInput({ type: "text", text: "espresso" });
+  web.sendInput({ type: "key", key: "Enter" });
+}, 50);
+```
+
+在 Rust 中它们是 `WebInput::Click { x, y }`、`WebInput::Text(text)` 和 `WebInput::Key(WebKey::Enter)`。
+
+可信输入带有用户激活（它可以打开窗口、写入剪贴板、打开系统的文件面板，或按下页面的确认按钮），所以它是一项单独的能力：应用需要在 `nsh.json` 的 `capabilities` 中声明 `"webview": { "input": true }`（见 [`webview`](./sandbox-and-capabilities.md#webview)），没有声明任何能力的应用也一样，否则核心会丢弃这次调用。
+
+和点击一样，`sendInput` 会把键盘焦点交给网页视图，应用自己的 `Input` 随之失去焦点。页面按自己的节奏处理输入：点击的事件在下一次调用开始时可能仍在途中，所以点击后先等它生效（大约一帧）再输入。目前由 macOS 投递这些输入，其他平台暂时忽略。
+
+在提供依赖它的功能之前，先确认它在当前环境下可用：`web_input_available()`（`WebView.inputAvailable()`）只有在平台会投递输入、并且应用拥有 `webview.input` 授权时才得到 `true`；在忽略这个调用的平台上，或者应用没有这项授权时，结果都是 `false`。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let input = signal(false);
+spawn(async move { input.set(web_input_available().await) });
+```
+
+```tsx tabs
+import { signal, WebView } from "nsh";
+
+const input = signal(false);
+WebView.inputAvailable().then((available) => input.set(available));
+```
+
+### 网站数据
+
+网页视图把页面的网站数据（cookie、local storage、IndexedDB、缓存）和应用的放在一起，所以在一个网页视图里登录，下一个网页视图里、
+应用重启后也还是登录状态。显示应用不信任的页面（别人生成的 HTML、一次性的登录页）的网页视图加上 `incognito`：它的页面使用一份
+自己的存储，只在内存里，随网页视图一起销毁。
+
+```rust tabs
+web_view("https://example.com/preview").incognito(true).flex_1()
+```
+
+```tsx tabs
+<WebView src="https://example.com/preview" incognito style={{ flex: 1 }} />
+```
+
+`incognito` 在网页视图创建时读取，所以在 Rust 里它接收一个值；在 TSX 里之后再改它，网页视图保留原来的存储并打印一条警告。
+要切换，就显示一个新的网页视图。各平台这样保存它的存储：
+
+| 平台 | incognito 网页视图的存储 |
+|---|---|
+| iOS、macOS | 自己的一份非持久 `WKWebsiteDataStore`。 |
+| Linux | 自己的一份临时 WebKit 网络会话。 |
+| Windows | InPrivate 模式的 WebView2 控制器。同时打开的 incognito 网页视图共用一份内存中的存储，最后一个关闭时清空。 |
+| Android | cookie 和网页存储属于整个应用，所有网页视图共用，网页视图关闭后仍然保留。incognito 网页视图加载时不使用 HTTP 缓存，也不保存表单数据。 |
+| Web | 浏览器为页面所在源保存的存储，和任何 `iframe` 一样。 |
 
 ### 网页视图可以显示哪些网站
 

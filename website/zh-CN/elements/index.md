@@ -92,20 +92,24 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Accordion>` 及其部件 | `nsh_base::accordion()`、`accordion_item()` 等 | 在各自标题下展开和收起的一组分区，一次一个或同时多个 | [Accordion](./accordion.md) |
 | `<Avatar>`、`<AvatarGroup>` | `nsh_base::avatar()`、`avatar_group()` | 一个人的头像，加载中或失败时显示后备内容；以及只显示前几个的一排头像 | [Avatar](./avatar.md) |
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
+| `<Carousel>` 及其部件 | `nsh_base::carousel()`、`carousel_content()` 等 | 一次显示一个位置的幻灯片，原生滑动，带上一张 / 下一张、分页、按键和无缝循环 | [Carousel](./carousel.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
+| `<Command>` | `nsh_base::command()` | 命令面板：在原生过滤的命令之上放一个搜索框，虚拟化列表，Cmd+K 面板的按键 | [Command](./command.md) |
 | `<DataTable>` | `nsh_base::data_table()` | 行列数量不限的表格，可选择、排序，列可调整宽度和移动 | [DataTable](./data-table.md) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | 两段文本之间或补丁中的改动，并排或合并显示 | [DiffView](./diff-view.md) |
 | `<DockArea>` | `nsh_base::dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区 | [Dock](./dock.md) |
 | `<Editor>` | `nsh_base::editor()` | 带高亮、多光标、折叠和搜索的代码编辑器 | [Editor](./editor.md) |
 | `<Input>` | `nsh_base::input()` | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
+| `<HoverCard>` | `nsh_base::hover_card()` | 预览触发元素所指向的内容，在指针停留在它上面时显示 | [HoverCard](./hover-card.md) |
 | `<Link>` | `nsh_base::link()` | 打开页面、网站或应用内路由的按压目标 | [Link](./link.md) |
 | `<Menu>`、`<ContextMenu>`、`<MenuItem>`、`<MenuSeparator>`、`<Submenu>` | `nsh_base::menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet | [Menu](./menu.md) |
 | `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
 | `<NumberInput>` | `nsh_base::number_input()` | 在输入框里输入、或用按钮和按键步进的数字 | [NumberInput](./number-input.md) |
 | `<OtpInput>` | `nsh_base::otp_input()` | 固定位数的一次性验证码，输入、粘贴或自动填充到格子里 | [OtpInput](./otp-input.md) |
 | `<Pagination>` | `nsh_base::pagination()` | 一组内容的各页：上一页、当前页附近的页码、省略号和下一页 | [Pagination](./pagination.md) |
+| `<Tree>` | `nsh_base::tree()` | 包含子项目的项目，可展开和收起，其中一个被选中：虚拟化渲染，在键盘焦点里只占一站 | [Tree](./tree.md) |
 | `<Plot>`、`<Line>`、`<Area>`、`<Bar>`、`<Grid>`、`<Pie>`、`<Arc>`（`nsh/base/plot`） | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | 图表的框架与图形，根据应用的数据行原生绘制 | [Plot](./plot.md) |
 | `<Popover>` | `nsh_base::popover()` | 锚定在触发元素上、显示在一切之上的内容 | [Popover](./popover.md) |
 | `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
@@ -170,6 +174,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | 被按下时。 |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | 指针悬停在视图上时。 |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | 视图获得焦点时。 |
+| `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | 视图自身或其内部的视图获得焦点时（`Overlay` 的内容算在它所在的视图内部）。 |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | `disabled` 时。 |
 | `checkedStyle` | `.checked(\|s\| ..)`、`.checked_style(style)` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`、`.indeterminate_style(style)` | `indeterminate:` | `accessibilityState.checked` 为 `"mixed"` 时（既非勾选也非未勾选的复选框）。 |
@@ -243,7 +248,7 @@ const at = signal<number | null>(null);
 
 ### 工具提示
 
-`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏。手机和平板不显示。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
+`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏；在任何设备上，键盘焦点停在元素上时也会显示，焦点离开或按下 Escape 时隐藏。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -280,7 +285,7 @@ view()
 
 ### 上下文菜单
 
-`onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有键盘的菜单键。在这里打开应用自己的菜单；在 TSX 中，[`Menu.popup`](../modules/nsh-desktop.md) 显示系统菜单：
+`onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有获得焦点的视图上的 Shift+F10 和键盘的菜单键；在 macOS 和 Windows 上还有读屏软件的「显示菜单」操作（VoiceOver 的 VO-Shift-M、UI Automation 的对应操作）。在这里打开应用自己的菜单；在 TSX 中，[`Menu.popup`](../modules/nsh-desktop.md) 显示系统菜单：
 
 ```rust tabs
 // 应用自己的菜单，放在点击的位置。
@@ -299,9 +304,9 @@ import { Menu } from "nsh/desktop";
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 辅助按钮在视图或其内部的视图上按下。 |
+| `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 在视图或其内部的视图上请求了上下文菜单。 |
 
-`ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）以及 `modifiers`；Rust 中为 `position`、`page_position` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
+`ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）、`modifiers` 以及 DOM 的 `pointerType`：指针为 `"mouse"`、`"pen"` 或 `"touch"`，键盘或读屏软件为 `null`，此时位置是视图的底部起始角，菜单放在这里就会出现在视图下方；Rust 中为 `position`、`page_position`、`modifiers` 和 `pointer_type`（`Option<PointerType>`）。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
 ### 键盘焦点
 
@@ -310,6 +315,8 @@ import { Menu } from "nsh/desktop";
 焦点和按压相互独立。在获得焦点时接收按键的视图（图表、滑块、用方向键移动选中项的列表）设置 `focusable`，并在获得焦点期间绑定自己的按键（`onFocus` / `onBlur` 配合 [`keymap`](../modules/nsh.md#keymap)）；点击它时，按压照样交给外层可按压的视图，比如一张点开详情页的卡片。
 
 ref 的 `focus()` 像 Tab 一样把键盘焦点移到停靠点上（显示它的焦点样式并触发 `onFocus`），比如在弹层关闭后把焦点还给它的触发器；`blur()` 让焦点离开它。
+
+焦点在某个视图自身或其内部任意视图上时，这个视图可以用 `focus-within:`（`focusWithinStyle`、`.focus_within(..)`）设置样式：比如包住正在编辑的输入框的外框，或其中某个按钮持有焦点时的工具栏。`Overlay` 的内容无论显示在哪里，都算在 overlay 所在的视图内部，所以弹出层属于包含其触发元素的视图。在 Rust 中，组件用 ref 的 `on_focus_in(..)` 和 `on_focus_out(..)` 得知焦点进入、离开一个元素；焦点在元素内部的视图之间移动不算进入或离开。
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
@@ -436,6 +443,8 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `desktop` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `windowDrag` | `.window_drag(..)` | `boolean` | 按住视图拖动窗口，像按住标题栏一样；`false` 让可拖动视图中的一部分保持可点击。见[自定义标题栏](../modules/nsh-desktop.md#自定义标题栏)。 |
+| `windowControl` | `.window_control(..)` | `"minimize" \| "maximize" \| "close"` | 这个视图就是应用自绘标题栏中对应的窗口按钮：平台执行它的按下动作，辅助技术把它识别为该按钮。 |
+| `windowResize` | `.window_resize(..)` | `"top" \| "bottom" \| "left" \| "right" \| "topLeft" \| "topRight" \| "bottomLeft" \| "bottomRight"` | 按住这个视图从对应的边或角调整无边框窗口的大小。 |
 
 ```rust tabs
 use nsh_core::Ripple;

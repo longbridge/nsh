@@ -11,8 +11,8 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     builder::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
-        VideoProgress, WebNavigation,
+        self, CaretEvent, Composition, HintReason, NativeEvent, OverlayPosition, Selection,
+        VideoInfo, VideoProgress, WebNavigation,
     },
 };
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp, ViewPaint,
     },
-    geometry::{Bounds, Corners, Point, Radians, ScaledPixels},
+    geometry::{Bounds, Corners, Percentage, Point, Radians, ScaledPixels},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement},
     style::SvgPaint,
@@ -462,6 +462,34 @@ pub fn shader() -> ShaderView {
     ShaderView(ElNode::new(Tag::Shader))
 }
 
+/// A view whose children draw through a shader: give it the program with
+/// [`ShaderView::source`], which reads what they draw with
+/// `sample_content`. Without a program the children draw as they are.
+pub fn shader_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderEffect))
+}
+
+/// A view whose children change through a shader when its
+/// [`ShaderView::value`] changes: `sample_from` is a picture of what they
+/// drew, `sample_to` what they draw now, `nsh.progress` how far it is.
+/// Without a program it cross-fades ([`ShaderView::fallback`]).
+pub fn shader_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderTransition))
+}
+
+/// The whole surface drawn through a shader, which reads it with
+/// `sample_content`. It takes no space and has no children.
+pub fn screen_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenEffect))
+}
+
+/// The whole surface changing through a shader when its
+/// [`ShaderView::value`] changes, as [`shader_transition`] does for its
+/// children. It takes no space and has no children.
+pub fn screen_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenTransition))
+}
+
 crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
 
 /// A value [`ShaderView::uniform`] takes ([`IntoUniform`]).
@@ -562,7 +590,56 @@ impl ShaderView {
     pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
         self.bind_prop(paused, Prop::ShaderPaused)
     }
+
+    /// An effect's `nsh.progress`, a fraction (a bound one sets it again
+    /// when it changes).
+    pub fn progress(self, progress: impl IntoReactive<Percentage>) -> Self {
+        self.bind_prop(progress, |p| {
+            Prop::ShaderProgress(crate::shader::ShaderProgress::Number(p))
+        })
+    }
+
+    /// An effect's `nsh.progress` moved by an animated value, which the
+    /// platform writes on every frame it changes, without the engine.
+    pub fn animated_progress(mut self, value: &impl super::Animated) -> Self {
+        let progress = match value.animated_node().live() {
+            Some(node) => {
+                let id = node.id();
+                self.0.attrs.bound.push(node);
+                crate::shader::ShaderProgress::Animated(id)
+            }
+            None => crate::shader::ShaderProgress::Number(Percentage(0.0)),
+        };
+        self.set(Prop::ShaderProgress(progress))
+    }
+
+    /// How far beyond its box, in points, an effect or a transition draws
+    /// and its pictures reach (`maxSampleOffset`).
+    pub fn max_sample_offset(self, offset: Points) -> Self {
+        self.set(Prop::MaxSampleOffset(offset))
+    }
+
+    /// A transition's value: when it changes, the transition runs (not for
+    /// the first one).
+    pub fn value(self, value: impl IntoReactive<crate::shader::TransitionKey>) -> Self {
+        self.bind_prop(value, |v| Prop::TransitionValue(Some(v)))
+    }
+
+    /// How long a transition runs (300 ms by default).
+    pub fn duration(self, duration: std::time::Duration) -> Self {
+        self.set(Prop::TransitionDuration(Some(
+            duration.as_secs_f32() * 1000.0,
+        )))
+    }
+
+    /// What a transition without a program runs: a cross-fade (the
+    /// default) or nothing.
+    pub fn fallback(self, fallback: crate::TransitionFallback) -> Self {
+        self.set(Prop::TransitionFallback(fallback))
+    }
 }
+
+crate::static_reactive!(crate::shader::TransitionKey: crate::shader::TransitionKey);
 
 /// A web view loading `url` (a bound one loads again when it changes).
 pub fn web_view(url: impl IntoReactive<String>) -> WebView {
@@ -949,6 +1026,33 @@ impl Screen {
         })
     }
 
+    /// The leading header button is UIKit's own, drawn instead of the
+    /// `header_left` view (iOS; a press on it presses that view's first
+    /// pressable view).
+    pub fn header_left_system_item(self, item: impl IntoReactive<crate::HeaderSystemItem>) -> Self {
+        self.bind_prop(item, |item| {
+            Prop::Screen(ScreenProp::HeaderLeftSystemItem(Some(item)))
+        })
+    }
+
+    /// The trailing header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_right` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_right_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderRightSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
+    /// The leading header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_left` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_left_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderLeftSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
     /// Whether the back button shows (default true).
     pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
@@ -970,6 +1074,18 @@ impl Screen {
     /// How the screen enters and leaves.
     pub fn animation(self, animation: impl IntoReactive<ScreenAnimation>) -> Self {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
+        })
     }
 
     /// What the status bar shows while the screen is up (iOS and Android;
@@ -1033,9 +1149,39 @@ impl Overlay {
         )
     }
 
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
+        )
+    }
+
+    /// Places it beside the element carrying `anchor`, outside the edges
+    /// of the one carrying `edges` (the menu around it), as a submenu
+    /// beside its row ([`OverlayAnchor::Beside`]).
+    pub fn anchor_beside(self, anchor: &super::ElementRef, edges: &super::ElementRef) -> Self {
+        let (anchor, edges) = (*anchor, *edges);
+        self.bind_prop(
+            move || match (anchor.node(), edges.node()) {
+                (Some(node), Some(edges)) => OverlayAnchor::Beside { node, edges },
+                (Some(id), None) => OverlayAnchor::Node(id),
+                _ => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
-    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    /// is placed against what shows ([`OverlayAnchor::Content`]). A ref a
+    /// component gives its slot goes by the app's element's own box,
+    /// whether a TSX or a Rust app filled the slot.
     pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
         let anchor = *anchor;
         self.bind_prop(
@@ -1104,7 +1250,9 @@ impl Overlay {
 
     /// Makes it a hint (a tooltip): shown once the pointer rested on its
     /// anchor (its parent without one) for `delay`, until the pointer
-    /// leaves or presses the anchor, on the desktops only; it is placed
+    /// leaves or presses the anchor, on the desktops only, and while the
+    /// keyboard focus is on the anchor (or in it, outside an overlay), in
+    /// every idiom, until the focus leaves; Escape hides it. It is placed
     /// against the anchor and should not take the pointer
     /// ([`Interactive::pointer_events`] none). [`Self::hint_open`] decides
     /// instead of the pointer.
@@ -1120,16 +1268,26 @@ impl Overlay {
         self.bind_prop(open, |o| Prop::Overlay(OverlayProp::Open(o)))
     }
 
-    /// The pointer rested on a hint's anchor for its delay: it asks to
-    /// show (and shows, unless [`Self::hint_open`] decides).
-    pub fn on_hint_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Show, listener.into_listener(), events::unit)
+    /// The pointer rested on a hint's anchor for its delay, or the
+    /// keyboard focus came to it: it asks to show (and shows, unless
+    /// [`Self::hint_open`] decides), with why.
+    pub fn on_hint_show<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Show,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
-    /// The pointer left or pressed a hint's anchor, or the hint left the
-    /// view, after it asked to show: it asks to hide.
-    pub fn on_hint_hide<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
+    /// The pointer left or pressed a hint's anchor, the focus left it,
+    /// Escape was pressed or the hint left the view, after it asked to
+    /// show: it asks to hide, with why.
+    pub fn on_hint_hide<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Dismiss,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
     /// The core placed it against its anchor: the side it went on, its
@@ -1148,6 +1306,18 @@ impl Modal {
     pub fn animation(self, animation: impl IntoReactive<ModalAnimation>) -> Self {
         self.bind_prop(animation, |animation: ModalAnimation| {
             Prop::Modal(ModalProp::Animation(animation))
+        })
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
         })
     }
 
@@ -1304,6 +1474,14 @@ impl WebView {
         self.bind_prop(enabled, |enabled: bool| {
             Prop::Native(NativeProp::BackForwardGestures(enabled))
         })
+    }
+
+    /// Keeps the page's website data (cookies, storage, the cache) only
+    /// as long as the web view, apart from the app's other web views
+    /// (default no; Android: no HTTP cache and no saved form data). Read
+    /// when the web view is made, so it takes a value, not a signal.
+    pub fn incognito(self, incognito: bool) -> Self {
+        self.set(Prop::Native(NativeProp::Incognito(incognito)))
     }
 
     /// A page started loading.
@@ -2218,6 +2396,13 @@ impl From<Drawing> for Painter {
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
 
+/// A program where an optional one goes (`.transition_shader(wipe)`).
+impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {
+    fn into_reactive(self) -> super::Reactive<Option<crate::shader::TransitionShader>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2260,6 +2445,42 @@ mod tests {
         u.0.iter()
             .find(|(n, _)| &**n == name)
             .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn screens_and_modals_take_a_transition_shader() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let source = "struct Uniforms { edge: f32 }\n\
+            fn shade(uv: vec2f) -> vec4f {\n    \
+            return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress * uniforms.edge);\n}\n";
+        let shader = crate::shader::Shader::compile(source).expect("compiles");
+        let wipe = crate::shader::TransitionShader::new(shader)
+            .uniform("edge", 1.0_f32)
+            .duration(std::time::Duration::from_millis(400));
+        let expected = crate::shader::NavShaderSpec {
+            source: source.into(),
+            uniforms: ShaderUniforms(vec![("edge".into(), UniformValue::Number(1.0))]),
+            duration: Some(400.0),
+        };
+        let spec = |attrs: &super::super::builder::Attrs| {
+            attrs.props.iter().find_map(|p| match p {
+                Prop::TransitionShader(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let page = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&page.resolved_attrs()), Some(Some(expected.clone())));
+        let dialog = modal().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&dialog.resolved_attrs()), Some(Some(expected.clone())));
+        // A binding goes back to the page's or the dialog's own animation.
+        let on = signal(true);
+        let bound = screen()
+            .transition_shader(move || on.get().then(|| wipe.clone()))
+            .0;
+        assert_eq!(spec(&bound.resolved_attrs()), Some(Some(expected)));
+        on.set(false);
+        assert_eq!(spec(&bound.resolved_attrs()), Some(None));
     }
 
     #[test]

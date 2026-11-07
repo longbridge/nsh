@@ -168,6 +168,9 @@ struct Node<H: Host> {
     handle: bool,
     /// Disposed: runs no more (a memo keeps its value for its handle).
     disposed: bool,
+    /// Being disposed (what it owns goes, its cleanups run): until that
+    /// ends, the node is the graph's, not its handle's.
+    disposing: bool,
 }
 
 impl<H: Host> Node<H> {
@@ -188,6 +191,7 @@ impl<H: Host> Node<H> {
             context: None,
             handle: false,
             disposed: false,
+            disposing: false,
         }
     }
 
@@ -425,13 +429,23 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].handle = true;
     }
 
+    /// Whether node `id`'s handle owns what the node holds: it is freed with
+    /// the handle ([`Self::drop_handle`]), as a signal or a disposed
+    /// computation is. A live computation belongs to its owner and outlives
+    /// its handle, so what it holds is not the handle's (a garbage collector
+    /// must not count it among the handle's children); so does one being
+    /// disposed, until that ends ([`dispose`] frees it then).
+    pub fn held_by_handle(&self, id: u32) -> bool {
+        let n = &self.nodes[id as usize];
+        n.kind == Kind::Signal || (n.disposed && !n.disposing)
+    }
+
     /// The handle of node `id` went: a signal, or a disposed computation,
     /// is freed now (what it held comes back, to free once the graph is no
     /// longer borrowed).
     pub fn drop_handle(&mut self, id: u32) -> Option<Held<H>> {
-        let n = &mut self.nodes[id as usize];
-        n.handle = false;
-        if n.kind == Kind::Signal || n.disposed {
+        self.nodes[id as usize].handle = false;
+        if self.held_by_handle(id) {
             self.unlink_observers(id);
             Some(self.release(id))
         } else {
@@ -556,7 +570,15 @@ impl<H: Host> Graph<H> {
 
     fn track(&mut self, id: u32) {
         let l = self.listener;
-        if l == NONE || l == UNOWNED || self.nodes[l as usize].disposed {
+        if l == NONE || l == UNOWNED {
+            return;
+        }
+        // Only a live computation takes sources: it unlinks them before its
+        // slot is freed (when it runs again or is disposed). A computation
+        // disposed in a nested run is the listener again once that run
+        // returns, and its slot may hold a signal by then.
+        let n = &self.nodes[l as usize];
+        if n.disposed || !n.is_computation() {
             return;
         }
         // Repeated reads of the same source make one edge.
@@ -988,6 +1010,13 @@ pub fn dispose<H: Host>(h: H, id: u32) {
     if !is_node(id) || g(h).nodes[id as usize].disposed {
         return;
     }
+    // Disposed before it is cleaned: what runs meanwhile (what it owns
+    // going, its cleanups, a flush they start) neither tracks into it, runs
+    // it again nor disposes it again. Each would leave links to its slot
+    // once the slot is freed, or free the slot twice.
+    let n = &mut g(h).nodes[id as usize];
+    n.disposed = true;
+    n.disposing = true;
     // Code running under it goes on under no owner it could reuse the slot
     // of: what it makes from now on goes at once (its cleanups' too).
     if g(h).owner == id {
@@ -997,7 +1026,7 @@ pub fn dispose<H: Host>(h: H, id: u32) {
     let graph = g(h);
     graph.unlink_observers(id);
     let n = &mut graph.nodes[id as usize];
-    n.disposed = true;
+    n.disposing = false;
     n.state = CLEAN;
     if n.handle {
         let func = n.func.take();

@@ -64,7 +64,9 @@ sideways through the columns, with scroll bars (`scrollbar={false}` hides them, 
 ## Rows and columns
 
 `data` is the rows: objects whose fields the columns' `key`s name, or arrays the columns index by position. Numbers,
-booleans and strings show as text. A column is a `DataTableColumn`:
+booleans and strings show as text. Rust gives the rows a field at a time, each of one type:
+`DataTableRows::new(2).texts("symbol", ["AAPL", "MSFT"]).numbers("change", [1.2, -0.4])`. A column is a
+`DataTableColumn`:
 
 | Field | Description |
 |---|---|
@@ -168,7 +170,7 @@ selected.
 
 Pressing the table, or reaching it with Tab (macOS, the web), gives it the keyboard until another press, the focus
 moving elsewhere or `blur()`; `focus()` gives it from the app. The table is one stop of Tab: inside it Tab moves the
-selection, and Escape gives the keyboard back.
+selection, and Escape gives the keyboard back. Its columns' resize handles take the pointer only, in a terminal too, where a handle shows its line while the pointer is on it and a title's sort is one glyph (`▲`, `▼`, `↕` unsorted).
 
 | Keys | What they do |
 |---|---|
@@ -338,8 +340,8 @@ parts provide the table's structure and alignment; their classes supply the appe
 | `rowCount` | `.row_count(..)` | `number` | the rows held | How many rows there are in all. |
 | `dataStart` | `.data_start(..)` | `number` | `0` | The row of the first row of `data`. |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | Classes of the rows given, by their place in `data`: a row's own look, with no call into JS per row. |
-| `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points. |
-| `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row. |
+| `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points; in a terminal a row is one Cell. |
+| `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row; in a terminal a title row is one Cell. |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | Labels above the columns, lowest level first. |
 | `sort` | `.sort(..)` | `DataTableSort` | | What the data is sorted by, shown on the title. |
 | `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | Presses and keys select rows. |

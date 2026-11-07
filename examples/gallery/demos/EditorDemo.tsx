@@ -134,6 +134,8 @@ const SEVERITY = {
 
 const same = (a: EditorRange, b: EditorRange) =>
   a.start.line === b.start.line && a.start.column === b.start.column && a.end.line === b.end.line && a.end.column === b.end.column;
+/** A terminal: no icons, and its lines read as words. */
+const terminal = platform.idiom === "terminal";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 || word === "info" ? "" : "s"}`;
 
 const pointer = platform.desktop;
@@ -149,6 +151,16 @@ interface HoverCard {
 function Dot(props: { severity: EditorDiagnostic["severity"] }) {
   return <View class={`mt-[5px] size-2 rounded-full ${SEVERITY[props.severity ?? "error"].class}`} />;
 }
+
+/** The hover card's docs: small type, the signature's code block without a
+ * box of its own inside the card's. */
+const HOVER_DOCS = {
+  root: "gap-1.5 text-xs text-popover-foreground",
+  paragraph: "text-xs",
+  codeBlock: "bg-transparent border-0 rounded-none p-0",
+  codeBlockScroll: "p-0",
+  codeBlockCode: "p-0 text-xs",
+};
 
 /** A small text button of the find bar: `on` lights it while what it
  * toggles is on. */
@@ -168,7 +180,7 @@ function Tool(props: { label: string; name: string; onPress: () => void; on?: bo
 
 /** An icon button of the toolbar, its label for screen readers and as its
  * tooltip: `on` lights it while what it toggles is on. */
-function IconTool(props: { label: string; icon: IconName; onPress: () => void; on?: boolean; size?: "small" }) {
+function IconTool(props: { label: string; icon: IconName; onPress: () => void; on?: boolean; size?: "small"; word?: string }) {
   return (
     <Button
       onPress={props.onPress}
@@ -176,8 +188,10 @@ function IconTool(props: { label: string; icon: IconName; onPress: () => void; o
       accessibilityLabel={props.label}
       tooltip={<Tip label={props.label} />}
       class={`${props.size === "small" ? "size-5" : "size-7"} items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70 selected:bg-foreground/15`}
+      style={terminal && props.word ? { width: "auto" } : undefined}
     >
-      <Icon name={props.icon} size={props.size === "small" ? 13 : 16} tint={props.on ? colors.text : colors.muted} />
+      {/* A terminal has no icons: the tool is its word there, which the painter bands while on. */}
+      {terminal && props.word ? <Text>{props.word}</Text> : <Icon name={props.icon} size={props.size === "small" ? 13 : 16} tint={props.on ? colors.text : colors.muted} />}
     </Button>
   );
 }
@@ -294,9 +308,46 @@ export function EditorDemo() {
   );
   const diagnostics = computed(() => problems().map((p) => p.diagnostic));
   const count = (severity: EditorDiagnostic["severity"]) => diagnostics().filter((d) => (d.severity ?? "error") === severity).length;
+  // The lines edited since the sample, as version control marks them: in
+  // the gutter and the overview ruler's left lane.
+  const edited = signal(0);
+  const changes = computed<EditorDecoration[]>(() => {
+    edited();
+    const lang = language();
+    const before = SAMPLES[lang].text.split("\n");
+    const after = (texts[lang] ?? SAMPLES[lang].text).split("\n");
+    // One changed block: the lines between what the two texts start and
+    // end with alike.
+    let head = 0;
+    while (head < before.length && head < after.length && before[head] === after[head]) head++;
+    let tail = 0;
+    while (tail < before.length - head && tail < after.length - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    const removed = before.length - head - tail;
+    const added = after.length - head - tail;
+    const mark = (start: number, end: number, color: string, placement?: "before"): EditorDecoration => ({
+      range: { start: { line: start, column: 0 }, end: { line: end, column: 0 } },
+      gutter: { class: color, placement },
+      overviewRuler: { lane: "left", class: color },
+    });
+    const out: EditorDecoration[] = [];
+    const modified = Math.min(removed, added);
+    if (modified > 0) out.push(mark(head, head + modified, "bg-amber-500"));
+    if (added > removed) out.push(mark(head + modified, head + added, "bg-green-500"));
+    // Deleted lines: a boundary where they were.
+    if (removed > added) out.push(mark(head + added, head + added, "bg-red-500", "before"));
+    return out;
+  });
   const decorations = computed<EditorDecoration[]>(() => {
-    if (!typescript()) return [];
-    const out: EditorDecoration[] = literals().map(({ range, color }) => ({ range, style: { backgroundColor: `${color}40` } }));
+    // The problems on the overview ruler's right lane.
+    const out: EditorDecoration[] = [
+      ...changes(),
+      ...diagnostics().map((d) => ({
+        range: d.range,
+        overviewRuler: { lane: "right" as const, class: (d.severity ?? "error") === "error" ? "bg-red-500" : "bg-amber-500" },
+      })),
+    ];
+    if (!typescript()) return out;
+    out.push(...literals().map(({ range, color }) => ({ range, style: { backgroundColor: `${color}40` } })));
     const lit = flash();
     if (lit) out.push({ range: lit, class: "bg-brand/25", lineClass: "bg-brand/10" });
     return out;
@@ -513,6 +564,7 @@ export function EditorDemo() {
               inlineCompletionDelay={150}
               onChange={({ value }) => {
                 texts[lang] = value;
+                edited.set(edited() + 1);
                 if (lsp) changed(value);
               }}
               onSelectionChange={({ selections: value }) => selections.set(value)}
@@ -601,12 +653,17 @@ export function EditorDemo() {
   const menuOpen = signal<"language" | "options" | null>(null);
   return (
     <View class="flex-1 bg-background">
-      <View ref={(node: ViewRef) => (toolbar = node)} class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5">
+      {/* A terminal's 6pt is no column: its language menu would touch the line before it, so it keeps one. */}
+      <View
+        ref={(node: ViewRef) => (toolbar = node)}
+        class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5"
+        style={platform.idiom === "terminal" ? { paddingHorizontal: 8 } : undefined}
+      >
         <Menu
           offset={4}
           margin={8}
           popupClass={popup}
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           onOpenChange={({ open }) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View
@@ -639,7 +696,7 @@ export function EditorDemo() {
           offset={4}
           margin={8}
           popupClass={popup}
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           onOpenChange={({ open }) => menuOpen.set(open ? "options" : null)}
           trigger={
             <View
@@ -686,7 +743,7 @@ export function EditorDemo() {
           handleThumbClass={handleThumb}
           dockClass="bg-card"
           sheetClass="h-72 rounded-t-2xl border-t border-border bg-card"
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           renderTab={(tab) => (
             <View class="h-7 flex-row items-center gap-2 px-3">
               <Text style={{ numberOfLines: 1 }} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>
@@ -714,39 +771,40 @@ export function EditorDemo() {
                 closeSoon();
               }}
               testID="hover-card"
-              class="gap-2 rounded-lg border border-border bg-popover p-3 shadow-lg"
+              // A slim panel, as an editor's: one line per problem, its
+              // fixes as links under it, the docs below a hairline.
+              class="overflow-hidden rounded-md border border-border bg-popover shadow-md"
               // A width of its own: an overlay fits its content, which
               // would leave the message's growing text no room.
-              style={{ width: Math.min(400, windowSize().width - 16) }}
+              style={{ maxWidth: Math.min(440, windowSize().width - 16) }}
             >
               <Each of={card().diagnostics}>
                 {(d) => (
-                  <View class="gap-1.5">
-                    <View class="flex-row gap-2">
+                  <View class="gap-0.5 px-2.5 py-1.5">
+                    <View class="flex-row gap-1.5">
                       <Dot severity={d().severity} />
-                      <View class="flex-1 gap-0.5">
-                        <Text class="text-[13px] text-popover-foreground">{d().message}</Text>
-                        <View class="flex-row flex-wrap items-center gap-1">
-                          <Text class="text-xs text-muted-foreground">{d().source ?? ""}</Text>
-                          <If when={d().code}>
-                            {(code) => (
-                              <If when={d().codeDescription} else={<Text class="text-xs text-muted-foreground">{`(${code()})`}</Text>}>
-                                {(description) => (
-                                  <Button
-                                    onPress={() => void openRule(description().href)}
-                                    accessibilityLabel={`Open the description of ${code()}`}
-                                    class="rounded-sm active:opacity-70"
-                                  >
-                                    <Text class="text-xs text-info underline">{code()}</Text>
-                                  </Button>
-                                )}
-                              </If>
+                      <Text class="shrink text-xs text-popover-foreground">
+                        {d().message}
+                        <Text class="text-muted-foreground">{d().source ? `  ${d().source}` : ""}</Text>
+                      </Text>
+                      <If when={d().code}>
+                        {(code) => (
+                          <If when={d().codeDescription} else={<Text class="text-xs text-muted-foreground">{code()}</Text>}>
+                            {(description) => (
+                              <Button
+                                onPress={() => void openRule(description().href)}
+                                accessibilityLabel={`Open the description of ${code()}`}
+                                class="rounded-sm active:opacity-70"
+                              >
+                                <Text class="text-xs text-info hover:underline">{code()}</Text>
+                              </Button>
                             )}
                           </If>
-                        </View>
-                      </View>
+                        )}
+                      </If>
                     </View>
-                    <View class="flex-row flex-wrap gap-1.5 pl-4">
+                    {/* A terminal starts its fixes' bands at the card's first column, as the code block's below. */}
+                    <View class="flex-row flex-wrap gap-x-3 pl-3.5" style={terminal ? { paddingLeft: 0 } : undefined}>
                       <Each of={fixesFor(d())}>
                         {(fix) => (
                           <Button
@@ -754,9 +812,9 @@ export function EditorDemo() {
                               apply(fix());
                               hover.set(null);
                             }}
-                            class="rounded-md bg-accent px-2 py-1 hover:bg-foreground/15 active:opacity-70"
+                            class="rounded-sm active:opacity-70"
                           >
-                            <Text class="text-xs text-accent-foreground">{fix().title}</Text>
+                            <Text class="text-xs text-info hover:underline">{fix().title}</Text>
                           </Button>
                         )}
                       </Each>
@@ -765,7 +823,14 @@ export function EditorDemo() {
                 )}
               </Each>
               <If when={card().markdown}>
-                {(markdown) => <TextView markdown={markdown()} selectable class={card().diagnostics.length > 0 ? "border-t border-border pt-2" : ""} />}
+                {(markdown) => (
+                  <TextView
+                    markdown={markdown()}
+                    selectable
+                    classes={HOVER_DOCS}
+                    class={`px-2.5 py-1.5 ${card().diagnostics.length > 0 ? "border-t border-border" : ""}`}
+                  />
+                )}
               </If>
             </View>
           </Overlay>
@@ -794,7 +859,8 @@ export function EditorDemo() {
         )}
       </If>
 
-      <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1">
+      {/* A terminal's status line reads as words two columns apart (12pt is one), its edges one column in, as a pager's. */}
+      <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1" style={terminal ? { gap: 24, paddingHorizontal: 8 } : undefined}>
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
           {caret()}
         </Text>
@@ -807,13 +873,15 @@ export function EditorDemo() {
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-info">
           {plural(count("info"), "info")}
         </Text>
-        <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
-          {last()}
-        </Text>
+        <If when={!terminal || last() !== "—"}>
+          <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
+            {last()}
+          </Text>
+        </If>
         <Text style={{ numberOfLines: 1 }} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {typescript() && analyzing() ? "Analyzing…" : LANGUAGES.find((l) => l.value === language())!.label}
         </Text>
-        <IconTool label="Toggle problems" icon="diagnostics" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />
+        <IconTool label="Toggle problems" word="Problems" icon="diagnostics" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />
       </View>
     </View>
   );

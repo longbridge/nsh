@@ -9,7 +9,7 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{
-    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, MountSink, Policy,
+    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, Lifecycle, MountSink, Policy,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -18,15 +18,19 @@ use objc2::{
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectProtocol, NSOperationQueue,
-    NSValue,
+    NSCurrentLocaleDidChangeNotification, NSNotification, NSNotificationCenter, NSNumber, NSObject,
+    NSObjectProtocol, NSOperationQueue, NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSValue,
 };
 use objc2_ui_kit::{
-    NSValueUIGeometryExtensions, UIDevice, UIFont, UIFontTextStyleBody,
-    UIKeyboardAnimationCurveUserInfoKey, UIKeyboardAnimationDurationUserInfoKey,
-    UIKeyboardFrameEndUserInfoKey, UIKeyboardWillChangeFrameNotification,
-    UIKeyboardWillHideNotification, UIResponder, UITraitCollection, UITraitEnvironment,
-    UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView,
+    NSValueUIGeometryExtensions, UIApplication, UIApplicationDidBecomeActiveNotification,
+    UIApplicationDidEnterBackgroundNotification, UIApplicationState,
+    UIApplicationWillEnterForegroundNotification, UIApplicationWillResignActiveNotification,
+    UIDevice, UIFont, UIFontTextStyleBody, UIKeyboardAnimationCurveUserInfoKey,
+    UIKeyboardAnimationDurationUserInfoKey, UIKeyboardFrameEndUserInfoKey,
+    UIKeyboardWillChangeFrameNotification, UIKeyboardWillHideNotification, UIResponder,
+    UISceneActivationState, UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
+    UISceneWillDeactivateNotification, UISceneWillEnterForegroundNotification, UITraitCollection,
+    UITraitEnvironment, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIWindowScene,
 };
 
 use crate::{
@@ -121,6 +125,10 @@ pub(crate) struct RootViewIvars {
     on_hot_failed: SharedHandler,
     /// Keyboard height over the view and its animation duration.
     keyboard: Cell<(f32, f32)>,
+    /// Whether the app is in use where the surface shows, as the
+    /// notifications of its window's scene said last (the application's
+    /// while it has none: [`RootView::observe_lifecycle`]).
+    lifecycle: Cell<Lifecycle>,
     /// Last environment sent to the engine.
     environment: Cell<Option<Environment>>,
     /// The embedding app's locale and text size over the system's
@@ -130,6 +138,8 @@ pub(crate) struct RootViewIvars {
     host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+    /// Links that came before the engine started ([`Surface::url_scheme`]).
+    url_schemes: RefCell<Vec<String>>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -185,6 +195,31 @@ define_class!(
             });
             // SAFETY: calling the superclass implementation.
             taken || unsafe { msg_send![super(self), accessibilityPerformEscape] }
+        }
+
+        #[unsafe(method(didMoveToWindow))]
+        fn did_move_to_window(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), didMoveToWindow] };
+            // Another window may be another scene, in another state.
+            self.ivars().lifecycle.set(self.scene_state());
+            self.publish_environment();
+            let Some(mounter) = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone())
+            else {
+                return;
+            };
+            // On the next turn: a batch being applied may hold the mounter.
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                if let Some(m) = mounter.get(mtm).borrow_mut().as_mut() {
+                    m.window_changed();
+                }
+            });
         }
 
         #[unsafe(method(safeAreaInsetsDidChange))]
@@ -270,10 +305,12 @@ impl RootView {
             on_error: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             on_hot_failed: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             keyboard: Cell::new((0.0, 250.0)),
+            lifecycle: Cell::new(lifecycle(mtm)),
             environment: Cell::new(None),
             host: Cell::default(),
             host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
+            url_schemes: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -339,6 +376,8 @@ impl RootView {
                 _ => Idiom::Phone,
             },
             locale: current_locale(),
+            locale_settings: locale_settings(),
+            lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
             // No host answers `nsh/host` here: an embedding app talks to its
@@ -346,6 +385,12 @@ impl RootView {
             host: false,
             // UIKit has no screen color sampler.
             screen_color: false,
+            // The Speech framework fed by the microphone.
+            speech: true,
+            // The notification center.
+            notifications: true,
+            // AVAudioEngine and AVPlayer.
+            audio: true,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
@@ -365,6 +410,150 @@ impl RootView {
         if self.ivars().environment.get() != Some(env) {
             self.ivars().environment.set(Some(env));
             running.engine.control().set_environment(env);
+        }
+    }
+
+    /// The environment follows the system's time zone: the user changed
+    /// it, or the device moved to another zone. Foundation caches the
+    /// system's zone until it is reset.
+    fn observe_time_zone(this: &Retained<Self>) {
+        let center = NSNotificationCenter::defaultCenter();
+        let weak = Weak::from_retained(this);
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            let Some(view) = weak.load() else { return };
+            NSTimeZone::resetSystemTimeZone();
+            view.publish_environment();
+        });
+        // SAFETY: as in `observe_keyboard`; the block only touches the view
+        // on the main queue it is delivered on.
+        let observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSSystemTimeZoneDidChangeNotification),
+                None,
+                Some(&NSOperationQueue::mainQueue()),
+                &block,
+            )
+        };
+        this.ivars().observers.borrow_mut().push(observer);
+    }
+
+    /// The environment follows the region's settings: the region format,
+    /// 24-hour time, the first day of the week, the measurement system and
+    /// the temperature unit, which iOS changes while apps run.
+    fn observe_locale(this: &Retained<Self>) {
+        let center = NSNotificationCenter::defaultCenter();
+        let weak = Weak::from_retained(this);
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            let Some(view) = weak.load() else { return };
+            view.publish_environment();
+        });
+        // SAFETY: as in `observe_time_zone`.
+        let observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSCurrentLocaleDidChangeNotification),
+                None,
+                Some(&NSOperationQueue::mainQueue()),
+                &block,
+            )
+        };
+        this.ivars().observers.borrow_mut().push(observer);
+    }
+
+    /// Tracks whether the app is in use where the surface shows
+    /// (`lifecycle()`): the notifications of its window's scene, so that on
+    /// an iPad with several windows, and on Catalyst, a surface follows its
+    /// own window as the desktop backends do; the application's while the
+    /// surface is in no window with a scene. An embedded surface follows
+    /// the embedding app's window. The state is the notification's: during
+    /// `willResignActive` / `willDeactivate`, the app and the scene still
+    /// say active.
+    fn observe_lifecycle(this: &Retained<Self>) {
+        let center = NSNotificationCenter::defaultCenter();
+        let weak = Weak::from_retained(this);
+        let block = RcBlock::new(move |note: NonNull<NSNotification>| {
+            let Some(view) = weak.load() else { return };
+            // SAFETY: a valid notification for the duration of the call.
+            let note = unsafe { note.as_ref() };
+            let name = note.name();
+            // SAFETY: immutable UIKit constants.
+            let (of_scene, state) = unsafe {
+                if *name == *UISceneDidActivateNotification {
+                    (true, Lifecycle::Active)
+                } else if *name == *UISceneDidEnterBackgroundNotification {
+                    (true, Lifecycle::Background)
+                } else if *name == *UISceneWillDeactivateNotification
+                    || *name == *UISceneWillEnterForegroundNotification
+                {
+                    (true, Lifecycle::Inactive)
+                } else if *name == *UIApplicationDidBecomeActiveNotification {
+                    (false, Lifecycle::Active)
+                } else if *name == *UIApplicationDidEnterBackgroundNotification {
+                    (false, Lifecycle::Background)
+                } else {
+                    // Resigning active, or coming back to the foreground
+                    // before it is active again.
+                    (false, Lifecycle::Inactive)
+                }
+            };
+            let scene = view.scene();
+            let ours = match (&scene, note.object()) {
+                (Some(scene), Some(object)) if of_scene => {
+                    std::ptr::addr_eq(Retained::as_ptr(scene), Retained::as_ptr(&object))
+                }
+                // Another scene's, or the application's while the surface
+                // follows a scene.
+                (Some(_), _) => false,
+                (None, _) => !of_scene,
+            };
+            if ours {
+                view.ivars().lifecycle.set(state);
+                view.publish_environment();
+            }
+        });
+        // SAFETY: immutable UIKit constants.
+        let names = unsafe {
+            [
+                UISceneDidActivateNotification,
+                UISceneWillDeactivateNotification,
+                UISceneDidEnterBackgroundNotification,
+                UISceneWillEnterForegroundNotification,
+                UIApplicationDidBecomeActiveNotification,
+                UIApplicationWillResignActiveNotification,
+                UIApplicationDidEnterBackgroundNotification,
+                UIApplicationWillEnterForegroundNotification,
+            ]
+        };
+        let mut observers = this.ivars().observers.borrow_mut();
+        for name in names {
+            // SAFETY: as in `observe_keyboard`; the block only touches the
+            // view on the main queue it is delivered on.
+            observers.push(unsafe {
+                center.addObserverForName_object_queue_usingBlock(
+                    Some(name),
+                    None,
+                    Some(&NSOperationQueue::mainQueue()),
+                    &block,
+                )
+            });
+        }
+    }
+
+    /// The scene of the window the surface is in, if any.
+    fn scene(&self) -> Option<Retained<UIWindowScene>> {
+        self.window()?.windowScene()
+    }
+
+    /// The state of the surface's scene now, before its notifications say
+    /// more (the application's without one). An unattached scene shows
+    /// nothing, as one in the background.
+    fn scene_state(&self) -> Lifecycle {
+        let Some(scene) = self.scene() else {
+            return lifecycle(self.mtm());
+        };
+        match scene.activationState() {
+            UISceneActivationState::ForegroundActive => Lifecycle::Active,
+            UISceneActivationState::ForegroundInactive => Lifecycle::Inactive,
+            _ => Lifecycle::Background,
         }
     }
 
@@ -499,12 +688,32 @@ impl RootView {
             }
             Err(_) => true,
         };
+        let settled = mounter.clone();
         if busy {
             DispatchQueue::main().exec_async(move || {
                 let mtm = MainThreadMarker::new().expect("main queue");
                 if let Some(m) = mounter.get(mtm).borrow_mut().as_mut() {
                     m.keyboard_changed(height, motion);
                 }
+            });
+        }
+        // Once the engine handled the change, and the batch the app
+        // answered with (if any) is applied (batches reach the main queue
+        // first): what the app did not move clear of the keyboard moves.
+        let control = self
+            .ivars()
+            .running
+            .borrow()
+            .as_ref()
+            .map(|r| r.engine.control());
+        if let Some(control) = control {
+            control.flush(move |_| {
+                DispatchQueue::main().exec_async(move || {
+                    let mtm = MainThreadMarker::new().expect("main queue");
+                    if let Some(m) = settled.get(mtm).borrow_mut().as_mut() {
+                        m.keyboard_settled();
+                    }
+                });
             });
         }
     }
@@ -550,6 +759,9 @@ impl RootView {
             clipboard: None,
             host: self.ivars().options.host.clone(),
             picker: None,
+            speech: None,
+            audio: None,
+            windows: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
@@ -603,10 +815,14 @@ impl RootView {
         );
         // The app's downloaded images go through its disk cache.
         installed.set_image_cache(engine.image_cache());
-        if self.ivars().options.fps {
+        if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);
+        let links = std::mem::take(&mut *self.ivars().url_schemes.borrow_mut());
+        for url in links {
+            send_url_scheme(&engine.control(), url);
+        }
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
     }
@@ -736,6 +952,9 @@ impl Surface {
             .spawn(crate::text::prewarm)?;
         let view = RootView::new(mtm, frame, app.into(), options);
         RootView::observe_keyboard(&view);
+        RootView::observe_lifecycle(&view);
+        RootView::observe_time_zone(&view);
+        RootView::observe_locale(&view);
         Ok(Surface { view })
     }
 
@@ -818,6 +1037,16 @@ impl Surface {
         }
     }
 
+    /// Hands `url`, a link the system opened the app with, to the app's
+    /// engine, whose core keeps it until the app listens (`UrlScheme`);
+    /// kept until the engine starts.
+    pub(crate) fn url_scheme(&self, url: String) {
+        match &*self.view.ivars().running.borrow() {
+            Some(running) => send_url_scheme(&running.engine.control(), url),
+            None => self.view.ivars().url_schemes.borrow_mut().push(url),
+        }
+    }
+
     /// Replaces the running app with `app` (state is reset).
     pub fn reload(&self, app: impl Into<App>) {
         let app = app.into();
@@ -832,6 +1061,18 @@ impl Surface {
             *self.view.ivars().pending.borrow_mut() = Some(app);
         }
     }
+}
+
+/// Reports `url` as a link the system opened the app with.
+fn send_url_scheme(control: &nsh_engine::EngineControl, url: String) {
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        nsh_core::EventKind::UrlScheme,
+        nsh_core::EventPayload::Map(vec![(
+            nsh_core::url_scheme::URL,
+            nsh_core::PayloadValue::Str(url),
+        )]),
+    );
 }
 
 impl Drop for Surface {
@@ -857,6 +1098,73 @@ fn preferred_language_rtl() -> bool {
         })
 }
 
+/// The user's preferred languages, most preferred first:
+/// `NSLocale.preferredLanguages`, Settings' list (the app's own language
+/// first when the user chose one for it). iOS restarts apps when the user
+/// changes the list, so it is read as the environment is published.
+fn preferred_languages() -> nsh_engine::Languages {
+    let tags: Vec<String> = objc2_foundation::NSLocale::preferredLanguages()
+        .iter()
+        .map(|tag| tag.to_string())
+        .collect();
+    nsh_engine::Languages::parse(tags.iter().map(String::as_str))
+        .unwrap_or_else(|| nsh_engine::Languages::one(current_locale()))
+}
+
+/// The user's locale settings (`localeSettings()`): the preferred
+/// languages, the time zone, and Settings' time format (the hours of
+/// `NSDateFormatter`'s format for the `j` template, which 24-hour time
+/// changes), `NSCalendar`'s first weekday, `NSLocale`'s measurement system
+/// and the `AppleTemperatureUnit` default, over the region's.
+fn locale_settings() -> nsh_engine::LocaleSettings {
+    use nsh_engine::{HourCycle, MeasurementSystem, TemperatureUnit, Weekday};
+    use objc2_foundation::{
+        NSCalendar, NSDateFormatter, NSLocale, NSLocaleMeasurementSystem, NSString, NSUserDefaults,
+        ns_string,
+    };
+    let locale = NSLocale::currentLocale();
+    let mut preferences = nsh_engine::LocaleSettings::parse(&locale.localeIdentifier().to_string());
+    preferences.languages = preferred_languages();
+    preferences.time_zone = time_zone();
+    // The hours of the user's time format, which 24-hour time changes.
+    let hours =
+        NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("j"), 0, Some(&locale));
+    if let Some(cycle) = hours.and_then(|format| HourCycle::of_pattern(&format.to_string())) {
+        preferences.hour_cycle = cycle;
+    }
+    // From 1 for Sunday to 7 for Saturday.
+    let first = match NSCalendar::currentCalendar().firstWeekday() {
+        1 => Some(Weekday::Sunday),
+        n => u8::try_from(n)
+            .ok()
+            .and_then(|n| Weekday::from_number(n.wrapping_sub(1))),
+    };
+    if let Some(day) = first {
+        preferences.first_day_of_week = day;
+    }
+    // SAFETY: a key Foundation defines.
+    let system = locale.objectForKey(unsafe { NSLocaleMeasurementSystem });
+    match system
+        .and_then(|s| s.downcast::<NSString>().ok())
+        .map(|s| s.to_string())
+        .as_deref()
+    {
+        Some("Metric") => preferences.measurement_system = MeasurementSystem::Metric,
+        Some("U.S.") => preferences.measurement_system = MeasurementSystem::Us,
+        Some("U.K.") => preferences.measurement_system = MeasurementSystem::Uk,
+        _ => {}
+    }
+    // Set once the user picks one.
+    let unit =
+        NSUserDefaults::standardUserDefaults().stringForKey(ns_string!("AppleTemperatureUnit"));
+    match unit.map(|u| u.to_string()).as_deref() {
+        Some("Celsius") => preferences.temperature_unit = TemperatureUnit::Celsius,
+        Some("Fahrenheit") => preferences.temperature_unit = TemperatureUnit::Fahrenheit,
+        _ => {}
+    }
+    preferences
+}
+
 /// The user's region format (`NSLocale.currentLocale`: language and
 /// region, as Settings sets them), `Intl`'s default.
 fn current_locale() -> nsh_engine::Locale {
@@ -864,6 +1172,22 @@ fn current_locale() -> nsh_engine::Locale {
         .localeIdentifier()
         .to_string();
     nsh_engine::Locale::parse(&identifier).unwrap_or_default()
+}
+
+/// The system's time zone: its IANA name.
+fn time_zone() -> nsh_engine::TimeZone {
+    nsh_engine::TimeZone::parse(&NSTimeZone::systemTimeZone().name().to_string())
+        .unwrap_or_default()
+}
+
+/// The app's state as UIApplication reports it now, before its
+/// notifications say more.
+fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
+    match UIApplication::sharedApplication(mtm).applicationState() {
+        UIApplicationState::Active => Lifecycle::Active,
+        UIApplicationState::Background => Lifecycle::Background,
+        _ => Lifecycle::Inactive,
+    }
 }
 
 /// The iOS version (`UIDevice.systemVersion`, the iOS version Catalyst

@@ -61,6 +61,8 @@ pub(crate) enum Platform {
     /// GPUI, on this machine (macOS, Windows or Linux): a development host
     /// only, as GPUI is the backend for embedding in GPUI apps.
     Gpui,
+    /// The terminal host on this machine.
+    Tui,
 }
 
 impl Platform {
@@ -73,6 +75,7 @@ impl Platform {
             Platform::MacOs => "macos",
             Platform::Windows => "windows",
             Platform::Gpui => "gpui",
+            Platform::Tui => "tui",
         }
     }
 
@@ -82,7 +85,13 @@ impl Platform {
             Platform::IphoneOs => Some("aarch64-apple-ios"),
             Platform::IphoneSimulator => Some("aarch64-apple-ios-sim"),
             Platform::MacCatalyst => Some("aarch64-apple-ios-macabi"),
-            Platform::Linux | Platform::MacOs | Platform::Windows | Platform::Gpui => None,
+            // Packaged off Windows: cross-built ([`cross_build`]).
+            Platform::Windows if !cfg!(windows) => Some(WINDOWS_TRIPLE),
+            Platform::Linux
+            | Platform::MacOs
+            | Platform::Windows
+            | Platform::Gpui
+            | Platform::Tui => None,
         }
     }
 
@@ -96,6 +105,8 @@ impl Platform {
             (Platform::MacOs, true) => "nsh-macos-app",
             (Platform::Windows, false) => "nsh-windows-host",
             (Platform::Windows, true) => "nsh-windows-app",
+            (Platform::Tui, false) => "nsh-tui-host",
+            (Platform::Tui, true) => "nsh-tui-app",
             (Platform::Gpui, false) => "nsh-gpui-host",
             (Platform::Gpui, true) => unreachable!("GPUI apps are embedded, never packaged"),
             (_, false) => "nsh-ios-host",
@@ -106,12 +117,7 @@ impl Platform {
     /// The file of [`Platform::binary`]: with this machine's executable
     /// suffix (`.exe`) when it is built for this machine.
     pub(crate) fn file_name(self, runner: bool) -> String {
-        let suffix = if self.triple().is_none() {
-            env::consts::EXE_SUFFIX
-        } else {
-            ""
-        };
-        format!("{}{suffix}", self.binary(runner))
+        format!("{}{}", self.binary(runner), exe_suffix(self.triple()))
     }
 
     /// The development host (`runner` false) or release runner for it, as
@@ -130,6 +136,7 @@ impl Platform {
             Platform::MacOs => "macOS",
             Platform::Windows => "Windows",
             Platform::Gpui => "GPUI",
+            Platform::Tui => "the terminal",
         };
         format!("the {what} for {platform}")
     }
@@ -519,8 +526,43 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         built.push(triple);
     }
     built.push(profile);
-    built.push(file_name);
-    existing(built, platform, name)
+    built.push(&file_name);
+    let built = existing(built, platform, name)?;
+    match checkout(bin) {
+        Some(root) if cfg!(target_os = "macos") && platform.triple().is_none() => stable_copy(
+            &built,
+            &root.join(".nsh/hosts").join(profile).join(&file_name),
+        ),
+        _ => Ok(built),
+    }
+}
+
+/// A copy of the executable `built` at `copy` that changes only when the
+/// build does. Every `cargo build`, even one with nothing to do, links the
+/// binary into `target/<profile>/` again, and macOS checks an executable whose
+/// file changed again the first time it runs: a second or more for a debug
+/// host, on every `nsh run`. The copy keeps its file until the build is new
+/// (its modification time or size differ); on APFS the copy is a clone.
+fn stable_copy(built: &Path, copy: &Path) -> anyhow::Result<PathBuf> {
+    let source = fs::metadata(built).with_context(|| format!("read {}", built.display()))?;
+    let fresh = fs::metadata(copy).is_ok_and(|copied| {
+        copied.len() == source.len() && copied.modified().ok() == source.modified().ok()
+    });
+    if !fresh {
+        if let Some(dir) = copy.parent() {
+            fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        }
+        // A new file rather than one written over: a running host keeps its own.
+        let _ = fs::remove_file(copy);
+        fs::copy(built, copy).with_context(|| format!("copy {}", built.display()))?;
+        let modified = source.modified().context("modification time")?;
+        fs::File::options()
+            .write(true)
+            .open(copy)
+            .and_then(|file| file.set_modified(modified))
+            .with_context(|| format!("stamp {}", copy.display()))?;
+    }
+    Ok(copy.to_path_buf())
 }
 
 /// The cargo arguments a build of a GPUI host adds: on a Mac
@@ -589,11 +631,57 @@ fn append_web_flags(command: &mut Command, encoded: Option<OsString>, plain: Opt
     }
 }
 
+/// The Windows target a Windows runtime is cross-built for off Windows.
+pub(crate) const WINDOWS_TRIPLE: &str = "x86_64-pc-windows-msvc";
+
+/// The executable suffix of a build for `triple` (`None`: this machine).
+pub(crate) fn exe_suffix(triple: Option<&str>) -> &'static str {
+    match triple {
+        None => env::consts::EXE_SUFFIX,
+        Some(triple) if triple.contains("-windows-") => ".exe",
+        Some(_) => "",
+    }
+}
+
+/// Sets up `cmd` (`cargo` with no arguments yet) to build for `triple`.
+/// A Windows (MSVC) build off Windows links with cargo-xwin, whose
+/// `cargo xwin build` takes the same arguments as `cargo build`, and links
+/// the C runtime statically so the executable needs no Visual C++
+/// redistributable on the machine it runs on.
+pub(crate) fn cross_build(cmd: &mut Command, triple: Option<&str>) -> anyhow::Result<()> {
+    if cfg!(windows) || triple != Some(WINDOWS_TRIPLE) {
+        return Ok(());
+    }
+    let program = cmd.get_program().to_owned();
+    let found = Command::new(&program)
+        .args(["xwin", "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !found {
+        bail!(
+            "building for Windows on this machine needs cargo-xwin and the {WINDOWS_TRIPLE} target:\n  cargo install --locked cargo-xwin\n  rustup target add {WINDOWS_TRIPLE}\nor set NSH_RUNTIME to a runtime with a Windows release runner"
+        );
+    }
+    cmd.arg("xwin").env(
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS",
+        "-C target-feature=+crt-static",
+    );
+    Ok(())
+}
+
 /// Runs cargo in the checkout `root` (the one that runs this CLI under
 /// `cargo run`, else `cargo` from the path): the step "building <what>".
 fn cargo(root: &Path, args: &[&str], what: &str) -> anyhow::Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
-    crate::ui::cargo(Command::new(&cargo).args(args).current_dir(root), what)
+    let mut cmd = Command::new(&cargo);
+    let triple = args
+        .iter()
+        .position(|arg| *arg == "--target")
+        .and_then(|i| args.get(i + 1).copied());
+    cross_build(&mut cmd, triple)?;
+    crate::ui::cargo(cmd.args(args).current_dir(root), what)
 }
 
 fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<PathBuf> {
@@ -632,6 +720,29 @@ pub(crate) fn copy_browser_host(source: &Path, target: &Path) -> anyhow::Result<
 #[cfg(test)]
 mod tests {
     use super::Platform;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stable_copy_changes_only_with_the_build() {
+        use std::{fs, os::unix::fs::MetadataExt as _};
+        let dir = std::env::temp_dir().join(format!("nsh-stable-copy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let built = dir.join("host");
+        let copy = dir.join("copies/host");
+        fs::write(&built, b"one").unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        let first = fs::metadata(&copy).unwrap().ino();
+        // What cargo does with nothing to rebuild: the same file linked again.
+        fs::hard_link(&built, dir.join("again")).unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        assert_eq!(fs::metadata(&copy).unwrap().ino(), first);
+        fs::remove_file(&built).unwrap();
+        fs::write(&built, b"three").unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), b"three");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn published_runtime_variants_use_browser_execution() {

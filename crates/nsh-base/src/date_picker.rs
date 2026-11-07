@@ -36,9 +36,9 @@ use nsh_core::{
 };
 
 use crate::{
-    calendar::{self, CalendarItemState, Config, Date, Grid, Matcher, YearRange, iso, parse_date},
+    calendar::{self, CalendarEntry, Config, Date, Grid, Matcher, YearRange, iso, parse_date},
     popup::{self, DropdownFrame, OpenChangeReason, OpenState, Presence},
-    time_field::{self, FieldConfig, HourCycle, TimeFieldSegmentState, TimeOfDay, TimePrecision},
+    time_field::{self, FieldConfig, HourCycle, TimeFieldSegmentEntry, TimeOfDay, TimePrecision},
 };
 
 /// A date picker's value (`gpui-component`'s `DateTime`): its date or
@@ -444,13 +444,16 @@ pub struct DatePickerProps {
     #[prop(default)]
     pub row_style: Prop<Style>,
     /// The classes of each item of the calendar (`selected:`, `disabled:`,
-    /// `focus:` as `Calendar`'s).
+    /// `focus:` and the days' `data-range-start:`, `data-range-end:`,
+    /// `data-range-middle:`, `data-today:`, `data-outside:` as
+    /// `Calendar`'s).
     pub item_class: Prop<Option<SharedString>>,
     /// The style of each item, its text styles too.
     #[prop(default)]
     pub item_style: Prop<TextPartStyle>,
-    /// Draws each item of the calendar.
-    pub render_item: Prop<Option<Renderer<CalendarItemState>>>,
+    /// Draws each item of the calendar from what it is, never its state
+    /// (`Calendar`'s `renderItem`).
+    pub render_item: Prop<Option<Renderer<CalendarEntry>>>,
     /// The classes of the time's row: its label at the start and the field
     /// at the end (`flex-row items-center justify-between`, `gpui-component`'s).
     pub time_class: Prop<Option<SharedString>>,
@@ -477,8 +480,9 @@ pub struct DatePickerProps {
     /// The style of each `:`.
     #[prop(default)]
     pub separator_style: Prop<TextPartStyle>,
-    /// Draws each segment of the time field.
-    pub render_segment: Prop<Option<Renderer<TimeFieldSegmentState>>>,
+    /// Draws each segment of the time field from what it is and shows,
+    /// never its state (`TimeField`'s `renderSegment`).
+    pub render_segment: Prop<Option<Renderer<TimeFieldSegmentEntry>>>,
     /// The classes of the clear button, a sibling after the trigger.
     pub clear_button_class: Prop<Option<SharedString>>,
     /// The inline style of the clear button, over its classes.
@@ -533,6 +537,11 @@ fn display_format(precision: Option<TimePrecision>, cycle: HourCycle) -> String 
 /// clears it. The value is `value` and `onChange` (or the
 /// picker's own, from `defaultValue`). Every prop of `Calendar` passes on
 /// to its calendar. It looks like nothing: the app styles every part.
+///
+/// In a terminal the trigger shows a `Select`'s marks over the end of its
+/// band: `▾` on the Cell before its last and, while there is a date to clear, `×` three
+/// Cells before it in place of `clearButton`; the app's `trigger` leaves
+/// those Cells free.
 #[component]
 pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
@@ -618,6 +627,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                 KeyOptions {
                     when: When::NotEditing,
                     repeat: false,
+                    ..Default::default()
                 },
                 move |_| change(!open.get_untracked(), OpenChangeReason::TriggerPress),
             );
@@ -628,6 +638,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        ..Default::default()
                     },
                     move |_| {
                         if !open.get_untracked() {
@@ -816,40 +827,48 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
         })
     };
 
+    // The terminal's marks are lit while the trigger has the keys or the
+    // calendar is open.
+    let lit = move || focused.get() || open.get();
     let toggle = change;
-    let trigger = props.trigger.place(move |t| {
+    let trigger = props.trigger.place({
         let toggle = toggle.clone();
-        t.element_ref(&anchor)
-            .role(AccessibilityRole::Combobox)
-            .optional_label(props.accessibility_label)
-            .disabled(props.disabled)
-            .focusable(move || !props.disabled.get())
-            .accessibility_state(move || AccessibilityState {
-                expanded: Some(open.get()),
-                disabled: props.disabled.get(),
-                ..AccessibilityState::default()
-            })
-            .accessibility_value(move || {
-                let format = props
-                    .date_format
-                    .get()
-                    .map(|f| f.to_string())
-                    .unwrap_or_else(|| {
-                        display_format(props.time_precision.get(), props.hour_cycle.get())
-                    });
-                let (start, end) = times.get();
-                DateTime::of(date.get(), start, end)
-                    .format(&format)
-                    .map(|text| AccessibilityValue {
-                        text: Some(text.as_str().into()),
-                        ..AccessibilityValue::default()
-                    })
-            })
-            .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
-            .on_focus(move || focused.set(true))
-            .on_blur(move || focused.set(false))
-            .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
+        move |t| {
+            let toggle = toggle.clone();
+            t.element_ref(&anchor)
+                .role(AccessibilityRole::Combobox)
+                .optional_label(props.accessibility_label)
+                .disabled(props.disabled)
+                .focusable(move || !props.disabled.get())
+                .accessibility_state(move || AccessibilityState {
+                    expanded: Some(open.get()),
+                    has_popup: true,
+                    disabled: props.disabled.get(),
+                    ..AccessibilityState::default()
+                })
+                .accessibility_value(move || {
+                    let format = props
+                        .date_format
+                        .get()
+                        .map(|f| f.to_string())
+                        .unwrap_or_else(|| {
+                            display_format(props.time_precision.get(), props.hour_cycle.get())
+                        });
+                    let (start, end) = times.get();
+                    DateTime::of(date.get(), start, end)
+                        .format(&format)
+                        .map(|text| AccessibilityValue {
+                            text: Some(text.as_str().into()),
+                            ..AccessibilityValue::default()
+                        })
+                })
+                .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
+                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
+        }
     });
+    let terminal = crate::terminal::is_terminal();
     let clear_button = when(
         move || props.cleanable.get() && date.with(Date::is_some),
         move || {
@@ -860,15 +879,28 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                 .focusable(false)
                 .disabled(props.disabled)
                 .on_press(move || clear())
-                .app_class(props.clear_button_class)
-                .inline_style(props.clear_button_style)
-                .child(props.clear_button.place(|c| c))
+                .map(|v| match terminal {
+                    // The terminal's own `×`, one of the trigger's marks.
+                    true => crate::terminal::mark_slot(v, crate::terminal::CLEAR.trim_start(), lit),
+                    false => v
+                        .app_class(props.clear_button_class)
+                        .inline_style(props.clear_button_style)
+                        .child(props.clear_button.place(|c| c)),
+                })
         },
     );
-    view()
-        .child(trigger)
-        .child(clear_button)
-        .child(popup::dropdown(anchor, width, frame, presence, content))
+    let dropdown = popup::dropdown(anchor, width, true, None, frame, presence, content);
+    match terminal {
+        // The app's trigger with the terminal's marks over its band's end
+        // (`trigger_marks`), as a `Select`'s; dimmed with it.
+        true => view().child(view().disabled(props.disabled).child(trigger).child(
+            crate::terminal::trigger_marks(clear_button, lit, move || {
+                toggle(!open.get_untracked(), OpenChangeReason::TriggerPress)
+            }),
+        )),
+        false => view().child(trigger).child(clear_button),
+    }
+    .child(dropdown)
 }
 
 #[cfg(test)]

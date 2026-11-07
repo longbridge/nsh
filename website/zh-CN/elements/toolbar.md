@@ -34,7 +34,10 @@ fn formatting() -> impl IntoElement {
                 .size_8()
                 .items_center()
                 .justify_center()
-                .pressed_style(|s| s.bg(move || theme().accent))
+                .border_1()
+                .border_color(transparent_black())
+                .hover(|s| s.bg(move || theme().foreground.opacity(0.05)))
+                .pressed_style(|s| s.bg(move || theme().foreground.opacity(0.1)).border_color(move || theme().border))
                 .child(text("B")),
         )
 }
@@ -47,12 +50,12 @@ import { Button, Toggle, Toolbar, ToolbarGroup, ToolbarSeparator } from "nsh/bas
 function App() {
   const bold = signal(false);
   return (
-    <Toolbar accessibilityLabel="Formatting" class="items-center gap-1 self-start rounded-lg bg-muted p-1">
+    <Toolbar accessibilityLabel="Formatting" class="items-center gap-1 self-start rounded-lg border border-border bg-muted p-1">
       <ToolbarGroup accessibilityLabel="History">
-        <Button accessibilityLabel="Undo" class="size-8 items-center justify-center rounded-md hover:bg-accent">
+        <Button accessibilityLabel="Undo" class="size-8 items-center justify-center rounded-md hover:bg-foreground/5">
           <Text>↶</Text>
         </Button>
-        <Button accessibilityLabel="Redo" class="size-8 items-center justify-center rounded-md hover:bg-accent">
+        <Button accessibilityLabel="Redo" class="size-8 items-center justify-center rounded-md hover:bg-foreground/5">
           <Text>↷</Text>
         </Button>
       </ToolbarGroup>
@@ -61,7 +64,7 @@ function App() {
         pressed={bold()}
         accessibilityLabel="Bold"
         onChange={({ pressed }) => bold.set(pressed)}
-        class="size-8 items-center justify-center rounded-md aria-pressed:bg-accent"
+        class="size-8 items-center justify-center rounded-md border border-transparent hover:bg-foreground/5 aria-pressed:border-border aria-pressed:bg-foreground/10"
       >
         <Text>B</Text>
       </Toggle>
@@ -103,7 +106,7 @@ mount(App);
 
 ## 项目
 
-工具栏的项目是其中的 `Button`、`Toggle` 和 `Link`，包括它的分组里的，以及放在它里面的 [`ToggleGroup`](./toggle.md) 里的。[`Menu`](./menu.md) 或 [`Popover`](./popover.md) 的触发器也是项目：即放在它的 `trigger` 插槽里的视图，弹出层把按下、焦点和 `expanded` 状态交给它。放在工具栏里的 `ToggleGroup` 是它的一个分组：其中的开关按钮就是工具栏的项目，屏幕阅读器听到的是一个分组，它的 `disabled` 仍然禁用它自己的开关按钮。其他控件（`Input`、`Select`、`Slider`）各自是键盘焦点的一站，保留自己的方向键；把它们放在栏的末尾。项目打开的弹出层里显示的内容（弹出框的输入框和按钮、菜单的项）不属于工具栏。方向键按栏里排列的顺序经过各个项目，无论项目嵌套多深；应用稍后才显示的项目也会排在它所在的位置。
+工具栏的项目是其中的 `Button`、`Toggle` 和 `Link`，包括它的分组里的，以及放在它里面的 [`ToggleGroup`](./toggle.md) 里的。[`Menu`](./menu.md) 或 [`Popover`](./popover.md) 的触发器也是项目：即放在它的 `trigger` 插槽里的视图，弹出层把按下、焦点和 `expanded` 状态交给它。应用自己画的工具写成带应用样式的 `Button`：`Button` 没有自己的外观，样子完全由应用决定，同时它是工具栏的项目（带 `onPress` 的 `View` 是键盘焦点单独的一站，方向键不经过它）。放在工具栏里的 `ToggleGroup` 是它的一个分组：其中的开关按钮就是工具栏的项目，屏幕阅读器听到的是一个分组，它的 `disabled` 仍然禁用它自己的开关按钮。其他控件（`Input`、`Select`、`Slider`）各自是键盘焦点的一站，保留自己的方向键；把它们放在栏的末尾。项目打开的弹出层里显示的内容（弹出框的输入框和按钮、菜单的项、悬停卡片的链接）不属于工具栏。方向键按栏里排列的顺序经过各个项目，无论项目嵌套多深；应用稍后才显示的项目也会排在它所在的位置。
 
 ## 部件
 
@@ -121,14 +124,14 @@ mount(App);
 工具面板是一列：`axis="vertical"` 让项目从上到下排列，上下键沿着它们移动。
 
 ```tsx
-<Toolbar axis="vertical" accessibilityLabel="Tools" class="gap-1 self-start rounded-lg bg-muted p-1">
+<Toolbar axis="vertical" accessibilityLabel="Tools" class="gap-1 self-start rounded-lg border border-border bg-muted p-1">
   <Each of={["select", "pen", "shape", "text"]}>
     {(t) => (
       <Toggle
         pressed={tool() === t()}
         accessibilityLabel={t()}
         onChange={({ pressed }) => pressed && tool.set(t())}
-        class="size-8 items-center justify-center rounded-md aria-pressed:bg-accent"
+        class="size-8 items-center justify-center rounded-md border border-transparent hover:bg-foreground/5 aria-pressed:border-border aria-pressed:bg-foreground/10"
       >
         <Text>{t()[0].toUpperCase()}</Text>
       </Toggle>
@@ -170,7 +173,7 @@ mount(App);
 | Home、End | 把焦点移到第一个或最后一个项目。 |
 | 空格、回车 | 按下获得焦点的项目。 |
 
-方向键跳过被禁用的项目，不会按下任何东西：开关按钮只在被按下时改变。另一对方向键留给项目使用（菜单的触发器用下键打开菜单）。
+方向键跳过被禁用的项目，不会按下任何东西：开关按钮只在被按下时改变。另一对方向键留给项目使用（菜单的触发器用下键打开菜单）。在从右到左的布局里，横向工具栏从右边开始，左键移到下一个项目，右键移到上一个；纵向工具栏仍用下、上键。
 
 ## 平台说明
 

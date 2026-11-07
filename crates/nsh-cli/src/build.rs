@@ -59,6 +59,10 @@ pub(crate) struct Built {
     /// (`nsh_bundler::Bundle::native_use`); `None` when unknown (a Rust
     /// app's, a development build's).
     pub(crate) native_use: Option<nsh_bundler::NativeUse>,
+    /// What the entry chunk's own code uses of them
+    /// (`nsh_bundler::Bundle::entry_native_use`); `None` when unknown, and
+    /// then the chunks' are not used either: everything is the entry's.
+    pub(crate) entry_native_use: Option<nsh_bundler::NativeUse>,
     /// How long bundling and compiling took.
     pub(crate) elapsed: Duration,
     /// A Rust app (`nsh.json` `"root"`, [`rust_root`]): no bundle, its
@@ -80,6 +84,7 @@ pub(crate) fn rust_root() -> Built {
         capabilities: None,
         ui_sets: Vec::new(),
         native_use: None,
+        entry_native_use: None,
         elapsed: Duration::ZERO,
         rust_root: true,
     }
@@ -97,6 +102,9 @@ pub(crate) struct BuiltChunk {
     pub(crate) bytecode: Vec<u8>,
     /// Source map of `code`.
     pub(crate) source_map: Option<String>,
+    /// What its own code uses of the native modules
+    /// (`nsh_bundler::Bundle::chunk_native_use`); `None` when unknown.
+    pub(crate) native_use: Option<nsh_bundler::NativeUse>,
 }
 
 /// A file an app ships.
@@ -209,7 +217,7 @@ fn compile_with(
     strip: nsh_js::Strip,
 ) -> Result<Built, BuildError> {
     let start = Instant::now();
-    let bundle = nsh_bundler::bundle(&BundleOptions {
+    let mut bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: release,
         split,
@@ -230,11 +238,13 @@ fn compile_with(
         nsh_js::compile_chunk_bytecode(&bundle.code, &sources, strip, &crate::ui_sets())?
             .into_iter();
     let bytecode = compiled.next().expect("entry bytecode");
+    let mut chunk_native_use = std::mem::take(&mut bundle.chunk_native_use);
     let chunks = bundle
         .chunks
         .into_iter()
         .zip(compiled)
         .map(|(c, bytecode)| BuiltChunk {
+            native_use: chunk_native_use.remove(&c.id),
             id: c.id,
             code: c.code,
             bytecode,
@@ -252,6 +262,7 @@ fn compile_with(
         capabilities: bundle.capabilities,
         ui_sets: imported_sets(&bundle.natives),
         native_use: Some(bundle.native_use),
+        entry_native_use: Some(bundle.entry_native_use),
         elapsed: start.elapsed(),
         rust_root: false,
     })
@@ -278,6 +289,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
         capabilities: hot.capabilities.clone(),
         ui_sets: imported_sets(hot.natives()),
         native_use: None,
+        entry_native_use: None,
         elapsed: start.elapsed(),
         rust_root: false,
     };
@@ -321,11 +333,21 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
         let path = out.join(name);
         fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
     }
-    // The app's id, which names where it keeps its data (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the schemes
+    // it claims (`Bundle::read`).
     let app = out.join("app.json");
     let id = crate::package::app_id(entry)?;
-    fs::write(&app, serde_json::json!({ "id": id }).to_string())
-        .with_context(|| format!("write {}", app.display()))?;
+    let config = crate::package::read_config(&dunce::canonicalize(entry)?)?;
+    let schemes = config.url_schemes();
+    fs::write(
+        &app,
+        crate::package::app_json(
+            serde_json::json!({ "id": id }),
+            &schemes,
+            config.window.as_ref(),
+        ),
+    )
+    .with_context(|| format!("write {}", app.display()))?;
     let declared = out.join("capabilities.json");
     match built.capabilities_json() {
         Some(json) => {
@@ -369,6 +391,36 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+
+    /// Separates development bundling, hot-script assembly and QuickJS compilation.
+    /// Run with `cargo test -p nsh-cli bench_dev_startup -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "startup measurement on the counter and gallery"]
+    fn bench_dev_startup() {
+        use std::time::Instant;
+
+        let sets = crate::ui_sets();
+        for app in ["counter", "gallery"] {
+            let entry = PathBuf::from(format!("../../examples/{app}/App.tsx"));
+            for run in 0..3 {
+                let start = Instant::now();
+                let hot = nsh_bundler::bundle_hot(&entry, &sets).unwrap();
+                let bundled = start.elapsed();
+                let start = Instant::now();
+                let (code, _) = hot.script();
+                let assembled = start.elapsed();
+                let start = Instant::now();
+                let bytecode = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
+                let compiled = start.elapsed();
+                assert!(!bytecode.is_empty());
+                eprintln!(
+                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes",
+                    code.len(),
+                    bytecode.len()
+                );
+            }
+        }
+    }
 
     #[test]
     fn hosts_must_serve_the_ui_sets_an_app_imports() {

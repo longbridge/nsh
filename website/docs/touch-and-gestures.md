@@ -90,6 +90,7 @@ Press feedback is the app's: styles the view takes while it is pressed, hovered,
 | `.active(\|s\| ..)` | `activeStyle` | `active:` | While pressed. |
 | `.hover(\|s\| ..)` | `hoverStyle` | `hover:` | While a pointer is over it (desktops, iPad pointers, browsers). |
 | `.focus(\|s\| ..)` | `focusStyle` | `focus:` | While it has focus. |
+| `.focus_within(\|s\| ..)` | `focusWithinStyle` | `focus-within:` | While it or a view inside it has focus: a field's frame around the input that edits. |
 | `.disabled_style(\|s\| ..)` | `disabledStyle` | `disabled:` | While disabled. |
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | | Android's material ripple (`color`, `borderless`, `radius`, `foreground`), in addition to the styles. |
 
@@ -637,3 +638,13 @@ The main thread never waits for your code. When the system needs an answer on th
 - [Scrolling](./scrolling.md): the keyboard taps setting, scroll views and nested gestures.
 - [`PanResponder`](../modules/nsh.md#panresponder): the `PanResponder` reference.
 - [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.
+
+## Terminal pointer input
+
+The terminal host captures the mouse: hover applies the app's `hoverStyle` and `hover:` classes and reports
+`onMouseEnter` / `onMouseMove` / `onMouseLeave`, primary-button drags drive native pans and responders, dragging
+scroll content or a scroll bar's thumb moves its viewport, and the wheel scrolls the innermost scroll view under
+the pointer (Shift scrolls sideways). Double and triple clicks carry their count in `Press` events, and a right
+click reaches `onContextMenu`. Positions follow the Cell grid. Start the host with `--no-mouse` to leave the
+mouse to the terminal emulator and its own text selection. Embedding applications choose when to forward mouse
+events to their NSH surface.

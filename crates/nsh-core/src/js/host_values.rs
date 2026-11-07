@@ -188,6 +188,7 @@ impl HostValue for AccessibilityState {
             busy: flag("busy"),
             expanded: input.field("expanded").and_then(|v| v.as_bool()),
             pressed: tristate("pressed"),
+            has_popup: flag("hasPopup"),
             // `false` and unknown words are no current item, as ARIA has it.
             current: match current.as_ref().and_then(|c| c.as_bool()) {
                 Some(true) => Some(AccessibilityCurrent::True),
@@ -213,7 +214,9 @@ impl HostValue for AccessibilityState {
              /** A toggle button that is on or off (ARIA's `aria-pressed`). */\n  \
              pressed?: boolean | \"mixed\";\n  \
              /** The current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step. */\n  \
-             current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n}"
+             current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n  \
+             /** Opens a popup, a menu or a list (ARIA's `aria-haspopup`); `expanded` says whether it is open. */\n  \
+             hasPopup?: boolean;\n}"
                 .into()
         })
     }
@@ -692,6 +695,76 @@ impl HostValue for crate::shader::ShaderUniforms {
                 .into()
         });
         format!("Record<string, {value}>")
+    }
+}
+
+/// A page's or a dialog's `transitionShader`: `{ source, uniforms?,
+/// duration? }`.
+impl HostValue for crate::shader::NavShaderSpec {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let mut source = None;
+        let mut uniforms = crate::shader::ShaderUniforms::default();
+        let mut duration = None;
+        for (name, value) in input.entries() {
+            match name.as_str() {
+                "source" => source = value.as_string(),
+                "uniforms" => {
+                    uniforms = crate::shader::ShaderUniforms::decode(&value, cx).unwrap_or_default()
+                }
+                "duration" => duration = value.as_number().map(|d| d as f32),
+                _ => {}
+            }
+        }
+        Some(crate::shader::NavShaderSpec {
+            source: source?.as_str().into(),
+            uniforms,
+            duration,
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let uniforms = crate::shader::ShaderUniforms::ts_type(types);
+        format!("{{ source: string; uniforms?: {uniforms}; duration?: number }}")
+    }
+}
+
+/// An effect's `progress`: a number or an animated value.
+impl HostValue for crate::shader::ShaderProgress {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::ShaderProgress::Number(
+                crate::geometry::Percentage(n as f32),
+            ));
+        }
+        input
+            .animated_node()
+            .map(crate::shader::ShaderProgress::Animated)
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "number | AnimatedNode".into()
+    }
+}
+
+/// A transition's `value`: a string, a number or a boolean.
+impl HostValue for crate::shader::TransitionKey {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(b) = input.as_bool() {
+            return Some(crate::shader::TransitionKey::Bool(b));
+        }
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::TransitionKey::number(n));
+        }
+        input
+            .as_string()
+            .map(|s| crate::shader::TransitionKey::String(s.as_str().into()))
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "string | number | boolean".into()
     }
 }
 

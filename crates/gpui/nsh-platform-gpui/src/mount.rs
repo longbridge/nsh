@@ -150,6 +150,7 @@ impl Mounter {
             MountItem::Remove { id } => {
                 if let Some(view) = &self.get(*id) {
                     crate::text_input::removing(surface, view);
+                    crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
@@ -160,6 +161,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 if let Some(view) = self.views.remove(*id) {
                     crate::text_input::removing(surface, &view);
+                    crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
@@ -172,7 +174,9 @@ impl Mounter {
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = &self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // The window decides its root's size: the main one, and
+                // each of the app's own ([`crate::window`]).
+                if *id == ROOT_ID || crate::window::is_root(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;
@@ -238,6 +242,7 @@ impl Mounter {
                     view.state_mut().events = *events;
                     crate::input::events_changed(surface, view);
                     crate::access::events_changed(view);
+                    crate::file_drop::events_changed(surface, view);
                 }
             }
             MountItem::Image {
@@ -314,9 +319,19 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            // Only fills draw: an effect's or a transition's children show as
+            // they are (a transition changes them at once), a screen effect
+            // draws nothing, pages and dialogs come and go as they would
+            // without a shader.
+            MountItem::ShaderTransition { .. }
+            | MountItem::ShaderInput { .. }
+            | MountItem::NavShader { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
-                    crate::shader::set(surface, view, layer.clone());
+                    let fill = layer
+                        .clone()
+                        .filter(|l| l.role == nsh_core::shader::ShaderRole::Fill);
+                    crate::shader::set(surface, view, fill);
                 }
             }
             MountItem::Gestures { id, values } => {
@@ -375,7 +390,9 @@ impl Mounter {
             // The animator's (`Surface::apply`).
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
-            | MountItem::ComponentPropSlots { .. } => {}
+            | MountItem::ComponentPropSlots { .. }
+            | MountItem::TreeOrder(_)
+            | MountItem::ProjectStates { .. } => {}
         }
     }
 
@@ -441,6 +458,7 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::Load(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {
@@ -448,7 +466,7 @@ impl Mounter {
                 }
             }
             Command::Back => crate::navigation::default_back(surface),
-            Command::Desktop(command) => crate::chrome::command(surface, command),
+            Command::Desktop(command) => crate::window::command(surface, id, view, command),
             other => crate::system::command(surface, id, other),
         }
     }

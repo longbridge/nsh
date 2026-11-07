@@ -1,7 +1,8 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { TextView, type TextViewImage } from "nsh/base";
+import { TextView, type TextViewImage, type TextViewRef } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
 import { ImageViewer } from "./ImageViewer";
+import { LucideIcon } from "../icons";
 
 const MARKDOWN = `# Native Shell
 
@@ -32,7 +33,7 @@ mount(() => <Text class="text-lg font-semibold">Hello, NSH</Text>);
 
 > Only the app's code is JS: everything else is native.
 
-![Green mountains under low clouds](https://picsum.photos/id/1018/1200/750)
+![Starship between its towers at sunrise](https://pbs.twimg.com/media/HS8AAMSWwAEg-aG?format=jpg&name=medium)
 
 > [!TIP]
 > Long-press any paragraph to select and copy it.
@@ -44,6 +45,16 @@ A list stays smooth at $60$ frames a second, $16.7\\,\\text{ms}$ each.
 
 $$
 t_{\\text{frame}} = \\tfrac{1000}{60}\\,\\text{ms}
+$$
+
+The roots of $ax^2 + bx + c = 0$ are $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$, and
+
+$$
+\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}, \\qquad \\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}
+$$
+
+$$
+f(x) = \\begin{cases} x^2 & x \\geq 0 \\\\ -x & \\text{otherwise} \\end{cases} \\qquad A = \\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}
 $$
 
 <details>
@@ -83,11 +94,11 @@ const HTML = `<article>
       runtime behind it is open source.
     </p>
     <figure>
-      <a href="https://picsum.photos/id/1015/600/300"><img src="https://picsum.photos/id/1015/320/160" alt="A river valley under clouds" width="320" height="160"></a>
+      <a href="https://pbs.twimg.com/media/HTpJzwHWMAAIOgb?format=jpg&name=medium"><img src="https://pbs.twimg.com/media/HTpJzwHWMAAIOgb?format=jpg&name=small" alt="A booster under the arc of a launch" width="320" height="160"></a>
       <figcaption>The gallery on a phone, a desktop and the web, one app. <em>Tap to open it full size.</em></figcaption>
     </figure>
     <figure>
-      <img src="https://picsum.photos/id/1036/1200/750" alt="A tent in the snow below mountains" width="320" height="200">
+      <img src="https://pbs.twimg.com/media/HQ6i3NMW0AAA-TS?format=jpg&name=medium" alt="A Falcon Heavy on the pad under the moon" width="320" height="200">
       <figcaption>Where the renderer was written. <em>Press it to zoom in.</em></figcaption>
     </figure>
   </section>
@@ -179,7 +190,7 @@ mount(Counter);</code></pre>
   </details>
 </article>`;
 
-const EXTENDED = `Thanks @huacnlee and @sunli829 for the review!
+const EXTENDED = `Thanks @huacnlee and @sunli829 for the review! Fixed in #775 and #799.
 
 \`\`\`chart
 Mon 12
@@ -202,6 +213,7 @@ Containers wrap Markdown, like *this*.
 
 const extensions = [
   { name: "mention", pattern: "@(\\w+)" },
+  { name: "issue", pattern: "#(\\d+)" },
   { name: "chart", language: "chart" },
   { name: "callout", tag: "callout" },
   { name: "note", container: "note" },
@@ -225,17 +237,6 @@ nsh package my-app --target ios-simulator --run
 That's it. Ping me if anything looks off.`;
 
 
-/** A formula without a math renderer of the app's: its TeX, set apart. */
-function Tex(props: { tex: string; display: boolean }) {
-  return (
-    <If when={props.display} else={<Text class="font-mono text-[13px] text-violet-600 dark:text-violet-300">{props.tex}</Text>}>
-      <View class="items-center rounded-lg bg-violet-500/10 px-3 py-2">
-        <Text class="font-mono text-[13px] text-violet-600 dark:text-violet-300">{props.tex}</Text>
-      </View>
-    </If>
-  );
-}
-
 /** Links in the gallery's accent (a `TextView` draws them in the theme's `primary`). */
 const links = { link: "text-brand decoration-brand/40" };
 
@@ -249,7 +250,6 @@ function Markdown() {
         selectable
         classes={links}
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
-        renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={({ url }) => pressed.set(url)}
         onImagePress={({ image }) => viewing.set(image)}
       />
@@ -294,7 +294,16 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
-    <Card icon="components" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
+    <View style={{ gap: 16 }}>
+      <InlineChips />
+      <Mentions />
+    </View>
+  );
+}
+
+function Mentions() {
+  return (
+    <Card icon="components" title="Extensions" subtitle="Mentions, issue chips with an icon, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
         extensions={extensions}
@@ -302,8 +311,15 @@ function Extensions() {
           switch (node.name) {
             case "mention":
               return (
-                <View class="translate-y-[7px] rounded-full bg-sky-500/15 px-2">
+                <View class="align-middle rounded-full bg-sky-500/15 px-2">
                   <Text class="text-[14px] font-medium text-sky-700 dark:text-sky-300">@{node.attributes?.["1"]}</Text>
+                </View>
+              );
+            case "issue":
+              return (
+                <View class="flex-row items-center gap-1 rounded-md border border-zinc-500/25 px-1.5" style={{ verticalAlign: "middle", height: 20 }}>
+                  <LucideIcon name="code" size={14} tint={colors.text} />
+                  <Text class="text-[13px] font-semibold">#{node.attributes?.["1"]}</Text>
                 </View>
               );
             case "chart":
@@ -324,6 +340,33 @@ function Extensions() {
               );
           }
         }}
+      />
+    </Card>
+  );
+}
+
+/** Task and PR ids in a chat message (`T-0042`, `nsh#810`): chips in the
+ * middle of the text (`align-middle`) that keep its lines evenly spaced. */
+const CHIPS = `Picked up T-0089 after the review of nsh#810: each chip sits in the middle of the text, and a line holding one is as tall as the others. T-0096 follows up on iOS and macOS, with gpui-kit#3766 next in the queue. 中文段落里的 T-0101 也一样，和文字居中对齐，行距保持一致。`;
+
+const CHIP_EXTENSIONS = [
+  { name: "task", pattern: "\\bT-\\d{4}\\b" },
+  { name: "pr", pattern: "\\b[a-z-]+#\\d+\\b" },
+];
+
+function InlineChips() {
+  return (
+    <Card icon="components" title="Inline chips" subtitle="Chips in the middle of the text; lines stay evenly spaced">
+      <TextView
+        markdown={CHIPS}
+        extensions={CHIP_EXTENSIONS}
+        styles={{ root: { fontSize: 17, lineHeight: 26 } }}
+        renderCustom={(node) => (
+          <View class="align-middle h-5 flex-row items-center gap-1.5 rounded-full border border-border bg-inset px-2">
+            <View class={node.name === "task" ? "size-1.5 rounded-full bg-sky-500" : "size-1.5 rounded-full bg-emerald-500"} />
+            <Text class="font-mono text-[13px] leading-4">{node.text}</Text>
+          </View>
+        )}
       />
     </Card>
   );
@@ -376,10 +419,11 @@ const ANSWER = `Every one with a native backend:
 - macOS, Windows and Linux: AppKit, Win32 and GTK 4`;
 
 /** Two documents and a plain text that select as one, around a label that stays out. */
-function Selection() {
+function SelectionAcross() {
+  const selected = signal("");
   return (
     <Card icon="text" title="Selectable view" subtitle="One selection across texts and TextViews">
-      <View selectable class="gap-3">
+      <View selectable class="gap-3" onSelectionChange={({ text }) => selected.set(text)}>
         <TextView markdown={QUESTION} />
         <TextView markdown={ANSWER} />
         <View class="flex-row items-baseline gap-2">
@@ -388,7 +432,49 @@ function Selection() {
         </View>
       </View>
       <Caption label="Drag from the question into the answer, or long press and move the handles" />
+      <Caption label="Selected (onSelectionChange)" note={selected() || "nothing"} />
     </Card>
+  );
+}
+
+const FORMATS = [
+  { value: "plain", label: "Text" },
+  { value: "markdown", label: "Markdown" },
+  { value: "html", label: "HTML" },
+] as const;
+
+type Format = (typeof FORMATS)[number]["value"];
+
+/** A selectable TextView's ref reads its selection as text, Markdown or HTML. */
+function SelectionRead() {
+  let view: TextViewRef | undefined;
+  const format = signal<Format>("markdown");
+  const out = signal("");
+  const read = async () => out.set((await view?.selectedText({ format: format() })) ?? "");
+  return (
+    <Card icon="text" title="Read the selection" subtitle="selectedText({ format }) of a TextView ref">
+      <TextView ref={(r) => (view = r)} selectable markdown={ANSWER} onSelectionChange={() => void read()} />
+      <Segmented
+        options={FORMATS}
+        value={format()}
+        onChange={(f) => {
+          format.set(f);
+          void read();
+        }}
+      />
+      <View class="rounded-md bg-muted p-3">
+        <Text style={{ fontFamily: "monospace", fontSize: 12, userSelect: "text" }}>{out() || "Select part of the answer"}</Text>
+      </View>
+    </Card>
+  );
+}
+
+function Selection() {
+  return (
+    <View style={{ gap: 16 }}>
+      <SelectionAcross />
+      <SelectionRead />
+    </View>
   );
 }
 

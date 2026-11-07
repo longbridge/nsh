@@ -13,6 +13,7 @@ import android.graphics.drawable.Drawable;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.Toolbar;
@@ -37,6 +38,11 @@ final class StackBox extends FrameLayout implements Node {
     /** The screens currently shown, bottom to top. */
     private final List<ScreenBox> shown = new ArrayList<>();
     private Animator transition;
+    /** The page transition through a shader playing, if any. */
+    private NavTransition navTransition;
+    /** A page change through a shader waiting for its screens' layout, and the screens it leaves. */
+    private android.view.ViewTreeObserver.OnPreDrawListener navPending;
+    private List<ScreenBox> navLeaving;
 
     StackBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -68,8 +74,13 @@ final class StackBox extends FrameLayout implements Node {
             if (v instanceof ScreenBox) desired.add((ScreenBox) v);
         }
         if (desired.equals(shown)) return;
+        // A change through a shader still running ends first: its screens
+        // settle (one it removed is added again below if it comes back).
+        finishNav();
         ScreenBox oldTop = top();
         ScreenBox newTop = desired.isEmpty() ? null : desired.get(desired.size() - 1);
+        // The page on top leaves (a pop, a replace): its keyboard hides with the transition.
+        if (oldTop != null && !desired.contains(oldTop)) mounter.hideKeyboardIn(oldTop);
         for (ScreenBox s : desired) {
             if (s.getParent() != this) {
                 if (s.getParent() instanceof ViewGroup) ((ViewGroup) s.getParent()).removeView(s);
@@ -88,12 +99,84 @@ final class StackBox extends FrameLayout implements Node {
             settle(leaving);
             return;
         }
+        if (shaderAnimate(pushing ? oldTop : newTop, pushing ? newTop : oldTop, pushing, leaving)) return;
         int animation = pushing ? newTop.animation : oldTop.animation;
         if (animation == 2) {
             settle(leaving);
             return;
         }
         animate(pushing ? oldTop : newTop, pushing ? newTop : oldTop, pushing, animation == 1, 0, leaving);
+    }
+
+    /**
+     * `upper` comes over `lower` (`push`) or goes from it through its
+     * `transitionShader`, once the screens are laid out; false where none
+     * runs (no shader, Android 9, less motion).
+     */
+    private boolean shaderAnimate(ScreenBox lower, ScreenBox upper, boolean push, List<ScreenBox> leaving) {
+        if (!NavTransition.wanted(mounter, upper.id)) return false;
+        // What showed stays until the shader's first frame covers it.
+        lower.setVisibility(push ? VISIBLE : INVISIBLE);
+        upper.setVisibility(push ? INVISIBLE : VISIBLE);
+        for (ScreenBox s : new ScreenBox[] {lower, upper}) {
+            s.setTranslationX(0);
+            s.setAlpha(1);
+        }
+        View[] both = {lower, upper}, one = {lower};
+        navLeaving = leaving;
+        navPending = new android.view.ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                getViewTreeObserver().removeOnPreDrawListener(this);
+                if (navPending != this) return true;
+                navPending = null;
+                navLeaving = null;
+                if (shown.isEmpty() || top() != (push ? upper : lower)) return true;
+                NavTransition t = NavTransition.start(mounter, StackBox.this, id, upper.id, one, both,
+                        !push, () -> {
+                            lower.setVisibility(INVISIBLE);
+                            upper.setVisibility(INVISIBLE);
+                        }, () -> {
+                            navTransition = null;
+                            settle(leaving);
+                        }, () -> {
+                            navTransition = null;
+                            ownMotion(lower, upper, push, leaving);
+                        });
+                // No picture, or no GPU: the page moves with its own
+                // animation.
+                if (t == null) ownMotion(lower, upper, push, leaving);
+                else navTransition = t;
+                return true;
+            }
+        };
+        getViewTreeObserver().addOnPreDrawListener(navPending);
+        invalidate();
+        return true;
+    }
+
+    /** `upper` comes over `lower` (`push`) or goes from it with its own animation. */
+    private void ownMotion(ScreenBox lower, ScreenBox upper, boolean push, List<ScreenBox> leaving) {
+        if (upper.animation == 2) settle(leaving);
+        else animate(lower, upper, push, upper.animation == 1, 0, leaving);
+    }
+
+    /**
+     * Ends the page change through a shader that runs, or waits for its
+     * layout to start, at once: its screens settle where it ends (the ones
+     * it leaves are removed), its frames go.
+     */
+    private void finishNav() {
+        if (navPending != null) {
+            getViewTreeObserver().removeOnPreDrawListener(navPending);
+            List<ScreenBox> leaving = navLeaving;
+            navPending = null;
+            navLeaving = null;
+            settle(leaving);
+        }
+        NavTransition t = navTransition;
+        navTransition = null;
+        if (t != null) t.finish();
     }
 
     /** Only the top screen is visible; removed screens leave. */
@@ -140,15 +223,20 @@ final class StackBox extends FrameLayout implements Node {
         a.start();
     }
 
-    /** `t` 0: `upper` covers the stack; 1: `upper` is gone. */
+    /**
+     * `t` 0: `upper` covers the stack; 1: `upper` is gone. Slides move by
+     * whole pixels: Skia keys the blurred masks of shadows on the subpixel
+     * part of their position, so a fractional offset each frame blurs every
+     * shadow the screens draw again, frame after frame.
+     */
     private static void place(View lower, View upper, float t, float w, boolean fade) {
         if (fade) {
             upper.setTranslationX(0);
             lower.setTranslationX(0);
             upper.setAlpha(1 - t);
         } else {
-            upper.setTranslationX(t * w);
-            lower.setTranslationX(-(1 - t) * w * 0.25f);
+            upper.setTranslationX(Math.round(t * w));
+            lower.setTranslationX(Math.round(-(1 - t) * w * 0.25f));
         }
     }
 
@@ -157,13 +245,33 @@ final class StackBox extends FrameLayout implements Node {
     /** Whether the back button pops a screen of this stack. */
     boolean canPop() {
         ScreenBox top = top();
-        return shown.size() > 1 && top != null && !top.preventBack && isShown();
+        return shown.size() > 1 && top != null && !top.preventBack && showsForBack();
     }
 
     /** Whether the top screen keeps the user (`popOnBack` false): back only tells JS. */
     boolean preventsBack() {
         ScreenBox top = top();
-        return top != null && top.preventBack && isShown();
+        return top != null && top.preventBack && showsForBack();
+    }
+
+    /**
+     * Whether going back may act on this stack: shown, and it and every
+     * view of the app around it laid out with a size
+     * (`nsh_core::navigation::shown_in_layout`: `display: none`, a tab not
+     * selected, is laid out at no size, which `isShown` does not see). The
+     * frames are the core's (`Box.Frame`), set when a batch lands: a screen
+     * just added has not been measured yet, and the views the platform
+     * places between (screens, a scroll view's content) have none.
+     */
+    private boolean showsForBack() {
+        if (!isShown()) return false;
+        for (ViewParent p = this; p instanceof View && !(p instanceof NshView); p = p.getParent()) {
+            if (((View) p).getLayoutParams() instanceof Box.Frame) {
+                Box.Frame f = (Box.Frame) ((View) p).getLayoutParams();
+                if (f.right <= f.left || f.bottom <= f.top) return false;
+            }
+        }
+        return true;
     }
 
     /** Whether a back gesture may drag the top screen away (`popOnSwipe`). */
@@ -179,7 +287,7 @@ final class StackBox extends FrameLayout implements Node {
      */
     void back() {
         ScreenBox top = top();
-        if (top == null || !isShown()) return;
+        if (top == null || !showsForBack()) return;
         if (mounter.wants(top.id, Native.BACK_REQUEST)) mounter.event(top.id, Native.BACK_REQUEST);
         if (!top.preventBack) pop();
     }
@@ -188,7 +296,7 @@ final class StackBox extends FrameLayout implements Node {
 
     /** Predictive back: the gesture started. */
     void backStarted() {
-        if (!canSwipe() || transition != null) return;
+        if (!canSwipe() || transition != null || navTransition != null || navPending != null) return;
         backProgress = 0;
         ScreenBox lower = shown.get(shown.size() - 2);
         lower.setVisibility(VISIBLE);
@@ -224,15 +332,20 @@ final class StackBox extends FrameLayout implements Node {
     /** The back button (or a completed back gesture): pops the top screen. */
     void pop() {
         if (!canPop()) return;
+        // A change through a shader still running ends first.
+        finishNav();
         ScreenBox upper = top();
         ScreenBox lower = shown.get(shown.size() - 2);
+        mounter.hideKeyboardIn(upper);
         float progress = backProgress >= 0 ? upper.getTranslationX() / Math.max(1, getWidth()) : 0;
         backProgress = -1;
         shown.remove(shown.size() - 1);
         popped.add(upper.id);
         List<ScreenBox> leaving = new ArrayList<>();
         leaving.add(upper);
-        if (upper.animation == 2) {
+        if (progress == 0 && shaderAnimate(lower, upper, false, leaving)) {
+            // Through its shader.
+        } else if (upper.animation == 2) {
             settle(leaving);
         } else {
             animate(lower, upper, false, upper.animation == 1, progress, leaving);

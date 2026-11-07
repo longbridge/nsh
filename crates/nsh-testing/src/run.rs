@@ -23,9 +23,10 @@ use nsh_core::{
     ApproxTextEngine, MountBatch,
     element::{Callback, Registry, Root},
     geometry::{Points, Size},
-    platform::{Idiom, Locale, Os},
+    platform::{Idiom, Locale, LocaleSettings, Os},
     prelude::timer,
 };
+use nsh_dev::protocol::TestIdiom;
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
 };
@@ -50,7 +51,7 @@ pub enum Built {
     Js(Box<Bundle>, Option<String>),
     /// The root of an app of Rust only (`nsh.json` `"root"`): what `open`
     /// of the app starts.
-    Rust(Root),
+    Rust(Box<Root>),
 }
 
 /// What an entry [`Compile`] builds is.
@@ -475,7 +476,7 @@ impl Session {
         let app = match self.build(&path)? {
             Built::Js(bundle, Some(map)) => nsh_engine::App::Js(bundle.with_source_map(map)),
             Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
-            Built::Rust(root) => nsh_engine::App::Rust(root),
+            Built::Rust(root) => nsh_engine::App::Rust(*root),
         };
         let clock = launch
             .clock
@@ -498,6 +499,7 @@ impl Session {
             ),
             None => None,
         };
+        let settings = launch.locale_settings.pins(&format!("open({entry:?})"))?;
         let storage = MemoryStorage::new(launch.storage.0);
         let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -513,7 +515,7 @@ impl Session {
             None => None,
         };
         let default = EngineConfig::new(app);
-        let config = EngineConfig {
+        let mut config = EngineConfig {
             viewport: nsh_core::Size::new(
                 launch.width.unwrap_or(default.viewport.width),
                 launch.height.unwrap_or(default.viewport.height),
@@ -532,6 +534,9 @@ impl Session {
                 },
                 color_scheme: launch.color_scheme.unwrap_or_default().into(),
                 locale: locale.unwrap_or(Locale::EN_US),
+                // The locale's (it alone as the languages, its region's
+                // preferences) in UTC, but for what the test sets.
+                locale_settings: LocaleSettings::of(locale.unwrap_or(Locale::EN_US)),
                 reduce_motion: launch.reduced_motion.unwrap_or(false),
                 os: match platform {
                     Platform::Ios => Os::Ios,
@@ -553,6 +558,7 @@ impl Session {
             host: launch.host,
             ..default
         };
+        settings.apply(&mut config.environment);
         let mut app = Headless::start(config)
             .map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
         if let Some(host) = page_host {
@@ -575,6 +581,10 @@ impl Session {
         app.answer_dialogs_myself();
         app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
+        // The link that launched it, there before the app listens.
+        if let Some(url) = &launch.url_scheme {
+            app.send_url_scheme(url);
+        }
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(app))));
@@ -602,6 +612,7 @@ impl Session {
         {
             return Err(format!("open({entry:?}): {tag:?} is not a locale"));
         }
+        let settings = launch.locale_settings.pins(&format!("open({entry:?})"))?;
         check_launch(entry, &launch, self.run.target.as_ref())?;
         // What the test gives is pinned, its defaults included; what it
         // leaves out is the platform's.
@@ -610,6 +621,14 @@ impl Session {
         environment.host_params = (!params.is_empty()).then_some(params);
         environment.clipboard = launch.clipboard.clone();
         environment.locale = launch.locale.clone();
+        environment.time_zone = settings.time_zone.map(|z| z.as_str().to_owned());
+        environment.languages = settings
+            .languages
+            .map(|l| l.iter().map(|t| t.as_str().to_owned()).collect());
+        environment.hour_cycle = settings.hour_cycle.map(|c| c.name().to_owned());
+        environment.first_day_of_week = settings.first_day_of_week.map(|d| d.number());
+        environment.measurement_system = settings.measurement_system.map(|s| s.name().to_owned());
+        environment.temperature_unit = settings.temperature_unit.map(|u| u.name().to_owned());
         environment.reduced_motion = launch.reduced_motion;
         environment.safe_area = launch.safe_area.map(|safe_area| {
             [
@@ -638,6 +657,7 @@ impl Session {
         };
         // Its sockets and WebSockets reach the host's network only so too.
         environment.live_network = live.then_some(true);
+        environment.idiom = launch_idiom(launch.platform);
         let requests = RecordingNetwork::new(inner);
         let storage: Vec<(String, String)> = launch.storage.0.into_iter().collect();
         let size = match (launch.width, launch.height) {
@@ -763,6 +783,12 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
         );
     }
+    if launch.url_scheme.is_some() {
+        return unsupported(
+            "url",
+            "the system hands links to packaged apps: run the test without --target",
+        );
+    }
     let Some(target) = target else {
         return Ok(());
     };
@@ -792,6 +818,17 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
         );
     }
     Ok(())
+}
+
+/// The idiom a host that measures its own (the web's page) starts the app
+/// in for `open`'s `platform`: a desktop's asks for a desktop at any size,
+/// as it gets on every other target; none and `"web"` leave the page to
+/// measure, as a real browser does.
+fn launch_idiom(platform: Option<Platform>) -> Option<TestIdiom> {
+    match platform? {
+        Platform::Macos | Platform::Windows | Platform::Linux => Some(TestIdiom::Desktop),
+        Platform::Ios | Platform::Android | Platform::Web => None,
+    }
 }
 
 /// `platform` as `open`'s `platform` names it.
@@ -1120,11 +1157,13 @@ mod tests {
             clipboard: None,
             color_scheme: None,
             locale: None,
+            locale_settings: Default::default(),
             reduced_motion: None,
             platform: None,
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
+            url_scheme: None,
         }
     }
 
@@ -1151,6 +1190,16 @@ mod tests {
         plain.reduced_motion = Some(true);
         assert_eq!(check(&plain, &ios), Ok(()));
         assert_eq!(check(&plain, &macos), Ok(()));
+
+        // A launching link: only headless runs hand one over.
+        let mut linked = launch();
+        linked.url_scheme = Some("myapp://item/42".into());
+        let error = check(&linked, &macos).unwrap_err();
+        assert!(
+            error.contains("`url` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
 
         // A size: a desktop's window takes it, a device's screen does not.
         let mut sized = launch();
@@ -1189,5 +1238,27 @@ mod tests {
         handlers.host_handlers = true;
         let error = check_launch("./App.tsx", &handlers, None).unwrap_err();
         assert_eq!(code_of(&error), Some(UNSUPPORTED), "{error}");
+    }
+
+    #[test]
+    fn a_desktop_platform_asks_the_page_for_the_desktop_idiom() {
+        for platform in [Platform::Macos, Platform::Windows, Platform::Linux] {
+            assert_eq!(
+                launch_idiom(Some(platform)),
+                Some(TestIdiom::Desktop),
+                "{platform:?}"
+            );
+        }
+        for platform in [Platform::Web, Platform::Ios, Platform::Android] {
+            assert_eq!(launch_idiom(Some(platform)), None, "{platform:?}");
+        }
+        assert_eq!(launch_idiom(None), None);
+        // As the page's `idiom` option names it.
+        let mut environment = nsh_dev::protocol::TestEnvironment::default();
+        environment.idiom = Some(TestIdiom::Desktop);
+        assert_eq!(
+            serde_json::to_value(&environment).unwrap(),
+            serde_json::json!({ "idiom": "desktop" })
+        );
     }
 }

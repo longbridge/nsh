@@ -216,6 +216,19 @@ style id:cursor-zoom-out cursor zoom-out
 style id:cursor-col-resize cursor col-resize
 style id:cursor-row-resize cursor row-resize
 style id:cursor-none cursor none
+style id:cursor-nwse-resize cursor nwse-resize
+style id:cursor-nesw-resize cursor nesw-resize
+style id:cursor-nw-resize cursor nwse-resize
+style id:cursor-se-resize cursor nwse-resize
+style id:cursor-ne-resize cursor nesw-resize
+style id:cursor-sw-resize cursor nesw-resize
+style id:cursor-class-nwse cursor nwse-resize
+style id:cursor-class-nesw cursor nesw-resize
+style id:cursor-dynamic cursor crosshair
+tap id:cursor-dynamic
+style id:cursor-dynamic cursor none
+tap id:cursor-dynamic
+style id:cursor-dynamic cursor crosshair
 style id:tinted tintColor #ff9500ff
 style id:tinted-hsl tintColor #0080ffff
 style id:origin-center transformOrigin 50% 50% 0
@@ -584,7 +597,7 @@ covers [props] indeterminateStyle
 # state-expanded
 tap id:case-state-expanded
 # Closed: the plain classes, on the trigger and on the chevron.
-prop id:trigger accessibilityState expanded=false
+prop id:trigger accessibilityState expanded=false hasPopup=true
 style id:trigger backgroundColor #ccccccff
 style id:trigger borderWidth 0
 style id:chevron backgroundColor #ffffffff
@@ -592,14 +605,14 @@ style id:chevron backgroundColor #ffffffff
 # `group-aria-expanded:` on the chevron.
 tap id:trigger
 expect Popup
-prop id:trigger accessibilityState expanded=true
+prop id:trigger accessibilityState expanded=true hasPopup=true
 style id:trigger backgroundColor #3355ffff
 style id:trigger borderWidth 2
 style id:trigger borderColor #000000ff
 style id:chevron backgroundColor #222222ff
 # Closed again.
 tap id:trigger
-prop id:trigger accessibilityState expanded=false
+prop id:trigger accessibilityState expanded=false hasPopup=true
 style id:trigger backgroundColor #ccccccff
 style id:trigger borderWidth 0
 style id:chevron backgroundColor #ffffffff
@@ -638,7 +651,32 @@ style id:icon backgroundColor #ffffffff
 style id:busy backgroundColor #ff0000ff
 style id:checked backgroundColor #00ff00ff
 style id:selected backgroundColor #0000ffff
+# `data-*:` and `group-data-*:` are known classes; without the attribute
+# (only components' parts show them) the plain ones apply.
+style id:data backgroundColor #ccccccff
+style id:data-inner backgroundColor #ffffffff
 covers [props] pressedStyle
+# state-focus-within
+tap id:case-state-focus-within
+# No focus: the frame's own style.
+style id:frame backgroundColor #ccccccff
+style id:frame opacity 0.5
+# The input inside it has the focus: `focus-within:` and
+# `focusWithinStyle` on the frame.
+state id:field focused
+style id:frame backgroundColor #3366ffff
+style id:frame opacity 1
+state id:field none
+style id:frame backgroundColor #ccccccff
+style id:frame opacity 0.5
+# An overlay's content is inside the view the overlay is in.
+style id:holder backgroundColor #ccccccff
+state id:popup-field focused
+style id:holder backgroundColor #00ff00ff
+style id:frame backgroundColor #ccccccff
+state id:popup-field none
+style id:holder backgroundColor #ccccccff
+covers [props] focusWithinStyle
 # paint-inline-align
 tap id:case-paint-inline-align
 # The headless engine's 16.8 pt line has its baseline at the bottom and a

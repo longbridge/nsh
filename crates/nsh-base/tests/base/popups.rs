@@ -3,7 +3,9 @@
 //! closed, it stays with its ending look for as long as its transitions
 //! then run, and `onClose` comes after; opened again on its way out it is
 //! taken back; with reduced motion, or no ending look, it goes at once and
-//! nothing more is sent. On a manual clock: time moves only as the test
+//! nothing more is sent. A tooltip's `delay` of `Infinity` never ends and
+//! one of `NaN` is none; the keyboard focus shows a tooltip in every idiom
+//! until it leaves or Escape is pressed. On a manual clock: time moves only as the test
 //! says.
 
 use std::{
@@ -12,10 +14,10 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{MenuEvent, PopoverEvent, menu, menu_item, popover, submenu, tooltip};
+use nsh_base::{MenuEvent, PopoverEvent, TooltipEvent, menu, menu_item, popover, submenu, tooltip};
 use nsh_core::{
     MountItem, NodeId, Size,
-    element::Root,
+    element::{Root, input},
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -23,10 +25,12 @@ use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
 /// What the platform was sent: each view's parent and test id, the
-/// opacities of its styles in order, and whether it takes presses.
+/// opacities of its styles in order, whether it takes presses, and the
+/// views put in each view in order (the last one on top).
 #[derive(Default)]
 struct Seen {
     parents: HashMap<NodeId, NodeId>,
+    stacks: HashMap<NodeId, Vec<NodeId>>,
     test_ids: HashMap<String, NodeId>,
     styles: HashMap<NodeId, Vec<f32>>,
     inert: HashMap<NodeId, bool>,
@@ -70,13 +74,18 @@ impl App {
 /// `root` on a Mac, on a manual clock; `reduce_motion`: the user asked for
 /// less motion.
 fn start(root: Root, reduce_motion: bool) -> App {
+    start_on(root, reduce_motion, Os::MacOs, Idiom::Desktop)
+}
+
+/// [`start`] on `os` and `idiom`.
+fn start_on(root: Root, reduce_motion: bool, os: Os, idiom: Idiom) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
         ..EngineConfig::new(root)
     };
-    config.environment.os = Os::MacOs;
-    config.environment.idiom = Idiom::Desktop;
+    config.environment.os = os;
+    config.environment.idiom = idiom;
     config.environment.reduce_motion = reduce_motion;
     let mut app = Headless::start(config).expect("the engine starts");
     let seen = Arc::new(Mutex::new(Seen::default()));
@@ -92,8 +101,18 @@ fn start(root: Root, reduce_motion: bool) -> App {
                     seen.inert
                         .insert(*id, props.pointer_events == PointerEvents::None);
                 }
-                MountItem::Insert { parent, child, .. } => {
+                MountItem::Insert {
+                    parent,
+                    child,
+                    before,
+                } => {
                     seen.parents.insert(*child, *parent);
+                    let stack = seen.stacks.entry(*parent).or_default();
+                    stack.retain(|id| id != child);
+                    let at = before
+                        .and_then(|b| stack.iter().position(|id| *id == b))
+                        .unwrap_or(stack.len());
+                    stack.insert(at, *child);
                 }
                 MountItem::ViewStyle { id, style } => {
                     seen.styles.entry(*id).or_default().push(style.opacity);
@@ -252,6 +271,35 @@ fn a_popover_reports_the_side_it_went_on() {
     app.app.wait_for("Side: Some(Top)").unwrap();
 }
 
+#[test]
+fn on_a_phone_a_popover_is_above_its_backdrop() {
+    let mut app = start_on(
+        Root::new::<PopoverScreen>(|| PopoverProps {
+            looks: false,
+            low: false,
+        }),
+        false,
+        Os::Ios,
+        Idiom::Phone,
+    );
+    app.app.press("id:trigger").unwrap();
+    app.app.wait_for("Body").unwrap();
+    let seen = app.seen.lock().unwrap();
+    let popup = seen.popup("body");
+    let stack = &seen.stacks[&seen.parents[&popup]];
+    assert!(stack.len() >= 2, "the backdrop and the popup: {stack:?}");
+    assert_eq!(
+        stack.last(),
+        Some(&popup),
+        "the popup on top, taking the presses on it"
+    );
+    let backdrop = stack[stack.len() - 2];
+    assert!(
+        !seen.inert.get(&backdrop).copied().unwrap_or(false),
+        "the backdrop under it takes the presses outside"
+    );
+}
+
 /// A desktop menu with a submenu, both fading for 200 ms on their way out.
 #[component]
 fn MenuScreen() -> impl IntoElement {
@@ -350,4 +398,207 @@ fn a_tooltip_stays_with_its_ending_look_until_its_exit_ran() {
     app.app.run_for(Duration::from_millis(150)).unwrap();
     assert!(!app.app.shows("Tip"));
     app.app.wait_for("Closed: true").unwrap();
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct DelayProps {
+    /// The tooltip's `delay`.
+    delay: f64,
+}
+
+/// A trigger whose tooltip shows after `delay`, and a place away from it.
+#[component]
+fn DelayScreen(props: DelayProps) -> impl IntoElement {
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            view()
+                .test_id("trigger")
+                .w(px(80.0))
+                .h(px(30.0))
+                .tooltip(tooltip().delay(props.delay).child(text("Tip")))
+                .child(text("Trigger")),
+        )
+        .child(view().test_id("away").h(px(200.0)).child(text("Away")))
+}
+
+fn delay_app(delay: f64) -> App {
+    start(
+        Root::new::<DelayScreen>(move || DelayProps { delay }),
+        false,
+    )
+}
+
+#[test]
+fn a_tooltip_delay_of_infinity_never_shows_it() {
+    let mut app = delay_app(f64::INFINITY);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_secs(10)).unwrap();
+    assert!(!app.app.shows("Tip"));
+    app.app.hover("id:away").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    assert!(!app.app.shows("Tip"));
+}
+
+#[test]
+fn a_tooltip_delay_of_nan_is_none() {
+    let mut app = delay_app(f64::NAN);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.app.shows("Tip"), "shown at once");
+}
+
+#[test]
+fn a_tooltip_shows_once_the_pointer_rested_for_its_delay() {
+    let mut app = delay_app(300.0);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_millis(250)).unwrap();
+    assert!(!app.app.shows("Tip"), "not before 300 ms");
+    app.app.run_for(Duration::from_millis(100)).unwrap();
+    assert!(app.app.shows("Tip"));
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct FocusProps {
+    /// The trigger is a text field the app focuses and blurs with two
+    /// buttons (a phone's headless driver moves no focus with Tab), not a
+    /// view Tab stops at.
+    fields: bool,
+}
+
+/// Two stops, the first with a tooltip whose open changes are written
+/// down with their reasons.
+#[component]
+fn FocusScreen(props: FocusProps) -> impl IntoElement {
+    let changes = signal(Vec::<String>::new());
+    let tip = move || {
+        tooltip()
+            .on_open_change(move |e: &TooltipEvent| {
+                if let TooltipEvent::OpenChange(open, reason) = e {
+                    let change = format!("{open}:{reason:?}");
+                    changes.update(|c| c.push(change));
+                }
+            })
+            .child(text("Tip"))
+    };
+    let field = element_ref();
+    let (trigger, next) = if props.fields {
+        (
+            input()
+                .element_ref(&field)
+                .test_id("trigger")
+                .w(px(80.0))
+                .h(px(30.0))
+                .tooltip(tip())
+                .into_element(),
+            view()
+                .flex_row()
+                .child(
+                    view()
+                        .test_id("focus")
+                        .on_press(move || field.focus())
+                        .child(text("Focus")),
+                )
+                .child(
+                    view()
+                        .test_id("blur")
+                        .on_press(move || field.blur())
+                        .child(text("Blur")),
+                )
+                .into_element(),
+        )
+    } else {
+        (
+            view()
+                .test_id("trigger")
+                .w(px(80.0))
+                .h(px(30.0))
+                .focusable(true)
+                .tooltip(tip())
+                .child(text("Trigger"))
+                .into_element(),
+            view()
+                .test_id("next")
+                .focusable(true)
+                .child(text("Next"))
+                .into_element(),
+        )
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(trigger)
+        .child(next)
+        .child(text(move || {
+            format!("Changes: {}", changes.get().join(" "))
+        }))
+}
+
+/// A tooltip shows for the keyboard focus on its trigger at once (Tab),
+/// hides when the focus leaves and on Escape, in `idiom`.
+fn the_focus_shows_a_tooltip_in(os: Os, idiom: Idiom) {
+    let root = Root::new::<FocusScreen>(|| FocusProps { fields: false });
+    let mut app = start_on(root, false, os, idiom).app;
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown at once for the focus");
+    app.wait_for("Changes: true:Focus").unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(!app.shows("Tip"), "hidden with the focus gone");
+    app.wait_for("Changes: true:Focus false:Focus").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown again");
+    app.press_key("escape").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(!app.shows("Tip"), "Escape hides it");
+    app.wait_for("Changes: true:Focus false:Focus true:Focus false:Cancel")
+        .unwrap();
+    // The focus stayed: it shows again only once the focus comes back.
+    app.press_key("tab").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"));
+}
+
+#[test]
+fn the_keyboard_focus_shows_a_tooltip_on_a_desktop() {
+    the_focus_shows_a_tooltip_in(Os::MacOs, Idiom::Desktop);
+}
+
+#[test]
+fn the_focus_shows_a_tooltip_on_a_phone() {
+    let root = Root::new::<FocusScreen>(|| FocusProps { fields: true });
+    let mut app = start_on(root, false, Os::Ios, Idiom::Phone).app;
+    app.press("id:focus").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown at once for the focus");
+    app.wait_for("Changes: true:Focus").unwrap();
+    app.press("id:blur").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(!app.shows("Tip"), "hidden with the focus gone");
+    app.wait_for("Changes: true:Focus false:Focus").unwrap();
+    app.press("id:focus").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown again");
+    app.press_key("escape").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(!app.shows("Tip"), "Escape hides it");
+    app.wait_for("Changes: true:Focus false:Focus true:Focus false:Cancel")
+        .unwrap();
+}
+
+#[test]
+fn the_keyboard_focus_shows_a_tooltip_in_a_terminal() {
+    the_focus_shows_a_tooltip_in(Os::Linux, Idiom::Terminal);
+}
+
+#[test]
+fn a_tooltip_delay_of_infinity_is_not_shown_by_the_focus_either() {
+    let mut app = delay_app(f64::INFINITY);
+    app.app.press_key("tab").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    assert!(!app.app.shows("Tip"));
 }

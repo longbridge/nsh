@@ -2,6 +2,8 @@
 
 use nsh_core::{AccessibilityState, Checked, element::Style, prelude::*};
 
+use crate::terminal::{is_terminal, mark_view, switch_mark};
+
 /// The props of [`Switch`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct SwitchProps {
@@ -20,6 +22,12 @@ pub struct SwitchProps {
     /// What screen readers say: what the switch turns on, when its children
     /// have no text that says it.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// How far outside its bounds presses still count, as a view's
+    /// `hitSlop`: one number for every side, or the sides named (each left
+    /// out 0). A small switch (a track with no label) takes presses a
+    /// finger lands near it, with no change to its layout or look.
+    #[prop(default)]
+    pub hit_slop: Prop<EdgeInsets>,
     /// The Tailwind classes of the track, the part the thumb moves along;
     /// `checked:` and `disabled:` follow the switch.
     pub track_class: Prop<Option<SharedString>>,
@@ -54,9 +62,15 @@ pub enum SwitchEvent {
 /// `style` style the switch, `trackClass` / `trackStyle` and `thumbClass` /
 /// `thumbStyle` the parts, and `checked:` and `disabled:` classes on each
 /// follow the switch's state (or `checkedStyle` and `disabledStyle` on the
-/// switch).
+/// switch). `hitSlop` widens where presses count past its bounds, as a
+/// view's does.
+///
+/// In a terminal it shows the terminal's switch, `[on ]` or `[off]` and a
+/// space, in place of the track and thumb, then its children, in a row
+/// ([`crate::terminal`]).
 #[component]
 pub fn Switch(props: SwitchProps, cx: Scope<SwitchEvent>) -> impl IntoElement {
+    let terminal = is_terminal();
     let part = || {
         view()
             .project_checked(props.checked)
@@ -75,16 +89,21 @@ pub fn Switch(props: SwitchProps, cx: Scope<SwitchEvent>) -> impl IntoElement {
             ..AccessibilityState::default()
         })
         .checked_style(props.checked_style)
+        .hit_slop(props.hit_slop)
         .on_press(move |_: &()| cx.emit(SwitchEvent::Change(!props.checked.get_untracked())))
-        .child(
-            part()
+        .when(terminal, |v| v.flex_row())
+        .child(match terminal {
+            // The terminal's own switch, in place of the track and thumb.
+            true => mark_view(move || switch_mark(props.checked.get())).into_element(),
+            false => part()
                 .app_class(props.track_class)
                 .inline_style(props.track_style)
                 .child(
                     part()
                         .app_class(props.thumb_class)
                         .inline_style(props.thumb_style),
-                ),
-        )
-        .child(props.children)
+                )
+                .into_element(),
+        })
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }
