@@ -75,15 +75,6 @@ The nightly build of the latest `main`, rebuilt every night that it changes:
 curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
 ```
 
-Build and install the latest `main` from source (Git, Rust and the
-[platform build dependencies](https://nsh.dev/docs/installation) required):
-
-```sh
-curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
-```
-
-Re-run to update. The checkout stays in `~/.nsh/source` for runtime builds.
-
 </details>
 
 <details>
@@ -101,6 +92,20 @@ brew install longbridge/tap/nsh
 ```powershell
 irm https://nsh.dev/install.ps1 | iex
 ```
+
+</details>
+
+<details>
+<summary>From source (macOS / Linux)</summary>
+
+Build and install the latest `main` from source (Git, Rust and the
+[platform build dependencies](https://nsh.dev/docs/installation) required):
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+```
+
+Re-run to update. The checkout stays in `~/.nsh/source` for runtime builds.
 
 </details>
 
