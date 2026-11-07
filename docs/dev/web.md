@@ -100,7 +100,8 @@ animation, press events and editor input. Its report does not claim exhaustive A
 
 `cargo xtask web` writes
 `web/index.html` (the player), `nsh.wasm` (feature `browser`) with `nsh.js` and its `browser/` modules,
-`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches),
+`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches;
+huacnlee/cargo ignores the directory, keeps both builds apart itself and writes the file to `target/`),
 compiles each demo with `nsh build --release` into the ES module `website/public/play/demos/<name>.js` (generated,
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it; packaging builds `nsh-browser.wasm`: `--target wasm32-unknown-unknown --profile web`, the release
