@@ -584,8 +584,9 @@ menus of its own; the web, whose `Menu.popup` is the app's own UI, has none), th
 `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
 moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
 `keymap::Key::virtual_key`, the web's CDP key events (printable keys carry their physical code, modifiers and US-layout
-text, so shortcuts get the key before a field types it), Linux's bindings fired as its shortcut controller would, as GTK
-takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
+text, so shortcuts get the key before a field types it), Linux's XTest key events under X11 / Xvfb (GTK shortcut
+controllers, focused widgets and input methods handle them; without XTest the agent uses widget signals and calls
+the bindings directly, `docs/dev/linux.md` "Checking a change"); iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
 real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation that ends by itself ran for 100 ms (`Native::animating`:

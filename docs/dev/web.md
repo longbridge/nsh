@@ -69,13 +69,56 @@ NSH_BROWSER_WASM=target/wasm32-unknown-unknown/web/nsh_platform_web.wasm node --
 python3 crates/nsh-platform-web/web/browser/browser-check.py --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
 ```
 
-The second command requires Python Playwright and Chromium (`--chrome` selects its executable). It checks
-real module realms, host events queued before startup, repeated replacement/disposal, rejected startup, every
-state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab), a
-list's `contentClass` and a scroll view's `contentStyle` / `contentClass` (where its children land, inserted before
-and after the content container is made).
+The second command requires Python Playwright and its browser binaries. The website CI pins Playwright to
+1.62.0; install that version in a virtual environment and run `python -m playwright install chromium firefox
+webkit` (`--with-deps` also installs the engines' system dependencies on Linux).
+
+The default is Chromium's complete suite; `--chrome PATH` overrides only its executable. To run the lifecycle
+checks on each of the other engines with the same Wasm artifact:
+
+```sh
+python3 crates/nsh-platform-web/web/browser/browser-check.py --browser firefox --suite lifecycle --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
+python3 crates/nsh-platform-web/web/browser/browser-check.py --browser webkit --suite lifecycle --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
+```
+
+`--suite lifecycle` checks `runModule`, `runSource`, namespace imports, `nativeExports` and development
+factories using `nsh:hot`: startup must render text and respond to a host event. It verifies that a single
+complete import map precedes the realm's first module script. It also checks queued host events and realm
+identities, repeated start/stop, startup failures, cancellation/replacement during a held request or top-level
+await, facade-loading failures, and cleanup errors with a reentrant reset. A fetched bootstrap with a syntax
+error, a thrown exception or no initialization callback must reject startup, release its realm and allow a
+replacement to start. A second HTTP origin serves the runtime with CORS headers to check CDN bootstrap
+loading, execution errors and recovery. Each case has a fresh browser context and page; repeated
+runs within a case reuse its Player. Request gates and explicit fixture events coordinate cancellation rather
+than fixed delays. Assertions cover public promise outcomes, cleanup and a usable replacement, independently
+of garbage-collection timing or whether a detached realm resumes its JavaScript continuation.
+
+Chromium's `--suite interaction` checks every state style (`hoverStyle` / `activeStyle` under real mouse input,
+`focusStyle` / `focusWithinStyle` under Tab), a list's `contentClass`, a scroll view's `contentStyle` /
+`contentClass` (children inserted before and after its content container is made), platform props and tooltips.
+`--suite all` combines the two suites. Firefox and WebKit select `lifecycle` explicitly. The website CI builds
+Wasm once and runs Chromium `all`, Firefox `lifecycle` and WebKit `lifecycle` serially, reporting all engines
+before failing the step.
+
+Reports go to `.nsh/browser-tests/<browser>/` (`--artifacts DIR` changes the root): an engine summary records its
+version and suite, and per-case JSON records the failing stage, fixture events, promise outcomes, console
+messages, page errors and failed requests. Failed cases also save a screenshot and Playwright trace; CI uploads
+the reports on failure. Unexpected errors fail the case; deliberate failures are matched to their own error
+report and request URL. Engine launch failures remain failures in the summary. Playwright WebKit exercises its
+bundled engine; device Safari testing and published-package testing have their own coverage.
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
+
+The realm's `browser/bootstrap.js` is a generated classic script. Its factories execute inside the app's
+iframe, preserving that realm's `Error`, `Promise` and typed-array identities without loading modules before
+the import map. The source entry is `crates/nsh-bundler/examples/browser-bootstrap.js`, importing `scope.js`
+and its dependencies. After changing those sources, regenerate with
+`cargo run -p nsh-bundler --example browser_bootstrap`; CI runs the same command with `-- --check` to detect
+stale output. Keep the generated file with the runtime sources so the CLI, documentation server and distributed
+hosts share the same asset. Publishing minifies it and restores its strict directive after module-mode
+compression, before hashing the directory. The classic bootstrap loads with anonymous CORS, as module
+scripts do, so a CDN's execution errors retain their filename and thrown value. The CDN must allow the page's
+origin, as for the app's other module and Wasm requests. Application modules remain ES modules.
 
 `browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
 desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's
@@ -100,7 +143,8 @@ animation, press events and editor input. Its report does not claim exhaustive A
 
 `cargo xtask web` writes
 `web/index.html` (the player), `nsh.wasm` (feature `browser`) with `nsh.js` and its `browser/` modules,
-`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches),
+`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches;
+huacnlee/cargo ignores the directory, keeps both builds apart itself and writes the file to `target/`),
 compiles each demo with `nsh build --release` into the ES module `website/public/play/demos/<name>.js` (generated,
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it; packaging builds `nsh-browser.wasm`: `--target wasm32-unknown-unknown --profile web`, the release
@@ -632,10 +676,14 @@ browsers' touches into what phones report:
   the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
   modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
   `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
-  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
+  cancel button); a focused field (Escape leaves it); a custom context menu (Shift+F10 or the Menu key);
+  selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
+  Context-menu keys are handled explicitly because Chromium on macOS does not emit `contextmenu` for them.
+  A handled key prevents the browser default to avoid duplicate openings; native fields and selectable text
+  retain their own menus, and keyboard requests carry no pointer and use the trigger's bottom-start corner.
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a

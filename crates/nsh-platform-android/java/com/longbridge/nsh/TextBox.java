@@ -15,6 +15,16 @@ import android.view.accessibility.AccessibilityNodeInfo;
 @SuppressLint("ViewConstructor")
 final class TextBox extends android.view.ViewGroup implements Node {
     final Decor decor = new Decor();
+
+    /** An outer box shadow draws outside the bounds, and compositing the
+     * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
+     * it; such a view reports no overlapping rendering, so the alpha
+     * applies per draw op and the shadow fades with the content. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !decor.hasOuterShadows();
+    }
+
     final int id;
     boolean clip;
     /** Accessibility from the app's properties, if any. */

@@ -843,7 +843,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Registry::tokens_from`]); set before the first op. Runs the
     /// sets' setup functions ([`Registry::setup`]).
     pub fn set_components(&mut self, registry: Registry) {
-        if let Some(Ok(tokens)) = registry.tokens(None) {
+        if let Some(Ok((tokens, _))) = registry.tokens(None) {
             self.set_tokens(tokens);
         }
         {
@@ -866,11 +866,18 @@ impl<M: TextEngine> Core<M> {
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
-    /// UI set that reads themes makes tokens of.
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
+    /// which the UI set that reads themes makes tokens of. What it cannot
+    /// read is left out and the rest applies, so a bundle made by a newer
+    /// NSH keeps its theme here.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
         match self.components.registry.tokens(Some(json)) {
-            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Ok((tokens, left_out))) => {
+                for what in left_out {
+                    log::warn!("theme: {what}, ignored");
+                }
+                self.set_tokens(tokens);
+            }
             Some(Err(e)) => log::warn!("theme: {e}"),
             None => log::warn!("theme: no UI set reads themes"),
         }
@@ -3940,9 +3947,20 @@ impl<M: TextEngine> Core<M> {
         let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
-            Some(p) => (
-                p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
-            ),
+            Some(mut p) => {
+                // Bindings may have changed the node since this element
+                // was applied. Diff against those latest values, even
+                // when the new element has no bindings.
+                if let Some(applied) = inst.bound.remove(&p.id) {
+                    p.attrs = applied.attrs;
+                    p.style = applied.style;
+                    p.classes = applied.classes;
+                    p.text = applied.text;
+                }
+                (
+                    p.id, p.attrs, p.style, p.classes, p.events, p.children, p.text,
+                )
+            }
             None => {
                 let id = self.components.alloc();
                 let _ = self.apply_op(Op::Create { id, tag: el.tag });

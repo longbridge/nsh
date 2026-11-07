@@ -706,6 +706,18 @@ fn browser_host_files(root: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         .collect()
 }
 
+fn minify_browser_host(name: &str, source: &str) -> anyhow::Result<String> {
+    let code = nsh_bundler::minify_module(name, source).map_err(anyhow::Error::msg)?;
+    // Module-mode compression removes strict directives. The bootstrap is
+    // the one classic script: restore its ESM factories' strict semantics
+    // after the final minification, before computing its content digest.
+    Ok(if name == "bootstrap.js" {
+        format!("\"use strict\";\n{code}")
+    } else {
+        code
+    })
+}
+
 /// Version the complete facade directory together so relative ES imports
 /// remain valid, and every public file keeps immutable cache semantics.
 fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
@@ -719,7 +731,7 @@ fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
             .into_owned();
         let code = fs::read_to_string(&path)?;
         let code = if name.ends_with(".js") {
-            nsh_bundler::minify_module(&name, &code).map_err(anyhow::Error::msg)?
+            minify_browser_host(&name, &code)?
         } else {
             code
         };
@@ -1402,6 +1414,27 @@ mod tests {
             "LICENSE.".len() + DIGEST_LEN
         );
         assert!(hashed_name(".env", b"x").starts_with(".env."));
+    }
+
+    #[test]
+    fn the_published_bootstrap_is_a_strict_classic_script() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-bootstrap-{}", std::process::id()));
+        let root = dir.join("host");
+        fs::create_dir_all(root.join("browser")).unwrap();
+        // Export a detached-call probe without letting module-mode compression
+        // fold away the call that observes strictness in the published script.
+        let source = "\"use strict\"; globalThis.bootstrapThis = function () { return this; };";
+        fs::write(root.join("browser/bootstrap.js"), source).unwrap();
+        let site = Site::new(&dir.join("site"), None).unwrap();
+        let published = publish_browser_host(&site, &root).unwrap();
+        let code = fs::read_to_string(site.dir.join(published).join("bootstrap.js")).unwrap();
+        let host = nsh_js::Host::new().unwrap();
+        host.eval_script("bootstrap.js", &code).unwrap();
+        assert!(
+            host.eval_script("check.js", "(0, bootstrapThis)() === undefined")
+                .unwrap()
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -2379,7 +2412,8 @@ mod tests {
                 "/snippets/app-1/inline0.js",
                 "/nsh-host.js",
                 "/browser/runtime.js",
-                "/browser/dom.js",
+                "/browser/bootstrap.js",
+                "/browser/realm.js",
             ] {
                 let file = format!("{origin}{file}");
                 assert!(
