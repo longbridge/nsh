@@ -32,6 +32,10 @@ bundle = [
   "oxc/minifier",
 ]
 
+[[example]]
+name = "browser_bootstrap"
+required-features = ["bundle"]
+
 [dependencies]
 dunce.workspace = true
 anyhow = { workspace = true, optional = true }

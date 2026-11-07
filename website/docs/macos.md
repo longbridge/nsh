@@ -207,6 +207,14 @@ point. `AlertDialog` shows an `NSAlert` sheet on the window: up to two alert act
 action leftmost, the last regular one the default for Return), more actions and an action sheet's actions stacked in
 their order with the cancel action last and no default; Escape chooses the cancel action.
 
+### Table accessibility
+
+VoiceOver and UI automation read `Table` and `Grid` as `AXTable`, `Row` as `AXRow`, and `Cell` and
+`ColumnHeader` as `AXCell`. The table exposes its mounted rows and columns, visible rows and cells, and headers.
+Row and cell indices follow tree order, starting at zero and including header rows, with each cell spanning one
+row and column. Column headers are linked from their table, column and cells. Rows with `onPress` keep their
+press action and their row role, and labels and text children remain available to accessibility clients.
+
 ### Keyboard
 
 | Keys | Do |

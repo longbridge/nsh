@@ -5,8 +5,8 @@
 //!   [`crate::run_app`], or a child of the embedding app's window.
 //!   `GWLP_USERDATA` holds a [`WindowData`] that finds the surface.
 //! - The engine thread wakes the surface with [`WM_NSH_WAKE`] ([`wake`]);
-//!   worker threads run closures on the main thread with [`invoke`] (a
-//!   message-only dispatcher window).
+//!   worker threads run closures on a UI thread with [`UiThread::invoke`]
+//!   (each UI thread has a message-only dispatcher window of its own).
 //! - [`Ticker`] paces animation frames: a thread waits for the compositor's
 //!   next frame (`DwmFlush`) and posts [`WM_NSH_TICK`], one at a time;
 //!   while nothing composes it posts none.
@@ -21,19 +21,20 @@ use std::{
     rc::{Rc, Weak},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicIsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use nsh_core::{NodeId, ROOT_ID};
 use windows::{
     Win32::{
-        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
-            Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
+            Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
             Gdi::{
-                BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST,
-                MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ScreenToClient, UpdateWindow,
+                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
+                GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+                MonitorFromWindow, PAINTSTRUCT, ReleaseDC, ScreenToClient, UpdateWindow,
                 ValidateRect,
             },
         },
@@ -64,7 +65,7 @@ use crate::{
 pub(crate) const WM_NSH_WAKE: u32 = WM_APP + 1;
 /// A frame of the ticker ([`Surface::tick`]).
 pub(crate) const WM_NSH_TICK: u32 = WM_APP + 2;
-/// A closure from another thread ([`invoke`]); `lparam` owns it.
+/// A closure from another thread ([`UiThread::invoke`]); `lparam` owns it.
 const WM_NSH_CALL: u32 = WM_APP + 3;
 /// A context menu to show ([`crate::chrome::show_popup`]).
 pub(crate) const WM_NSH_MENU: u32 = WM_APP + 4;
@@ -139,10 +140,12 @@ struct WindowData {
 thread_local! {
     /// Top-level windows open on this thread.
     static OPEN: Cell<usize> = const { Cell::new(0) };
+    /// The dispatcher window of this thread ([`UiThread::invoke`]); 0
+    /// until `register_classes` made it. Per thread, not per process: a
+    /// closure touches the thread-locals of the thread that owns its
+    /// surface, so it must run on that one.
+    static DISPATCHER: Cell<isize> = const { Cell::new(0) };
 }
-
-/// The dispatcher window of the main thread ([`invoke`]).
-static DISPATCHER: AtomicIsize = AtomicIsize::new(0);
 
 pub(crate) fn instance() -> HINSTANCE {
     // SAFETY: the module handle of this executable.
@@ -195,7 +198,7 @@ fn register_classes() {
             Some(hinstance),
             None,
         ) {
-            DISPATCHER.store(hwnd.0 as isize, Ordering::Release);
+            DISPATCHER.with(|d| d.set(hwnd.0 as isize));
         }
     }
 }
@@ -687,6 +690,34 @@ pub(crate) fn wake(hwnd: isize) {
     }
 }
 
+/// Fills the window's client area with its background before the first
+/// frame. Windows composites and animates a window that has not painted yet
+/// with its default light surface, which flashes white on a dark appearance;
+/// its swap chain does not cover that surface until the first present.
+pub(crate) fn fill_background(surface: &Surface, hwnd: HWND) {
+    if surface.transparent() {
+        return;
+    }
+    // `Color` is 0xRRGGBBAA; a GDI color is 0x00BBGGRR.
+    let color = crate::system::window_background(surface).0;
+    let brush = unsafe {
+        CreateSolidBrush(COLORREF(
+            ((color >> 24) & 0xff) | ((color >> 8) & 0xff00) | ((color & 0xff00) << 8),
+        ))
+    };
+    // SAFETY: GDI calls on a window of this thread; the brush is freed here.
+    unsafe {
+        let dc = GetDC(Some(hwnd));
+        if !dc.is_invalid() {
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let _ = FillRect(dc, &rect, brush);
+            let _ = ReleaseDC(Some(hwnd), dc);
+        }
+        let _ = DeleteObject(brush.into());
+    }
+}
+
 /// Asks for `WM_PAINT`.
 pub(crate) fn invalidate(hwnd: HWND) {
     if !hwnd.is_invalid() {
@@ -695,27 +726,42 @@ pub(crate) fn invalidate(hwnd: HWND) {
     }
 }
 
-/// Runs `f` on the main thread (from any thread), in the message loop.
-/// Dropped when there is no main thread (no window was ever made).
-pub(crate) fn invoke(f: impl FnOnce() + Send + 'static) {
-    let hwnd = DISPATCHER.load(Ordering::Acquire);
-    if hwnd == 0 {
-        return;
+/// A UI thread that runs closures posted from other threads: its
+/// message-only dispatcher window. Capture it on the UI thread where the
+/// work starts and carry it to wherever the work finishes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct UiThread(isize);
+
+impl UiThread {
+    /// The calling thread (its dispatcher made on first use). Never call
+    /// it from a worker thread: that would make a dispatcher there.
+    pub(crate) fn current() -> UiThread {
+        register_classes();
+        UiThread(DISPATCHER.with(Cell::get))
     }
-    let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
-    let raw = Box::into_raw(boxed);
-    // SAFETY: the dispatcher takes ownership of `raw` when it gets the
-    // message; if posting fails it is freed here.
-    unsafe {
-        if PostMessageW(
-            Some(HWND(hwnd as *mut _)),
-            WM_NSH_CALL,
-            WPARAM(0),
-            LPARAM(raw as isize),
-        )
-        .is_err()
-        {
-            drop(Box::from_raw(raw));
+
+    /// Runs `f` on that thread (from any thread), in its message loop.
+    /// Dropped when it has no dispatcher or the post fails (the thread is
+    /// gone).
+    pub(crate) fn invoke(self, f: impl FnOnce() + Send + 'static) {
+        if self.0 == 0 {
+            return;
+        }
+        let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
+        let raw = Box::into_raw(boxed);
+        // SAFETY: the dispatcher takes ownership of `raw` when it gets the
+        // message; if posting fails it is freed here.
+        unsafe {
+            if PostMessageW(
+                Some(HWND(self.0 as *mut _)),
+                WM_NSH_CALL,
+                WPARAM(0),
+                LPARAM(raw as isize),
+            )
+            .is_err()
+            {
+                drop(Box::from_raw(raw));
+            }
         }
     }
 }
@@ -727,13 +773,29 @@ unsafe extern "system" fn dispatch_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     if msg == WM_NSH_CALL {
-        // SAFETY: `invoke` posted a leaked box of this type.
+        // SAFETY: `UiThread::invoke` posted a leaked box of this type.
         let f = unsafe { Box::from_raw(lparam.0 as *mut Box<dyn FnOnce() + Send>) };
         f();
         return LRESULT(0);
     }
     // SAFETY: default handling.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Keeps the window out of DWM's composition (cloaked) while its first
+/// background is prepared. A window shown without this is composited and
+/// animated with its default light client surface before the app paints.
+pub(crate) fn set_cloaked(hwnd: HWND, cloaked: bool) {
+    let value: i32 = cloaked.into();
+    // SAFETY: a BOOL-sized attribute value.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            &value as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
 }
 
 /// Darkens (or not) a top-level window's title bar.

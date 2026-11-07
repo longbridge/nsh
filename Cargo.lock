@@ -3669,6 +3669,7 @@ dependencies = [
  "base64 0.22.1",
  "dunce",
  "log",
+ "nsh-core",
  "nsh-dev",
  "serde",
  "serde_json",

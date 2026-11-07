@@ -295,6 +295,7 @@ Things that were found the hard way. Read the section of the area you change bef
   of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
   each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
   the gallery's index ran at about half the frame rate before (#519).
+- **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
@@ -492,6 +493,13 @@ Things that were found the hard way. Read the section of the area you change bef
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
   current frame and style (including any later title bar change in the same batch).
 
+- **From macOS 26 a window with a toolbar has larger corners than one with only a title bar** (seen on 26.6), even an
+  empty `NSToolbar` in `UnifiedCompact`; the radius is the system's and no API sets it. A hidden title bar of the app's
+  height therefore centers the traffic lights itself instead of selecting a toolbar style (`chrome::TrafficLights`).
+  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, a screen change, leaving full
+  screen), so they are placed again from their `NSViewFrameDidChangeNotification`s, which arrive inside that layout,
+  before anything is drawn.
+
 - **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
@@ -609,13 +617,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Web, browsers
 
-- **WebKit takes an import map only before the document's first module script**: one added after it is ignored,
-  and the app's `import "nsh"` failed with "Module name, 'nsh' does not resolve to a valid URL" (iOS 18.3 Safari; a
-  `document.open()` in between does not reset it, a dynamic `import()` from a classic script counts as a module
-  script, and navigating the frame gives it a new realm; iOS 26.5 Safari and Chrome 152 merge the later map). The realm's import map
-  goes in before the bootstrap module, with the native modules' facades made from `nativeExports` (`runtime.js`);
-  a module the app imports whole is mapped only once the namespaces exist, which needs a browser that merges
-  import maps (Chrome 133 and later).
+- **Firefox and older WebKit ignore an import map added after the first module script**: Firefox 153 rejected
+  the development host's bare `nsh` import, and iOS 18.3 Safari reported "Module name, 'nsh' does not resolve to a
+  valid URL". A `document.open()` does not reset this state; a dynamic `import()` from a classic script also
+  starts module loading. The realm bootstrap is therefore a self-contained generated classic script: it builds
+  the namespaces before `runtime.js` installs one complete map and loads `realm.js`, the first module. This also
+  covers namespace imports without relying on multiple import maps. Regenerate `bootstrap.js` with the command
+  in `docs/dev/web.md`; a module-mode minifier removes its strict directive, so the publisher restores the
+  directive before loading the result as a classic script.
 - **WebKit does not hand a `<link rel=preload as=fetch>` still in flight to the `fetch` of the same URL**: the
   `fetch` downloads the file again, and only once the preload has finished does it come from the HTTP cache (iOS 26.5
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;

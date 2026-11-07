@@ -1412,7 +1412,7 @@ pub(crate) fn state_changed(surface: &Surface, id: NodeId) {
         let Some(w) = windows.get(&id) else {
             return;
         };
-        crate::chrome::place_controls(&w.held.title_bar, &w.window);
+        crate::chrome::place_controls(surface, id, &w.held.title_bar, &w.window);
         let area = crate::chrome::title_bar_area(&w.held.title_bar, &w.window);
         let state = crate::window_state::read_window(&w.watch, &w.window);
         (
@@ -1434,7 +1434,7 @@ pub(crate) fn main_changed(surface: &Surface, state: Option<&WindowState>) {
     let Some(window) = surface.root.ns().window() else {
         return;
     };
-    crate::chrome::place_controls(&surface.main_window.title_bar, &window);
+    crate::chrome::place_controls(surface, ROOT_ID, &surface.main_window.title_bar, &window);
     let focused = state.is_some_and(|s| s.focused);
     let was = surface.main_window.focused.replace(focused);
     if was && !focused && surface.main_window.close_on_blur.get() {
@@ -1452,12 +1452,17 @@ pub(crate) fn left_full_screen(surface: &Surface, target: Target) {
     match target {
         Target::Main => {
             if let Some(window) = surface.root.ns().window() {
-                crate::chrome::place_controls(&surface.main_window.title_bar, &window);
+                crate::chrome::place_controls(
+                    surface,
+                    ROOT_ID,
+                    &surface.main_window.title_bar,
+                    &window,
+                );
             }
         }
         Target::Own(id) => {
             if let Some(w) = surface.windows.borrow().get(&id) {
-                crate::chrome::place_controls(&w.held.title_bar, &w.window);
+                crate::chrome::place_controls(surface, id, &w.held.title_bar, &w.window);
             }
         }
     }
