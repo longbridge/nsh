@@ -113,6 +113,18 @@ expect Listener: listening
 tap id:stop-links
 expect Listener: stopped
 covers [nsh] UrlScheme
+# mod-updater
+tap id:case-mod-updater
+# no packaged app: no package runs, none is offered, and there is nothing to
+# download or restart into.
+expect Running package: none
+expect Check: null
+expect Download: rejected
+expect Restart: rejected
+covers [nsh/updater] checkForPackage
+covers [nsh/updater] downloadPackage
+covers [nsh/updater] restartToPackage
+covers [nsh/updater] runningPackage
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the main window is the only one, a window of the app's
