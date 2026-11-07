@@ -290,6 +290,15 @@ fn install() {
     watch_clock_format();
 }
 
+/// Whether the system is in dark mode (the portal's answer, or GTK's
+/// scheme at start), whatever the app's own appearance: the panels'.
+pub(crate) fn system_dark() -> bool {
+    SYSTEM.with(|s| {
+        let s = s.borrow();
+        s.portal_dark.unwrap_or(s.initial_dark)
+    })
+}
+
 /// The system's settings now.
 fn appearance() -> Appearance {
     let settings = gtk::Settings::default();
