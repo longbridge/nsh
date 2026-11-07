@@ -273,7 +273,7 @@ impl Config {
 /// Whether semver-like `have` (`1.2.3`) is at least `needs`, as packages
 /// compare their minimum runtime: missing parts count as 0, pre-release
 /// and build suffixes are ignored.
-fn version_at_least(have: &str, needs: &str) -> bool {
+pub fn version_at_least(have: &str, needs: &str) -> bool {
     let parse = |v: &str| -> [u64; 3] {
         let mut parts = [0; 3];
         let core = v.split(['-', '+']).next().unwrap_or_default();
