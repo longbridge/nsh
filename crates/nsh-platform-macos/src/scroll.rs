@@ -662,7 +662,7 @@ fn animate_to(
     settle(surface, view);
     let (min, max) = limits(&view.state());
     let to = to.clamp(min, max.max(min));
-    let from = view.state().scroll.as_ref().map_or(0.0, main);
+    let from = view.state().scroll.as_deref().map_or(0.0, main);
     if (to - from).abs() < 0.5 || duration <= 0.0 {
         set_phase(view, Phase::Idle);
         moved_to(surface, view, to);
@@ -1714,7 +1714,7 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
         return;
     }
     interrupt(surface, view);
-    let raw = view.state().scroll.as_ref().map_or(0.0, main);
+    let raw = view.state().scroll.as_deref().map_or(0.0, main);
     set_phase(
         view,
         Phase::Wheel {
@@ -1743,7 +1743,7 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
         } => (gesture, total, raw),
         _ => {
             interrupt(surface, view);
-            let raw = view.state().scroll.as_ref().map_or(0.0, main);
+            let raw = view.state().scroll.as_deref().map_or(0.0, main);
             (false, 0.0, raw)
         }
     };
@@ -1813,7 +1813,7 @@ pub(crate) fn wheel_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32)
     // After the refresh check: refreshing lowers the top limit.
     let (pos, (min, max)) = {
         let state = view.state();
-        (state.scroll.as_ref().map_or(0.0, goal), limits(&state))
+        (state.scroll.as_deref().map_or(0.0, goal), limits(&state))
     };
     let outside = pos < min - 0.5 || pos > max.max(min) + 0.5;
     if gesture && !outside && !snaps {

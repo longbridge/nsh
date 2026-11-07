@@ -284,7 +284,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         }
         let shader = state
             .shader
-            .get_or_insert_with(|| ShaderState::new(Rc::downgrade(surface)));
+            .get_or_insert_with(|| Box::new(ShaderState::new(Rc::downgrade(surface))));
         if layer.is_none() {
             // SAFETY: clearing the contents.
             unsafe { shader.layer.setContents(None) };

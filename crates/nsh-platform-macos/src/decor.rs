@@ -141,8 +141,10 @@ pub(crate) struct Decor {
     /// `tintColor`: the image layer shows this color through a mask of the
     /// image.
     tint: Option<(Color, Retained<CALayer>)>,
-    /// Layered shadows, gradients, outline, filters.
-    visual: crate::visual::Visual,
+    /// Layered shadows, gradients, outline, filters: boxed once a view has
+    /// one, since most views have none and a view's state is allocated
+    /// with its AppKit view.
+    visual: Option<Box<crate::visual::Visual>>,
     /// What was applied last.
     shape: Option<Box<Shape>>,
     colors: Option<Colors>,
@@ -572,15 +574,17 @@ impl Decor {
             layer.setShadowPath(None);
         }
         let covered = covers_shadows && kind != Kind::Text;
-        self.visual.apply(
-            view,
-            layer,
-            style,
-            local,
-            radii,
-            kind == Kind::Text,
-            covered,
-        );
+        let text = kind == Kind::Text;
+        match &mut self.visual {
+            Some(visual) => visual.apply(view, layer, style, local, radii, text, covered),
+            None => {
+                let mut visual = crate::visual::Visual::default();
+                visual.apply(view, layer, style, local, radii, text, covered);
+                if !visual.is_empty() {
+                    self.visual = Some(Box::new(visual));
+                }
+            }
+        }
     }
 
     /// Draws borders with differing sides: the ring between the outer and

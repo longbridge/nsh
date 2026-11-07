@@ -293,6 +293,26 @@ pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
 }
 
 impl Visual {
+    /// It holds no layer, as a new one.
+    pub(crate) fn is_empty(&self) -> bool {
+        let Self {
+            shadows,
+            insets,
+            gradients,
+            outline,
+            veil,
+            backdrop,
+            mask_image,
+        } = self;
+        shadows.is_none()
+            && insets.is_none()
+            && gradients.is_empty()
+            && outline.is_none()
+            && veil.is_none()
+            && backdrop.is_none()
+            && mask_image.is_none()
+    }
+
     /// Shapes the effect layers of `view` (in its own `layer`) after
     /// `style`; `filled`: an opaque fill layer covers the box.
     #[allow(clippy::too_many_arguments)]
