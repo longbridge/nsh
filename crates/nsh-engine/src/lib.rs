@@ -1133,10 +1133,6 @@ pub struct HotUpdate {
 /// leftovers continue next frame.
 const MAX_LIST_ROUNDS: usize = 8;
 
-/// How many times a round hands JS what the components emitted while
-/// handling the events it just took, before it commits anyway.
-const MAX_EMIT_ROUNDS: usize = 4;
-
 /// The overscan a turn binds: cells until their ops reach this many (about
 /// as many mount items, which the main thread applies in one go) or their
 /// JS takes [`PACED_BIND_TIME`], at least one. A fast scroll asks for a
@@ -2916,42 +2912,31 @@ impl<M: TextEngine> State<M> {
             }
             // The core's events (layouts, ends reached, ...) on a Rust
             // component's nodes are the component's; the rest are JS's, in
-            // order with Rust components' events and calls' results. What
-            // the components emit while handling them (a table's rows in
-            // view as it scrolls) reaches JS in this round too, before the
-            // commit: the app's answer (the rows it serves) lands in the
-            // same commit as what asked for it, which would otherwise lay
-            // the view out twice.
-            for _ in 0..MAX_EMIT_ROUNDS {
-                for event in self.events.drain(..) {
-                    match event {
-                        JsEvent::Event(id, event, payload) => {
-                            if !self.core.component_event(id, event, &payload)
-                                && let Some(script) = script
-                            {
-                                script.dispatch_event(id, event, &payload);
-                            }
+            // order with Rust components' events and calls' results.
+            for event in self.events.drain(..) {
+                match event {
+                    JsEvent::Event(id, event, payload) => {
+                        if !self.core.component_event(id, event, &payload)
+                            && let Some(script) = script
+                        {
+                            script.dispatch_event(id, event, &payload);
                         }
-                        JsEvent::LayoutListener {
-                            host,
-                            id,
-                            listener,
-                            frame,
-                        } => {
-                            self.core.component_layout(host, id, &listener, frame);
-                        }
-                        // Without JS nothing waits for them.
-                        other => {
-                            if let Some(script) = script {
-                                script.deliver(other);
-                            }
+                    }
+                    JsEvent::LayoutListener {
+                        host,
+                        id,
+                        listener,
+                        frame,
+                    } => {
+                        self.core.component_layout(host, id, &listener, frame);
+                    }
+                    // Without JS nothing waits for them.
+                    other => {
+                        if let Some(script) = script {
+                            script.deliver(other);
                         }
                     }
                 }
-                if script.is_none() || !self.core.has_events() {
-                    break;
-                }
-                self.core.take_events(&mut self.events);
             }
             if let Some(script) = script {
                 script.take_ops(&mut self.ops);
