@@ -65,6 +65,7 @@ pub mod time;
 mod transform;
 pub mod transition;
 pub mod url_scheme;
+pub mod web_resource;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.

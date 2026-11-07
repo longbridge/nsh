@@ -7949,6 +7949,52 @@ fn web_view_incognito_is_read_when_it_is_made() {
     assert_eq!(web(&c.commit().unwrap()), Some(true));
 }
 
+#[test]
+fn web_view_url_schemes_are_read_when_it_is_made() {
+    use crate::web_resource::WebUrlScheme;
+    let scheme = WebUrlScheme::new("app-image", |request| request.fail()).unwrap();
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::UrlSchemes(vec![scheme.clone()])),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let schemes = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::WebView(p),
+            } => Some(p.url_schemes.clone()),
+            _ => None,
+        })
+    };
+    // The platform makes the web view with its first props.
+    assert_eq!(schemes(&c.commit().unwrap()), Some(vec![scheme.clone()]));
+    // Made: another handler is ignored, and nothing is sent for it.
+    let other = WebUrlScheme::new("app-image", |request| request.fail()).unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::UrlSchemes(vec![other])),
+        }],
+    );
+    assert_eq!(c.commit().as_ref().and_then(schemes), None);
+}
+
 mod components {
     use serde_json::json;
 
