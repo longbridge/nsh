@@ -498,6 +498,12 @@ Things that were found the hard way. Read the section of the area you change bef
   `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
   the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
 
+- **The regular (`Unified`) toolbar's title bar view is taller than the buttons' row**: on macOS 27, with an empty
+  `Unified` toolbar, `NSTitlebarView` (the close button's superview) and the top of `contentLayoutRect` are 66 pt,
+  while AppKit centers the traffic lights 26 pt down, in a 52-pt row (`UnifiedCompact`: 40 pt, the buttons centered
+  in it). A bar laid out at the view's height sits 7 pt below the buttons. With NSH's own toolbar,
+  `chrome::update_area` reports twice the close button's middle, measured in the title bar view (#1068).
+
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
   opacity, every time; a transform set elsewhere is lost on the next move.

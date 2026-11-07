@@ -187,8 +187,23 @@ pub(crate) fn update_area(surface: &Surface) {
             // The title bar view that holds the window's buttons and the
             // toolbar has that height whatever the window's: the content
             // layout rectangle is only laid out for the new frame later,
-            // so read during a resize it gives the old one's.
-            let height = if window.toolbar().is_some() {
+            // so read during a resize it gives the old one's. With our
+            // empty toolbar, the bar is the row AppKit centers the buttons
+            // in: the regular (unified) style's title bar view is taller
+            // than that row (66 pt around a 52-pt row on macOS 27).
+            let ours = surface
+                .chrome
+                .toolbar
+                .borrow()
+                .as_ref()
+                .is_some_and(|t| t.is_installed(&window));
+            let height = if ours {
+                button_row_height(&window)
+                    .or_else(|| title_bar_view_height(&window))
+                    .unwrap_or_else(|| {
+                        toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
+                    })
+            } else if window.toolbar().is_some() {
                 title_bar_view_height(&window).unwrap_or_else(|| {
                     toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
                 })
@@ -246,6 +261,27 @@ fn title_bar_view_height(window: &NSWindow) -> Option<f32> {
     let button = window.standardWindowButton(NSWindowButton::CloseButton)?;
     let height = crate::view::superview(&button)?.frame().size.height;
     (height.is_finite() && height > 0.0).then_some(height as f32)
+}
+
+/// The height of the row the window's buttons are centered in: twice the
+/// distance from the title bar view's top to the close button's middle.
+/// Measured in that view, which keeps its height while the window resizes.
+fn button_row_height(window: &NSWindow) -> Option<f32> {
+    let button = window.standardWindowButton(NSWindowButton::CloseButton)?;
+    let bar = crate::view::superview(&button)?;
+    let rect = button.convertRect_toView(button.bounds(), Some(&bar));
+    centered_row_height(bar.frame().size.height, bar.isFlipped(), rect)
+}
+
+/// The height of the row centered on `button`, in the coordinates of a view
+/// `bar_height` tall (from its top when `flipped`, else from its bottom); the
+/// row never extends below that view.
+fn centered_row_height(bar_height: f64, flipped: bool, button: NSRect) -> Option<f32> {
+    let middle = button.origin.y + button.size.height / 2.0;
+    let from_top = if flipped { middle } else { bar_height - middle };
+    let height = 2.0 * from_top;
+    (button.size.height > 0.0 && height.is_finite() && height > 0.0 && height <= bar_height)
+        .then_some(height as f32)
 }
 
 /// The unobscured rectangle is in window coordinates, including its origin.
@@ -991,6 +1027,29 @@ mod tests {
         assert_eq!(toolbar_height(800.0, rect(12.0, 750.0), 22.0), 38.0);
         // An embedding host's expanded toolbar occupies its full native area.
         assert_eq!(toolbar_height(800.0, rect(0.0, 730.0), 22.0), 70.0);
+    }
+
+    #[test]
+    fn button_row_is_centered_on_the_close_button() {
+        let button = |y| NSRect::new(NSPoint::new(19.0, y), NSSize::new(14.0, 14.0));
+        // Regular (unified): a 66-pt title bar view, the buttons 19–33 pt
+        // down, so a 52-pt row, whichever way the view's y goes.
+        assert_eq!(centered_row_height(66.0, false, button(33.0)), Some(52.0));
+        assert_eq!(centered_row_height(66.0, true, button(19.0)), Some(52.0));
+        // Compact: the row fills its 40-pt view.
+        assert_eq!(centered_row_height(40.0, false, button(13.0)), Some(40.0));
+    }
+
+    #[test]
+    fn button_row_without_usable_geometry_is_unknown() {
+        let empty = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
+        assert_eq!(centered_row_height(66.0, false, empty), None);
+        // A button below the middle of its view, or outside it.
+        let low = NSRect::new(NSPoint::new(19.0, 10.0), NSSize::new(14.0, 14.0));
+        assert_eq!(centered_row_height(66.0, false, low), None);
+        let above = NSRect::new(NSPoint::new(19.0, 80.0), NSSize::new(14.0, 14.0));
+        assert_eq!(centered_row_height(66.0, false, above), None);
+        assert_eq!(centered_row_height(f64::NAN, false, low), None);
     }
 
     #[test]
