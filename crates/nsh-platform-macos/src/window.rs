@@ -168,7 +168,10 @@ define_class!(
 );
 
 /// A new window of NSH's class for `kind`, of content size `size`.
-fn make_window(
+///
+/// A window of the app's own ([`crate::host::HostWindow`]) takes this path too:
+/// it is kept in the `HostWindow` that owns it until it goes.
+pub(crate) fn make_window(
     mtm: MainThreadMarker,
     kind: WindowKind,
     style: NSWindowStyleMask,
@@ -192,7 +195,8 @@ fn make_window(
     } else {
         new_window(mtm, rect, style, focusable, false)
     };
-    // SAFETY: the window is kept in `Surface::windows` until it goes.
+    // SAFETY: the window is kept in `Surface::windows` — or in the
+    // `HostWindow` that owns it — until it goes.
     unsafe { window.setReleasedWhenClosed(false) };
     window
 }
@@ -733,18 +737,18 @@ fn apply(
 
 /// The inputs of a window's style mask.
 #[derive(Debug, Clone, Copy)]
-struct StyleInputs {
-    kind: WindowKind,
-    frame: WindowFrameStyle,
-    title_bar_hidden: bool,
-    resizable: bool,
-    minimizable: bool,
-    closable: bool,
-    activate: bool,
+pub(crate) struct StyleInputs {
+    pub(crate) kind: WindowKind,
+    pub(crate) frame: WindowFrameStyle,
+    pub(crate) title_bar_hidden: bool,
+    pub(crate) resizable: bool,
+    pub(crate) minimizable: bool,
+    pub(crate) closable: bool,
+    pub(crate) activate: bool,
 }
 
 /// The style mask of a window.
-fn style_mask(s: &StyleInputs) -> NSWindowStyleMask {
+pub(crate) fn style_mask(s: &StyleInputs) -> NSWindowStyleMask {
     let mut mask = match s.frame {
         WindowFrameStyle::None => NSWindowStyleMask::Borderless,
         _ => {
@@ -773,14 +777,16 @@ fn style_mask(s: &StyleInputs) -> NSWindowStyleMask {
     mask
 }
 
-/// The AppKit level of `level`.
-fn ns_level(level: WindowLevel) -> isize {
+/// The AppKit level of `level`. An unknown level floats: the enum grows, and
+/// floating is the safe band for whatever arrives.
+pub(crate) fn ns_level(level: WindowLevel) -> isize {
     match level {
         WindowLevel::Normal => NSNormalWindowLevel,
         WindowLevel::Floating => NSFloatingWindowLevel,
         // Above the Dock and the menu bar.
         WindowLevel::AboveDock => NSStatusWindowLevel,
         WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
+        _ => NSFloatingWindowLevel,
     }
 }
 

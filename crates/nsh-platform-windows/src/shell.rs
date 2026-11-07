@@ -563,6 +563,9 @@ fn level_order(level: WindowLevel) -> HWND {
         WindowLevel::Normal => HWND_NOTOPMOST,
         WindowLevel::Floating | WindowLevel::AboveDock => HWND_TOPMOST,
         WindowLevel::DesktopIcon => HWND_BOTTOM,
+        // A level from a newer core: over the normal windows, as a
+        // floating one.
+        _ => HWND_TOPMOST,
     }
 }
 

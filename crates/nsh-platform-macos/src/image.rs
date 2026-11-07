@@ -516,7 +516,7 @@ fn in_background(f: impl FnOnce() + Send + 'static) {
 }
 
 /// Runs `f` on the main queue.
-fn on_main_queue(f: impl FnOnce() + Send + 'static) {
+pub(crate) fn on_main_queue(f: impl FnOnce() + Send + 'static) {
     DispatchQueue::main().exec_async(f);
 }
 
