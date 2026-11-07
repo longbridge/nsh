@@ -29,6 +29,8 @@ mod shader_frame;
 mod storage;
 #[cfg(feature = "js-core")]
 mod symbolicate;
+#[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
+pub mod updates;
 
 // The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
 // nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
@@ -136,6 +138,17 @@ impl App {
         }
     }
 
+    /// The main window's launch options (`nsh.json` `"window"`): a JS app's
+    /// bundle's ([`Bundle::main_window`]), a Rust app's root's
+    /// ([`nsh_core::element::Root::main_window`]). Runners open the main
+    /// window by them.
+    pub fn main_window(&self) -> Option<&nsh_core::desktop::MainWindowOptions> {
+        match self {
+            App::Rust(root) => root.main_window_ref(),
+            App::Js(bundle) => bundle.main_window.as_ref(),
+        }
+    }
+
     /// The URL schemes the app claims (`nsh.json` `schemes`):
     /// the links the core lets through (`nsh_core::url_scheme`).
     pub fn url_schemes(&self) -> &[String] {
@@ -184,6 +197,36 @@ pub struct Bundle {
     /// The signed package the bundle came from ([`Bundle::from_package`]),
     /// named in the app's errors ([`AppError::package`]).
     pub package: Option<Arc<PackageInfo>>,
+    /// The update configuration `nsh/updater` reads (`nsh-updater.json`,
+    /// as `nsh package` wrote it), from the installed app's own resources;
+    /// `None`: the file among the app's assets, if any. A packaged app
+    /// running a newer package of its code sets the shipped one
+    /// (`updates::launch`).
+    pub updater_config: Option<Arc<[u8]>>,
+    /// Told how the app fares, while it has not proved it runs: a package
+    /// of a packaged app's code running for the first time
+    /// (`updates::launch`).
+    pub trial: Option<Arc<dyn Trial>>,
+    /// The main window's launch-time options (`nsh.json` `"window"`, an
+    /// app's `app.json`, the dev server's app info): runners read them
+    /// before they make the window; the engine sends their attributes to
+    /// the main window with the first frame.
+    pub main_window: Option<nsh_core::desktop::MainWindowOptions>,
+}
+
+/// How long an app on [`Bundle::trial`] runs past its first frame without
+/// a fatal error to be healthy.
+pub const TRIAL_PERIOD: Duration = Duration::from_secs(10);
+
+/// A run on trial ([`Bundle::trial`]): the engine tells it once whether
+/// the app is healthy or failed (later calls are its to ignore). A crash
+/// of the process tells it nothing.
+pub trait Trial: Send + Sync + std::fmt::Debug + 'static {
+    /// The app ran [`TRIAL_PERIOD`] past its first frame, or its engine
+    /// stopped after the first frame, without a fatal error.
+    fn healthy(&self);
+    /// The app did not start, or its VM was stopped ([`AppError::is_fatal`]).
+    fn failed(&self, error: &AppError);
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -309,6 +352,9 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            updater_config: None,
+            trial: None,
+            main_window: None,
         }
     }
 
@@ -324,6 +370,9 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            updater_config: None,
+            trial: None,
+            main_window: None,
         }
     }
 
@@ -342,6 +391,19 @@ impl Bundle {
     /// gives it.
     pub fn with_app_id(mut self, id: Option<&str>) -> Self {
         self.app_id = id.map(str::to_owned);
+        self
+    }
+
+    /// The main window's launch-time options from their JSON (`nsh.json`
+    /// `"window"`, as the dev server's app info carries it); a wrong one is
+    /// logged and left out.
+    pub fn with_main_window(mut self, json: Option<&str>) -> Self {
+        self.main_window = json.and_then(|json| {
+            let parsed = serde_json::from_str(json)
+                .map_err(|e| e.to_string())
+                .and_then(|v| nsh_core::desktop::MainWindowOptions::from_json(&v));
+            parsed.map_err(|e| log::warn!("nsh.json window: {e}")).ok()
+        });
         self
     }
 
@@ -420,6 +482,12 @@ impl Bundle {
         bundle.app_id = info
             .as_ref()
             .and_then(|info| info.get("id")?.as_str().map(str::to_owned));
+        if let Some(window) = info.as_ref().and_then(|info| info.get("window")) {
+            bundle.main_window = Some(
+                nsh_core::desktop::MainWindowOptions::from_json(window)
+                    .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
+            );
+        }
         if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
             // A newer NSH's: what this runtime cannot claim is left out.
             let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(url_schemes);
@@ -686,11 +754,16 @@ pub trait FetchTask: Send {
 /// (so its TLS and proxies), and the file `nsh package` left among the assets.
 struct UpdaterOverNetwork {
     network: Arc<dyn Network>,
-    assets: Arc<dyn Assets>,
+    assets: Option<Arc<dyn Assets>>,
+    /// [`Bundle::updater_config`].
+    config: Option<Arc<[u8]>>,
+    /// [`Bundle::package`].
+    running: Option<Arc<PackageInfo>>,
 }
 
 impl UpdaterOverNetwork {
-    /// `None` without both (nothing to update from).
+    /// `None` without a network, or without both assets and the bundle's
+    /// configuration (nothing to update from).
     #[cfg_attr(
         not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
         allow(dead_code)
@@ -698,18 +771,51 @@ impl UpdaterOverNetwork {
     fn host(
         network: Option<Arc<dyn Network>>,
         assets: Option<Arc<dyn Assets>>,
+        bundle: &Bundle,
     ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        if assets.is_none() && bundle.updater_config.is_none() {
+            return None;
+        }
         Some(Arc::new(UpdaterOverNetwork {
             network: network?,
-            assets: assets?,
+            assets,
+            config: bundle.updater_config.clone(),
+            running: bundle.package.clone(),
         }))
     }
 }
 
 impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
     fn config(&self) -> Option<Vec<u8>> {
+        if let Some(config) = &self.config {
+            return Some(config.to_vec());
+        }
         // Only a package has it; a dev server answers nothing for it.
-        self.assets.read("asset:/nsh-updater.json").ok()
+        self.assets.as_ref()?.read("asset:/nsh-updater.json").ok()
+    }
+
+    fn running_package(&self) -> Option<nsh_core::runtime::PackageVersion> {
+        let running = self.running.as_ref()?;
+        let mut version = nsh_core::runtime::PackageVersion::default();
+        version.version = running.version.clone();
+        version.build = running.build;
+        Some(version)
+    }
+
+    #[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
+    fn verify_package(
+        &self,
+        file: &std::path::Path,
+        updates: &std::path::Path,
+        app_id: &str,
+        roots: &[String],
+        newer_than: u64,
+    ) -> Result<nsh_core::runtime::PackageVersion, String> {
+        let app = updates::verify_download(file, updates, app_id, roots, newer_than)?;
+        let mut version = nsh_core::runtime::PackageVersion::default();
+        version.version = app.version;
+        version.build = app.build;
+        Ok(version)
     }
 
     fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
@@ -870,6 +976,12 @@ pub struct EngineConfig {
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
     /// has one (`Environment::audio`).
     pub audio: Option<Arc<dyn nsh_core::audio::AudioBackend>>,
+    /// Opens and applies the app's windows of its own (`<Window>`,
+    /// `Window.open`) instead of the platform: the embedding app's own
+    /// windows, or a test's fake. `None` (the default): the platform's
+    /// built-in backend, which every desktop backend has, embedded or
+    /// standalone. The main window's commands always go to the platform.
+    pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -996,7 +1108,24 @@ impl EngineConfig {
             picker: None,
             speech: None,
             audio: None,
+            windows: None,
         }
+    }
+
+    /// Where a runner opens the main window of an app with nsh.json
+    /// `window.restoreBounds`: the placement its last run kept in its
+    /// storage ([`EngineConfig::storage`], or the file in its directory of
+    /// [`EngineConfig::data_dir`]), fitted on `displays`, the ones there
+    /// are now. Read before making the window; `None` without
+    /// `restoreBounds` or a kept placement. The engine keeps it as the
+    /// window changes (the environment's window state).
+    pub fn main_window_placement(
+        &self,
+        displays: &[nsh_core::desktop::Display],
+    ) -> Option<nsh_core::desktop::WindowPlacement> {
+        let options = self.app.main_window()?;
+        let storage = app_storage(self)?;
+        options.kept_placement(&*storage, displays)
     }
 }
 
@@ -1053,6 +1182,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
+            .field("windows", &self.windows.is_some())
             .finish()
     }
 }
@@ -1445,6 +1575,36 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
+    drive(&mut driver, &rx);
+    // Stopped on purpose (a crash never gets here): a trial is over.
+    if let Some(trial) = &driver.trial {
+        trial.healthy();
+    }
+}
+
+/// Tells `trial` the app is healthy [`TRIAL_PERIOD`] after its first frame
+/// (it ignores this after a fatal error).
+fn start_trial(trial: Arc<dyn Trial>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let spawned = std::thread::Builder::new()
+            .name("nsh-trial".into())
+            .spawn(move || {
+                std::thread::sleep(TRIAL_PERIOD);
+                trial.healthy();
+            });
+        if let Err(err) = spawned {
+            log::error!("cannot time the app's trial: {err}");
+        }
+    }
+    // WebAssembly runs no packaged apps' updates.
+    #[cfg(target_arch = "wasm32")]
+    drop(trial);
+}
+
+/// Runs the engine's loop until it stops.
+#[cfg(not(target_arch = "wasm32"))]
+fn drive<M: TextEngine + 'static>(driver: &mut Driver<M>, rx: &Receiver<Message>) {
     loop {
         let message = match driver.deadline() {
             Some(deadline) => match rx.recv_deadline(deadline) {
@@ -1459,12 +1619,12 @@ fn run<M: TextEngine + 'static, S: MountSink>(
         };
         let started = driver.state.perf.is_some().then(Instant::now);
         if let Some(message) = message {
-            if !driver.handle(message, &rx) {
+            if !driver.handle(message, rx) {
                 return;
             }
             // Coalesce everything already queued into this frame.
             while let Ok(message) = rx.try_recv() {
-                if !driver.handle(message, &rx) {
+                if !driver.handle(message, rx) {
                     return;
                 }
             }
@@ -1631,6 +1791,11 @@ struct Driver<M: TextEngine + 'static> {
     /// The engine's attachment to the embedding app's channel: its events
     /// come here while the engine runs.
     _host: host_channel::HostAttachment,
+    /// [`Bundle::trial`], told the app is healthy when the engine stops
+    /// after its first frame. Only the native engine thread ([`run`]) stops
+    /// that way; WebAssembly has no such stop.
+    #[cfg(not(target_arch = "wasm32"))]
+    trial: Option<Arc<dyn Trial>>,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -1644,6 +1809,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
+        let trial = match &config.app {
+            App::Js(bundle) => bundle.trial.clone(),
+            App::Rust(_) => None,
+        };
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let system_tx = tx.clone();
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
@@ -1694,6 +1863,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
         core.set_audio(config.audio.clone());
+        core.set_window_backend(config.windows.clone());
+        if let Some(window) = config.app.main_window() {
+            core.set_main_window(window);
+        }
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
@@ -1832,6 +2005,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             context: config.context.clone(),
             last_frame: None,
             _host: config.host.attach(host_tx, rx.clone()),
+            #[cfg(not(target_arch = "wasm32"))]
+            trial: trial.clone(),
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -1845,6 +2020,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         updater: UpdaterOverNetwork::host(
                             config.network.clone(),
                             config.assets.clone(),
+                            bundle,
                         ),
                         data_dir: config
                             .data_dir
@@ -1920,6 +2096,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                 );
             }
             sink.submit(batch);
+        }
+        if let Some(trial) = trial {
+            start_trial(trial);
         }
         // A resize that came while the app started is in the first frame:
         // reported as a turn reports it, or a platform waiting for the
@@ -3142,15 +3321,18 @@ impl WindowStateReport {
 
 /// Whether `next` differs from `shown` by where the window is or its size
 /// alone (a move or a resize, which settles before it is reported), not by
-/// its mode, display or being minimized or hidden.
+/// its mode, display, focus, scale or being minimized or visible.
 fn moved_only(
     shown: &nsh_core::desktop::WindowState,
     next: &nsh_core::desktop::WindowState,
 ) -> bool {
-    std::mem::discriminant(&shown.window_bounds) == std::mem::discriminant(&next.window_bounds)
+    shown.mode == next.mode
+        && shown.placement.mode == next.placement.mode
         && shown.minimized == next.minimized
-        && shown.hidden == next.hidden
-        && shown.display.map(|d| d.id) == next.display.map(|d| d.id)
+        && shown.visible == next.visible
+        && shown.focused == next.focused
+        && shown.display == next.display
+        && shown.scale_factor == next.scale_factor
 }
 
 /// Gives the core and JS the environment `env`.
@@ -3452,26 +3634,30 @@ mod tests {
     #[test]
     fn moves_settle_and_changes_of_mode_do_not() {
         use nsh_core::{
-            desktop::{Display, DisplayId, WindowBounds, WindowState},
+            desktop::{DisplayId, WindowMode, WindowPlacement, WindowState},
             geometry::{Bounds, point, px, size},
         };
         let rect = |x: f32| Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
-        let a = WindowState::new(rect(0.0), WindowBounds::Windowed(rect(0.0)));
+        let a = WindowState::new(
+            rect(0.0),
+            WindowPlacement::new(WindowMode::Normal, rect(0.0)),
+        );
         let mut moved = a;
         moved.bounds = rect(10.0);
-        moved.window_bounds = WindowBounds::Windowed(rect(10.0));
+        moved.placement = WindowPlacement::new(WindowMode::Normal, rect(10.0));
         assert!(super::moved_only(&a, &moved));
         let mut maximized = a;
-        maximized.window_bounds = WindowBounds::Maximized(rect(0.0));
+        maximized.mode = WindowMode::Maximized;
+        maximized.placement = WindowPlacement::new(WindowMode::Maximized, rect(0.0));
         assert!(!super::moved_only(&a, &maximized));
         let mut minimized = a;
         minimized.minimized = true;
         assert!(!super::moved_only(&a, &minimized));
         let mut hidden = a;
-        hidden.hidden = true;
+        hidden.visible = false;
         assert!(!super::moved_only(&a, &hidden));
         let mut elsewhere = a;
-        elsewhere.display = Some(Display::new(DisplayId(2), rect(0.0), rect(0.0), false));
+        elsewhere.display = Some(DisplayId(2));
         assert!(!super::moved_only(&a, &elsewhere));
     }
 

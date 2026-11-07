@@ -332,17 +332,17 @@ fn pan_permission_filters_native_values_and_events_without_losing_them() {
 /// The tokens of a theme file of the tests' own format, `{ "key":
 /// "#rrggbb", … }` over the sample's (`None`: the sample's): the core reads
 /// `uiTheme` with what a UI set brings.
-fn test_tokens(json: Option<&str>) -> Result<crate::element::Tokens, String> {
+fn test_tokens(json: Option<&str>) -> Result<(crate::element::Tokens, Vec<String>), String> {
     let mut tokens = crate::element::tokens::sample();
     let Some(json) = json else {
-        return Ok(tokens);
+        return Ok((tokens, Vec::new()));
     };
     let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     for (key, value) in value.as_object().ok_or("not an object")? {
         let color = value.as_str().and_then(Color::parse).ok_or("not a color")?;
         tokens.set_color(key, color.into());
     }
-    Ok(tokens)
+    Ok((tokens, Vec::new()))
 }
 
 /// Tokens with just `colors`.
@@ -9643,7 +9643,7 @@ mod components {
             })
         };
         let themed = |hex: u32| {
-            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap())
+            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap().0)
         };
         c.commit().unwrap();
         c.set_host_tokens(Some(themed(0x00ff00)));
@@ -18057,10 +18057,12 @@ mod rust_desktop {
 
     use super::*;
     use crate::{
-        desktop::{DesktopCommand, TitleBarStyle},
+        desktop::{
+            DesktopCommand, TitleBarOptions, TitleBarStyle, WindowAttributes, WindowRequest,
+        },
         element::{
             Root,
-            desktop::{close_window, quit, restart, set_title_bar, title_bar},
+            desktop::{current_window, quit, restart, title_bar},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -18073,7 +18075,15 @@ mod rust_desktop {
 
     #[component]
     fn Chrome() -> impl IntoElement {
-        set_title_bar(TitleBarStyle::Hidden, Some(px(42.0)));
+        let window = current_window();
+        window.set(WindowAttributes {
+            title_bar: Some(TitleBarOptions {
+                style: TitleBarStyle::Hidden,
+                height: Some(px(42.0)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
         let drag = signal(true);
         DRAG.set(Some(drag));
         view()
@@ -18086,7 +18096,7 @@ mod rust_desktop {
             .child(
                 text("Close window")
                     .window_drag(false)
-                    .on_press(|_: &()| close_window()),
+                    .on_press(move |_: &()| window.close()),
             )
             .child(text("Quit").on_press(|_: &()| quit()))
             .child(text("Restart").on_press(|_: &()| restart()))
@@ -18107,7 +18117,7 @@ mod rust_desktop {
         });
         c.mount_root(&Root::of::<Chrome>());
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::SetTitleBar {style:TitleBarStyle::Hidden, height:Some(px(42.0))})));
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if matches!(&**command, DesktopCommand::SetAttributes(a) if a.title_bar.is_some_and(|t| t.style == TitleBarStyle::Hidden && t.height == Some(px(42.0)))))));
         let header = batch
             .items
             .iter()
@@ -18202,7 +18212,7 @@ mod rust_desktop {
         );
         assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Request(WindowRequest::Close))));
         // Quitting is a command of its own: the platform ends the app's run,
         // not only its window.
         assert!(c.component_event(quit_button, EventKind::Press, &EventPayload::None));
@@ -18226,6 +18236,540 @@ mod rust_desktop {
     }
 }
 
+mod rust_windows {
+    use std::cell::RefCell;
+
+    use super::*;
+    use crate::{
+        desktop::{
+            DesktopCommand, OpenWindow, SizeToContent, WindowAttributes, WindowCloseCause,
+            WindowEvent, WindowKind, WindowLevel, WindowRequest,
+        },
+        element::{
+            Root,
+            desktop::{OpenChange, current_window, window},
+        },
+        geometry::Edges,
+        prelude::*,
+    };
+
+    thread_local! {
+        static TITLE: RefCell<Option<Signal<String>>> = const { RefCell::new(None) };
+        static CHANGES: RefCell<Vec<OpenChange>> = const { RefCell::new(Vec::new()) };
+        static INSIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    #[component]
+    fn Windows() -> impl IntoElement {
+        let title = signal(String::from("Inspector"));
+        TITLE.with(|t| *t.borrow_mut() = Some(title));
+        let open = signal(true);
+        view().child(
+            window()
+                .id("inspector")
+                .kind(WindowKind::Panel)
+                .title(move || title.get())
+                .open(move || open.get())
+                .on_open_change(move |e| {
+                    CHANGES.with(|c| c.borrow_mut().push(*e));
+                    open.set(e.open);
+                })
+                .content(|| {
+                    INSIDE.with(|i| *i.borrow_mut() = Some(current_window().id().to_owned()));
+                    text("Inspector")
+                }),
+        )
+    }
+
+    fn desktop_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } => Some((*id, (**command).clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rust_windows_open_with_their_kinds_defaults_and_send_what_changes() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Windows>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let [(id, DesktopCommand::OpenWindow(open))] = &commands[..] else {
+            panic!("one window opens: {commands:?}");
+        };
+        let OpenWindow { options, .. } = &**open;
+        assert_eq!(options.id, "inspector");
+        assert_eq!(options.kind, WindowKind::Panel);
+        // The kind's defaults arrive resolved, the app's own over them.
+        let a = &options.attributes;
+        assert_eq!(a.title.as_deref(), Some("Inspector"));
+        assert_eq!(a.level, Some(WindowLevel::Floating));
+        assert_eq!(a.taskbar, Some(false));
+        assert_eq!(a.close_on_press, Some(true));
+        // `current_window()` in its content is the window.
+        assert_eq!(
+            INSIDE.with(|i| i.borrow().clone()).as_deref(),
+            Some("inspector")
+        );
+        // A changed title: one diff with only the title.
+        {
+            let _entered = c.components.runtime.enter();
+            TITLE.with(|t| t.borrow().unwrap().set("Layers".into()));
+        }
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        assert_eq!(
+            commands,
+            [(
+                *id,
+                DesktopCommand::SetAttributes(Box::new(WindowAttributes {
+                    title: Some("Layers".into()),
+                    ..Default::default()
+                }))
+            )]
+        );
+        // Escape closed it (its policy): the app hears why and the window's
+        // root goes.
+        c.component_event(
+            *id,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::Closed {
+                cause: WindowCloseCause::Escape,
+            })),
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            CHANGES.with(|c| c.borrow().clone()),
+            [OpenChange {
+                open: false,
+                reason: WindowCloseCause::Escape
+            }]
+        );
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Remove { id: removed } | MountItem::Delete { id: removed } if removed == id)),
+            "{:?}",
+            batch.items
+        );
+    }
+
+    thread_local! {
+        static PRESSES: RefCell<Vec<(String, crate::desktop::CloseReason)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    #[component]
+    fn ClosePresses() -> impl IntoElement {
+        crate::element::desktop::main_window().on_close_press(|reason| {
+            PRESSES.with(|p| p.borrow_mut().push(("main".into(), reason)))
+        });
+        view().child(window().id("notes").content(|| {
+            let this = current_window();
+            let id = this.id().to_owned();
+            this.on_close_press(move |reason| {
+                PRESSES.with(|p| p.borrow_mut().push((id.clone(), reason)))
+            });
+            text("Notes")
+        }))
+    }
+
+    #[test]
+    fn rust_listeners_hear_close_presses_of_the_main_window_and_their_own() {
+        use crate::desktop::CloseReason;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<ClosePresses>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let [(notes, DesktopCommand::OpenWindow(_))] = &commands[..] else {
+            panic!("one window opens: {commands:?}");
+        };
+        for (id, reason) in [
+            (crate::ROOT_ID, CloseReason::CloseButton),
+            (*notes, CloseReason::Shortcut),
+            (crate::ROOT_ID, CloseReason::Shortcut),
+        ] {
+            c.component_event(
+                id,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::ClosePress { reason })),
+            );
+            let _ = c.commit();
+        }
+        assert_eq!(
+            PRESSES.with(|p| p.borrow().clone()),
+            [
+                ("main".to_owned(), CloseReason::CloseButton),
+                ("notes".to_owned(), CloseReason::Shortcut),
+                ("main".to_owned(), CloseReason::Shortcut),
+            ]
+        );
+    }
+
+    thread_local! {
+        static FITTED: RefCell<Option<crate::element::desktop::WindowHandle>> =
+            const { RefCell::new(None) };
+    }
+
+    /// A main window as tall as its content, and a panel as large as its
+    /// content.
+    #[component]
+    fn Fitted() -> impl IntoElement {
+        current_window().set(WindowAttributes {
+            size_to_content: Some(SizeToContent::Height),
+            ..Default::default()
+        });
+        view().child(view().h(px(120.0))).child(
+            window()
+                .id("fitted")
+                .attributes(WindowAttributes {
+                    size_to_content: Some(SizeToContent::Both),
+                    ..Default::default()
+                })
+                .content(|| {
+                    FITTED.with(|f| *f.borrow_mut() = Some(current_window()));
+                    view().w(px(300.0)).h(px(200.0))
+                }),
+        )
+    }
+
+    #[test]
+    fn rust_windows_fit_their_content_and_report_their_title_bars() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        c.mount_root(&Root::of::<Fitted>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let fit = |w: Option<f32>, h: Option<f32>| {
+            DesktopCommand::Request(WindowRequest::SetContentSize {
+                width: w.map(Points),
+                height: h.map(Points),
+            })
+        };
+        // The main window: only its height, its content's.
+        assert!(
+            commands.contains(&(ROOT_ID, fit(None, Some(120.0)))),
+            "{commands:?}"
+        );
+        let Some((id, _)) = commands
+            .iter()
+            .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
+        else {
+            panic!("the panel opens: {commands:?}");
+        };
+        let id = *id;
+        assert!(
+            commands.contains(&(id, fit(Some(300.0), Some(200.0)))),
+            "{commands:?}"
+        );
+        // The platform sized them: nothing more to ask.
+        // (A commit with nothing to mount gives no batch.)
+        c.set_viewport(size(px(800.0), px(120.0)));
+        if let Some(batch) = c.commit() {
+            assert!(
+                !desktop_commands(&batch)
+                    .iter()
+                    .any(|(_, c)| matches!(c, DesktopCommand::Request(_))),
+                "{:?}",
+                batch.items
+            );
+        }
+        // Its title bar's area, as the platform reports it.
+        let handle = FITTED
+            .with(|f| f.borrow().clone())
+            .expect("the panel's handle");
+        {
+            let _entered = c.components.runtime.enter();
+            assert_eq!(handle.title_bar(), Edges::default());
+        }
+        let area = Edges {
+            top: px(28.0),
+            left: px(72.0),
+            ..Default::default()
+        };
+        c.component_event(
+            id,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::TitleBar(area))),
+        );
+        let _entered = c.components.runtime.enter();
+        assert_eq!(handle.title_bar(), area);
+    }
+
+    /// A popover anchored to a button and a dialog, both in a window's
+    /// content, below a tall view of the main window.
+    #[component]
+    fn Popups() -> impl IntoElement {
+        let button = element_ref();
+        view().child(view().h(px(500.0))).child(
+            window()
+                .id("tools")
+                .default_size(size(px(300.0), px(100.0)))
+                .content(move || {
+                    view()
+                        .pl(px(20.0))
+                        .pt(px(50.0))
+                        .child(view().element_ref(&button).w(px(60.0)).h(px(30.0)))
+                        .child(
+                            overlay()
+                                .anchor(&button)
+                                .placement(crate::overlay::Placement::Bottom)
+                                .align(crate::overlay::Align::Start)
+                                .w(px(80.0))
+                                .h(px(40.0))
+                                .child(text("pop")),
+                        )
+                        .child(modal().child(text("dialog")))
+                }),
+        )
+    }
+
+    #[test]
+    fn rust_windows_show_their_popups_and_dialogs_in_themselves() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        c.mount_root(&Root::of::<Popups>());
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let Some((window, _)) = commands
+            .iter()
+            .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
+        else {
+            panic!("the window opens: {commands:?}");
+        };
+        let window = *window;
+        // The popover's view goes into the window's root view, placed in
+        // its coordinates, whatever is above the window's node in the main
+        // window: above the button, as the window (100 points tall, not the
+        // main window's 600) has no room below it.
+        let text_parent = |batch: &MountBatch, label: &str| {
+            let id = batch.items.iter().find_map(|i| match i {
+                MountItem::Text { id, text, .. } if &*text.text == label => Some(*id),
+                _ => None,
+            })?;
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == id => Some(*parent),
+                _ => None,
+            })
+        };
+        let popover = text_parent(&batch, "pop").expect("the popover's view");
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::Insert { parent, child, .. } if *parent == window && *child == popover
+            )),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(
+            frame_of(&batch, popover).map(|f| f.origin),
+            Some(point(px(20.0), px(10.0)))
+        );
+        // The dialog shows over the window, not the main one.
+        let dialog = text_parent(&batch, "dialog").expect("the dialog's root");
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(window));
+        // The window's own root: in the main window.
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == window => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
+    }
+
+    #[test]
+    fn main_windows_that_restore_their_bounds_keep_their_placement() {
+        use crate::desktop::{MainWindowOptions, WindowMode, WindowPlacement, WindowState};
+        let mut c = core();
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            ..Default::default()
+        });
+        let bounds =
+            crate::geometry::Bounds::new(point(px(40.0), px(60.0)), size(px(640.0), px(480.0)));
+        let placement = WindowPlacement::new(WindowMode::Maximized, bounds);
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            window_state: Some(WindowState::new(bounds, placement)),
+            ..Default::default()
+        });
+        let kept = {
+            let _entered = c.components.runtime.enter();
+            crate::storage::Storage::get_item("nsh.window:main")
+        };
+        let kept: WindowPlacement = serde_json::from_str(&kept.expect("kept")).unwrap();
+        assert_eq!(kept, placement);
+    }
+
+    /// A window with no size of the app's, and one with a `defaultSize`,
+    /// each filled by a view.
+    #[component]
+    fn Sized() -> impl IntoElement {
+        view()
+            .child(window().id("unsized").content(|| {
+                view()
+                    .flex_grow(1.0)
+                    .child(view().w(px(200.0)).h(px(100.0)))
+            }))
+            .child(
+                window()
+                    .id("document")
+                    .default_size(size(px(640.0), px(560.0)))
+                    .content(|| view().flex_grow(1.0)),
+            )
+    }
+
+    #[test]
+    fn window_roots_are_laid_out_at_their_own_size() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(1100.0), px(820.0)));
+        c.mount_root(&Root::of::<Sized>());
+        let batch = c.commit().unwrap();
+        let opened: Vec<(NodeId, String)> = desktop_commands(&batch)
+            .into_iter()
+            .filter_map(|(id, c)| match c {
+                DesktopCommand::OpenWindow(open) => Some((id, open.options.id.clone())),
+                _ => None,
+            })
+            .collect();
+        let id_of = |name: &str| {
+            opened
+                .iter()
+                .find(|(_, n)| n == name)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| panic!("{name} opens: {opened:?}"))
+        };
+        let (free_size, document) = (id_of("unsized"), id_of("document"));
+        let main = rect(0.0, 0.0, 1100.0, 820.0);
+        // Never the main window's size: the size it opens at, or its
+        // content's until the platform tells.
+        assert_eq!(
+            frame_of(&batch, document),
+            Some(rect(0.0, 0.0, 640.0, 560.0))
+        );
+        let first = frame_of(&batch, free_size).expect("the window root's frame");
+        assert_ne!(first, main);
+        assert_eq!(first.size, size(px(200.0), px(100.0)));
+        // The platform reports their sizes: laid out at them, and again
+        // at each new one.
+        c.set_root_size(free_size, size(px(500.0), px(400.0)), EdgeInsets::default());
+        c.set_root_size(document, size(px(700.0), px(600.0)), EdgeInsets::default());
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, free_size),
+            Some(rect(0.0, 0.0, 500.0, 400.0))
+        );
+        assert_eq!(
+            frame_of(&batch, document),
+            Some(rect(0.0, 0.0, 700.0, 600.0))
+        );
+        c.set_root_size(free_size, size(px(520.0), px(300.0)), EdgeInsets::default());
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, free_size),
+            Some(rect(0.0, 0.0, 520.0, 300.0))
+        );
+    }
+
+    /// A plain dialog next to a window of the app's own.
+    #[component]
+    fn DialogBesideWindow() -> impl IntoElement {
+        view()
+            .child(
+                view()
+                    .p(px(30.0))
+                    .child(modal().child(text("plain dialog"))),
+            )
+            .child(window().id("side").content(|| text("side")))
+    }
+
+    #[test]
+    fn plain_dialog_roots_fill_the_main_window() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(1100.0), px(820.0)));
+        c.mount_root(&Root::of::<DialogBesideWindow>());
+        let batch = c.commit().unwrap();
+        let text = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id, text, .. } if &*text.text == "plain dialog" => Some(*id),
+                _ => None,
+            })
+            .expect("the dialog's text");
+        let dialog = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == text => Some(*parent),
+                _ => None,
+            })
+            .expect("the dialog's root");
+        // The main window's size, wherever its node is, a window of the
+        // app's own open or not; its window is the main one.
+        assert_eq!(
+            frame_of(&batch, dialog),
+            Some(rect(0.0, 0.0, 1100.0, 820.0))
+        );
+        let config = batch.items.iter().find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            _ => None,
+        });
+        assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
+        // The main window resized: so is it.
+        c.set_viewport(size(px(900.0), px(700.0)));
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, dialog), Some(rect(0.0, 0.0, 900.0, 700.0)));
+    }
+
+    #[test]
+    fn rust_windows_render_nothing_off_desktops() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Ios,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Windows>());
+        let batch = c.commit().unwrap();
+        assert!(desktop_commands(&batch).is_empty());
+    }
+}
+
 mod rust_menus {
     use super::*;
     use crate::{
@@ -18233,7 +18777,7 @@ mod rust_menus {
         desktop::{DesktopCommand, MenuItem as Item, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, popup_menu_at, set_application_menu, set_title},
+            desktop::{MenuItem, current_window, popup_menu_at, set_application_menu},
         },
         keymap::Modifiers,
         platform::Os,
@@ -18246,7 +18790,10 @@ mod rust_menus {
     fn Menus() -> impl IntoElement {
         let wrap = signal(false);
         let log = signal(String::from("ready"));
-        set_title("Notes");
+        current_window().set(crate::desktop::WindowAttributes {
+            title: Some("Notes".into()),
+            ..Default::default()
+        });
         effect(move || {
             set_application_menu(vec![MenuItem::submenu(
                 "View",
@@ -18364,13 +18911,9 @@ mod rust_menus {
         });
         c.mount_root(&Root::of::<Menus>());
         let batch = c.commit().unwrap();
-        assert!(
-            batch
-                .items
-                .iter()
-                .filter_map(desktop)
-                .any(|c| *c == DesktopCommand::SetTitle("Notes".into()))
-        );
+        assert!(batch.items.iter().filter_map(desktop).any(
+            |c| matches!(c, DesktopCommand::SetAttributes(a) if a.title.as_deref() == Some("Notes"))
+        ));
         let (id, checked) = first_action(&batch);
         assert!(id >= 1 << 31, "views' ids are above JS's: {id}");
         assert_eq!(checked, Some(false));

@@ -126,6 +126,10 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// The main window's launch-time options (`"window"`, checked by
+    /// [`read_config`]): written into `app.json` and the dev server's app
+    /// info, where the runners read them before the app's code runs.
+    pub(crate) window: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
@@ -227,11 +231,25 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
 /// The `app.json` of a package: `info` (the app's id, ...) with the
 /// schemes it claims, which its runner hands the core so the links of
 /// others are dropped (`nsh_engine::Bundle::url_schemes`).
-pub(crate) fn app_json(mut info: serde_json::Value, schemes: &[String]) -> String {
+pub(crate) fn app_json(
+    mut info: serde_json::Value,
+    schemes: &[String],
+    window: Option<&serde_json::Value>,
+) -> String {
     if !schemes.is_empty() {
         info["schemes"] = serde_json::json!(schemes);
     }
+    if let Some(window) = window {
+        info["window"] = window.clone();
+    }
     info.to_string()
+}
+
+/// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
+/// dev server's app info carries it.
+pub(crate) fn window_json(entry: &Path) -> Option<String> {
+    let entry = dunce::canonicalize(entry).ok()?;
+    read_config(&entry).ok()?.window.map(|w| w.to_string())
 }
 
 /// Declares the URL schemes the app claims in an Apple `Info.plist`
@@ -326,6 +344,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         None | Some("light" | "dark" | "system")
     ) {
         config.appearance = None;
+    }
+    if let Some(window) = &config.window
+        && let Err(e) = nsh_core::desktop::MainWindowOptions::from_json(window)
+    {
+        ignored.push(format!("window: {e}"));
+        config.window = None;
     }
     warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
@@ -628,7 +652,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // it claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
-        app_json(serde_json::json!({ "id": id, "name": name }), &schemes),
+        app_json(
+            serde_json::json!({ "id": id, "name": name }),
+            &schemes,
+            config.window.as_ref(),
+        ),
     )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
@@ -790,7 +818,12 @@ fn package_android(
     // The app's id, which names where it keeps its data.
     assets.push((
         "nsh/app.json".to_owned(),
-        app_json(serde_json::json!({ "id": id }), &config.schemes).into_bytes(),
+        app_json(
+            serde_json::json!({ "id": id }),
+            &config.schemes,
+            config.window.as_ref(),
+        )
+        .into_bytes(),
     ));
     for asset in &built.assets {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
@@ -1011,7 +1044,10 @@ fn package_macos(
         info["appearance"] = appearance.as_str().into();
     }
     let schemes = config.url_schemes();
-    fs::write(nsh.join("app.json"), app_json(info, &schemes))?;
+    fs::write(
+        nsh.join("app.json"),
+        app_json(info, &schemes, config.window.as_ref()),
+    )?;
     let icon = match &config.icon {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
@@ -1537,9 +1573,12 @@ mod tests {
             .collect();
         assert_eq!(listed, ["myapp", "myapp-dev"]);
         // ...and the runner lets them through.
-        let json: serde_json::Value =
-            serde_json::from_str(&app_json(serde_json::json!({ "id": "com.a" }), &schemes))
-                .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&app_json(
+            serde_json::json!({ "id": "com.a" }),
+            &schemes,
+            None,
+        ))
+        .unwrap();
         assert_eq!(
             json,
             serde_json::json!({ "id": "com.a", "schemes": ["myapp", "myapp-dev"] })
@@ -1549,7 +1588,7 @@ mod tests {
         url_types(&mut info, "com.a", &[]);
         assert!(!info.contains_key("CFBundleURLTypes"));
         assert_eq!(
-            app_json(serde_json::json!({ "id": "com.a" }), &[]),
+            app_json(serde_json::json!({ "id": "com.a" }), &[], None),
             r#"{"id":"com.a"}"#
         );
         // Schemes of the system and other apps are left out.

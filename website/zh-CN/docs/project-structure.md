@@ -129,11 +129,12 @@ mount(App);
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
-| `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
+| `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
+| `window` | object | 每次构建、`package` | 桌面平台上主窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`）（[主窗口](../modules/nsh-desktop.md#主窗口)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `web` | object | `package` | Web 包给页面添加的内容。`web.host`：一个 JS 模块，路径相对于 `nsh.json`，导出 `createHost(player)`，应答应用的 [`host`](../modules/nsh.md#host) 调用；`web.connect`：该模块自己的请求访问的主机，写法同 `capabilities.network.hosts` 的模式，页面的 Content-Security-Policy 允许它们（[Web](./web.md#宿主的函数)）；`web.base`：站点所在的路径（`"/apps/counter/"`），即页面的 `<base href>`，使页面在应用自己的路径上也能加载（[Web](./web.md#部署)）。 |
-| `updater` | object | `package` | 打包后的应用从哪里获取更新：`{ "github": "owner/repo" }` 或 `{ "url": "https://…/latest.json", "publicKey": "…" }`，配 `github` 时 `publicKey` 可选（[应用更新](./app-updates.md)、[nsh/updater](../modules/nsh-updater.md#nshjson)）。 |
+| `updater` | object | `package` | 打包后的应用从哪里获取更新：`{ "github": "owner/repo" }` 或 `{ "url": "https://…/latest.json", "publicKey": "…" }`，配 `github` 时 `publicKey` 可选；[OTA 更新](./ota-updates.md)另需 `"packages": { "roots": [...] }`（[应用更新](./app-updates.md)、[nsh/updater](../modules/nsh-updater.md#nshjson)）。 |
 | `ios` | object | `package` | iOS 包添加的内容：`infoPlist` 是应用 `Info.plist` 的键，`entitlements` 在真机构建时对照描述文件检查。NSH 自己的键会被拒绝（[打包](./packaging.md#infoplist-键与-entitlements)）。 |
 | `android` | object | `package` | Android 包的设置：`targetSdk`，应用的目标 API 级别，也是编译所用的级别（默认 35）（[打包](./packaging.md#目标-api-级别)）。 |
 | `macos` | object | `package` | macOS 包添加的内容：`infoPlist` 和 `entitlements`，与 `ios` 的相同（[打包](./packaging.md#infoplist-键与-entitlements)）。 |
@@ -237,7 +238,7 @@ const open = async () => {
 | `nsh` | 响应式（`signal`、`computed`、`effect` 等）、`mount`、`split`、`context`；基础元素 `View`、`Text`、`Scroll`、`Image`、`List`、`Canvas`、`WebView`、`Video`（`View` 的 `selectable` 用于文本选择）；安全区域边距（`safeArea`、`safeAreaInsets`）和软键盘（`Keyboard`、`keyboardFrame`）；原生动画；`PanResponder`；环境（`platform`、`windowSize`、`colorScheme`、`fontScale`、`pixelRatio`、`locale`）；读屏与减少动态效果的状态、朗读通知；剪贴板、照片选择器、存储、宿主通道、键盘快捷键；嵌入应用注册的组件和函数（[参考](../modules/nsh.md)） |
 | `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、文本输入框（`Input`）和系统警告对话框（`AlertDialog`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
 | `nsh/mobile` | iOS 和 Android 的 API：`TabBar`、`InputAccessoryView`（iOS）、`BackHandler`（Android）（[参考](../modules/nsh-mobile.md)） |
-| `nsh/desktop` | macOS、Windows 和 Linux 的 API：`Window`、`titleBar`、`Menu`（[参考](../modules/nsh-desktop.md)） |
+| `nsh/desktop` | macOS、Windows 和 Linux 的 API：窗口（`Window`、`currentWindow`、`windows`）、`titleBar`、`displays`、`Menu`、`Tray`、`GlobalShortcut`（[参考](../modules/nsh-desktop.md)） |
 | `nsh/updater` | 打包后的应用自我更新：`checkForUpdate`、`downloadUpdate`、`installAndRestart`（[参考](../modules/nsh-updater.md)） |
 
 [模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/base"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。

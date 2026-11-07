@@ -121,7 +121,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
-    "openUrl": { "schemes": ["https", "mailto"] }
+    "openUrl": { "schemes": ["https", "mailto"] },
+    "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
 }
 ```
@@ -217,6 +218,23 @@ listed. A URL whose scheme is not granted rejects with `ERR_ACCESS_DENIED` (`per
 URL). URLs that would run code or reach the app's own data
 (`javascript:`, `data:`, `file:`, ...) are never opened, whatever the capability.
 
+### `windows`
+
+Lets the app open windows of its own on the desktops ([`Window`](../modules/nsh-desktop.md#windows)): `"windows": true`
+for every kind but overlays, or an object that narrows it:
+
+| Key | Type | Description |
+|---|---|---|
+| `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
+| `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
+| `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
+| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
+| `contentProtected` | `boolean` | Windows left out of screenshots and screen sharing. Never granted unless declared, also for an app without `"capabilities"`. |
+
+`overlay` and `contentProtected` are separate because a transparent, click-through window above every other can pass
+for the system's own UI, and a protected one hides what it shows from the user's recordings. The main window needs no
+grant.
+
 ### Storage
 
 Every app may keep its own data on the device with [`Storage`](../modules/nsh.md#storage), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
@@ -262,6 +280,7 @@ if (host.available()) {
 | Files (`fs/promises`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"fs"` and `resource` the path; the disk is never touched. |
 | Processes (`process`) | `run` rejects, and `spawn` and `exit` throw, with `ERR_ACCESS_DENIED`, `permission` `"process"` and `resource` the command (`"exit"` for `exit`); no child starts. |
 | TCP socket (`net.connect`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the `"host:port"`, before any DNS lookup. |
+| Window (`Window.open`, `<Window>`) | Throws `ERR_ACCESS_DENIED`, `permission` `"windows"` and `resource` the window's id; nothing opens. An attribute of `set()` not granted is left as it is, with a warning. |
 | WebSocket | The `websocket` module's `connect` rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the URL; the global `WebSocket` fires `error` and then `close` (code 1006), as a connection that fails does. |
 
 The errors of the [standard modules](../modules/standard-modules.md#failures) carry `code` `"ERR_ACCESS_DENIED"`, so an
@@ -341,7 +360,7 @@ them.
 |---|---|---|
 | Limits (heap, stack, time, nodes) | the runtime, per VM | the host app per view (embedded apps) |
 | Hardening | the runtime, on load | always on outside development |
-| Capabilities | the runtime (fetch, images, video, web views, status bar, files, processes, sockets) | the app (`nsh.json`) and the host app (grant) |
+| Capabilities | the runtime (fetch, images, video, web views, status bar, windows, files, processes, sockets) | the app (`nsh.json`) and the host app (grant) |
 | Code integrity | signature verification | `nsh publish`; the host app's trusted roots |
 
 ## See also

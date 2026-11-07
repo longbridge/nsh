@@ -137,13 +137,13 @@ Notes:
 | Conditional UI | `when(os() == Os::Ios, \|\| ..)` | `<If when={platform.os === "ios"}>` |
 | Android back button | `on_back_press(listener)` | `BackHandler.on("press", listener)` from `nsh/mobile` |
 | Bar over the iOS keyboard | `input_accessory_view(id)` | `InputAccessoryView` from `nsh/mobile` |
-| Window and menus | `nsh_core::element::desktop`: `set_title_bar`, `title_bar`, `set_title`, `close_window`, `set_application_menu`, `popup_menu` | `Window`, `Menu`, `titleBar` from `nsh/desktop` |
+| Windows and menus | `nsh_core::element::desktop`: `window()`, `current_window()` (`WindowHandle`: `set(WindowAttributes)`, `set_mode`, `close`, ...), `title_bar`, `set_application_menu`, `popup_menu` | `<Window>`, `Window.open`, `currentWindow()` (`WindowRef`: `set({ title, titleBar })`, `setMode`, `close`, ...), `Menu`, `titleBar` from `nsh/desktop` |
 | Status bar | `.status_bar(StatusBarStyle::Light)` on `nav_page()` or `dialog()` | `statusBar={{ foreground: "light" }}` on `NavPage` or `Dialog` |
 | Target-gated Rust | `#[cfg(target_os = "macos")]`, `#[cfg(target_arch = "wasm32")]` | - |
 | A view of the OS | `native(name)`, registered with `#[native_components(macos)]` | `nativeComponent(name, spec)` |
 
 - Desktop means macOS, Windows, Linux, and browsers in the desktop idiom. Mobile means iOS, Android, Mac Catalyst and browsers in the phone or tablet idiom.
-- Gate layout and input on `platform.desktop`. Gate `Window` and `Menu` calls on `isAvailable` from `nsh/desktop`, which is false in browsers.
+- Gate layout and input on `platform.desktop`. Gate windows and `Menu` calls on `isAvailable` from `nsh/desktop`, which is false in browsers.
 - Mac Catalyst reports `"ios"` and takes `ios={{…}}` props.
 - Web has no registered native components. On the desktops, `#[native_components]` is one function per platform, each registering the same names, with `nsh-platform-*` per-target dependencies.
 

@@ -141,6 +141,21 @@ export const colors: Palette = tokens<keyof Palette>({
   down: "down",
 });
 
+/**
+ * The window buttons an app draws for a frameless window on macOS (the
+ * traffic lights): close, minimize and zoom in the system's hues, the
+ * glyphs' ink over them, their hairline edge, and `off`, all three while
+ * the window is in the background.
+ */
+export const windowControls = tokens<"close" | "minimize" | "zoom" | "ink" | "edge" | "off">({
+  close: "window-close",
+  minimize: "window-minimize",
+  zoom: "window-zoom",
+  ink: "window-control-ink",
+  edge: "window-control-edge",
+  off: "window-control-off",
+});
+
 /** `color` at opacity `a`. */
 export function alpha(color: string, a: number) {
   return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
