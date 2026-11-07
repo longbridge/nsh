@@ -3,6 +3,8 @@
 //! not CLDR itself. A language without a table resolves to the next
 //! requested one, then the device's, then `en-US`.
 
+use std::borrow::Cow;
+
 /// What a language (and its region) formats numbers with.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Numbers {
@@ -14,8 +16,18 @@ pub(crate) struct Numbers {
     /// Groups of two after the first three (`12,34,567`, India).
     pub(crate) indian: bool,
     pub(crate) minus: &'static str,
+    /// Before a positive number a sign asks to show (`+4`).
+    pub(crate) plus: &'static str,
     /// After the number (`12%`, `12 %`).
     pub(crate) percent: &'static str,
+    /// `NaN`, in the locale's words where it has them.
+    pub(crate) nan: &'static str,
+    /// Between a scientific mantissa and its exponent (`1.2E3`); its own
+    /// digits are written in the locale's numbering (Persian `×۱۰^`).
+    pub(crate) exponential: &'static str,
+    /// The digits `0`…`9` are written with: Latin, or a locale's own
+    /// (Persian's `arabext`).
+    pub(crate) digits: [char; 10],
     /// The currency before the number (`$1.00`) or after (`1,00 €`).
     pub(crate) currency_before: bool,
     /// Between the currency and the number.
@@ -24,6 +36,39 @@ pub(crate) struct Numbers {
     pub(crate) compact_short: &'static [(u8, &'static str)],
     /// `compactDisplay: "long"` (the short ones where there are none).
     pub(crate) compact_long: &'static [(u8, &'static str)],
+}
+
+impl Numbers {
+    /// `resolvedOptions().numberingSystem`.
+    pub(crate) fn numbering(&self) -> &'static str {
+        if self.digits == ARABEXT {
+            "arabext"
+        } else {
+            "latn"
+        }
+    }
+
+    /// Whether the locale writes digits of its own (non-Latin, right-to-left
+    /// scripts).
+    pub(crate) fn own_digits(&self) -> bool {
+        self.digits != DIGITS
+    }
+
+    /// `text` with its ASCII digits written in the locale's numbering;
+    /// Latin-digit locales get their text back unchanged.
+    pub(crate) fn localize_digits<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        if self.digits == DIGITS || !text.bytes().any(|b| b.is_ascii_digit()) {
+            return Cow::Borrowed(text);
+        }
+        Cow::Owned(
+            text.chars()
+                .map(|c| match c.to_digit(10) {
+                    Some(d) => self.digits[d as usize],
+                    None => c,
+                })
+                .collect(),
+        )
+    }
 }
 
 /// What a language formats dates and times with.
@@ -53,6 +98,8 @@ pub(crate) struct Dates {
     pub(crate) weekday_sep: &'static str,
     /// Between the date and the time.
     pub(crate) date_time_sep: &'static str,
+    /// Before `fractionalSecond` digits (`.`; Persian `٫`).
+    pub(crate) fraction_decimal: &'static str,
     pub(crate) names: Option<&'static Names>,
     /// Chinese, Japanese and Korean: months are numbers with a unit.
     pub(crate) cjk: bool,
@@ -86,8 +133,8 @@ pub(crate) struct Locale {
 
 /// The languages with data.
 const LANGUAGES: &[&str] = &[
-    "en", "de", "fr", "es", "it", "pt", "nl", "ru", "sv", "pl", "tr", "id", "vi", "th", "hi", "zh",
-    "ja", "ko",
+    "en", "de", "fr", "es", "it", "pt", "nl", "ru", "sv", "pl", "tr", "fa", "id", "vi", "th", "hi",
+    "zh", "ja", "ko",
 ];
 
 /// Whether `tag`'s language has data.
@@ -141,6 +188,11 @@ pub(crate) fn resolve(requested: &[String], default: &str) -> Locale {
 const NBSP: &str = "\u{a0}";
 const NNBSP: &str = "\u{202f}";
 
+/// The Latin digits every language writes with, except those with their own.
+const DIGITS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+/// Extended Arabic-Indic digits (Persian's `arabext` numbering).
+const ARABEXT: [char; 10] = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+
 const EN_SHORT: &[(u8, &str)] = &[(3, "K"), (6, "M"), (9, "B"), (12, "T")];
 const EN_LONG: &[(u8, &str)] = &[
     (3, " thousand"),
@@ -160,7 +212,11 @@ fn numbers(lang: &str, region: &str) -> Numbers {
         min_grouping: 1,
         indian: false,
         minus: "-",
+        plus: "+",
         percent: "%",
+        nan: "NaN",
+        exponential: "E",
+        digits: DIGITS,
         currency_before: true,
         currency_space: "",
         compact_short: EN_SHORT,
@@ -313,6 +369,32 @@ fn numbers(lang: &str, region: &str) -> Numbers {
             compact_long: &[],
             ..euro
         },
+        // Persian: `arabext` digits, its own separators and compact words.
+        // The left-to-right marks keep the sign and the currency symbol on
+        // the number's side, as CLDR writes them.
+        "fa" => Numbers {
+            decimal: "٫",
+            group: "٬",
+            minus: "\u{200e}\u{2212}",
+            plus: "\u{200e}+",
+            percent: "٪",
+            nan: "ناعدد",
+            exponential: "×10^",
+            digits: ARABEXT,
+            compact_short: &[
+                (3, "\u{a0}هزار"),
+                (6, "\u{a0}میلیون"),
+                (9, "\u{a0}میلیارد"),
+                (12, "\u{a0}تریلیون"),
+            ],
+            compact_long: &[
+                (3, " هزار"),
+                (6, " میلیون"),
+                (9, " میلیارد"),
+                (12, " هزارمیلیارد"),
+            ],
+            ..base
+        },
         "id" => Numbers {
             currency_before: true,
             compact_short: &[
@@ -406,6 +488,8 @@ fn numbers(lang: &str, region: &str) -> Numbers {
             n.currency_space = NBSP;
         }
         ("nl", _) => n.currency_space = NBSP,
+        // Dari writes a space between the currency and the number.
+        ("fa", "AF") => n.currency_space = NBSP,
         _ => {}
     }
     if n.compact_long.is_empty() {
@@ -676,6 +760,91 @@ const KO: Names = Names {
     weekdays_short: ["(일)", "(월)", "(화)", "(수)", "(목)", "(금)", "(토)"],
 };
 
+/// Persian (Iran). Months abbreviated as written; `سه‌شنبه` holds a
+/// zero-width non-joiner, as CLDR writes it.
+const FA: Names = Names {
+    months: [
+        "ژانویه",
+        "فوریه",
+        "مارس",
+        "آوریل",
+        "مه",
+        "ژوئن",
+        "ژوئیه",
+        "اوت",
+        "سپتامبر",
+        "اکتبر",
+        "نوامبر",
+        "دسامبر",
+    ],
+    months_short: [
+        "ژانویه",
+        "فوریه",
+        "مارس",
+        "آوریل",
+        "مه",
+        "ژوئن",
+        "ژوئیه",
+        "اوت",
+        "سپتامبر",
+        "اکتبر",
+        "نوامبر",
+        "دسامبر",
+    ],
+    weekdays: [
+        "یکشنبه",
+        "دوشنبه",
+        "سه\u{200c}شنبه",
+        "چهارشنبه",
+        "پنجشنبه",
+        "جمعه",
+        "شنبه",
+    ],
+    weekdays_short: [
+        "یکشنبه",
+        "دوشنبه",
+        "سه\u{200c}شنبه",
+        "چهارشنبه",
+        "پنجشنبه",
+        "جمعه",
+        "شنبه",
+    ],
+};
+
+/// Persian (Afghanistan, Dari): its own months; the weekdays are shared.
+const FA_AF: Names = Names {
+    months: [
+        "جنوری",
+        "فبروری",
+        "مارچ",
+        "اپریل",
+        "می",
+        "جون",
+        "جولای",
+        "اگست",
+        "سپتمبر",
+        "اکتوبر",
+        "نومبر",
+        "دسمبر",
+    ],
+    months_short: [
+        "جنو",
+        "فبروری",
+        "مارچ",
+        "اپریل",
+        "می",
+        "جون",
+        "جول",
+        "اگست",
+        "سپتمبر",
+        "اکتوبر",
+        "نومبر",
+        "دسم",
+    ],
+    weekdays: FA.weekdays,
+    weekdays_short: FA.weekdays_short,
+};
+
 fn dates(lang: &str, region: &str) -> Dates {
     let base = Dates {
         hour12: false,
@@ -692,6 +861,7 @@ fn dates(lang: &str, region: &str) -> Dates {
         weekday_first: true,
         weekday_sep: ", ",
         date_time_sep: ", ",
+        fraction_decimal: ".",
         names: None,
         cjk: false,
     };
@@ -754,6 +924,21 @@ fn dates(lang: &str, region: &str) -> Dates {
         "pl" | "tr" => Dates {
             numeric: &[(D, "."), (M, "."), (Y, "")],
             text: None,
+            ..base
+        },
+        // Persian: `y/M/d` (`۲۰۲۶/۱۰/۱۶`), `d MMM y` (`۱۶ اکتبر ۲۰۲۶`),
+        // the weekday first (`جمعه ۱۶ اکتبر ۲۰۲۶`) and unpadded 24-hour
+        // times (`۱۵:۰۴`), as CLDR and browsers write them.
+        "fa" => Dates {
+            pad_hour24: false,
+            am: "ق.ظ.",
+            pm: "ب.ظ.",
+            numeric: &[(Y, "/"), (M, "/"), (D, "")],
+            text: Some(&[(D, " "), (M, " "), (Y, "")]),
+            weekday_sep: " ",
+            date_time_sep: "، ",
+            fraction_decimal: "٫",
+            names: Some(&FA),
             ..base
         },
         "id" | "vi" | "th" => Dates {
@@ -843,6 +1028,8 @@ fn dates(lang: &str, region: &str) -> Dates {
         ("en", _) => {}
         ("fr", "CA") => d.numeric = &[(Y, "-"), (M, "-"), (D, "")],
         ("de", "CH") => {}
+        // Dari: its month names; numbers and patterns are shared with Iran.
+        ("fa", "AF") => d.names = Some(&FA_AF),
         _ => {}
     }
     if lang == "zh" && d.hour12 {
@@ -869,5 +1056,26 @@ mod tests {
             "en-US"
         );
         assert!(resolve(&tags(&["zh-Hant"]), "en").dates.hour12);
+    }
+
+    #[test]
+    fn persian_resolves_with_its_own_digits() {
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let fa = resolve(&tags(&["fa-IR"]), "en-US");
+        assert_eq!(fa.tag.as_str(), "fa-IR");
+        assert_eq!(fa.numbers.numbering(), "arabext");
+        assert_eq!(fa.numbers.localize_digits("a1b23"), "a۱b۲۳");
+        assert_eq!(fa.numbers.localize_digits("abc"), "abc");
+        assert_eq!(resolve(&tags(&["fa-AF"]), "en-US").tag.as_str(), "fa-AF");
+        assert_eq!(
+            resolve(&tags(&["en-US"]), "en-US").numbers.numbering(),
+            "latn"
+        );
+        assert_eq!(
+            resolve(&tags(&["en-US"]), "en-US")
+                .numbers
+                .localize_digits("12"),
+            "12"
+        );
     }
 }

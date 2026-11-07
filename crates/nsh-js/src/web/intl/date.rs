@@ -4,9 +4,11 @@
 //! offset QuickJS's `Date` uses), UTC, or a fixed offset: there is no time
 //! zone database.
 
+use std::borrow::Cow;
+
 use super::{
     Part,
-    locale::{Dates, EN, Field},
+    locale::{Dates, EN, Field, Numbers},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,7 +156,14 @@ fn zone_name(zone: Zone, offset: i32) -> String {
 
 /// The parts of the time `ms` (milliseconds since the epoch), written
 /// `offset` minutes east of UTC (the zone's offset at that time).
-pub(crate) fn format(ms: f64, offset: i32, zone: Zone, f: &Format, dates: &Dates) -> Vec<Part> {
+pub(crate) fn format(
+    ms: f64,
+    offset: i32,
+    zone: Zone,
+    f: &Format,
+    dates: &Dates,
+    numbers: &Numbers,
+) -> Vec<Part> {
     let c = civil(ms + f64::from(offset) * 60_000.0);
     let mut parts = Vec::new();
     let date = date_parts(&c, f, dates);
@@ -165,6 +174,12 @@ pub(crate) fn format(ms: f64, offset: i32, zone: Zone, f: &Format, dates: &Dates
         literal(&mut parts, dates.date_time_sep);
     }
     parts.extend(time);
+    // Locales with their own digits write them in every number they format.
+    for part in &mut parts {
+        if let Cow::Owned(text) = numbers.localize_digits(&part.value) {
+            part.value = text;
+        }
+    }
     parts
 }
 
@@ -342,7 +357,7 @@ fn time_parts(c: &Civil, f: &Format, dates: &Dates, zone: Zone, offset: i32) -> 
     }
     if f.fraction > 0 {
         if !clock.is_empty() {
-            literal(&mut clock, ".");
+            literal(&mut clock, dates.fraction_decimal);
         }
         let digits = format!("{:03}", c.millisecond);
         field(
@@ -398,7 +413,7 @@ mod tests {
 
     fn fmt(tag: &str, f: Format) -> String {
         let locale = resolve(&[tag.to_owned()], "en-US");
-        format(T, 0, Zone::Utc, &f, &locale.dates)
+        format(T, 0, Zone::Utc, &f, &locale.dates, &locale.numbers)
             .into_iter()
             .map(|p| p.value)
             .collect()
@@ -466,6 +481,54 @@ mod tests {
             ..DATE
         };
         assert_eq!(fmt("en-US", two), "10/16/26");
+    }
+
+    /// Persian as browsers format it, in the Gregorian calendar:
+    /// `۲۰۲۶/۱۰/۱۶`, `۱۶ اکتبر ۲۰۲۶`, `جمعه ۱۶ اکتبر ۲۰۲۶`, and Dari's
+    /// own month names.
+    #[test]
+    fn persian_dates_like_browsers() {
+        assert_eq!(fmt("fa-IR", DATE), "۲۰۲۶/۱۰/۱۶");
+        let two = Format {
+            year: Some(Num::TwoDigit),
+            month: Some(Month::Num(Num::TwoDigit)),
+            day: Some(Num::TwoDigit),
+            ..DATE
+        };
+        assert_eq!(fmt("fa-IR", two), "۲۶/۱۰/۱۶");
+        let long = Format {
+            weekday: Some(Text::Long),
+            month: Some(Month::Text(Text::Long)),
+            ..DATE
+        };
+        assert_eq!(fmt("fa-IR", long), "جمعه ۱۶ اکتبر ۲۰۲۶");
+        let month = Format {
+            month: Some(Month::Text(Text::Long)),
+            ..DATE
+        };
+        assert_eq!(fmt("fa-IR", month), "۱۶ اکتبر ۲۰۲۶");
+        assert_eq!(fmt("fa-AF", month), "۱۶ اکتوبر ۲۰۲۶");
+        assert_eq!(fmt("fa-IR", TIME), "۱۵:۰۴:۰۵");
+        let h12 = Format {
+            hour_cycle: Some(HourCycle::H12),
+            second: None,
+            ..TIME
+        };
+        assert_eq!(fmt("fa-IR", h12), "۳:۰۴ ب.ظ.");
+        let both = Format {
+            month: Some(Month::Text(Text::Long)),
+            hour: Some(Num::Numeric),
+            minute: Some(Num::Numeric),
+            second: Some(Num::Numeric),
+            ..DATE
+        };
+        assert_eq!(fmt("fa-IR", both), "۱۶ اکتبر ۲۰۲۶، ۱۵:۰۴:۰۵");
+        let hour = Format {
+            minute: None,
+            second: None,
+            ..TIME
+        };
+        assert_eq!(fmt("fa-IR", hour), "۱۵");
     }
 
     #[test]
@@ -570,6 +633,7 @@ mod tests {
                 ..TIME
             },
             &locale.dates,
+            &locale.numbers,
         )
         .into_iter()
         .map(|p| p.value)

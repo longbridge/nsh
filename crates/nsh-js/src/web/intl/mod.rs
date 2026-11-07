@@ -10,13 +10,15 @@
 //! The locale data is a hand-written table of the common languages
 //! (`locale.rs`), not CLDR: ICU4X's data for numbers and dates in every
 //! locale would add megabytes to every app, these tables add a few
-//! kilobytes. A locale without data resolves to the next requested one,
-//! then the device's (`Environment::locale`), then `en-US`. Local time is
-//! `Date`'s, and is named as the zone it is computed in: as the C library
-//! computing it reads that zone (`TZ`, `/etc/localtime`; the browser's on
-//! the web), or where that is out of its sight (Windows, Android) as the
-//! platform reports it (`LocaleSettings::time_zone`, `localeSettings()`'s
-//! `timeZone`), so on a device `localeSettings()` names it too.
+//! kilobytes. Digits are Latin except in the locales that write their own
+//! (Persian's `arabext`). A locale without data resolves to the next
+//! requested one, then the device's (`Environment::locale`), then `en-US`.
+//! Local time is `Date`'s, and is named as the zone it is computed in: as
+//! the C library computing it reads that zone (`TZ`, `/etc/localtime`; the
+//! browser's on the web), or where that is out of its sight (Windows,
+//! Android) as the platform reports it (`LocaleSettings::time_zone`,
+//! `localeSettings()`'s `timeZone`), so on a device `localeSettings()` names
+//! it too.
 //! `resolvedOptions().timeZone` gives the name and a `timeZone` naming it
 //! is local time; a `TZ` holding a POSIX rule
 //! (`CET-1CEST,M3.5.0,M10.5.0/3`) is named by its text, so its daylight
@@ -28,9 +30,10 @@
 //! Not there: `Collator`, `PluralRules`, `RelativeTimeFormat`,
 //! `ListFormat`, `DisplayNames`, `Segmenter`, `Intl.Locale`; time zones
 //! other than the device's, UTC and fixed offsets (no zone database);
-//! calendars other than the Gregorian, non-Latin digits, `currencySign:
+//! calendars other than the Gregorian; a numbering system other than the
+//! locale's own (`fa-u-nu-latn` still writes `arabext`); `currencySign:
 //! "accounting"` (written as `standard`) and currency names (written as
-//! codes). The constructors need `new`.
+//! codes); unit names are English everywhere. The constructors need `new`.
 
 mod date;
 mod locale;
@@ -453,7 +456,7 @@ native!(
         let set = |key: &str, value: V| js::define(cx, o.raw(), key, value, true);
         let text = |s: &str| js::string(cx, s);
         set("locale", text(locale.tag.as_str())?)?;
-        set("numberingSystem", text("latn")?)?;
+        set("numberingSystem", text(locale.numbers.numbering())?)?;
         match &f.style {
             Style::Decimal => set("style", text("decimal")?)?,
             Style::Percent => set("style", text("percent")?)?,
@@ -952,7 +955,14 @@ fn format_date(
         date::Zone::Utc => 0,
         date::Zone::Offset(minutes) => minutes,
     };
-    Ok(date::format(ms, offset, zone, f, &locale.dates))
+    Ok(date::format(
+        ms,
+        offset,
+        zone,
+        f,
+        &locale.dates,
+        &locale.numbers,
+    ))
 }
 
 fn format_with(cx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
@@ -1008,7 +1018,7 @@ native!(
         let text = |s: &str| js::string(cx, s);
         set("locale", text(locale.tag.as_str())?)?;
         set("calendar", text("gregory")?)?;
-        set("numberingSystem", text("latn")?)?;
+        set("numberingSystem", text(locale.numbers.numbering())?)?;
         let zone = match zone {
             Zone::Utc => "UTC".to_owned(),
             Zone::Offset(m) => format!("{}{:02}:{:02}", if m < 0 { '-' } else { '+' }, m.abs() / 60, m.abs() % 60),
