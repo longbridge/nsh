@@ -56,7 +56,8 @@ function App() {
         testID="application"
         onPress={() => {
           Application.quit();
-          calls.set(`application done, quit ${typeof Application.quit}`);
+          Application.restart();
+          calls.set(`application done, quit ${typeof Application.quit}, restart ${typeof Application.restart}`);
         }}
       >
         <Text>Application calls</Text>

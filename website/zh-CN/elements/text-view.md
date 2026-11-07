@@ -287,7 +287,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 
 ## 链接
 
-链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。在终端里，Tab 依次到达每个链接和脚注引用，Return 按下获得焦点的那一个：`onLinkPress` 收到它，与收到点击一样。
+链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。在终端里，Tab 依次到达每个链接和脚注引用，Return 按下获得焦点的那一个：`onLinkPress` 收到它，与收到点击一样。事件还带有按下时按住的修饰键（`modifiers`，与点击事件的相同），应用可以把按住 Command（macOS 以外是 Control）的点击交给浏览器，普通点击自己处理；键盘或辅助技术触发的按下不带修饰键。
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};
@@ -754,7 +754,7 @@ fn chat() -> impl IntoElement {
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url, modifiers }`，其 URL（标题为 `#anchor`，脚注为 `#footnote-<label>`）和按住的修饰键。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
 | `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start }`，与复制得到的内容相同的选中文字及其起始位置；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
 

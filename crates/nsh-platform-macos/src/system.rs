@@ -396,6 +396,7 @@ fn follow_background(surface: &Surface) {
     if surface.background.replace(Some(color)) == Some(color) {
         return;
     }
+    crate::window::set_background(surface, color);
     // The root's own layer is the app's (its style); the view holding it
     // is the surface's.
     let Some(layer) = crate::view::superview(surface.root.ns()).and_then(|v| v.layer()) else {
@@ -607,6 +608,7 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
         .root
         .ns()
         .setAppearance(ns_appearance(appearance).as_deref());
+    crate::window::set_appearance(surface, ns_appearance(appearance).as_deref());
     update(surface);
 }
 
@@ -885,9 +887,7 @@ pub(crate) fn pasted(pasteboard: &NSPasteboard) -> nsh_core::PasteEvent {
         .unwrap_or_default()
     {
         if let Some(uri) = item.stringForType(&file_url) {
-            if crate::file_drop::is_local_uri(&uri) {
-                paste.uris.push(uri.to_string());
-            }
+            paste.uris.extend(crate::file_drop::local_file_uri(&uri));
             continue;
         }
         let image = IMAGE_TYPES.iter().find_map(|(mime, kind)| {
@@ -1061,8 +1061,7 @@ fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
             items
                 .iter()
                 .filter_map(|item| item.stringForType(&kind))
-                .filter(|uri| crate::file_drop::is_local_uri(uri))
-                .map(|uri| uri.to_string())
+                .filter_map(|uri| crate::file_drop::local_file_uri(&uri))
                 .collect()
         })
         .unwrap_or_default();

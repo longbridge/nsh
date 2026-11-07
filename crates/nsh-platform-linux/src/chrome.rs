@@ -208,6 +208,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => {
             crate::app::quit();
         }
+        // Quits as above, then the runner starts the app again.
+        DesktopCommand::Restart => crate::app::restart(),
         DesktopCommand::Hide => {
             if let Some(window) = window(surface) {
                 window.set_visible(false);

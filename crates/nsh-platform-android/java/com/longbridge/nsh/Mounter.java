@@ -1862,6 +1862,16 @@ final class Mounter {
         return !shownModals.isEmpty();
     }
 
+    /** The windows of the dialogs shown, bottom to top (the test agent's screenshots). */
+    java.util.List<android.view.Window> modalWindows() {
+        java.util.ArrayList<android.view.Window> windows = new java.util.ArrayList<>();
+        for (ModalHost m : shownModals) {
+            android.view.Window window = m.dialogWindow();
+            if (window != null) windows.add(window);
+        }
+        return windows;
+    }
+
     /** The window of the topmost dialog shown, or null. */
     View topModalWindow() {
         for (int i = shownModals.size() - 1; i >= 0; i--) {
@@ -2216,6 +2226,26 @@ final class Mounter {
             }
             case 27: {
                 for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
+                break;
+            }
+            case 28: {
+                int request = b.getInt();
+                String path = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openPath(context, path);
+                if (opened) {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id"}, new Object[] {(double) request});
+                } else {
+                    eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                            new Object[] {(double) request, "no app opened the file"});
+                }
+                break;
+            }
+            case 30: {
+                // A file request with no Android implementation: fail it so
+                // the waiting call returns instead of hanging.
+                int request = b.getInt();
+                eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
+                        new Object[] {(double) request, "not supported on Android"});
                 break;
             }
             case 44: {

@@ -46,6 +46,7 @@ export type IconName =
   | "undo"
   | "volume-low"
   | "volume-high"
+  | "volume-off"
   | "code"
   | "sliders"
   | "stepper"
@@ -587,6 +588,11 @@ const glyphs: Record<IconName, Draw> = {
     speaker(c);
     wave(c, 3.2);
     wave(c, 6.2);
+  },
+  "volume-off": (c) => {
+    speaker(c);
+    line(c, [13, 7.5, 18, 12.5]);
+    line(c, [18, 7.5, 13, 12.5]);
   },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.
