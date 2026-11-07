@@ -65,7 +65,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements)) and `updater`, which makes desktop packages update themselves
-(see [App Updates](./app-updates.md)); [Project structure](./project-structure.md#nshjson) lists
+(see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
 
@@ -364,6 +364,7 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 
 - [CLI](./cli.md): every command
 - [App Updates](./app-updates.md): packaged apps that update themselves
+- [OTA Updates](./ota-updates.md): new TSX for packaged apps, iOS and Android included, without a new build
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app

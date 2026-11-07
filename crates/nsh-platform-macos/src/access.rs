@@ -284,6 +284,12 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+    /// A view standing for the window's close button (`windowControl`).
+    CloseButton,
+    /// ... its minimize button.
+    MinimizeButton,
+    /// ... its zoom (maximize) button.
+    ZoomButton,
 }
 
 impl Ax {
@@ -294,6 +300,9 @@ impl Ax {
         matches!(
             self,
             Ax::Button
+                | Ax::CloseButton
+                | Ax::MinimizeButton
+                | Ax::ZoomButton
                 | Ax::Toggle
                 | Ax::Link
                 | Ax::CheckBox
@@ -484,7 +493,12 @@ fn update(view: &NshView) -> bool {
         let a = &s.props.accessibility;
         let pressable = is_pressable(s.events);
         let text = s.text.as_ref().map(|t| t.text.text.as_str());
-        let spec = spec_for(a, s.kind, pressable, text, s.style.hidden);
+        let mut spec = spec_for(a, s.kind, pressable, text, s.style.hidden);
+        if let Some(control) = s.props.window_control
+            && !spec.hidden
+        {
+            spec.role = window_button(control);
+        }
         if s.access.spec.as_deref() == Some(&spec) {
             return false;
         }
@@ -722,6 +736,19 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             // and columns; an item of a tree is static text that reports
             // its expanded state and its disclosure level.
             Ax::TreeItem => (constant(NSAccessibilityStaticTextRole), None),
+            // As AppKit's own window buttons.
+            Ax::CloseButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityCloseButtonSubrole),
+            ),
+            Ax::MinimizeButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityMinimizeButtonSubrole),
+            ),
+            Ax::ZoomButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityZoomButtonSubrole),
+            ),
         }
     }
 }
@@ -790,6 +817,16 @@ fn spec_for(
         level: a.level,
         hidden: a.hidden || invisible,
         grouped: (a.accessible == Some(true) || role.folds()) && kind != ViewKind::Text,
+    }
+}
+
+/// The element a view standing for a window button (`windowControl`) is.
+fn window_button(control: nsh_core::desktop::WindowControl) -> Ax {
+    use nsh_core::desktop::WindowControl;
+    match control {
+        WindowControl::Close => Ax::CloseButton,
+        WindowControl::Minimize => Ax::MinimizeButton,
+        WindowControl::Maximize => Ax::ZoomButton,
     }
 }
 

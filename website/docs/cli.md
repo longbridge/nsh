@@ -251,10 +251,12 @@ Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen 
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
 ```
 
-Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform: see [App Updates](/docs/app-updates).
+Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
+with `--package`, a signed package of the app's code (`nsh publish`'s), which it checks against the app's id and
+`updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 
 ### nsh certify
 

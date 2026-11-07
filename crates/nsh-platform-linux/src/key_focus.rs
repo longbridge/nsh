@@ -98,30 +98,37 @@ pub(crate) fn install(surface: &Rc<Surface>) {
             return;
         }
         installed.borrow().set(Some(&window));
-        let keys = gtk::EventControllerKey::new();
-        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let pressed = weak.clone();
-        keys.connect_key_pressed(move |keys, key, _, modifiers| match pressed.upgrade() {
-            Some(surface) if key_pressed(&surface, keys, key, modifiers) => glib::Propagation::Stop,
-            _ => glib::Propagation::Proceed,
-        });
-        window.add_controller(keys);
-        let weak = weak.clone();
-        let current = RefCell::new(None::<NshView>);
-        window.connect_focus_widget_notify(move |window| {
-            if let Some(surface) = weak.upgrade() {
-                moved(&surface, window, &current);
-            }
-        });
+        if let Some(surface) = weak.upgrade() {
+            watch(&surface, &window);
+        }
     });
 }
 
-/// The focused stop of `surface`.
+/// Follows the focus in `window` (the main one or one of the app's own,
+/// each with focus chains of its own) and takes a focused stop's keys.
+pub(crate) fn watch(surface: &Rc<Surface>, window: &gtk::Window) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let pressed = Rc::downgrade(surface);
+    keys.connect_key_pressed(move |keys, key, _, modifiers| match pressed.upgrade() {
+        Some(surface) if key_pressed(&surface, keys, key, modifiers) => glib::Propagation::Stop,
+        _ => glib::Propagation::Proceed,
+    });
+    window.add_controller(keys);
+    let weak = Rc::downgrade(surface);
+    let current = RefCell::new(None::<NshView>);
+    window.connect_focus_widget_notify(move |window| {
+        if let Some(surface) = weak.upgrade() {
+            moved(&surface, window, &current);
+        }
+    });
+}
+
+/// The focused stop of `surface`, in whichever of its windows.
 fn focused_stop(surface: &Surface, focus: Option<gtk::Widget>) -> Option<NshView> {
-    let root = surface.root.upcast_ref::<gtk::Widget>();
     focus
-        .filter(|f| f != root && f.is_ancestor(root))
         .and_downcast::<NshView>()
+        .filter(|view| crate::window::holds(surface, view))
         .filter(is_stop)
 }
 
@@ -159,7 +166,8 @@ fn key_pressed(
         glib::idle_add_local_once(|| TABBING.set(false));
         return false;
     }
-    let focus = surface.root.root().and_then(|r| r.focus());
+    // The focus of the window the key is going to.
+    let focus = keys.widget().and_then(|w| w.root()).and_then(|r| r.focus());
     let Some(view) = focused_stop(surface, focus) else {
         return false;
     };
@@ -211,7 +219,7 @@ fn show_context_menu(surface: &Surface, view: &NshView) -> bool {
             let position = core_input::context_menu_anchor(size, rtl);
             let (x, y) = v
                 .compute_point(
-                    &surface.root,
+                    &crate::window::root_of(surface, &v),
                     &graphene::Point::new(position.x.0, position.y.0),
                 )
                 .map_or((position.x.0, position.y.0), |p| (p.x(), p.y()));
