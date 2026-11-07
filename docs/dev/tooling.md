@@ -124,8 +124,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
 - Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
-  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
-  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` and `nsh dev` bind to
+  loopback, with `--target ios`, `android` or `web` and `nsh dev --server-only` to every address, for other machines
+  (`dev::Listen`, `run::Target::uses_network`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
@@ -150,6 +151,13 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
+- What the dev server serves to others (`crates/nsh-dev/src/server.rs`): `/assets/<path>` is the files a build
+  imported and the UI sets' crates ship (`DevServer::serve_files`, by name, any type), and from the app's directory only
+  media files (images, fonts, audio, video by extension) outside hidden directories, `.nsh`, `node_modules` and
+  `target`, also after following links (`asset_in_root`); sources, `nsh.json`, `.env`, JSON and other files return
+  404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
+  `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
+  browser, even on loopback or under a name rebound to this machine, gets 403.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK
