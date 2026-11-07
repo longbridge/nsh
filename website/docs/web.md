@@ -494,36 +494,6 @@ A press on a link is the app's `onPress`, so the app navigates as it always does
 click with a modifier key or the middle button opens it in a new tab, and a right click shows the browser's menu for
 links (open in a new tab, copy the link) unless the app shows its own with `onContextMenu`.
 
-### A URL for each page
-
-`NavStack`'s `linking` makes each page of the stack a URL of the site: the address bar shows the page on top, the
-browser's history holds one entry per page, and a URL opened directly (a search result, a shared link) opens the pages
-it names. `path` gives a route's path, and `routes` the routes a path opens, bottom to top, so the back button leads
-where the user expects:
-
-```tsx
-const nav = createNavStack<Route>([{ name: "home" }]);
-
-const linking = {
-  path: (route: Route) => (route.name === "note" ? `/notes/${route.slug}` : "/"),
-  routes: (path: string): Route[] | null => {
-    const match = /^\/notes\/([\w-]+)$/.exec(path);
-    if (match) return [{ name: "home" }, { name: "note", slug: match[1] }];
-    return path === "/" ? [{ name: "home" }] : null;
-  },
-};
-
-<NavStack state={nav} linking={linking}>
-  {(route) => (route.name === "note" ? <NotePage slug={route.slug} /> : <Home />)}
-</NavStack>
-```
-
-Paths start at the directory the site is published to (`/notes/q3` of a site at `https://example.com/research/` is
-`https://example.com/research/notes/q3`). The first stack with `linking` opens the page's URL; `routes` returning
-`null` keeps the stack's own routes. Serve the site's `index.html` for every path of the app (the fallback of a
-single-page site) with a `<base href>` naming the site's directory (`<base href="/research/">`), so a URL opened
-directly loads the app's files and opens its pages. The phones and the desktops keep the stack's routes as they are.
-
 ### Titles and descriptions
 
 [`nsh/web`](../modules/nsh-web.md)'s `Head` sets the page's `<head>` while it is mounted: the title, the description,

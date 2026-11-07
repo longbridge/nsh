@@ -1,7 +1,5 @@
 // `nsh/web`: the page around the app. `Head` sets the page's own `<head>`
-// (this module runs in the page's realm, the app in its iframe's), and the
-// linked `NavStack`'s routes become the page's URL (`linking`, through the
-// player's history).
+// (this module runs in the page's realm, the app in its iframe's).
 
 /** Elements the heads made, so that what no head sets any more is removed. */
 const MARK = "data-nsh-head";
@@ -76,13 +74,5 @@ export function createWebPage(reactive, player) {
     return null;
   }
 
-  /** What `NavStack`'s `linking` needs of the page: the path it opened at,
-   * and where its pages' paths go (the history's entries). Off the page
-   * (an app in an iframe of another page), none. */
-  const routes = player.history ? {
-    initialPath: () => player.routePath(),
-    setPaths: paths => player.setRoutePaths(paths),
-  } : null;
-
-  return { exports: { isAvailable: true, Head }, routes };
+  return { exports: { isAvailable: true, Head } };
 }
