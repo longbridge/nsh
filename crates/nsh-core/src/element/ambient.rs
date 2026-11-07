@@ -52,6 +52,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// The main window's close presses: how many, and the last one's
+    /// reason ([`crate::element::desktop::WindowHandle::on_close_press`]).
+    main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
 }
 
 impl Ambient {
@@ -166,6 +169,15 @@ impl super::Runtime {
         if signal.get_untracked() != enabled {
             signal.set(enabled);
         }
+    }
+
+    /// The user asked to close the main window: what listens hears it.
+    pub(crate) fn main_close_pressed(&self, reason: crate::desktop::CloseReason) {
+        let _entered = self.enter();
+        main_close_press_signal().update(|(count, last)| {
+            *count += 1;
+            *last = reason;
+        });
     }
 
     /// `placement` fitted on the displays now (`setPlacement`, a restored
@@ -1531,6 +1543,17 @@ fn perf_monitor_signal() -> Signal<bool> {
     }
     let signal = Owner::detached().run(|| super::signal(false));
     with_data(|d| d.ambient.perf_monitor = Some(signal));
+    signal
+}
+
+/// The main window's close presses, none until the platform reports one.
+pub(crate) fn main_close_press_signal() -> Signal<(u64, crate::desktop::CloseReason)> {
+    if let Some(signal) = with_data(|d| d.ambient.main_close_press) {
+        return signal;
+    }
+    let signal =
+        Owner::detached().run(|| super::signal((0, crate::desktop::CloseReason::default())));
+    with_data(|d| d.ambient.main_close_press = Some(signal));
     signal
 }
 

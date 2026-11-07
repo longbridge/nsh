@@ -5714,10 +5714,20 @@ impl<M: TextEngine> Core<M> {
             // A window that keeps its placement saves it as it changes; the
             // event goes on to the app.
             EventKind::Window => {
-                if let EventPayload::Window(event) = payload
-                    && let crate::desktop::WindowEvent::State(state) = event.as_ref()
-                {
-                    self.keep_window_placement(id, state);
+                if let EventPayload::Window(event) = payload {
+                    match event.as_ref() {
+                        crate::desktop::WindowEvent::State(state) => {
+                            self.keep_window_placement(id, state);
+                        }
+                        // Rust listeners of the main window's; JS's hear it
+                        // from the event.
+                        crate::desktop::WindowEvent::ClosePress { reason }
+                            if id == crate::ROOT_ID =>
+                        {
+                            self.components.runtime.main_close_pressed(*reason);
+                        }
+                        _ => {}
+                    }
                 }
                 false
             }

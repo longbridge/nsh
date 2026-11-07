@@ -131,6 +131,9 @@ pub struct WindowHandle {
     /// Closes a window of the app's own as its element does
     /// ([`WindowHandle::close`]).
     close: Option<Rc<dyn Fn(WindowCloseCause)>>,
+    /// The close presses of a window of the app's own: how many, and the
+    /// last one's reason (the main window's are the environment's).
+    close_press: Option<Signal<(u64, CloseReason)>>,
 }
 
 impl fmt::Debug for WindowHandle {
@@ -155,6 +158,7 @@ pub fn main_window() -> WindowHandle {
         state: None,
         title_bar: None,
         close: None,
+        close_press: None,
     }
 }
 
@@ -312,6 +316,24 @@ impl WindowHandle {
             let previous = last.replace(Some(next));
             if let Some(change) = changed(previous.as_ref(), &next) {
                 super::untracked(|| f(change));
+            }
+        });
+    }
+
+    /// Runs `f` with the reason each time the user asks to close it (its
+    /// close button, a shortcut, a menu, the taskbar, the system), under
+    /// the current owner (TS: `on("closePress", …)`). With
+    /// `close_on_press: false` it stays open: save or ask, then
+    /// [`Self::close`].
+    pub fn on_close_press(&self, f: impl Fn(CloseReason) + 'static) {
+        let signal = self
+            .close_press
+            .unwrap_or_else(super::ambient::main_close_press_signal);
+        let seen = super::stored(signal.with_untracked(|(count, _)| *count));
+        super::effect(move || {
+            let (count, reason) = signal.get();
+            if seen.replace(count) != count {
+                super::untracked(|| f(reason));
             }
         });
     }
@@ -573,6 +595,7 @@ impl IntoElement for Window {
             let element = super::element_ref();
             let state = super::signal(None::<WindowState>);
             let title_bar = super::signal(Edges::<Points>::default());
+            let close_press = super::signal((0u64, CloseReason::default()));
             let close: Rc<dyn Fn(WindowCloseCause)> = {
                 let on_open_change = on_open_change.clone();
                 Rc::new(move |cause: WindowCloseCause| {
@@ -591,6 +614,7 @@ impl IntoElement for Window {
                 state: Some(state),
                 title_bar: Some(title_bar),
                 close: Some(close.clone()),
+                close_press: Some(close_press),
             };
             if let Some(slot) = &handle {
                 *slot.borrow_mut() = Some(this.clone());
@@ -638,6 +662,10 @@ impl IntoElement for Window {
                                 if let Some(f) = &on_close_press {
                                     f(*reason);
                                 }
+                                close_press.update(|(count, last)| {
+                                    *count += 1;
+                                    *last = *reason;
+                                });
                             }
                             WindowEvent::Closed { cause } => close(*cause),
                         }
