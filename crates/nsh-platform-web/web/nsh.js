@@ -183,6 +183,9 @@ const KEYFRAMES = `
 .nsh-box-none { pointer-events: none; }
 .nsh-inert, .nsh-inert * { pointer-events: none !important; }
 .nsh-clip { overflow: clip; }
+/* Chromium drops the backdrop filters (or their masks) inside a view that clips with \`corner-shape\` corners
+   (placeCorners): such a view with a backdrop-filtered view inside clips with circular corners of the radius. */
+.nsh-curve-clip:has(.nsh-backdrop) { corner-shape: round !important; border-radius: var(--nsh-round) !important; }
 /* A sticky list cell's range of travel (op_sticky): it lifts the cell above the other cells, and with no breadth
    across it takes no pointer events. The cell sticks inside it, at its left in either direction. */
 .nsh-track { position: absolute; z-index: 5; }
@@ -2226,6 +2229,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     swapClass(el, "_class", this.styleClass(css));
+    if (CORNER_SHAPE) {
+      // Marks the views a clipping `corner-shape` ancestor must not hide (`.nsh-curve-clip`).
+      const backdrop = CLASSES.rules.get(el._class)?.style.backdropFilter;
+      el.classList.toggle("nsh-backdrop", !!backdrop && backdrop !== "none");
+    }
     if (border) {
       if (!el._border) el._border = document.createElement("div");
       el._border.className = `nsh-border ${this.styleClass(border)}`;
@@ -2251,6 +2259,12 @@ class Player {
    * diagonal, so a radius looks as round as on the native backends. Without
    * room to reach that far they stay circular, so a pill stays a pill, as
    * `nsh-platform-macos`'s; so do browsers without `corner-shape`.
+   *
+   * Chromium (verified in 156) shows no backdrop filter, or one without its
+   * mask, inside a view that clips with `corner-shape` corners. A clipping
+   * view (`nsh-curve-clip`) falls back to circular corners of the radius
+   * (`--nsh-round`) while a backdrop-filtered view (`nsh-backdrop`, `op_s`)
+   * is inside it.
    */
   placeCorners(el) {
     const r = el._corners;
@@ -2258,11 +2272,16 @@ class Player {
     const fits = CORNER_SHAPE && r && f && Math.max(...r) * CONTINUOUS_REACH <= Math.min(f[2], f[3]) / 2;
     const name = fits
       ? cssClass(
-          `border-radius:${r.map((v) => `${v * CONTINUOUS_REACH}px`).join(" ")};corner-shape:superellipse(${CONTINUOUS_SUPERELLIPSE});`,
+          `border-radius:${r.map((v) => `${v * CONTINUOUS_REACH}px`).join(" ")};corner-shape:superellipse(${CONTINUOUS_SUPERELLIPSE});--nsh-round:${r.map((v) => `${v}px`).join(" ")};`,
           3,
         )
       : null;
     swapClass(el, "_cornerClass", name);
+    if (CORNER_SHAPE) {
+      const overflow = fits ? CLASSES.rules.get(el._class)?.style.overflow : "";
+      const clips = fits && ((overflow && overflow !== "visible") || el.classList.contains("nsh-scroll") || el.classList.contains("nsh-clip"));
+      el.classList.toggle("nsh-curve-clip", !!clips);
+    }
     if (el._border) swapClass(el._border, "_cornerClass", name);
   }
 

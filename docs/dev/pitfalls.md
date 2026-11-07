@@ -637,6 +637,12 @@ Things that were found the hard way. Read the section of the area you change bef
   `wheel` events that were not cancelable, and the page scrolled under it although the root's listener prevented
   them (headless Chrome 156: `cancelable: false`, `scrollY` 300 after a 300 px wheel). The layer has a blocking
   listener of its own (`raise`).
+- **A clip with `corner-shape` corners breaks the backdrop filters inside it**: under a view with `overflow: clip`
+  (or `hidden`), a radius and `corner-shape: superellipse(…)`, a descendant's `backdrop-filter` showed nothing, or
+  blurred its whole box with its `mask-image` ignored (Chrome 156, headed and headless alike; the gallery's
+  "Progressive blur", inside continuous-cornered cards). Either one alone is fine, as are circular corners. A clipping
+  view with continuous corners (`nsh-curve-clip`) takes circular corners of its radius while a backdrop-filtered view
+  (`nsh-backdrop`) is inside it (`nsh.js`, `placeCorners`).
 - **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of

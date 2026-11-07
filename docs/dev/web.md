@@ -537,6 +537,12 @@ the same way from the CSS it makes (`cssClass`: a blur, an image's tint and mask
 view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
 apart: the later one then gets a view's own rule.
 
+`borderCurve: "continuous"` is a tripled class of `border-radius` and `corner-shape` that `nsh.js` makes from the
+frame (`placeCorners`). A view that clips with such corners is marked `nsh-curve-clip`, a view whose style has a
+backdrop filter `nsh-backdrop` (`op_s`, from its class's rule), and `.nsh-curve-clip:has(.nsh-backdrop)` takes
+circular corners of the radius (`--nsh-round`): Chromium shows no backdrop filter inside a clip with `corner-shape`
+corners (`pitfalls.md`, "Web, browsers").
+
 A view whose styles keep changing (a style animated from JS: a new text each frame) would grow the sheet by a rule a
 frame. After 16 classes defined for one view (`OWN_RULES_AFTER`) its new styles go to rules of its own (`i<id>`,
 `i<id>b`, `i<id>t<style>`, …, `nsh-p<player>-` in front), in `<style id="nsh-own">`, which `op_css` replaces in
