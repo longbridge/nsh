@@ -1496,6 +1496,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::Announce(text) => crate::access::announce(surface, text),
+        Command::PerfMonitor(on) => surface.set_stats(*on),
         // The status bar is a phone's; layout animations arrive as mount
         // items. `Back` and `Desktop` are routed by the mounter.
         Command::StatusBar(_) | Command::SetStatusBar(_) | Command::LayoutAnimation(_) => {}

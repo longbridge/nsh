@@ -207,7 +207,7 @@ view()
 | `aspect` | 比例（`1.5`） | `aspect-*` |
 | `ease` | `[x1, y1, x2, y2]` | `ease-*` |
 
-未知的键和无效的值会导致构建错误（`nsh.json: tailwind: unknown theme key 'colours'`）。主题会编译进 bundle，并在第一帧之前生效。
+NSH 读不懂的条目（不认识的键，或形式不认识的值）会给出警告并单独略过（`nsh.json: tailwind: unknown key 'colours', ignored`），运行时也一样，因此为更新的 NSH 写的主题在较旧的 NSH 上其余条目照常生效。主题会编译进 bundle，并在第一帧之前生效。
 
 Tailwind 主题影响你的类名。类型化方法保持 Tailwind 的默认刻度，因此 Rust 组件在任何应用中看起来都一样，它们从应用主题的设计令牌，即 `nsh.json` 中的 `"theme"` 获取应用的外观（[用 Rust 开发](./rust.md#主题)）。
 

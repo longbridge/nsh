@@ -539,7 +539,11 @@ taller than its screen when it shows it, and a test's window keeps the size the 
 it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
 `Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
-without becoming key and the agent does not wait for activation (`MacNative::activate`). A window that is not the
+without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
+the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
+"Checking a change"). A left button press into a web view of the inactive app goes to the `WKWebView` directly
+(`agent::mouse`), since AppKit gives an inactive window's first click only to views that accept the first mouse. A
+window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
 for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
@@ -686,11 +690,15 @@ app; the screen keeps its device's size. Android (`nsh-platform-android`, featur
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
 (`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
-each on the UI thread: `MotionEvent`s dispatched to the window's views (or the dialog's) as a finger's, with drags
-that rest before they lift as on iOS; typing as a keyboard's `KeyEvent`s (`KeyCharacterMap`; what no key types is
+each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
+topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
+iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
-screenshots draw the window and the dialog into a bitmap. A step waits for the native animation graph and for anything
+screenshots copy the activity's window and every window over it (each shown `<modal>`'s dialog in order, then the
+system alert) from their surfaces with `PixelCopy` after a frame drawn with the current state, each composited at its
+place over its dim, so they hold what the GPU draws (video, filters, the backdrop's blur), on an emulator without a
+window too; a window without a surface is drawn into the bitmap instead. A step waits for the native animation graph and for anything
 that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
 system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
 use `nsh_testing::agent::Tester`, which turns the dev client's

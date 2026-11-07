@@ -49,6 +49,9 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
+    /// Whether the performance monitor measures, as the platform reports
+    /// it.
+    perf_monitor: Option<Signal<bool>>,
 }
 
 impl Ambient {
@@ -152,6 +155,16 @@ impl super::Runtime {
         let signal = displays_signal();
         if signal.with_untracked(|d| **d != *displays) {
             signal.set(displays);
+        }
+    }
+
+    /// Whether the performance monitor measures now: what read it runs
+    /// again.
+    pub(crate) fn set_perf_monitor(&self, enabled: bool) {
+        let _entered = self.enter();
+        let signal = perf_monitor_signal();
+        if signal.get_untracked() != enabled {
+            signal.set(enabled);
         }
     }
 
@@ -1493,6 +1506,31 @@ fn displays_signal() -> Signal<Arc<[crate::desktop::Display]>> {
     }
     let signal = Owner::detached().run(|| super::signal(Arc::from(Vec::new())));
     with_data(|d| d.ambient.displays = Some(signal));
+    signal
+}
+
+/// Whether the platform's performance monitor measures (TS:
+/// `fpsEnabled()`), as the platform reports it: reading it in a binding
+/// subscribes it.
+pub fn fps_enabled() -> bool {
+    perf_monitor_signal().get()
+}
+
+/// Turns the platform's performance monitor on or off (TS:
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
+/// monitor ignore it; [`fps_enabled`] follows what the platform did.
+pub fn set_fps_enabled(enabled: bool) {
+    act(super::services::perf_monitor(enabled));
+}
+
+/// The performance monitor's signal, off until the platform reports it.
+fn perf_monitor_signal() -> Signal<bool> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(false));
+    with_data(|d| d.ambient.perf_monitor = Some(signal));
     signal
 }
 

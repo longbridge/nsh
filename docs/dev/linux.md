@@ -200,7 +200,7 @@ xdotool mousemove --window $W 100 30 click 1; xdotool type --window $W "hi"; xdo
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings; `--fps` logs the performance monitor's readings once a second (below); `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
+`--trace` logs per-commit timings; `--fps` shows the performance monitor and logs its readings once a second (below); `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
 one); `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
 Windows and GPUI hosts) names the GTK application and the directory of its web view data (the app's storage follows the id
 the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
@@ -208,11 +208,14 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
 
 ## Performance: `--fps`, the renderer
 
-`nsh-linux-host --fps` (`nsh run --target linux --fps`, `nsh test --target linux --fps`; `AppOptions::fps`) logs one
+`nsh-linux-host --fps` (`nsh run --target linux --fps`, `nsh test --target linux --fps`; `AppOptions::fps`, `NSH_FPS=1`, the app's `setFpsEnabled`) logs one
 `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`): frames GTK drew over the display's rate,
 the main thread's time per drawn frame from the frame clock's `before-paint` to `after-paint` and its phases
 (`update`, `layout`, `paint`, and within `paint` NSH's `snapshot` and the canvases' rasterizing), batches applied per
 drain, the engine's commits (JS and core time, mount items), its busy share, and the process' CPU and resident memory.
+A pointer-transparent panel at the top right also shows FPS, frame time and p95, JS/core time, CPU and RSS,
+with the latest 120 frame costs (newest at the right) and a horizontal refresh-budget line. It redraws twice a
+second while mapped; disabling the monitor removes the panel and timer as well as stopping measurement.
 `examples/gallery/tools/perf.py` runs the gallery under it, idle and scrolling on every demo, and prints a table.
 
 GSK's Vulkan renderer (GTK's default since 4.16) costs the main thread several times what its GL renderer does under
@@ -254,3 +257,115 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
 then calls `set_default_size`. GTK applies the request asynchronously, so merging
 with the widget allocation would discard earlier partial updates in the same batch.
 The window manager controls placement and stacking; resize animation is immediate.
+
+## Screenshot fidelity under Xvfb
+
+The test agent's screenshot is an offscreen rendering of the window's **content**,
+not a desktop capture: it omits the window decorations, cursor and anything covering
+it. `synth::shot` snapshots `GtkWidgetPaintable` into GSK render nodes and calls
+`window.renderer().render_texture`. It uses the same renderer as the visible window,
+including NGL (`GskGLRenderer`) or Vulkan (`GskVulkanRenderer`), not a separate Cairo
+renderer. `synth::after_paint` waits for the next painted frame before reading the
+retained nodes.
+
+### Styles comparison
+
+On 2026-11-07, the gallery at `b36cf29b6` was captured under Xvfb 21.1.25 with
+GTK 4.24.1, Mesa 26.2.5 (llvmpipe for NGL, lavapipe for Vulkan), light appearance
+and `GDK_SCALE=1`. A temporary diagnostic in `synth::shot` confirmed the actual
+renderer type in both runs; merely requesting `GSK_RENDERER=vulkan` is insufficient,
+since GTK can warn and fall back when no Vulkan device is available.
+
+For each renderer, `NSH_GALLERY_DEMO=Styles` and `NSH_GALLERY_SECTION` selected
+`Progressive blur`, `Shadows and glow`, or `3D transforms`. The app opened on a
+manual test clock, called `setViewport(1200, 1000)` and `setColorScheme("light")`,
+then saved an agent screenshot. While the same app remained open, `noop visual shot`
+captured the Xvfb display. The pointer was outside the window before either capture.
+The 5-pixel GTK decoration on each side was removed from the desktop image,
+leaving matching 1190 × 990 content images (1,178,100 pixels). No resampling,
+registration search, color conversion or tolerance was applied before comparing
+8-bit RGB samples.
+
+A changed pixel has at least one unequal channel. MAE is the mean absolute
+channel difference on the 0–255 scale. `>1` counts pixels with any channel differing
+by more than 1. The figures below cover the **whole content**, including the sidebar;
+the linked illustrations crop both images identically for readability, with the
+agent screenshot on the left and the window capture on the right.
+
+| Renderer | Section / comparison | Changed pixels | Pixels >1 | MAE | Max channel difference |
+| --- | --- | ---: | ---: | ---: | ---: |
+| NGL | Progressive blur | 7 | 0 | 0.000002 | 1 |
+| NGL | Shadows and glow | 48 | 0 | 0.000016 | 1 |
+| NGL | 3D transforms | 2,196 | 1,229 | 0.043830 | 190 |
+| Vulkan | Progressive blur | 1 | 0 | 0.0000003 | 1 |
+| Vulkan | Shadows and glow | 17 | 0 | 0.000009 | 1 |
+| Vulkan | 3D transforms | 2,163 | 1,224 | 0.043265 | 187 |
+
+The 3D demo's native Y-axis sway keeps running between the two captures; a manual
+engine clock does not freeze the platform animator. All differences greater than
+1 fall inside that moving specimen: NGL's bounding box is `(416, 472)–(529, 549)`,
+Vulkan's `(417, 472)–(528, 549)`, in content pixels, inclusive. Excluding only the
+perspective tile's stage (`x=279..657`, `y=460..563`) leaves 1,138,684 pixels,
+with **zero pixels differing by more than 1** for either renderer (MAE 0.000309
+NGL / 0.000301 Vulkan). The flip card, static X-axis tilt, skew and transform-origin
+examples remain in that comparison. The sequential captures do not establish
+pixel identity for moving content; matching a particular animation frame needs a
+separate synchronized capture, not a larger global image tolerance.
+
+Shadows and static transforms have no observed missing effects in the agent
+capture. The remaining one-level channel differences are consistent with render-to-texture
+versus presentation rounding; this comparison does not identify their exact cause.
+No screenshot-path change is warranted by these measurements.
+
+**Progressive blur is absent in both images.** This is a backend limitation,
+not an offscreen-capture difference: `decor.rs` does not draw `backdropFilter`
+or `mixBlendMode`. A widget snapshot does not expose the already-painted backdrop.
+GTK 4.22's copy/paste nodes could support another drawing path, but NSH targets
+GTK 4.14 and has no such path. Changing screenshot capture cannot supply a missing
+backdrop in the real window. `maskImage` is supported independently; a mask over an
+otherwise empty backdrop-filter layer cannot create the missing blur.
+
+### Repeating the comparison
+
+Build `nsh-cli` and `nsh-linux-host`, then use a dedicated Xvfb display, with
+`GDK_BACKEND=x11` and `WAYLAND_DISPLAY` empty (an inherited Wayland display can
+otherwise put the app on the real desktop). Set `TMPDIR` to a scratch directory
+outside the checkout. With Noop's visual tools:
+
+```sh
+noop visual start linux-shot 1600x1200
+# Set the demo/section and renderer in the command passed to visual run.
+noop visual run linux-shot -- env GDK_BACKEND=x11 GDK_SCALE=1 \
+  GSK_RENDERER=ngl NSH_GALLERY_DEMO=Styles \
+  NSH_GALLERY_SECTION='Shadows and glow' \
+  ./target/debug/nsh test examples/gallery/.nsh/capture.test.tsx --target linux -v
+# After the test saves offscreen.png, while its app is still open:
+noop visual shot linux-shot window.png
+noop visual stop linux-shot
+```
+
+Create the temporary `examples/gallery/.nsh/capture.test.tsx` before running the
+command (the gallery's manifest grants the two environment variables):
+
+```tsx
+import { open, test } from "nsh/test";
+
+test("capture", async () => {
+  const app = await open("../App.tsx", { clock: {} });
+  await app.setViewport(1200, 1000);
+  await app.setColorScheme("light");
+  await app.waitFor("Shadows and glow");
+  await app.screenshot("offscreen.png"); // use an absolute output path
+  await new Promise(resolve => setTimeout(resolve, 15000));
+});
+```
+
+Move the display's real pointer outside the window before taking the images;
+`noop visual shot` includes it. Repeat with `GSK_RENDERER=vulkan` and the other
+section titles, changing `waitFor` to match. Check for renderer fallback warnings;
+for an audit, inspect `window.renderer().type_().name()` in `synth::shot`.
+Crop the desktop image to the content bounds **observed for that display**; the
+5-pixel inset above is specific to this run's GTK decorations and scale. Compare
+raw RGB bytes, counting unequal pixels and absolute per-channel differences. Keep
+motion regions separate and record the excluded rectangle explicitly. Stop the
+visual session after capture and remove the temporary test file.

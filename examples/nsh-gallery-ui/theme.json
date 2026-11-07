@@ -6,7 +6,8 @@
       "radius-card": "12px",
       "radius-control": "7px",
       "brand-fill": "#c6ef6a",
-      "on-brand": "#13160c"
+      "on-brand": "#13160c",
+      "scrim": "rgba(0,0,0,0.45)"
     },
     "light": {
       "background": "#f6f6f9",

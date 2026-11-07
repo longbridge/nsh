@@ -421,8 +421,12 @@ impl Bundle {
             .as_ref()
             .and_then(|info| info.get("id")?.as_str().map(str::to_owned));
         if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
-            bundle.url_schemes = nsh_core::url_scheme::schemes_from_json(url_schemes)
-                .map_err(|e| io::Error::other(format!("app.json: {e}")))?;
+            // A newer NSH's: what this runtime cannot claim is left out.
+            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(url_schemes);
+            for what in ignored {
+                log::warn!("app.json: {what}, ignored");
+            }
+            bundle.url_schemes = schemes;
         }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
@@ -569,11 +573,18 @@ pub fn accept_package(
 }
 
 /// Parses capabilities in their JSON form (`capabilities.json`, the dev
-/// protocol, an embedder's grant).
+/// protocol, an embedder's grant). A newer NSH may have written them: what
+/// this runtime does not know is not granted (a warning says what), so a
+/// bundle built by a newer toolchain still runs here and never gets more
+/// than it declared.
 pub fn parse_capabilities(json: &str) -> Result<Capabilities, String> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("capabilities: {e}"))?;
-    Capabilities::from_json(&value)
+    let (capabilities, dropped) = Capabilities::from_json_lenient(&value)?;
+    for dropped in dropped {
+        log::warn!("not granted: {dropped} (unknown to this NSH)");
+    }
+    Ok(capabilities)
 }
 
 impl Bundle {
@@ -3319,6 +3330,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Perf(monitor) => {
+            state.core.set_perf_monitor(monitor.is_some());
+            if let Some(script) = script {
+                script.set_fps_enabled(monitor.is_some());
+            }
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();
         }
