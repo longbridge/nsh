@@ -8,7 +8,7 @@ order: 12.7
 
 `nsh/updater` 为打包后的应用检查新版本、下载并替换应用。更新从哪里来由 [`nsh.json` 的 `"updater"`](#nshjson) 决定，调用模块的代码无法指定。每一步都在 Rust 中校验：清单签名、应用 id、版本更新、压缩包的大小和 SHA-256。界面由你自己画，模块负责返回状态和完成工作。从设置来源到发布版本的完整流程见[应用更新](../docs/app-updates.md)。
 
-它也能只更新应用的代码：一个更新构建号的[签名包](../docs/signed-packages.md)，应用在所有原生平台（包括 iOS 和 Android）下次启动时运行它（见[包](#包)）。
+它也能只更新应用的代码：一个更新构建号的[签名包](../docs/signed-packages.md)，应用在所有原生平台（包括 iOS 和 Android）下次启动时运行它（见 [OTA 更新](#ota-更新)）。
 
 ```tsx
 import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
@@ -77,9 +77,9 @@ function installAndRestart(): Promise<void>;
 
 Linux 和 macOS 上整个目录或 `.app` 一起替换，保留用户给它起的名字；Windows 上逐个文件替换，有一个失败就全部恢复。
 
-## 包
+## OTA 更新
 
-只改了 TSX 的版本可以用签名包（`nsh publish`）发布，而不必发新应用。`nsh.json` 信任包根密钥（`"updater": { "packages": { "roots": [...] } }`，见[下文](#nshjson)）的应用会在同一份清单里找到它，下载后从下次启动开始运行。NSH 运行时本身的改动仍然需要新的应用构建：每个包都写明能运行它的最低运行时，较旧的应用不会收到它。
+OTA（over-the-air，空中下发）更新把打包应用的 TSX 作为签名包（`nsh publish`）下发，而不必发新应用。设置、发布和设备上的行为见 [OTA 更新](../docs/ota-updates.md)。`nsh.json` 信任包根密钥（`"updater": { "packages": { "roots": [...] } }`，见[下文](#nshjson)）的应用会在同一份清单里找到它，下载后从下次启动开始运行。NSH 运行时本身的改动仍然需要新的应用构建：每个包都写明能运行它的最低运行时，较旧的应用不会收到它。
 
 ### checkForPackage
 
@@ -102,7 +102,7 @@ interface PackageUpdate {
 function downloadPackage(onProgress?: ((progress: UpdateProgress) => void) | null): Promise<void>;
 ```
 
-下载上一次 `checkForPackage` 找到的包，按清单核对大小和 SHA-256，并按应用下次启动时的方式验证它：由某个根密钥认证的发布密钥签名、属于本应用、构建号比当前运行的以及之前运行过的都新、适用于当前运行时。之后它在应用的数据目录中等待下次启动。上次检查没有找到包时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；下载失败或包被拒绝时也会拒绝，且不留下任何文件。
+下载上一次 `checkForPackage` 找到的包，按清单核对大小和 SHA-256，并按应用下次启动时的方式验证它：由某个根密钥认证的发布密钥签名、属于本应用、构建号比当前运行的以及之前运行过的都新、适用于当前运行时。之后它在应用的数据目录中等待下次启动。上次检查没有找到包时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；下载失败或包被拒绝时以说明原因的错误（`package refused: …`）拒绝，且不留下任何文件。
 
 ### restartToPackage
 
@@ -189,7 +189,7 @@ export const install = () =>
 | `github` | string | `owner/repo`：清单是其最新 Release 的附件 `latest.json`，跳过 draft 和 prerelease |
 | `url` | string | 自己服务器上清单的 HTTPS 地址；压缩包的相对地址相对它解析 |
 | `publicKey` | string | 给清单签名（`latest.json.sig`）的 Ed25519 公钥。使用 `url` 时必填 |
-| `packages.roots` | string[] | 根公钥（`nsh keygen` 的 `root.pub`），由它们认证的发布密钥为应用的[包](#包)签名。没有它时应用不运行任何包 |
+| `packages.roots` | string[] | 根公钥（`nsh keygen` 的 `root.pub`），由它们认证的发布密钥为应用的 [OTA 包](#ota-更新)签名。没有它时应用不运行任何包 |
 
 `nsh package` 会校验这些键，并把它们连同应用的 `build` 放进包里，所以来源在构建应用时就已确定。`version` 必须是 semver。`nsh update-manifest` 为一个版本的压缩包和包生成 `latest.json` 和签名（[CLI](../docs/cli.md#nsh-update-manifest)）。
 

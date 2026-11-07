@@ -1,14 +1,15 @@
 ---
 title: App Updates
 description: "Let a packaged app update itself: from GitHub Releases or your own host, with signed manifests and verified downloads."
-order: 21
+order: 20.5
 group: delivery
 ---
 
 # App Updates
 
 `nsh/updater` lets a packaged app check for a newer version, download it and replace itself. The UI is yours: the module
-gives you the state and the actions. It updates the whole app; to deliver only NSH screens to a host app, see
+gives you the state and the actions. It updates the whole app; to update only a packaged app's TSX, see
+[OTA Updates](/docs/ota-updates), and to deliver only NSH screens to a host app, see
 [Signed Packages](/docs/signed-packages).
 
 | Platform | What it does |
@@ -16,7 +17,7 @@ gives you the state and the actions. It updates the whole app; to deliver only N
 | macOS, Windows, Linux | Checks, downloads, replaces the app and restarts it |
 | iOS, Android | Checks, and gives you the link to send the user to |
 | Web | Nothing to do: a deploy updates the app, `checkForUpdate` resolves `null` |
-| Every native platform | Runs a newer signed package of the app's code ([below](#update-the-apps-code)) |
+| Every native platform | Runs a newer TSX release as a signed package ([OTA updates](#ota-updates)) |
 
 ## Set the source
 
@@ -83,46 +84,26 @@ nsh update-manifest *.tar.gz *.zip \
 Upload the archives, `latest.json` and `latest.json.sig` (with `--key`) as assets of the GitHub Release, or to your host
 next to each other. A release marked as a draft or prerelease on GitHub is not offered.
 
-## Update the app's code
+## OTA updates
 
-A release that changes only TSX can reach installed apps as a [signed package](/docs/signed-packages) of the app's
-code, on every native platform, iOS and Android included, without a new app build. A change to the NSH runtime
-itself still needs a new app. Trust the root key that certifies your release keys (`nsh keygen keys/root`, then
-`nsh certify`):
-
-```json
-{
-  "version": "1.2.0",
-  "build": 12,
-  "updater": {
-    "github": "owner/repo",
-    "packages": { "roots": ["<contents of keys/root.pub>"] }
-  }
-}
-```
-
-Publish a package with a higher `build` and add it to the manifest:
-
-```sh
-nsh publish --key keys/release.secret --cert keys/release.cert --build 13
-nsh update-manifest --package .nsh/out/com.example.app-13.nshpkg --key keys/update.secret
-```
-
-In the app:
+A release that changes only the app's TSX needs no new app: [OTA updates](/docs/ota-updates) deliver it as a signed
+package that installed apps run from their next start, on every native platform, iOS and Android included. Use them
+first, and a new app when the change needs a newer NSH runtime or native code. One manifest can carry both, and the
+app checks for a package before a new app:
 
 ```tsx
-import { checkForPackage, downloadPackage, restartToPackage } from "nsh/updater";
+import { checkForPackage, checkForUpdate, downloadPackage } from "nsh/updater";
 
-const found = await checkForPackage(); // { version, build, notes, size } or null
-if (found) {
-  await downloadPackage();
-  await restartToPackage().catch(() => {}); // desktop: now; iOS and Android: next start
+if (await checkForPackage()) {
+  await downloadPackage(); // runs from the next start
+} else {
+  const update = await checkForUpdate();
+  // …as above
 }
 ```
 
-The app runs the newest verified package from its next start. Its first run is a trial: if it fails to start or the
-app crashes within 10 seconds, the app goes back to what it ran before. `runningPackage()` says which package runs.
-The [nsh/updater reference](../modules/nsh-updater.md#packages) has the details.
+[OTA Updates](/docs/ota-updates) covers the keys, the `"packages"` setting, releases from CI and what happens on the
+device.
 
 ## What is checked
 
@@ -133,7 +114,7 @@ The [nsh/updater reference](../modules/nsh-updater.md#packages) has the details.
 - The archive's size and SHA-256.
 - The new app: its id and executable, and on macOS its code signature.
 - That this run is the package itself: an NSH module running inside another app cannot replace it.
-- A package of the app's code: its signature against `packages.roots`, the app id, a build newer than the running one
+- An OTA package: its signature against `packages.roots`, the app id, a build newer than the running one
   and than any the app ran before, the runtime it needs, its size and SHA-256.
 
 On macOS, `nsh package` signs ad hoc, which is fine to test, but Gatekeeper may stop it on other Macs. To distribute, sign

@@ -13,7 +13,7 @@ module returns state and does the work.
 [App Updates](../docs/app-updates.md) walks through the whole flow, from setting the source to publishing a release.
 
 It also updates the app's code alone: a [signed package](../docs/signed-packages.md) of a newer build, which the app
-runs from its next start on every native platform, iOS and Android included ([packages](#packages)).
+runs from its next start on every native platform, iOS and Android included ([OTA updates](#ota-updates)).
 
 ```tsx
 import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
@@ -93,9 +93,10 @@ as it was: it rejects when nothing was downloaded or the app cannot be replaced.
 On Linux and macOS the whole directory or `.app` is replaced, keeping the name the user gave it; on Windows the files
 are replaced one by one and put back if one fails.
 
-## Packages
+## OTA updates
 
-A release that changes only the app's TSX ships as a signed package (`nsh publish`) instead of a new app. An app whose
+OTA (over-the-air) updates deliver a packaged app's TSX as a signed package (`nsh publish`) instead of a new app.
+[OTA Updates](../docs/ota-updates.md) walks through the setup, the release and what happens on the device. An app whose
 `nsh.json` trusts package roots (`"updater": { "packages": { "roots": [...] } }`, [below](#nshjson)) finds it in the
 same manifest, downloads it, and runs it from its next start. A change to the NSH runtime itself still needs a new app
 build: each package names the lowest runtime it runs on, and older apps are not offered it.
@@ -128,7 +129,8 @@ Downloads the package the last `checkForPackage` found, checks its size and SHA-
 verifies it as the app's next start will: signed by a release key one of the roots certifies, for this app, newer
 than the running build and than every build the app ran before, for this runtime. It then waits in the app's data
 directory for the next start. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
-when the download fails or the package is refused, which leaves nothing behind.
+with an error saying why (`package refused: …`) when the download fails or the package is refused, which leaves
+nothing behind.
 
 ### restartToPackage
 
@@ -225,7 +227,7 @@ file; with it, unsigned manifests are refused.
 | `github` | string | `owner/repo`: the manifest is the asset `latest.json` of its latest release. Drafts and prereleases are skipped |
 | `url` | string | The manifest's HTTPS URL on your own host; archives' relative URLs resolve next to it |
 | `publicKey` | string | The Ed25519 key that signs the manifests (`latest.json.sig`). Required with `url` |
-| `packages.roots` | string[] | Root public keys (`nsh keygen`'s `root.pub`) whose certified release keys sign the app's [packages](#packages). Without it the app runs no packages |
+| `packages.roots` | string[] | Root public keys (`nsh keygen`'s `root.pub`) whose certified release keys sign the app's [OTA packages](#ota-updates). Without it the app runs no packages |
 
 `nsh package` checks the keys and adds them, with the app's `build`, to the package, so the source is fixed when the
 app is built. `version` must be

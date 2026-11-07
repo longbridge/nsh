@@ -256,7 +256,7 @@ nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--
 
 Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
 with `--package`, a signed package of the app's code (`nsh publish`'s), which it checks against the app's id and
-`updater.packages.roots` first: see [App Updates](/docs/app-updates). A release may have only a package.
+`updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 
 ### nsh certify
 
