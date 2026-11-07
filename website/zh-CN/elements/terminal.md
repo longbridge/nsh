@@ -2,6 +2,7 @@
 title: Terminal
 description: Terminal 组件：用平台自己的文字引擎绘制程序输出，把用户的按键发回程序，所有平台可用；应用可以替换终端模拟器。
 group: base
+demo: el-terminal
 ---
 
 # Terminal

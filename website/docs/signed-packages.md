@@ -23,7 +23,8 @@ delivers the screens that change often as signed packages.
 
 > [!NOTE]
 > NSH verifies and runs packages; it does not deliver them. Where packages come from (your update server, a CDN, a
-> store of mini apps) and when the app downloads them is up to the host app.
+> store of mini apps) and when the app downloads them is up to the host app. A packaged NSH app updating its own TSX
+> is the exception: [OTA updates](./ota-updates.md) fetch, verify, run and roll back its packages for it.
 
 ## Why packages are signed
 
@@ -384,4 +385,5 @@ refused there too.
 
 - [Sandbox and capabilities](./sandbox-and-capabilities.md)
 - [Embedding in iOS apps](./ios.md), [Embedding in Android apps](./android.md)
+- [OTA Updates](./ota-updates.md): a packaged app's own TSX, delivered as signed packages
 - [CLI](./cli.md)

@@ -54,6 +54,7 @@ mod render;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod shell;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -64,6 +65,8 @@ mod transition;
 mod tray;
 mod view;
 mod window;
+mod window_close;
+mod window_state;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

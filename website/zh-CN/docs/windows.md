@@ -51,8 +51,8 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 
 ### 性能监视器
 
-`--fps`（`nsh run App.tsx --target windows --fps`、`nsh test --target windows --fps`、宿主的 `--fps`，或 Rust 应用在
-`run_app` 中用 `AppOptions { fps: true, .. }`）每秒输出一行性能监视器读数（target `nsh::perf`）：显示的帧数与显示器刷新率、
+`--fps`（`nsh run App.tsx --target windows --fps`、`nsh test --target windows --fps`、宿主的 `--fps`、Rust 应用在
+`run_app` 中用 `AppOptions { fps: true, .. }`、环境变量 `NSH_FPS=1`，或应用自己调用 `setFpsEnabled(true)`）每秒输出一行性能监视器读数（target `nsh::perf`）：显示的帧数与显示器刷新率、
 主线程每帧的耗时及其各阶段（`tick`、`drain`、`paint`、`present`、`canvas`）、引擎的 commit、CPU 和内存，格式与其他桌面平台一致
 （毫秒，依次为 mean/p50/p95/max）。`nsh test --fps -v` 会显示这些读数，`examples/gallery/tools/perf.py` 会读取它们
 （[性能报告](./performance-report.md#windowswin32direct2d)）。请测量 release 构建；监视器关闭时没有任何开销。
@@ -147,8 +147,9 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 鼠标停在视图上时，`cursor` 样式也会跟随更新。批次改变光标后，Windows 会在整个批次应用完成时，
 根据指针下方的视图显示新形状或应用 `"none"`。标题栏和调整窗口大小的边框使用系统光标。
 
-TSX 应用用 [`Window.open`](../modules/nsh-desktop.md#windowopen) 打开自己的窗口：每个都是顶层窗口，在任务栏有自己的按钮，
-由应用的引擎绘制，并运行在应用唯一的 JS 运行时中，因此直接共享应用的 signal 和模块。关闭主窗口会关闭这些窗口并结束应用。
+应用用 [`<Window>` 和 `Window.open`](../modules/nsh-desktop.md#窗口) 打开自己的窗口：每个都是顶层窗口，
+由应用的引擎绘制，并运行在应用唯一的 JS 运行时中，因此直接共享应用的 signal 和模块。普通窗口在任务栏有自己的按钮；
+对话框、面板和弹出窗口属于它们的父窗口。关闭主窗口会关闭这些窗口并结束应用。
 
 ### 键盘
 

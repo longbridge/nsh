@@ -6,7 +6,7 @@ import { Picker } from "nsh";
 import { Input } from "nsh/base";
 import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
+import { alpha, Appear, backdrop, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 import { localReply, type Provider } from "./chat/local";
 import { Glyph } from "./chat/glyphs";
@@ -687,7 +687,7 @@ export function Chat() {
           {/* The "+" menu: attachments and the scenarios, to replay them. */}
           <View
             onPress={() => menu.set(false)}
-            style={{ pointerEvents: menu() ? "auto" : "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", opacity: menuValue }}
+            style={{ pointerEvents: menu() ? "auto" : "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, ...backdrop(), opacity: menuValue }}
           />
           <View
             style={{

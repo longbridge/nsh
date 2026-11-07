@@ -559,6 +559,11 @@ impl Host {
                     }
                     return;
                 }
+                // Windows: their handles and listeners are native.
+                if let (EventKind::Window, EventPayload::Window(window)) = (event, payload) {
+                    crate::window::platform_event(cx.as_raw().as_ptr(), id, window);
+                    return;
+                }
                 let payload = match (event, payload) {
                     // `onChange({ value })`: the text, in one object as every
                     // event (`api-naming.md` "Payloads").
@@ -1044,6 +1049,23 @@ impl Host {
         });
     }
 
+    /// Publishes whether the platform's performance monitor measures to JS
+    /// (`nsh`'s `fpsEnabled()`). Call on every change; without a call it is
+    /// off.
+    pub fn set_fps_enabled(&self, enabled: bool) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_fps_enabled(raw, enabled) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1280,6 +1302,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
         // And sounds' and players' events (their objects' listeners).
         EventPayload::Audio { id, .. } => obj.set("id", *id)?,
+        // Handled natively (`crate::window`).
+        EventPayload::Window(_) => return Ok(Value::new_undefined(cx.clone())),
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;

@@ -20,7 +20,7 @@ use nsh_base::dialog;
 use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
-    desktop::{Display, DisplayId, WindowBounds, WindowState},
+    desktop::{Display, DisplayId, WindowMode, WindowPlacement, WindowState},
     element::{AssetFile, AssetKind, Registry, Root},
     geometry::{Bounds, point, size},
     platform::{
@@ -72,6 +72,7 @@ fn config(app: App) -> EngineConfig {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     }
 }
 
@@ -619,10 +620,10 @@ fn WindowInfo() -> impl IntoElement {
         let displays = nsh_core::element::desktop::displays().len();
         match nsh_core::element::desktop::window_state() {
             Some(state) => {
-                let mode = match state.window_bounds {
-                    WindowBounds::Windowed(_) => "windowed",
-                    WindowBounds::Maximized(_) => "maximized",
-                    WindowBounds::Fullscreen(_) => "fullscreen",
+                let mode = match state.mode {
+                    WindowMode::Normal => "windowed",
+                    WindowMode::Maximized => "maximized",
+                    WindowMode::FullScreen => "fullscreen",
                 };
                 format!(
                     "x {} {mode} minimized {} displays {displays}",
@@ -635,10 +636,10 @@ fn WindowInfo() -> impl IntoElement {
 }
 
 /// A window at `x`, 800 × 600, in `mode`'s mode.
-fn window_at(x: f32, mode: fn(Bounds<Points>) -> WindowBounds) -> Environment {
+fn window_at(x: f32, mode: WindowMode) -> Environment {
     let bounds = Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
     Environment {
-        window_state: Some(WindowState::new(bounds, mode(bounds))),
+        window_state: Some(WindowState::new(bounds, WindowPlacement::new(mode, bounds))),
         ..Environment::default()
     }
 }
@@ -675,7 +676,7 @@ fn advance(engine: &Engine, ms: u64) {
 fn components_read_the_window_once_it_stops_and_the_displays() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        environment: window_at(0.0, WindowBounds::Windowed),
+        environment: window_at(0.0, WindowMode::Normal),
         clock: nsh_core::time::Clock::manual(
             std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_225_600),
         ),
@@ -705,11 +706,11 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     // stopped.
     engine
         .control()
-        .set_environment(window_at(10.0, WindowBounds::Windowed));
+        .set_environment(window_at(10.0, WindowMode::Normal));
     advance(&engine, 100);
     engine
         .control()
-        .set_environment(window_at(20.0, WindowBounds::Windowed));
+        .set_environment(window_at(20.0, WindowMode::Normal));
     advance(&engine, 100);
     assert_eq!(
         last_text(&rx, &mut last),
@@ -724,11 +725,11 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     // hold it longer.
     engine
         .control()
-        .set_environment(window_at(30.0, WindowBounds::Windowed));
+        .set_environment(window_at(30.0, WindowMode::Normal));
     advance(&engine, 100);
     engine.control().set_environment(Environment {
         font_scale: 1.5,
-        ..window_at(30.0, WindowBounds::Windowed)
+        ..window_at(30.0, WindowMode::Normal)
     });
     advance(&engine, 60);
     assert_eq!(
@@ -738,13 +739,13 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     // A change of mode or minimizing comes at once, with the bounds of then.
     engine
         .control()
-        .set_environment(window_at(0.0, WindowBounds::Maximized));
+        .set_environment(window_at(0.0, WindowMode::Maximized));
     advance(&engine, 0);
     assert_eq!(
         last_text(&rx, &mut last),
         "x 0 maximized minimized false displays 2"
     );
-    let mut minimized = window_at(0.0, WindowBounds::Maximized);
+    let mut minimized = window_at(0.0, WindowMode::Maximized);
     if let Some(state) = &mut minimized.window_state {
         state.minimized = true;
     }
@@ -766,4 +767,110 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     engine.control().set_displays(Vec::new());
     advance(&engine, 0);
     assert_eq!(last_text(&rx, &mut last), "no window, displays 0");
+}
+
+/// Shows whether the performance monitor measures and turns it on.
+#[component]
+fn FpsSwitch() -> impl IntoElement {
+    view()
+        .child(text(move || format!("fps {}", fps_enabled())))
+        .child(text("Measure").on_press(|_: &()| set_fps_enabled(true)))
+}
+
+#[test]
+fn components_turn_the_performance_monitor_on_and_follow_it() {
+    let (engine, rx, _) = start::<FpsSwitch>(Environment::default());
+    let mut press = None;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while press.is_none() {
+        let batch = rx.recv_deadline(deadline).expect("the first render");
+        for item in batch.items {
+            if let MountItem::Text { id, text, .. } = item
+                && text.text == "Measure"
+            {
+                press = Some(id);
+            }
+        }
+    }
+    // The app asks; the platform turns its monitor on.
+    engine
+        .control()
+        .dispatch_event(press.unwrap(), EventKind::Press, EventPayload::None);
+    let mut asked = false;
+    while !asked {
+        let batch = rx.recv_deadline(deadline).expect("the command");
+        asked = batch.items.iter().any(|item| {
+            matches!(
+                item,
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PerfMonitor(true)
+                }
+            )
+        });
+    }
+    // What the app reads follows the monitor the platform installs, and
+    // removes.
+    engine
+        .control()
+        .set_perf_monitor(Some(Arc::new(nsh_engine::perf::PerfMonitor::new())));
+    until(&rx, "fps true");
+    engine.control().set_perf_monitor(None);
+    let (texts, ..) = until(&rx, "fps false");
+    assert_eq!(texts.last().map(String::as_str), Some("fps false"));
+}
+
+/// A Rust app's `nsh.json` `"window"` (its root's, as the generated code
+/// sets it) reaches the main window as a TSX app's bundle's does: its
+/// attributes with the first frame, the options for the runners.
+#[test]
+fn a_rust_apps_main_window_takes_its_launch_options() {
+    use nsh_core::desktop::DesktopCommand;
+    let root = Root::of::<Label>().main_window_json(
+        r#"{"title":"Notes","defaultSize":{"width":900,"height":600},"restoreBounds":true}"#,
+    );
+    let options = root
+        .main_window_ref()
+        .cloned()
+        .expect("the window's options");
+    assert_eq!(options.attributes.title.as_deref(), Some("Notes"));
+    assert!(options.restore_bounds);
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ..config(App::Rust(root))
+    };
+    // What the runners read before they make the window.
+    assert_eq!(config.app.main_window(), Some(&options));
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let _engine = Engine::start(
+        config,
+        || ApproxTextEngine,
+        FrameSink {
+            batches: tx,
+            frames: Arc::default(),
+        },
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut set = None;
+    while set.is_none()
+        && let Ok(batch) = rx.recv_deadline(deadline)
+    {
+        set = batch.items.into_iter().find_map(|item| match item {
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } => match *command {
+                DesktopCommand::SetAttributes(attributes) => Some(attributes),
+                _ => None,
+            },
+            _ => None,
+        });
+    }
+    let set = set.expect("the main window's attributes");
+    assert_eq!(set.title.as_deref(), Some("Notes"));
 }

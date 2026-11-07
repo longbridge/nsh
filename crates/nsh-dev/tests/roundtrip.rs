@@ -48,6 +48,7 @@ fn bundles_errors_and_logs_round_trip() {
         AppInfo {
             capabilities: Some("{\"statusBar\":true}".into()),
             id: Some("com.example.roundtrip".into()),
+            window: Some("{\"title\":\"Roundtrip\"}".into()),
         },
         None,
         vec!["app/native".into()],
@@ -70,9 +71,11 @@ fn bundles_errors_and_logs_round_trip() {
             source_map,
             capabilities,
             app_id,
+            window,
             limits,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(window.as_deref(), Some("{\"title\":\"Roundtrip\"}"));
             assert_eq!(limits.as_deref(), Some("memory=64MB,call=500ms"));
             assert_eq!(app_id.as_deref(), Some("com.example.roundtrip"));
             assert_eq!(bytes, [1, 2, 3]);

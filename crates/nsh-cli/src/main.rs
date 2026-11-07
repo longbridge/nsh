@@ -320,8 +320,13 @@ enum Command {
     /// together.
     UpdateManifest {
         /// The archives named `<name>-<version>-<os>-<arch>.<ext>`.
-        #[arg(required = true)]
+        #[arg(required_unless_present_any = ["package", "links"])]
         archives: Vec<PathBuf>,
+        /// A signed package of the app's code (`nsh publish`'s `.nshpkg`),
+        /// which apps trusting its root (`updater.packages.roots`) run
+        /// without a new app.
+        #[arg(long)]
+        package: Option<PathBuf>,
         /// The app's directory or entry, whose `nsh.json` has the id and version.
         #[arg(long, default_value = ".")]
         entry: PathBuf,
@@ -943,6 +948,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Keygen { name } => sign::keygen(&name),
         Command::UpdateManifest {
             archives,
+            package,
             entry,
             key,
             notes,
@@ -951,6 +957,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             out,
         } => updater::manifest(updater::ManifestOptions {
             archives: &archives,
+            package: package.as_deref(),
             entry: &entry,
             key: key.as_deref(),
             notes: notes.as_deref(),

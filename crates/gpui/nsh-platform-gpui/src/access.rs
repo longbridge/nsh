@@ -95,7 +95,7 @@ use gpui::{
 };
 use nsh_core::{
     Accessibility, AccessibilityCurrent, AccessibilityRole as AxRole, Checked, Command, EventKind,
-    EventMask, LiveRegion, MountBatch, NodeId, ViewKind, geometry::Points,
+    EventMask, LiveRegion, MountBatch, NodeId, ROOT_ID, ViewKind, geometry::Points,
 };
 use rustc_hash::FxHashMap;
 
@@ -834,16 +834,38 @@ struct State {
 }
 
 thread_local! {
-    static STATES: RefCell<FxHashMap<u64, State>> = RefCell::default();
+    /// Per surface and window (its root node): each window has a tree of
+    /// its own.
+    static STATES: RefCell<FxHashMap<(u64, NodeId), State>> = RefCell::default();
+}
+
+/// The window whose tree is built, drawn or acted in now: the window of the
+/// app's own whose input is entered ([`crate::window::enter`]), else the
+/// main window.
+fn current(surface: &Surface) -> NodeId {
+    crate::window::entered(surface).unwrap_or(ROOT_ID)
+}
+
+fn with_window_state<R>(surface: &Surface, window: NodeId, f: impl FnOnce(&mut State) -> R) -> R {
+    STATES.with_borrow_mut(|states| f(states.entry((surface.key(), window)).or_default()))
 }
 
 fn with_state<R>(surface: &Surface, f: impl FnOnce(&mut State) -> R) -> R {
-    STATES.with_borrow_mut(|states| f(states.entry(surface.key()).or_default()))
+    with_window_state(surface, current(surface), f)
 }
 
-/// True when a client was attached when the surface last drew.
+/// True when a client was attached when one of the surface's windows last
+/// drew.
 fn active(surface: &Surface) -> bool {
-    STATES.with_borrow(|s| s.get(&surface.key()).is_some_and(|s| s.active))
+    let key = surface.key();
+    STATES.with_borrow(|s| s.iter().any(|(k, s)| k.0 == key && s.active))
+}
+
+/// Window `window` of the app's own closed: its tree goes.
+pub(crate) fn window_closed(surface: &Surface, window: NodeId) {
+    STATES.with_borrow_mut(|s| {
+        s.remove(&(surface.key(), window));
+    });
 }
 
 /// A view was made.
@@ -876,6 +898,7 @@ pub(crate) fn prepare(_batch: &MountBatch) {}
 pub(crate) fn batch_applied(surface: &Surface) {
     if active(surface) {
         surface.invalidate();
+        crate::window::invalidate_all(surface);
     }
 }
 
@@ -884,23 +907,32 @@ pub(crate) fn focus(surface: &Rc<Surface>, view: &NshView) {
     let Ok(Some(element)) = exposed(view) else {
         return;
     };
-    with_state(surface, |s| s.focus = Some(element.id()));
+    let window = crate::window::root_of(surface, &element);
+    with_window_state(surface, window, |s| s.focus = Some(element.id()));
     surface.invalidate();
+    crate::window::invalidate_all(surface);
 }
 
 /// The keyboard focus moved to `view` (a text field): it takes the
 /// accessibility focus. Called by the modules that move it.
-pub(crate) fn focus_changed(surface: &Rc<Surface>, _view: &NshView) {
-    with_state(surface, |s| s.focus = None);
+pub(crate) fn focus_changed(surface: &Rc<Surface>, view: &NshView) {
+    let window = crate::window::root_of(surface, view);
+    with_window_state(surface, window, |s| s.focus = None);
     surface.invalidate();
+    crate::window::invalidate_all(surface);
 }
 
-/// The element with the accessibility focus.
+/// The element with the accessibility focus in the current window
+/// ([`current`]): the focused text field when it is in that window.
 pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
-    if let Some(field) = crate::text_input::focused(surface) {
+    let window = current(surface);
+    if let Some(field) = crate::text_input::focused(surface)
+        && crate::window::root_of(surface, &field) == window
+    {
         return Some(field);
     }
-    let id = STATES.with_borrow(|s| s.get(&surface.key()).and_then(|s| s.focus))?;
+    let key = (surface.key(), window);
+    let id = STATES.with_borrow(|s| s.get(&key).and_then(|s| s.focus))?;
     let view = surface.view(id)?;
     match exposed(&view) {
         Ok(Some(e)) => Some(e),
@@ -913,16 +945,20 @@ pub(crate) fn announce(surface: &Rc<Surface>, text: &str) {
     if text.is_empty() {
         return;
     }
-    with_state(surface, |s| {
+    // Read where the user is: the window with the keyboard focus.
+    let window = crate::window::focused_root(surface);
+    with_window_state(surface, window, |s| {
         let sequence = s.announcement.as_ref().map_or(0, |a| a.0 + 1);
         s.announcement = Some((sequence, text.to_owned()));
     });
     surface.invalidate();
+    crate::window::invalidate_all(surface);
 }
 
-/// The surface element prepaints (before it registers its focus handle):
-/// follows the client's attachment into the environment and, while one is
-/// attached, builds the nodes and prepaints the focus proxy.
+/// The surface element (or the element of a window of the app's own, its
+/// input entered) prepaints, before it registers its focus handle: follows
+/// the client's attachment into the environment and, while one is
+/// attached, builds the window's nodes and prepaints the focus proxy.
 pub(crate) fn prepaint(
     surface: &Rc<Surface>,
     focus_handle: &FocusHandle,
@@ -930,19 +966,21 @@ pub(crate) fn prepaint(
     cx: &mut App,
 ) {
     let active = window.is_a11y_active();
+    let key = surface.key();
+    with_state(surface, |s| s.active = active);
+    // A client attached to any of its windows.
+    let any = self::active(surface);
     let mut env = surface.environment.get();
-    if env.screen_reader != active {
-        env.screen_reader = active;
+    if env.screen_reader != any {
+        env.screen_reader = any;
         surface.set_environment(env);
     }
-    let key = surface.key();
     STATES.with_borrow_mut(|states| {
         // Surfaces that are gone.
-        states.retain(|k, _| *k == key || Surface::by_key(*k).is_some());
+        states.retain(|k, _| k.0 == key || Surface::by_key(k.0).is_some());
     });
     if !active {
         with_state(surface, |s| {
-            s.active = false;
             s.built = None;
             s.proxied = None;
             s.proxy = None;
@@ -952,7 +990,8 @@ pub(crate) fn prepaint(
     }
     let field = |v: &NshView| crate::text_input::accessible_value(v);
     let scale = window.scale_factor();
-    let mut built = build(key, &surface.root, surface.origin.get(), scale, &field);
+    let root = surface.input_root();
+    let mut built = build(key, &root, surface.origin.get(), scale, &field);
     let mut proxied = None;
     let mut proxy = None;
     if let Some(view) = focused(surface).map(|v| v.id())
@@ -991,7 +1030,6 @@ pub(crate) fn prepaint(
         proxy = Some(element);
     }
     with_state(surface, |s| {
-        s.active = true;
         s.built = Some(built);
         s.proxied = proxied;
         s.proxy = proxy;
@@ -1063,12 +1101,14 @@ pub(crate) fn paint(surface: &Surface, window: &mut Window, cx: &mut App) {
         proxy.paint(window, cx);
     }
     let key = surface.key();
+    let root = crate::window::entered(surface);
     for (node, view, actions) in listeners {
         for action in actions {
             window.on_a11y_action(node, action, move |data, window, cx| {
                 if let Some(surface) = Surface::by_key(key)
                     && let Some(view) = surface.view(view)
                 {
+                    let _in = crate::window::enter(&surface, root);
                     perform(&surface, &view, action, data, window.scale_factor());
                 }
                 crate::rt::flush(cx);

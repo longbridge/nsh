@@ -135,7 +135,7 @@ impl ElementRef {
             .flatten()
     }
 
-    fn send(&self, command: Command) {
+    pub(crate) fn send(&self, command: Command) {
         self.reach(|node, executor| executor.act(Action::Command(node, command)));
     }
 

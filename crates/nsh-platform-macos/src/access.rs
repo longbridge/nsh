@@ -24,6 +24,9 @@
 //!   VoiceOver does not see);
 //! - its `testID` as its accessibility identifier (what UI tests find).
 //!
+//! Its screen frame follows the layer tree, including ancestor transforms
+//! and scroll containers, rather than AppKit's untransformed view frames.
+//!
 //! Live regions are emulated by announcing a changed label or text
 //! (`NSAccessibilityAnnouncementRequestedNotification`);
 //! `AXPress` presses a view that takes presses, as Return does when it
@@ -34,22 +37,43 @@
 //! ([`Applied`]): `ViewProps` also carries touch properties, and `Text`
 //! items come again on every relayout.
 
+pub(crate) mod table;
+
 use std::sync::Arc;
 
 use nsh_core::{
     Accessibility, AccessibilityRole as Role, AttributedText, Checked, EventKind, EventMask,
     LiveRegion, MountBatch, ViewKind, ViewStyle,
 };
-use objc2::{MainThreadOnly, rc::Retained, runtime::AnyObject};
+use objc2::{MainThreadOnly, Message, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{
     NSAccessibility, NSAccessibilityAnnouncementKey,
     NSAccessibilityAnnouncementRequestedNotification, NSAccessibilityLayoutChangedNotification,
     NSAccessibilityPostNotificationWithUserInfo, NSAccessibilityPriorityKey,
     NSAccessibilityPriorityLevel, NSAccessibilityUIElementsKey, NSView,
 };
-use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSRect, NSString};
 
-use crate::view::{NshView, ViewState};
+use crate::view::{NshView, ViewState, superview};
+
+/// The drawn bounds in AppKit screen coordinates. Convert through the
+/// layer tree first: NSView's conversions omit layer transforms. The
+/// outermost layer-backed view bridges back to window coordinates, also
+/// when the surface is embedded in another view.
+pub(crate) fn frame(view: &NSView) -> Option<NSRect> {
+    let window = view.window()?;
+    let layer = view.layer()?;
+    let mut outer = view.retain();
+    let mut parent = superview(view);
+    while let Some(view) = parent {
+        parent = superview(&view);
+        if view.layer().is_some() {
+            outer = view;
+        }
+    }
+    let bounds = layer.convertRect_toLayer(layer.bounds(), outer.layer().as_deref());
+    Some(window.convertRectToScreen(outer.convertRect_toView(bounds, None)))
+}
 
 /// What was last given to AppKit for one view.
 #[derive(Debug, Default)]
@@ -65,6 +89,8 @@ pub(crate) struct Applied {
     /// all fifteen attributes per changed text is what a ticking table
     /// spends most of its main-thread time on.
     ax: AxState,
+    /// Stable, non-view columns, created only when an AX client asks.
+    columns: Vec<Retained<table::Column>>,
 }
 
 /// Which of its children VoiceOver reaches through a view.
@@ -274,6 +300,8 @@ enum Ax {
     /// An option of a listbox.
     Option,
     Grid,
+    Row,
+    Cell,
     Search,
     Alert,
     Status,
@@ -284,6 +312,12 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+    /// A view standing for the window's close button (`windowControl`).
+    CloseButton,
+    /// ... its minimize button.
+    MinimizeButton,
+    /// ... its zoom (maximize) button.
+    ZoomButton,
 }
 
 impl Ax {
@@ -294,6 +328,9 @@ impl Ax {
         matches!(
             self,
             Ax::Button
+                | Ax::CloseButton
+                | Ax::MinimizeButton
+                | Ax::ZoomButton
                 | Ax::Toggle
                 | Ax::Link
                 | Ax::CheckBox
@@ -484,7 +521,12 @@ fn update(view: &NshView) -> bool {
         let a = &s.props.accessibility;
         let pressable = is_pressable(s.events);
         let text = s.text.as_ref().map(|t| t.text.text.as_str());
-        let spec = spec_for(a, s.kind, pressable, text, s.style.hidden);
+        let mut spec = spec_for(a, s.kind, pressable, text, s.style.hidden);
+        if let Some(control) = s.props.window_control
+            && !spec.hidden
+        {
+            spec.role = window_button(control);
+        }
         if s.access.spec.as_deref() == Some(&spec) {
             return false;
         }
@@ -692,7 +734,11 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             // columns and row index), and its menu items a menu's; an option
             // of a list is static text that reports `AXSelected`.
             Ax::Option => (constant(NSAccessibilityStaticTextRole), None),
-            Ax::Grid => (constant(NSAccessibilityGridRole), None),
+            // VoiceOver navigates tables by row and column. Like WebKit,
+            // use AXTable for both table and grid semantics.
+            Ax::Grid => (constant(NSAccessibilityTableRole), None),
+            Ax::Row => (constant(NSAccessibilityRowRole), None),
+            Ax::Cell => (constant(NSAccessibilityCellRole), None),
             Ax::Search => (
                 constant(NSAccessibilityTextFieldRole),
                 constant(NSAccessibilitySearchFieldSubrole),
@@ -722,6 +768,19 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             // and columns; an item of a tree is static text that reports
             // its expanded state and its disclosure level.
             Ax::TreeItem => (constant(NSAccessibilityStaticTextRole), None),
+            // As AppKit's own window buttons.
+            Ax::CloseButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityCloseButtonSubrole),
+            ),
+            Ax::MinimizeButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityMinimizeButtonSubrole),
+            ),
+            Ax::ZoomButton => (
+                constant(NSAccessibilityButtonRole),
+                constant(NSAccessibilityZoomButtonSubrole),
+            ),
         }
     }
 }
@@ -793,6 +852,16 @@ fn spec_for(
     }
 }
 
+/// The element a view standing for a window button (`windowControl`) is.
+fn window_button(control: nsh_core::desktop::WindowControl) -> Ax {
+    use nsh_core::desktop::WindowControl;
+    match control {
+        WindowControl::Close => Ax::CloseButton,
+        WindowControl::Minimize => Ax::MinimizeButton,
+        WindowControl::Maximize => Ax::ZoomButton,
+    }
+}
+
 /// The element a view of `kind` is, with press handlers or not.
 fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
     let role = base_role(a, kind, pressable);
@@ -844,8 +913,11 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::List | Role::Listbox => Ax::List,
         Role::Option => Ax::Option,
         Role::Grid | Role::Table => Ax::Grid,
-        // Groups that read their children, a cell's text among them.
-        Role::Row | Role::Cell | Role::ColumnHeader | Role::RowGroup | Role::Group => Ax::Group,
+        Role::Row => Ax::Row,
+        // AppKit has no separate column-header role: a header is a cell
+        // referenced by the table's and column's header attributes.
+        Role::Cell | Role::ColumnHeader => Ax::Cell,
+        Role::RowGroup | Role::Group => Ax::Group,
         Role::Region => Ax::Region,
         Role::Navigation => Ax::Navigation,
         // A tree is a list of its items, as a listbox is (see `TreeItem`).

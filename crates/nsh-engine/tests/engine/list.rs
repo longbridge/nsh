@@ -134,6 +134,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     (config, dir)
 }

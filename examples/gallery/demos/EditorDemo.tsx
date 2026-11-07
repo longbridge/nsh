@@ -663,7 +663,7 @@ export function EditorDemo() {
           offset={4}
           margin={8}
           popupClass={popup}
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           onOpenChange={({ open }) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View
@@ -696,7 +696,7 @@ export function EditorDemo() {
           offset={4}
           margin={8}
           popupClass={popup}
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           onOpenChange={({ open }) => menuOpen.set(open ? "options" : null)}
           trigger={
             <View
@@ -743,7 +743,7 @@ export function EditorDemo() {
           handleThumbClass={handleThumb}
           dockClass="bg-card"
           sheetClass="h-72 rounded-t-2xl border-t border-border bg-card"
-          backdropClass="bg-black/40"
+          backdropClass="bg-scrim"
           renderTab={(tab) => (
             <View class="h-7 flex-row items-center gap-2 px-3">
               <Text style={{ numberOfLines: 1 }} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>

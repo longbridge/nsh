@@ -484,11 +484,13 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
     }
 }
 
-/// The surface element's prepaint, after it inserted its own hitbox (and
-/// set its origin and size): lays out and prepaints the components'
-/// elements at their containers' boxes and places the web views, each over
-/// a hitbox that keeps nsh's input away from it.
+/// The surface element's prepaint (or a window of the app's own's, its
+/// input entered), after it inserted its own hitbox (and set its origin
+/// and size): lays out and prepaints the elements of the components in
+/// that window at their containers' boxes and places its web views, each
+/// over a hitbox that keeps nsh's input away from it.
 pub(crate) fn prepaint(surface: &Rc<Surface>, window: &mut Window, cx: &mut App) {
+    let this = surface.input_root().id();
     let hosts: Vec<(NodeId, HostRef)> = {
         let hosts = surface.native.hosts.borrow();
         let mut hosts: Vec<_> = hosts
@@ -503,11 +505,21 @@ pub(crate) fn prepaint(surface: &Rc<Surface>, window: &mut Window, cx: &mut App)
     };
     // Video frames (and images) dropped where nothing draws images.
     crate::image::release_dropped(window, cx);
-    let mut focused = Vec::new();
+    // Those of the other windows stay as their windows' frames left them.
+    let mut focused: Vec<(NodeId, FocusHandle)> =
+        std::mem::take(&mut *surface.native.focused.borrow_mut());
+    focused.retain(|(id, _)| {
+        surface
+            .view(*id)
+            .is_some_and(|v| crate::window::root_of(surface, &v) != this)
+    });
     for (id, host) in hosts {
         let Some(view) = surface.view(id) else {
             continue;
         };
+        if crate::window::root_of(surface, &view) != this {
+            continue;
+        }
         let geometry = geometry(surface, &view);
         match host {
             HostRef::Component(item) => {
@@ -636,7 +648,12 @@ fn geometry(surface: &Surface, view: &NshView) -> Option<Geometry> {
         Some(crate::render::bounds(x + ox, y + oy, bw, bh))
     };
     let document = to_window(view, w, h)?;
-    let (sw, sh) = surface.size();
+    // The window's root: the surface's, or the entered window's.
+    let (sw, sh) = {
+        let root = surface.input_root();
+        let s = root.state();
+        (s.frame.size.width.0, s.frame.size.height.0)
+    };
     let mut visible = document.intersect(&crate::render::bounds(ox, oy, sw, sh));
     let mut node = Some(view.clone());
     while let Some(v) = node {
