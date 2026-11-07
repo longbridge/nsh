@@ -5122,19 +5122,33 @@ impl<M: TextEngine> Core<M> {
                     self.set_disabled(key, d);
                 }
                 let node = &mut self.nodes[key as usize];
-                // The platforms make a web view's website data store with
-                // the web view, from its first props.
-                if let (NativeProp::Incognito(on), Some(NativeProps::WebView(p))) =
-                    (&prop, node.control.as_deref())
-                    && node.created
+                // The platforms make a web view with its website data store
+                // and the URL schemes it serves, from its first props.
+                if node.created
+                    && let Some(NativeProps::WebView(p)) = node.control.as_deref()
                 {
-                    if *on != p.incognito {
-                        log::warn!(
-                            target: "js",
-                            "a web view's `incognito` is read when it is made; render a new element to change it"
-                        );
+                    let changed = match &prop {
+                        NativeProp::Incognito(on) => Some(("`incognito` is", *on != p.incognito)),
+                        // A re-render builds new handlers: only a change
+                        // of the schemes served is worth a warning.
+                        NativeProp::UrlSchemes(schemes) => Some((
+                            "URL schemes are",
+                            !schemes
+                                .iter()
+                                .map(|s| s.scheme())
+                                .eq(p.url_schemes.iter().map(|s| s.scheme())),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((what, changed)) = changed {
+                        if changed {
+                            log::warn!(
+                                target: "js",
+                                "a web view's {what} read when it is made; render a new element to change it"
+                            );
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
                 }
                 if let Some(control) = node.control.as_mut() {
                     apply_native(control, prop);
@@ -9035,6 +9049,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
+        (NativeProps::WebView(p), P::UrlSchemes(v)) => p.url_schemes = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),
