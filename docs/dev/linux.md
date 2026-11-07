@@ -200,7 +200,7 @@ xdotool mousemove --window $W 100 30 click 1; xdotool type --window $W "hi"; xdo
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings; `--fps` logs the performance monitor's readings once a second (below); `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
+`--trace` logs per-commit timings; `--fps` shows the performance monitor and logs its readings once a second (below); `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
 one); `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
 Windows and GPUI hosts) names the GTK application and the directory of its web view data (the app's storage follows the id
 the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
@@ -213,6 +213,9 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
 the main thread's time per drawn frame from the frame clock's `before-paint` to `after-paint` and its phases
 (`update`, `layout`, `paint`, and within `paint` NSH's `snapshot` and the canvases' rasterizing), batches applied per
 drain, the engine's commits (JS and core time, mount items), its busy share, and the process' CPU and resident memory.
+A pointer-transparent panel at the top right also shows FPS, frame time and p95, JS/core time, CPU and RSS,
+with the latest 120 frame costs (newest at the right) and a horizontal refresh-budget line. It redraws twice a
+second while mapped; disabling the monitor removes the panel and timer as well as stopping measurement.
 `examples/gallery/tools/perf.py` runs the gallery under it, idle and scrolling on every demo, and prints a table.
 
 GSK's Vulkan renderer (GTK's default since 4.16) costs the main thread several times what its GL renderer does under

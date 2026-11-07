@@ -237,6 +237,7 @@ impl AppView {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&crate::surface::widget(&surface)));
         overlay.set_vexpand(true);
+        *surface.fps_overlay.borrow_mut() = overlay.downgrade();
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let outer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         outer.append(&slot);
