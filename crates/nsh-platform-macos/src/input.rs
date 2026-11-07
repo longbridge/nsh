@@ -2958,4 +2958,34 @@ mod tests {
         flat.0[5] = 0.0;
         assert_eq!(unproject(&flat, (1.0, 1.0)), None);
     }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn projects_points_where_hit_testing_finds_them() {
+        // A quarter turn, nonuniform scale and translation, with perspective.
+        let mut m = nsh_core::Matrix::IDENTITY;
+        m.0[0] = 0.0;
+        m.0[1] = 2.0;
+        m.0[4] = -3.0;
+        m.0[5] = 0.0;
+        m.0[12] = 10.0;
+        m.0[13] = 20.0;
+        m.0[3] = 0.01;
+        m.0[7] = 0.02;
+        // (10, 20) maps to (-50, 40), divided by w = 1.5.
+        let shown = project(&m, (10.0, 20.0)).unwrap();
+        assert!((shown.0 + 50.0 / 1.5).abs() < 0.0001);
+        assert!((shown.1 - 40.0 / 1.5).abs() < 0.0001);
+        let local = unproject(&m, shown).unwrap();
+        assert!((local.0 - 10.0).abs() < 0.0001);
+        assert!((local.1 - 20.0).abs() < 0.0001);
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn projection_at_infinity_has_no_test_target() {
+        let mut m = nsh_core::Matrix::IDENTITY;
+        m.0[3] = -0.5;
+        assert_eq!(project(&m, (2.0, 3.0)), None);
+    }
 }
