@@ -252,3 +252,13 @@ event id:heard onHost type=event event=tick payload=2
 wait 50
 expect Host heard: [1]
 covers [nsh] host
+# mod-fps
+tap id:case-mod-fps
+# no performance monitor headless: it reports none, and the calls go through.
+expect Fps enabled: false
+expect Calls: not called
+tap id:toggle
+expect Calls: done
+expect Fps enabled: false
+covers [nsh] fpsEnabled
+covers [nsh] setFpsEnabled

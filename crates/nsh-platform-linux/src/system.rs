@@ -717,6 +717,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
         Command::Announce(text) => crate::access::announce(&surface.root, text),
+        Command::PerfMonitor(true) => surface.enable_fps(),
+        Command::PerfMonitor(false) => surface.disable_fps(),
         Command::Desktop(command) => crate::chrome::command(surface, command),
         Command::SetClipboard(text) => {
             if let Some(display) = gdk::Display::default() {

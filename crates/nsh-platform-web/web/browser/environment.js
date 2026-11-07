@@ -35,6 +35,8 @@ export function createEnvironment(reactive, invoke, dom) {
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
     localeSettings: () => fields.localeSettings(), lifecycle: () => fields.lifecycle(), platform,
+    // A browser page has no performance monitor (its developer tools measure it).
+    fpsEnabled: () => false,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   const api = {

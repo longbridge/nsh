@@ -3109,10 +3109,10 @@ unsafe extern "C" fn setup(
     {
         crate::env::take_theme(cx, &json);
     }
-    // Checked by the bundler; a hand-made bundle's wrong value is ignored.
+    // What this runtime cannot read (a newer NSH's) is left out.
     let status_bar = string_arg(cx, arg(argc, argv, 3))
         .and_then(|json| serde_json::from_str(&json).ok())
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok());
+        .map(|v| nsh_core::StatusBarSetting::from_json(&v));
     if let Some(setting) = status_bar
         && let Err(e) = push_op(
             cx,

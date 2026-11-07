@@ -183,6 +183,12 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
+`base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
+one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
+named …"). The macro checks at compile time that it lists every part, so a new part of `nsh/base` adds its line
+there.
+
 ### Historical QuickJS package sizes
 
 The web ran QuickJS in WebAssembly until 2026-10; those measurements do not apply to the current runtimes.
@@ -438,7 +444,9 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
-the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
+the content the core placed. A view of no size (`display: none` lays it out at none) is `nsh-empty`: it draws no border,
+outline or shadow of its own, as on the native backends, which draw inside a view's bounds (a CSS border-box is never
+smaller than its borders); its children still show. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
@@ -530,6 +538,12 @@ snapping, fits, hidden states, the press cursor `nsh-pointer`, `nsh-inert` for `
 the same way from the CSS it makes (`cssClass`: a blur, an image's tint and mask, the latter over the
 view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
 apart: the later one then gets a view's own rule.
+
+`borderCurve: "continuous"` is a tripled class of `border-radius` and `corner-shape` that `nsh.js` makes from the
+frame (`placeCorners`). A view that clips with such corners is marked `nsh-curve-clip`, a view whose style has a
+backdrop filter `nsh-backdrop` (`op_s`, from its class's rule), and `.nsh-curve-clip:has(.nsh-backdrop)` takes
+circular corners of the radius (`--nsh-round`): Chromium shows no backdrop filter inside a clip with `corner-shape`
+corners (`pitfalls.md`, "Web, browsers").
 
 A view whose styles keep changing (a style animated from JS: a new text each frame) would grow the sheet by a rule a
 frame. After 16 classes defined for one view (`OWN_RULES_AFTER`) its new styles go to rules of its own (`i<id>`,

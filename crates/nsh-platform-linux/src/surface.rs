@@ -182,6 +182,7 @@ pub(crate) struct Surface {
     pub(crate) selection: crate::selectable_view::State,
     /// The performance monitor, while it measures ([`crate::fps`]).
     fps: RefCell<Option<Rc<crate::fps::Fps>>>,
+    pub(crate) fps_overlay: RefCell<glib::WeakRef<gtk::Overlay>>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -266,6 +267,7 @@ impl Surface {
             chrome: Default::default(),
             selection: Default::default(),
             fps: RefCell::new(None),
+            fps_overlay: RefCell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -297,8 +299,23 @@ impl Surface {
         }
         let fps = Rc::new(crate::fps::Fps::new());
         crate::fps::install(self.root.upcast_ref(), &fps);
+        if let Some(overlay) = self.fps_overlay.borrow().upgrade() {
+            crate::fps::show(&overlay, &fps);
+        }
         self.control(|c| c.set_perf_monitor(Some(fps.monitor.clone())));
         *self.fps.borrow_mut() = Some(fps);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fps_for_test(&self) -> Rc<crate::fps::Fps> {
+        self.fps.borrow().as_ref().unwrap().clone()
+    }
+
+    /// Stops measuring ([`Surface::enable_fps`]).
+    pub(crate) fn disable_fps(&self) {
+        if self.fps.take().is_some() {
+            self.control(|c| c.set_perf_monitor(None));
+        }
     }
 
     /// Its key ([`Surface::by_key`]).

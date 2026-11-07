@@ -91,7 +91,8 @@ export type IconName =
   | "folder"
   | "folder-open"
   | "file"
-  | "tree";
+  | "tree"
+  | "hamburger";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -237,6 +238,12 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [2.5, 8, 17.5, 8]);
     line(c, [2.5, 12.5, 17.5, 12.5]);
     line(c, [8, 3.5, 8, 16.5]);
+  },
+  // Three bars: a menu of the app's own settings.
+  hamburger: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [3.5, 10, 16.5, 10]);
+    line(c, [3.5, 14.5, 16.5, 14.5]);
   },
   menu: (c) => {
     rect(c, 3.5, 2.5, 13, 15, 2.5);

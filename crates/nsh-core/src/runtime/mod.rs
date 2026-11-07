@@ -1,7 +1,7 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
-//! `Speech`, `UrlScheme` and `nsh/storage`,
+//! `Speech`, `UrlScheme`, `setFpsEnabled` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -20,6 +20,7 @@ mod clipboard;
 mod desktop;
 mod device;
 mod fonts;
+mod fps;
 mod fs;
 mod host;
 mod image;
@@ -70,6 +71,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<webview::WebView>()
             .module::<storage::Storage>()
             .module::<host::Host>()
+            .module::<fps::Fps>()
             // The environment's accessors and hooks, made by `nsh-js`.
             .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &[]);
         let mut mobile = Registry::runtime("nsh/mobile");

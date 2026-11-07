@@ -31,6 +31,9 @@ test("the sidebar's demos are one stop of Tab, whose Up and Down select the demo
   await app.keyboard.press("down");
   await app.wait(100);
   expect(app.shows(SWITCH)).toBe(false);
+  // Down opens the settings menu now that the footer is one menu trigger.
+  // Escape returns focus to that trigger before Shift+Tab returns to the demos.
+  await app.keyboard.press("escape");
   await app.keyboard.press("shift+tab");
   await app.keyboard.press("up");
   await app.waitFor("Select all");

@@ -2,11 +2,10 @@
 //!
 //! An app declares them in `nsh.json` (`"capabilities"`); the app embedding
 //! nsh may grant less ([`Access`]): a request must be allowed by both.
-//! Everything is denied unless listed, and unknown keys are errors, so a
-//! typo is caught at build time rather than becoming a missing grant.
-//! Signed packages are read leniently ([`Capabilities::from_json_lenient`]):
-//! a newer signer may declare what this runtime does not know, which is
-//! then not granted.
+//! Everything is denied unless listed. `nsh.json` and signed packages are
+//! read leniently ([`Capabilities::from_json_lenient`]): a newer NSH may
+//! declare what this one does not know, which is then not granted (the
+//! toolchain warns of it, so a typo is still seen at build time).
 //!
 //! ```json
 //! "capabilities": {
@@ -484,21 +483,46 @@ impl Capabilities {
         }
     }
 
-    /// Parses `capabilities` from `nsh.json` (or a grant in the same form).
-    /// Unknown keys are errors: a typo is caught when the app is built.
+    /// Parses `capabilities` strictly: unknown keys are errors. What NSH
+    /// itself reads (`nsh.json`, bundles, packages, grants) goes through
+    /// [`Capabilities::from_json_lenient`], which a newer NSH's keys do not
+    /// break.
     pub fn from_json(value: &Value) -> Result<Self, String> {
         Self::parse(value, None)
     }
 
-    /// Parses the capabilities a signed package declares, which a newer
-    /// signer may have written: unknown keys never grant anything. An
-    /// unknown capability is not granted; an unknown key inside one (a
-    /// restriction this runtime cannot apply) drops what it is in, the
-    /// whole capability or the `http` grant. Returns what was dropped
-    /// (`capabilities.bluetooth`, ...) with the capabilities.
+    /// Parses capabilities a newer NSH may have written (`nsh.json`,
+    /// bundles, signed packages, grants): what it cannot read never grants
+    /// anything. An unknown capability is not granted; an unknown key inside
+    /// one (a restriction this runtime cannot apply) drops what it is in,
+    /// the whole capability or the `http` grant; a value of a form it does
+    /// not know drops its capability (or its `http` grant), and the others
+    /// stay. Declared capabilities allow only what they list, so what is
+    /// dropped is denied. Only a declaration that is no object is denied
+    /// whole. Returns what was dropped (`capabilities.bluetooth`, ...) with
+    /// the capabilities.
     pub fn from_json_lenient(value: &Value) -> Result<(Self, Vec<String>), String> {
         let mut dropped = Vec::new();
-        let caps = Self::parse(value, Some(&mut dropped))?;
+        let Value::Object(obj) = value else {
+            dropped.push(format!(
+                "capabilities ({value} is not an object): all of them"
+            ));
+            return Ok((Self::default(), dropped));
+        };
+        // Each capability on its own: one that fails is dropped, alone.
+        let mut readable = Map::new();
+        for (key, v) in obj {
+            let one = Value::Object(Map::from_iter([(key.clone(), v.clone())]));
+            let mut its_dropped = Vec::new();
+            match Self::parse(&one, Some(&mut its_dropped)) {
+                Ok(_) => {
+                    dropped.append(&mut its_dropped);
+                    readable.insert(key.clone(), v.clone());
+                }
+                Err(e) => dropped.push(format!("capabilities.{key} ({e})")),
+            }
+        }
+        let caps = Self::parse(&Value::Object(readable), Some(&mut Vec::new()))?;
         Ok((caps, dropped))
     }
 
@@ -527,6 +551,10 @@ impl Capabilities {
                 None => return Err(unknown_key("capabilities", key, &KNOWN)),
             }
         }
+        let lenient = dropped.is_some();
+        // The `http` grants dropped, recorded once `check` is done with
+        // `dropped`.
+        let mut http_dropped = Vec::new();
         // Whether `obj` (`what`) has only `keys`; lenient, an unknown key
         // drops `name` (what it is in): recorded, and `false` returned.
         let mut check = |obj: &Map<String, Value>,
@@ -568,11 +596,9 @@ impl Capabilities {
                         .as_array()
                         .ok_or("capabilities.network.http must be an array")?;
                     for (i, grant) in list.iter().enumerate() {
-                        let g = object(grant, "capabilities.network.http[]")?;
-                        if check(
-                            g,
-                            "capabilities.network.http[]",
-                            &[
+                        let name = format!("capabilities.network.http[{i}]");
+                        let parsed = object(grant, "capabilities.network.http[]").and_then(|g| {
+                            let keys = [
                                 "host",
                                 "methods",
                                 "scheme",
@@ -582,10 +608,21 @@ impl Capabilities {
                                 "pathPrefix",
                                 "pathPrefixes",
                                 "path_prefixes",
-                            ],
-                            &format!("capabilities.network.http[{i}]"),
-                        )? {
-                            caps.network.http.push(http_grant(g)?);
+                            ];
+                            Ok(
+                                match check(g, "capabilities.network.http[]", &keys, &name)? {
+                                    true => Some(http_grant(g)?),
+                                    false => None,
+                                },
+                            )
+                        });
+                        match parsed {
+                            Ok(Some(grant)) => caps.network.http.push(grant),
+                            Ok(None) => {}
+                            // Lenient: a grant of a form this runtime does
+                            // not know is dropped alone.
+                            Err(e) if lenient => http_dropped.push(format!("{name} ({e})")),
+                            Err(e) => return Err(e),
                         }
                     }
                 }
@@ -751,6 +788,9 @@ impl Capabilities {
                     names
                 }
             };
+        }
+        if let Some(dropped) = dropped {
+            dropped.append(&mut http_dropped);
         }
         Ok(caps)
     }
@@ -2073,9 +2113,46 @@ mod tests {
                 .unwrap();
         assert_eq!(c, Capabilities::default());
         assert_eq!(dropped.len(), 2);
-        // What it knows is still checked.
-        assert!(lenient(r#"{ "statusBar": "yes" }"#).is_err());
-        assert!(lenient(r#"{ "network": { "hosts": ["exa mple.com"] } }"#).is_err());
+        // A value of a form it does not know (a newer NSH's, or a typo)
+        // drops its capability, alone: denied, as nothing is granted
+        // unless listed.
+        let (c, dropped) = lenient(
+            r#"{ "statusBar": "yes", "clipboard": true,
+                 "network": { "hosts": ["exa mple.com"] }, "webview": { "hosts": ["a.com"] } }"#,
+        )
+        .unwrap();
+        assert!(!c.status_bar);
+        assert!(c.clipboard);
+        assert!(c.network.hosts.is_empty());
+        assert_eq!(c.webview, Some(vec![HostPattern::new("a.com").unwrap()]));
+        assert_eq!(dropped.len(), 2, "{dropped:?}");
+        assert!(
+            dropped
+                .iter()
+                .any(|d| d.starts_with("capabilities.statusBar ("))
+        );
+        assert!(
+            dropped
+                .iter()
+                .any(|d| d.starts_with("capabilities.network ("))
+        );
+        // An `http` grant of another form is dropped alone.
+        let (c, dropped) = lenient(
+            r#"{ "network": { "hosts": ["a.com"], "http": [
+                 { "host": "b.com", "port": "any" }, { "host": "c.com" } ] } }"#,
+        )
+        .unwrap();
+        assert_eq!(c.network.hosts.len(), 1);
+        assert_eq!(c.network.http.len(), 1);
+        assert_eq!(c.network.http[0].host.as_str(), "c.com");
+        assert_eq!(dropped.len(), 1, "{dropped:?}");
+        assert!(dropped[0].starts_with("capabilities.network.http[0] ("));
+        // A declaration that is no object grants nothing.
+        let (c, dropped) = lenient(r#""everything""#).unwrap();
+        assert_eq!(c, Capabilities::default());
+        assert_eq!(dropped.len(), 1);
+        // The strict parse still refuses them.
+        assert!(Capabilities::from_json(&serde_json::json!({ "statusBar": "yes" })).is_err());
         // Nothing unknown: the same as the strict parse.
         let json = serde_json::json!({ "network": { "hosts": ["a.com"] }, "statusBar": true });
         let (c, dropped) = Capabilities::from_json_lenient(&json).unwrap();
