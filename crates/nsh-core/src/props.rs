@@ -343,6 +343,10 @@ pub struct ViewProps {
     pub accessibility: Accessibility,
     /// `testID`: an identifier for UI tests.
     pub test_id: Option<Arc<str>>,
+    /// `semantic`: the HTML element the web draws the view as.
+    pub semantic: Option<crate::Semantic>,
+    /// `href`: where a `semantic="a"` view links to (the web).
+    pub href: Option<Arc<str>>,
     /// `panActivation`: the view's touch responder waits for a pan the
     /// platform recognizes.
     pub pan_activation: Option<PanActivation>,

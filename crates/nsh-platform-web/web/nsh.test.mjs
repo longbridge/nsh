@@ -90,6 +90,29 @@ test("keyboard context menus have no pointer even when Chromium names a mouse", 
   }
 });
 
+test("links the app shows no menu for keep the browser's context menu", () => {
+  const { player } = fakePlayer();
+  const link = {
+    _id: 4,
+    _events: new Set(),
+    localName: "a",
+    hasAttribute: (name) => name === "href",
+    matches: () => false,
+  };
+  const text = { _id: 6, _events: new Set(), localName: "span", hasAttribute: () => false, matches: () => false };
+  player.viewOf = () => text;
+  player.ancestors = () => [text, link];
+  player.event = failing;
+  let prevented = false;
+  const e = { target: text, button: 2, pointerType: "mouse", preventDefault() { prevented = true; } };
+  // Handled: the listener leaves the event to the browser, which shows its menu.
+  assert.equal(player.contextMenu(e), true);
+  assert.equal(prevented, false);
+  // A link without an href is a view like any other: no menu of the browser's.
+  link.hasAttribute = () => false;
+  assert.equal(player.contextMenu(e), false);
+});
+
 test("input autofill hints are set, changed and cleared on both field kinds", () => {
   const { player } = fakePlayer();
   const attrs = new Map();

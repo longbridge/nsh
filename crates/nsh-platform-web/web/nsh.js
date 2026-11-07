@@ -129,6 +129,11 @@ const KEYFRAMES = `
   touch-action: none; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
+/* Views drawn as semantic elements (\`semantic\`) look as a view does: none of
+   the browser's margins, fonts, colors, underlines or list markers. */
+:is(h1, h2, h3, h4, h5, h6, p, a, ul, ol, li, strong, em, blockquote, figure, figcaption, time, address, nav, header,
+  footer, main, article, section, aside).nsh-v { display: block; font: inherit; color: inherit; text-decoration: none;
+  list-style: none; }
 /* The keyboard focus shows as the app draws it (focus: styles), as
    on the desktop backends: no ring of the browser's or the runtime's. */
 .nsh-v:focus { outline: none; }
@@ -2348,7 +2353,7 @@ class Player {
     el.classList.toggle("nsh-noselect", selectable === false);
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
-    el._textLabel = runs.map((r) => r[2]).join("");
+    el._textLabel = runs.map((r) => r[2] + (r[6] ?? "")).join("").trimEnd();
     if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
 
@@ -2385,7 +2390,23 @@ class Player {
       if (after) span._after = after;
       else delete span._after;
     });
+    this.lineBreaks(el);
     return true;
+  }
+
+  /**
+   * The characters a line broke at (`after`: the space a soft break ate,
+   * a hard break's newline) as text between the runs' spans, so the
+   * text's `textContent` reads as it was written ("it now brings", never
+   * "it nowbrings"): what search engines and the page's markup see. They
+   * are whitespace beside absolutely placed spans, which collapses: nothing
+   * shows of them.
+   */
+  lineBreaks(el) {
+    for (const node of [...el.childNodes]) if (node.nodeType === 3) node.remove();
+    for (const span of el.querySelectorAll(":scope > .nsh-run")) {
+      if (span._after) span.after(span._after);
+    }
   }
 
   /** The runs of a text made again: its spans and their backgrounds. */
@@ -2416,6 +2437,7 @@ class Player {
     }
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
+    this.lineBreaks(el);
   }
 
 
@@ -2503,8 +2525,11 @@ class Player {
   }
 
   op_vp([, id, props]) {
-    const el = this.view(id);
+    let el = this.view(id);
     if (!el) return;
+    el = this.retag(el, props.semantic ?? null);
+    if (props.href != null) el.setAttribute("href", props.href);
+    else el.removeAttribute("href");
     el._props = props;
     // A list in its parent's viewport: its cells are read in screen order.
     if (el._screenOrder !== props.screenOrder) {
@@ -2519,6 +2544,31 @@ class Player {
     el.classList.toggle("nsh-area", !!props.selectableView);
     this.updateFocusable(el);
     this.updateTouchAction(el);
+  }
+
+  /**
+   * The view drawn as the HTML element its `semantic` names (`h1`, `p`,
+   * `a`, `nav`, ...), else a `div`: the element is replaced by one of that
+   * tag carrying its attributes, children and fields, so search engines
+   * and the page's markup see the document's structure while the layout,
+   * styles and events stay the view's. Views whose element holds a
+   * control of its own (images, scroll views, canvases, ...) keep theirs.
+   */
+  retag(el, semantic) {
+    const tag = semantic ?? "div";
+    if (el.localName === tag || (el._kind !== "view" && el._kind !== "text")) return el;
+    const next = document.createElement(tag);
+    for (const { name, value } of el.attributes) next.setAttribute(name, value);
+    for (const key of Object.keys(el)) next[key] = el[key];
+    next.append(...el.childNodes);
+    el.replaceWith(next);
+    this.views.set(el._id, next);
+    if (el._mouseEvents) {
+      next._mouseEvents = false;
+      this.installMouse(next);
+    }
+    if (tag === "a") next.draggable = false;
+    return next;
   }
 
   op_al([, id, label]) {
@@ -6946,6 +6996,13 @@ class Player {
   installInput() {
     const root = this.root;
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
+    // A link view (`semantic="a"`) is the app's to press: a plain click
+    // stays in the app (its `onPress`), a click with a modifier or the
+    // middle button opens its `href` as the browser would.
+    root.addEventListener("click", (e) => {
+      const link = e.target instanceof Element ? e.target.closest("a.nsh-v[href]") : null;
+      if (link && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) e.preventDefault();
+    });
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
@@ -7030,6 +7087,9 @@ class Player {
         });
         return true;
       }
+      // A link (`semantic="a"` with an `href`) the app shows no menu for has
+      // the browser's: open in a new tab, copy the link.
+      if (el.localName === "a" && el.hasAttribute("href")) return true;
       if (el.matches(".nsh-field, .nsh-selectable")) return false;
     }
     return false;

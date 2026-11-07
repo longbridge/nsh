@@ -288,7 +288,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`data` 把运行时第一次需要时才下载的文件映射到 URL（`syntaxes`：`nsh-syntaxes.<digest>.bin`；默认是 `nsh.js` 旁边的 `nsh-<name>.bin`），`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.runModule(url, { capabilities, appId })` 在应用声明的能力（它的 `capabilities.json`）下运行应用，并把它的存储保存在 `nsh.json` 的 id 之下（没有 id 时保存在页面路径之下）。`nsh package --target web` 写出的页面都用到了。
 
-`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
+`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
@@ -415,6 +415,45 @@ await player.runModule(entry, {
 
 ```tsx
 const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
+```
+
+## 搜索引擎
+
+用 `nsh package --target web` 发布的站点可以被搜索引擎收录，也能生成链接预览：视图带有文档结构，栈中的每个页面都有自己的 URL，每个页面设置文档的标题和描述。应用仍是同一个应用：同样的代码在手机和桌面上绘制同样的界面。
+
+### 标题、段落和链接
+
+`semantic` 把视图或文本绘制成它指定的 HTML 元素，`href` 给链接视图设定目标（[页面的标记](../elements/index.md#页面的标记)）。元素保留视图的布局、样式和事件，因此页面的外观和行为不变，而它的标记读起来就是一篇文档：
+
+```tsx
+<View semantic="article">
+  <Text semantic="h1">{note.title}</Text>
+  <Text semantic="time">{note.date}</Text>
+  <Each of={note.body}>{(paragraph) => <Text semantic="p">{paragraph()}</Text>}</Each>
+  <View semantic="a" href="/" onPress={() => nav.pop()}>
+    <Text>All notes</Text>
+  </View>
+</View>
+```
+
+按压链接触发的是应用的 `onPress`，应用照常导航；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时在新标签页中打开它；右键点击显示浏览器的链接菜单（在新标签页中打开、复制链接），除非应用用 `onContextMenu` 显示自己的菜单。
+
+### 标题和描述
+
+[`nsh/web`](../modules/nsh-web.md) 的 `Head` 在挂载期间设置页面的 `<head>`：标题、描述、规范 URL、语言、更多 `<meta>`（Open Graph、Twitter 卡片、`robots`）以及结构化数据。每个页面放一个 head，描述正在显示的页面；最后挂载的 head 设置的内容生效：
+
+```tsx
+import { Head } from "nsh/web";
+
+<NavPage title={note.title} header={<SiteHeader />}>
+  <Head
+    title={`${note.title} · Market Notes`}
+    description={note.summary}
+    canonical={`/notes/${note.slug}`}
+    jsonLd={{ "@context": "https://schema.org", "@type": "Article", headline: note.title }}
+  />
+  …
+</NavPage>
 ```
 
 ## 限制

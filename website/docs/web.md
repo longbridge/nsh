@@ -317,7 +317,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). The page `nsh package --target web` writes uses all of them.
 
-`runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are.
+`runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are, and `runModule(url, { params })` the app's `host.params`: a JSON object the page already has for the app, such as the data of its first screen. The page `nsh package --target web` writes passes the JSON of a `<script type="application/json" id="nsh-params">` element when the page has one, so a server that serves the page can hand the app its data with it and the app shows it without asking for it again.
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
@@ -465,6 +465,53 @@ The [gallery](/gallery) loads each demo this way: `lazy` (in `examples/gallery/u
 
 ```tsx
 const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
+```
+
+## Search engines
+
+A site published with `nsh package --target web` is a site search engines index and link previews read: its views
+carry the document's structure, each page of a stack has a URL of its own, and each page sets the document's title
+and description. The app stays one app: the same code draws the same screens on the phones and the desktops.
+
+### Headings, paragraphs and links
+
+`semantic` draws a view or a text as the HTML element it names, and `href` gives a link view its target
+([the page's markup](../elements/index.md#the-pages-markup)). The element keeps the view's layout, styles and events,
+so the page looks and behaves as before, and its markup reads as a document:
+
+```tsx
+<View semantic="article">
+  <Text semantic="h1">{note.title}</Text>
+  <Text semantic="time">{note.date}</Text>
+  <Each of={note.body}>{(paragraph) => <Text semantic="p">{paragraph()}</Text>}</Each>
+  <View semantic="a" href="/" onPress={() => nav.pop()}>
+    <Text>All notes</Text>
+  </View>
+</View>
+```
+
+A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, a
+click with a modifier key or the middle button opens it in a new tab, and a right click shows the browser's menu for
+links (open in a new tab, copy the link) unless the app shows its own with `onContextMenu`.
+
+### Titles and descriptions
+
+[`nsh/web`](../modules/nsh-web.md)'s `Head` sets the page's `<head>` while it is mounted: the title, the description,
+the canonical URL, the language, more `<meta>`s (Open Graph, Twitter cards, `robots`) and structured data. A head in
+each page describes the page that shows; the one mounted last wins for what it sets:
+
+```tsx
+import { Head } from "nsh/web";
+
+<NavPage title={note.title} header={<SiteHeader />}>
+  <Head
+    title={`${note.title} · Market Notes`}
+    description={note.summary}
+    canonical={`/notes/${note.slug}`}
+    jsonLd={{ "@context": "https://schema.org", "@type": "Article", headline: note.title }}
+  />
+  …
+</NavPage>
 ```
 
 ## Limits

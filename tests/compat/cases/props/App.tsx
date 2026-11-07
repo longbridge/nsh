@@ -22,6 +22,7 @@ import PropsScrollBehavior from "./props-scroll-behavior";
 import PropsScrollZoom from "./props-scroll-zoom";
 import PropsTextLines from "./props-text-lines";
 import PropsViewAccessibility from "./props-view-accessibility";
+import PropsViewSemantic from "./props-view-semantic";
 import PropsViewStyling from "./props-view-styling";
 import PropsViewTouch from "./props-view-touch";
 
@@ -45,6 +46,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-scroll-zoom": PropsScrollZoom,
   "props-text-lines": PropsTextLines,
   "props-view-accessibility": PropsViewAccessibility,
+  "props-view-semantic": PropsViewSemantic,
   "props-view-styling": PropsViewStyling,
   "props-view-touch": PropsViewTouch,
 };

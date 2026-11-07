@@ -11,11 +11,11 @@
 /// nsh's own native ES modules, which bundles compiled with nsh's JSX
 /// compiler import (served by `nsh-js`, left as imports by the bundler):
 /// `nsh`, the API apps write against; `nsh:rt`, the renderer compiled JSX
-/// calls; `nsh/desktop` and `nsh/mobile`, the platforms' APIs. Registries
+/// calls; `nsh/desktop`, `nsh/mobile` and `nsh/web`, the platforms' APIs. Registries
 /// add theirs (`Registry::specifier`: `nsh/base`, an app's set) or the
 /// functions of nsh's own (`Image.getSize` on `nsh`, `nsh/mobile`'s
 /// `BackHandler`).
-pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/mobile"];
+pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/mobile", "nsh/web"];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.
 /// Privileged entries route through NSH capability adapters.

@@ -1,3 +1,5 @@
+import { createWebPage } from "./page.js";
+
 // A module given as source text, as a blob URL; its source map inline, so
 // DevTools maps it.
 function moduleURL(code, name, sourceMap) {
@@ -57,10 +59,11 @@ export function createBrowserHost(player) {
     } },
     // `owned`: blob URLs that go with the app. `nativeExports`
     // (`{ specifier: [name] }`): what the app imports by name from native
-    // modules (a published app's, `web::native_exports`). Their bindings
-    // are live, so what a gate called after the start registers (a side
-    // module loaded before the chunk) is filled then.
-    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {} } = {}, owned = []) {
+    // modules (a published app's, `web::native_exports`). Their modules
+    // are made before the realm loads any module; their bindings are live,
+    // so what a gate called after the start registers (a side module
+    // loaded before the chunk) is filled then.
+    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {}, params } = {}, owned = []) {
       if (current?.stopping) throw new Error("cannot start an app during disposal");
       const [width, height] = player.reset();
       let values;
@@ -213,6 +216,8 @@ export function createBrowserHost(player) {
         call(401, [appId, capabilities]);
         player.begin(width, settings => {
           player.withStrings([settings], (p, l) => player.wasm.nsh_environment(p, l));
+          // `host.params`: what the page gives the app to start with.
+          if (params != null) player.withStrings([JSON.stringify(params)], (p, l) => player.wasm.nsh_set_host_params?.(p, l));
           const delay = player.wasm.nsh_browser_start(width, height, player.dark ? 1 : 0, devicePixelRatio || 1);
           if (delay === -2) throw new Error("browser engine startup failed");
           return delay;
@@ -235,6 +240,7 @@ export function createBrowserHost(player) {
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
+        const page = createWebPage(reactive, player);
         const base = modules.exports.get("nsh/base");
         if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
 
@@ -245,6 +251,7 @@ export function createBrowserHost(player) {
         namespaces.set("nsh/android", { ...mobile, isAvailable: false });
         namespaces.set("nsh/ios", { ...mobile, isAvailable: false });
         namespaces.set("nsh", nsh);
+        namespaces.set("nsh/web", page.exports);
         namespaces.set("nsh:rt", dom.rt);
         // Development bundles import it for `__nsh_hot`, the global their
         // modules and update scripts call.
