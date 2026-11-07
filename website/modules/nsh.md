@@ -1005,6 +1005,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 
 Shows the app in `scheme` whatever the system's appearance, at once: `colorScheme()`, `dark:` classes, the components' theme and the platform's controls (alerts, the status bar's default style) follow it; `"system"` follows the system again. `nsh.json` `"appearance"` sets it from the start. Rust: `set_color_scheme(Appearance::Dark)` (`Appearance::Light`, `Appearance::System`).
 
+### fpsEnabled and setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` turns on the performance monitor, `false` turns it off: on macOS a panel at the top right of the app ([macOS](../docs/macos.md#performance-monitor)), on iOS, Windows, Linux and GPUI one `nsh::perf` log line a second, on the terminal a status line ([Performance](../docs/performance.md#on-screen---fps)). `fpsEnabled()` is whether it measures, as the platform reports it (reactive), so a switch shows what the platform did; it is also on when the app was started with `--fps` or with the environment variable `NSH_FPS=1`. Where the platform has no monitor (Android, the web) `fpsEnabled()` stays `false`. Rust: `set_fps_enabled(true)`, `fps_enabled() -> bool`.
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
 ### platform
 
 ```ts
@@ -1890,6 +1903,15 @@ Rust code calls `request_notification_permission`, `show_notification`, `close_n
 shows while the app is in front as it does behind it. Showing another with the same `id` replaces it, and
 `Notifications.close(id)` removes it.
 
+`silent: true` shows it without a sound or vibration, as the web's `Notification` does; by default it plays the
+system's sound. Apple platforms show it with no sound, Android in a group that does not alert (no sound, vibration or
+pop-up banner), Windows with a silent toast, Linux with the daemon's `suppress-sound` hint, and the web passes `silent`
+to the browser.
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
 ### Notifications.on
 
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
@@ -2161,7 +2183,8 @@ type AudioErrorCode =
 
 ### Sound.load
 
-Loads a sound from a bundled asset's path (`"sounds/click.wav"`), a `file:` URL, a `data:` URI or an `http(s)` URL
+Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
+`asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
 the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
 components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
 component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
@@ -2176,8 +2199,9 @@ that is silence. A value out of range throws a `RangeError`. `stop()` stops ever
 
 ```tsx
 import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
 
-const tap = await Sound.load("sounds/tap.wav");
+const tap = await Sound.load(tapFile);
 
 function Key(props: { label: string }) {
   return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;

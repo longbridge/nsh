@@ -1491,6 +1491,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str(&notification.id)
                     .str(&notification.title)
                     .str(&notification.body)
+                    .bool(notification.silent)
                     .end(),
                 N::Close(name) => out
                     .item("cmd")
@@ -1614,8 +1615,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .str(uri)
                 .end();
         }
-        // A browser's bars are the browser's.
-        Command::StatusBar(_) => {}
+        // A browser's bars are the browser's; the browser's own developer
+        // tools measure the page.
+        Command::StatusBar(_) | Command::PerfMonitor(_) => {}
         other => log::debug!("web: command {other:?} is not supported"),
     }
 }

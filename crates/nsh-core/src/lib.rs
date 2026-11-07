@@ -45,6 +45,8 @@ pub mod prelude;
 mod props;
 pub mod reactive;
 pub mod resource;
+#[doc(hidden)]
+pub mod restart;
 pub mod runtime;
 pub mod runtime_data;
 pub mod scroll;

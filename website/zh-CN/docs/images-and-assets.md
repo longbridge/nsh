@@ -350,6 +350,7 @@ function RemoteImage(props: { url: string }) {
 | 文件 | Rust（`asset!`） | TSX 导入 | 页面 |
 |---|---|---|---|
 | `.ttf`、`.otf`、`.woff`、`.woff2` | 带字体族名的 `FontAsset` | 字体的字体族名 | [字体](./fonts.md) |
+| `.wav`、`.m4a`、`.aac`、`.mp3` | 带 URI 的 `FileAsset` | 文件的 `asset:/` URL | [声音](../modules/nsh.md#sound) |
 | `.json` 及其他文件 | 带 URI 的 `FileAsset` | `.json`：解析后的值，打包进脚本 | [项目结构](./project-structure.md#模块) |
 
 两种方式下，字体都在第一帧之前注册。

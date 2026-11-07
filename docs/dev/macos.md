@@ -62,7 +62,11 @@ belong to the app, which owns retention and its storage budget.
 - **Why not `drawRect:`**: `drawRect:` views are redrawn by AppKit's display pass whenever a scroll moves their
   container; plain content layers are not, and are drawn again only when their content or size changes. A canvas
   that paints often draws asynchronously (`canvas.rs` `Cadence`), one with a long static part keeps it as a
-  `CGLayer`. Contents stay in the screen's format.
+  `CGLayer`. Shorter drawings with a small source-over animated suffix can instead keep that suffix in a small
+  sibling content layer (`canvas.rs` `layer_split`, `NshView::update_canvas_overlay`). Animated values redraw only
+  that surface; a new drawing redraws both. The geometry scan includes every suffix paint, including constant
+  shapes after animated ones. Complex compositing, unbounded or large suffixes, and long prefixes use the existing
+  path. Both surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
 - **No masks on what scrolls, where avoidable** (`visual.rs`): the window server pays for a mask on every frame its
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a
@@ -129,9 +133,11 @@ belong to the app, which owns retention and its storage budget.
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
   `nsh test`'s default: the first display besides the primary one whose frame is not the primary's, as a mirror's
   is; the primary one when there is no other). With `AppOptions::keep_size` (the host's `--keep-window-size`, which
-  `nsh test` passes) the window is an `NshKeptSizeWindow`, whose `constrainFrameRect:toScreen:` returns the frame as
+  `nsh test` passes) the window's `constrainFrameRect:toScreen:` (it is an `NshWindow`) returns the frame as
   it is: AppKit would shrink a window taller than its screen when it shows it, and a test's window keeps the size the
-  test opens it at on a shorter secondary display. The standalone event loop
+  test opens it at on a shorter secondary display. nsh.json `window` applies before the window shows (its attributes,
+  size, place, display and mode; with `restoreBounds` the placement the engine kept in the app's storage, which the runner reads first).
+  The standalone event loop
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
@@ -158,13 +164,14 @@ belong to the app, which owns retention and its storage budget.
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s `NSView` fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
 | Accessibility | `access.rs` | `NSAccessibility` setters on the views: roles and subroles, labels, values, states, `testID` as the identifier; `accessible={true}` hides the children, `accessibilityElementsHidden` and `visibility: hidden` the view and its subtree (as in a browser), the view answering `accessibilityChildren` itself; live regions announced; `AXShowMenu` (VoiceOver's VO-Shift-M) on a view that listens to `onContextMenu` raises it with no pointer (`input::accessibility_show_menu`), which is how the keyboard reaches context menus on a Mac (AppKit has no Shift+F10) |
 | Environment | `system.rs` | Color scheme: the app's appearance when it forces one, else the root's effective appearance (the root's appearance is set to the app's, so hosted controls follow); locale and RTL from `NSLocale`, reduce motion and VoiceOver from `NSWorkspace` (live), the backing scale factor (again when the window moves to another screen: `pixelRatio()`), the OS version; whether the app is in use (`lifecycle()`: `background` while none of it shows, hidden or `NSApplication.occlusionState` without `visible` (its windows minimized or covered), `active` while it is the active app, else `inactive`; live, from `NSApplication`'s activation, hiding and occlusion notifications, the embedding app's for an embedded surface); the preferred languages (`localeSettings()`'s `languages`: `NSLocale.preferredLanguages`, read again with the other settings); the regional preferences (`localeSettings()`'s `hourCycle` and the like: the hours of `NSDateFormatter`'s `j` format, `NSCalendar.firstWeekday`, `NSLocale`'s measurement system and the `AppleTemperatureUnit` default, over `LocaleSettings::parse` of the locale's identifier; read again with the other settings); the time zone (`localeSettings()`'s `timeZone`: `NSTimeZone.systemTimeZone`'s name, live from `NSSystemTimeZoneDidChangeNotification`, Foundation's cached zone reset first); `platform.os` `"macos"`, idiom `desktop`, font scale 1, safe area and keyboard height 0 |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | `setTitle`; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (native frame geometry, including `contentLayoutRect` for a toolbar, and the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left drag on a `windowDrag` view calls `performWindowDragWithEvent:`, while a click reaches the app (including ancestor press handlers) only if its original view remains under the pointer and draggable; replacing the app cancels the pending press; a double click does what `AppleActionOnDoubleClick` says (zoom by default); `setFrame` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the top left corner, down from the primary screen's top as on the other platforms: `appkit_frame` flips `y` at the height of `NSScreen.screens[0]`, whose bottom is the origin of Cocoa's screen coordinates on every display arrangement, and a `height` without a `y` keeps the top edge), `setLevel` maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`, and it also makes the window stationary on every space, out of Mission Control and Cmd+`); `orderFront` deminiaturizes, activates the app and makes the window key; the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own; one the app opens without a place opens where the root's last pointer event was (a move, or a press or release of any button: a right click's menu opens at that click), else at the cursor: the test agent's input leaves the cursor where it is); a menu item's `icon` (`MenuAction::icon`, `MenuItem::Submenu`'s, but not the bar's titles) goes through the images' pipeline (`image::load_menu_icon`, off the main thread, at the largest scale of the screens, since a menu opens on any of them) and arrives as `NSMenuItem.setImage` of an `NSImage` of up to 16pt, with `preferredImageVisibility` `.visible` (from macOS 27 AppKit hides items' images otherwise: `pitfalls.md`); an SVG is a template (`setTemplate`), which AppKit paints in the text's color (dark mode, selection, disabled), and a bitmap keeps its colors; a load is given up with its menu, a failed one warns and leaves the item as it is; role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; an app's bar height selects an empty `NSToolbar` (`UnifiedCompact` up to 44pt, `Unified` above), with AppKit laying out the traffic lights on every live-resize frame; `titleBar().height` reports the actual obscured height, the title bar view's around the traffic lights and the toolbar (`contentLayoutRect` lags the frame during a resize: `pitfalls.md`), refreshed after deferred layout; a host's existing toolbar and style stay untouched; NSH tracks its own toolbar by object identity and restores the window's previous style when removing it, moving between windows or dropping the surface |
-| Window state (`nsh/desktop`'s `windowState`, `displays`, `Window.setBounds`) | `window_state.rs` | The window's move, resize, (de)miniaturize, full screen and screen notifications read its state again into the environment, which the engine holds back until a move stops; the displays are `NSScreen.screens`, in NSH's screen coordinates (the primary screen's top left, `y` down), sent before the app starts and again when the screens change, each with an id that stays from one launch to the next; `setBounds` restores the frame, then zooms or enters full screen |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | The `title` attribute; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (native frame geometry, including `contentLayoutRect` for a toolbar, and the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left drag on a `windowDrag` view calls `performWindowDragWithEvent:`, while a click reaches the app (including ancestor press handlers) only if its original view remains under the pointer and draggable; replacing the app cancels the pending press; a double click does what `AppleActionOnDoubleClick` says (zoom by default); `setBounds` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the top left corner, down from the primary screen's top as on the other platforms: `appkit_frame` flips `y` at the height of `NSScreen.screens[0]`, whose bottom is the origin of Cocoa's screen coordinates on every display arrangement, and a `height` without a `y` keeps the top edge), the `level` attribute maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`, and it also makes the window stationary on every space, out of Mission Control and Cmd+`); `focus()` deminiaturizes, activates the app and makes the window key; the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own; one the app opens without a place opens where the root's last pointer event was (a move, or a press or release of any button: a right click's menu opens at that click), else at the cursor: the test agent's input leaves the cursor where it is); a menu item's `icon` (`MenuAction::icon`, `MenuItem::Submenu`'s, but not the bar's titles) goes through the images' pipeline (`image::load_menu_icon`, off the main thread, at the largest scale of the screens, since a menu opens on any of them) and arrives as `NSMenuItem.setImage` of an `NSImage` of up to 16pt, with `preferredImageVisibility` `.visible` (from macOS 27 AppKit hides items' images otherwise: `pitfalls.md`); an SVG is a template (`setTemplate`), which AppKit paints in the text's color (dark mode, selection, disabled), and a bitmap keeps its colors; a load is given up with its menu, a failed one warns and leaves the item as it is; role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; an app's bar height selects an empty `NSToolbar` (`UnifiedCompact` up to 44pt, `Unified` above), with AppKit laying out the traffic lights on every live-resize frame; `titleBar().height` reports the actual obscured height, the title bar view's around the traffic lights and the toolbar (`contentLayoutRect` lags the frame during a resize: `pitfalls.md`), refreshed after deferred layout; a host's existing toolbar and style stay untouched; NSH tracks its own toolbar by object identity and restores the window's previous style when removing it, moving between windows or dropping the surface |
+| Window state (`nsh/desktop`'s `WindowRef.state()`, `displays`, `setPlacement`) | `window_state.rs` | The window's move, resize, (de)miniaturize, full screen and screen notifications read its state again into the environment, which the engine holds back until a move stops; the displays are `NSScreen.screens`, in NSH's screen coordinates (the primary screen's top left, `y` down), sent before the app starts and again when the screens change, each with an id that stays from one launch to the next; `setPlacement` restores the frame, then zooms or enters full screen |
+| Windows (`nsh/desktop`'s `<Window>`, `Window.open`, `WindowRef`) | `window.rs` | Every window renders from the surface's one engine. A window of the app's own is a dialog root the core sends `OpenWindow` for: it leaves the main window's modals and becomes the content of a window of its own, its size the root's, its input routed to the surface with that root as the one events are picked in, shown once its first frame is in. Kinds pick the class: `normal` and `dialog` are `NshWindow`s (a dialog is a child window of its parent; a modal one holds its parent's input), `panel` an `NSPanel` with the small title bar, `popup` and `overlay` borderless non-activating panels (an overlay ignores the mouse). `SetAttributes` maps each attribute onto the window (style mask, content size limits, level, collection behavior, `NSVisualEffectView` backdrops, sharing type, document edited, represented URL, tabbing), the same code for the main window; requests are intents (`setMode` zooms or enters full screen, `requestAttention` asks the app's Dock icon). Each window reports its state (moves and resizes once they settle) and its hidden title bar's area on its root; `SetContentSize` (`sizeToContent`) sizes the content area, keeping the top left corner. Popups the core places in a window's root, and dialogs presented in a window (`ModalConfig.window`), show in that window: their sizing, focus, Escape and back follow the window the key is in, and so do the app's shortcuts, sheets (alerts, open and save panels) and context menus. The close, Escape and blur policies are held natively and answered on the main thread; the app hears of them afterwards (the main window's close press waits briefly for the app's turn). `windowControl` views act as the window's buttons (and read as them to VoiceOver), `windowResize` views resize the window by their edge. AppKit's Dock lists apps, not windows: `taskbar` is the Window menu and Cmd+`, `progress` the app's Dock tile (the last window that set one), and `requestAttention` bounces the app's icon |
 
 | Clipboard | `system.rs` | `NSPasteboard` |
 | Networking | `net.rs` | `NSURLSession` (the iOS backend's) |
 | Dev | `dev.rs` | The dev server client on its own thread; a status line and the error overlay above the surface (opaque; code frames keep their lines and scroll sideways; a click that selects no text dismisses it, in an inactive window too; its Copy button copies the error); Cmd+R reloads the latest build |
-| Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `AppView::set_fps_monitor`: a panel above the surface that lets the mouse through, redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
+| Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `NSH_FPS=1` / `AppView::set_fps_monitor` / the app's `setFpsEnabled` (`Command::PerfMonitor`, through `Surface::perf_toggle`): a panel above the surface that lets the mouse through, redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
 
 ## Keyboard
 
@@ -247,7 +254,13 @@ made active first (WebKit takes left clicks only in the active app); a scroll is
 events 16 ms apart of at most 20 points, ended), handed to the window, and the root's `hitTest:` sees it as the
 current event (it keeps it from pages with `scrollable={false}`); typing posts key events through the application,
 as real keys, so key monitors see them; back is Escape, twice when a text field is focused (the first only leaves
-it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet. `dev.rs`'s `Tester` attaches
+it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet. Pointer input goes to the window
+the agent targets (the main one or a window of the app's own), keys to the window that has the keyboard (an app run in
+the background never activates, so AppKit makes none of its windows key: the window that would be, the one last
+shown, focused or pressed, is the focused one in its state and gets the keys), a view's bounds are in its own window's content, a window's state is read
+from it as it would be reported, pressing a window's close button clicks its standard close button, so the
+window's close policy answers it; a window's screenshot is its content, as the main window's, and dark mode is the
+application's appearance, which every window follows but one with a color scheme of its own. `dev.rs`'s `Tester` attaches
 the agent's model to the surface when the server says it runs a test session, before the first bundle. A step ends
 once the app is quiet and no native animation runs (`Surface::animating`: the animation graph, the platform's own
 motion on the display link, batches waiting for a frame); a scroll indicator fading out after a scroll does not count
@@ -260,24 +273,53 @@ echo 'await app.screenshot("/tmp/a.png"); await app.press("label:Navigation"); a
   | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # steps from stdin
 ```
 
-A screenshot renders the window's content in process (`cacheDisplayInRect:`), so it needs no Screen Recording
-permission and works while the screen is locked. `cacheDisplayInRect:` draws sublayers in their order and ignores
-`zPosition`, so the screenshot first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
+A screenshot is the window as the window server composited it (`synth.rs` `composited`:
+`CGWindowListCreateImageFromArray` of the window, its sheets and its child windows, clipped to the content view, at
+the backing scale), so it shows what the screen shows: backdrop blur and glass, 3D transforms, Core Image filters,
+`maskedCorners`, every box shadow, sheets, `AVPlayerLayer` and web views. An app may take pictures of its own windows
+without the Screen Recording permission (checked on macOS 27 with the permission denied), and the picture is of the
+window's own surface, so other windows over it do not matter. The function is deprecated and missing from the SDK's
+headers since macOS 15 but still exported, so it is looked up at run time. Before the picture, the agent flushes Core
+Animation and waits 50 ms (`agent.rs` `PRESENT`): taken at once, the picture was of the frame before the last commit.
+In-process rendering cannot do this: `CARenderer` renders a layer tree only in a context of its own, and given the
+window's tree (or a keyed-archive copy of it) it rendered and left the window's content blank on screen.
+
+Where the window server gives no picture (the function is missing, the window is not visible, or the picture is all
+black or clear, as a locked screen may make it), the screenshot falls back to drawing the window's content in process
+(`drawn`: `cacheDisplayInRect:`), logged at debug. `cacheDisplayInRect:` draws sublayers in their order and ignores
+`zPosition`, so the fallback first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
 the window does not change): without that, a decoration added before a layer it sits above (a border's stroke before
 a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts
 masks at their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective,
 `rotateX`, `rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show:
 WebKit draws them for `cacheDisplayInRect:`, as of macOS 27). `decor.rs` avoids the first three (shape layers for
-differing corners, masked holders for box shadows), so screenshots match the window closely, except that spread
-rings of box shadows are missing from them, and so are outer box shadows under an opaque background (unmasked
-`shadowPath` casters, `visual.rs`).
+differing corners, masked holders for box shadows), so the fallback matches the window closely, except that spread
+rings of box shadows are missing from it, and so are outer box shadows under an opaque background (unmasked
+`shadowPath` casters, `visual.rs`). The composited picture also differs from the fallback in two ways a test may
+see: the window's rounded bottom corners are clear, and a sheet dims the window under it, as on screen.
+
+Tests run while the screen is locked (an agent can run them while the user is away), as they run unlocked: nothing
+the agent does goes through the window server's input or screen capture. Input is posted to the
+app's own event queue or handed to its window, keys go to the window whether or not it is key (`synth::key_event`),
+screenshots render in process, and frames the display link no longer gives come from the surface's deadline timer,
+which a test's app runs as it would on screen (`Surface::keep_deadline`). The agent finds a locked screen, or a
+session that is not the console's, with `CGSessionCopyCurrentDictionary` (`system::screen_locked`): with
+`--foreground` it does not wait for the app's activation then (the system never gives it), and the app's
+`lifecycle()` does not turn `background` because the lock covers its windows. A left button press into a web view
+while the app is not active (`--background`, the default, or a locked screen) goes to the `WKWebView` directly,
+with its drags and release (`agent::mouse`): AppKit gives an inactive window's first click only to a view that
+accepts the first mouse, which WebKit's does not for a click. The agent's mouse is the test window's only one: the
+root takes no pointer events but the agent's (`synth::from_agent`, by type and timestamp, which survive the copy
+AppKit makes of a posted event), so the user's mouse, and the enters and exits AppKit derives from where it really
+is, never change what a test hovers, locked or not, and the user may go on using it while tests run. Lock the screen with `pmset displaysleepnow` (with a
+password required right after sleep) to run tests that way.
 
 ## Not implemented, or different
 
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
 - **`mixBlendMode`**, `brightness()` above 1. **`backdropFilter: blur()`** is an `NSVisualEffectView` (within-window
   blending, the popover material) below the view's background: AppKit picks the blur radius and adds the material's
-  light tint; in-process screenshots cannot show it. `glassEffect` puts an `NSGlassEffectView` there instead on macOS 26
+  light tint; the test agent's screenshots show it, its in-process fallback cannot. `glassEffect` puts an `NSGlassEffectView` there instead on macOS 26
   and later (looked up at run time, `setStyle:` regular / clear, `setCornerRadius:` the shared radius); before, the
   blur stands in, and glass alone draws nothing. Not yet seen on macOS 26: written and checked on macOS 15, where the
   class is missing.
@@ -299,7 +341,7 @@ event after `stop:` so a dispatch-driven close wakes the event loop.
 This lets a Rust host perform final cleanup or execute an installed update after
 `run_app` returns. Embedded `AppView` instances continue to use their host's
 delegate and event loop. This change still needs native close, minimized-close,
-Command-Q, a test's quit, process-exit status and relaunch validation. No tests
+Command-Q, a test's quit, process-exit status and restart validation. No tests
 were run for this change at the user's request.
 
 ### Retained standalone session design
@@ -313,9 +355,13 @@ orders that window front; it creates neither another engine nor another session.
 Explicit application Quit and `quit_app()` always take the stop-and-return
 path, including while the window is hidden. `quit_app()` dispatches to the main
 thread and only affects the standalone runner; an embedded host retains its own
-application lifecycle. The Rust core's `close_window()` remains a window-close
-request; an Exit or relaunch uses `quit_app()` from the host, or the app's
-`quit()` (TS: `Application.quit()`), which takes the same path.
+application lifecycle. `WindowHandle::close()` (TS `WindowRef.close()`) remains a window-close
+request; an Exit or restart uses `quit_app()` from the host, or the app's
+`quit()` (TS: `Application.quit()`), which takes the same path. `restart()` (TS: `Application.restart()`) takes it
+too (`app.rs` `restart_app`) and marks the run; once `app.run()` returns, `run_app` calls
+`nsh_core::restart::spawn_after_exit`, whose shell waits for the process to exit before `open -n` starts the bundle
+again (the executable itself outside a bundle). A development host (feature `dev`) only quits: `nsh run` ends with
+its host and stops the dev server, so a host started again would be cut off from both.
 
 Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while

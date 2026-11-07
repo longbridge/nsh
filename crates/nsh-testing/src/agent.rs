@@ -505,9 +505,27 @@ pub trait Scene: Send + Sync {
     fn send_host_event(&self, name: &str, data: serde_json::Value) -> Result<(), String>;
     /// The URLs the app opened ([`Model::opened_urls`]).
     fn opened_urls(&self) -> Result<Vec<String>, String>;
+    /// The root of the app's window `id` while it is open (`"main"`: the
+    /// main window's, [`nsh_core::ROOT_ID`]). Without windows of the app's
+    /// own (the web), only the main one.
+    fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
+        Ok((id == "main").then_some(nsh_core::ROOT_ID))
+    }
+    /// The root of the window view `id` is in (the main window's when it is
+    /// in none of the app's own).
+    fn window_of(&self, id: NodeId) -> Result<NodeId, String> {
+        let _ = id;
+        Ok(nsh_core::ROOT_ID)
+    }
 }
 
 impl Scene for Model {
+    fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
+        Ok(self.lock().screen.window_root(id))
+    }
+    fn window_of(&self, id: NodeId) -> Result<NodeId, String> {
+        Ok(self.lock().screen.window_of(id))
+    }
     fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
         Ok(self.lock().screen.canvas_node(&Selector::parse(selector)?))
     }
@@ -986,11 +1004,66 @@ pub enum Key {
 /// Called from the agent's thread; each call does its work on the host's
 /// main thread and returns once it is done (input posted, not answered).
 pub trait Native: Send + Sync {
-    /// The view `id`'s unclipped bounds in the window's content, in points
-    /// from its top-left. Mounted views outside a Scroll or the window
-    /// retain their bounds so the agent can scroll them into view;
-    /// `None` means the platform has no displayed view for this node.
+    /// The view `id`'s unclipped bounds in the content of the window it is
+    /// in (the main window, or one of the app's own), in points from its
+    /// top-left. Mounted views outside a Scroll or the window retain their
+    /// bounds so the agent can scroll them into view; `None` means the
+    /// platform has no displayed view for this node.
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
+    /// The window the pointer's input that follows acts in, until the next
+    /// call: the one whose root node is `window` ([`nsh_core::ROOT_ID`]:
+    /// the main window). The points [`Native::press`],
+    /// [`Native::long_press`], [`Native::scroll`], [`Native::drag`],
+    /// [`Native::hover`], [`Native::right_click`],
+    /// [`Native::drag_and_hold`], [`Native::drop_files`] and
+    /// [`Native::drop_at`] get are in that window's content, and their input
+    /// goes to that window (which a press activates, as a click does). The
+    /// agent names it before each step on a view. A platform without
+    /// windows of the app's own acts in the main window only.
+    fn target_window(&self, window: NodeId) -> Result<(), String> {
+        if window == nsh_core::ROOT_ID {
+            Ok(())
+        } else {
+            Err("this platform's test agent acts in the main window only: \
+                 views in windows of the app's own cannot be reached yet"
+                .into())
+        }
+    }
+    /// The state of the window whose root node is `window`
+    /// ([`nsh_core::ROOT_ID`]: the main window) as the platform reports it
+    /// to the app now (`app.window(id).state()`); `None` when no such
+    /// window is open.
+    fn window_state(
+        &self,
+        window: NodeId,
+    ) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        let _ = window;
+        Err("this platform's test agent reads no window state yet".into())
+    }
+    /// Presses the close button of the window whose root node is `window`
+    /// as the user does (`app.window(id).pressClose()`), through the
+    /// platform's own path: the window reports the press (reason
+    /// `closeButton`) and closes when its `closeOnPress` lets it. An error
+    /// when it has no close button.
+    fn press_window_close(&self, window: NodeId) -> Result<(), String> {
+        let _ = window;
+        Err("this platform's test agent presses no window's close button yet".into())
+    }
+    /// A picture of the window whose root node is `window`
+    /// ([`nsh_core::ROOT_ID`]: the main window), as [`Native::screenshot`]
+    /// takes of the main one: PNG bytes of its content
+    /// (`app.window(id).screenshot()`). An error when no such window is
+    /// open.
+    fn window_screenshot(&self, window: NodeId) -> Result<Vec<u8>, String> {
+        if window == nsh_core::ROOT_ID {
+            self.screenshot()
+        } else {
+            Err(
+                "this platform's test agent takes no picture of windows of the app's own yet"
+                    .into(),
+            )
+        }
+    }
     /// Where the characters `start..end` (UTF-16 units) of text view
     /// `text` are on screen: the part on their first line, in the
     /// window's content as [`Native::bounds`] (`None`: not on screen, or
@@ -1058,8 +1131,9 @@ pub trait Native: Send + Sync {
         Err("this platform shows no context menus to close".into())
     }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
-    /// `mod` the platform's command key), on a hardware keyboard: the app's
-    /// shortcuts hear it, else what has the keyboard focus. Every
+    /// `mod` the platform's command key), on a hardware keyboard, in the
+    /// window that has the keyboard focus (one of the app's own too): the
+    /// app's shortcuts hear it, else what has the keyboard focus. Every
     /// platform's agent makes them; one that cannot refuses it.
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         let _ = keys;
@@ -1495,6 +1569,39 @@ impl Agent {
                 self.native.quit();
                 Ok(Value::Null)
             }
+            TestStep::WindowState { id } => match self.scene.window_root(&id)? {
+                Some(root) => Ok(self
+                    .native
+                    .window_state(root)?
+                    .map_or(Value::Null, |s| crate::window_json::to_json(&s))),
+                None => Ok(Value::Null),
+            },
+            TestStep::PressWindowClose { id } => {
+                let root = self
+                    .scene
+                    .window_root(&id)?
+                    .ok_or_else(|| format!("no window {id:?} is open"))?;
+                done(
+                    self.native
+                        .press_window_close(root)
+                        .map_err(|e| format!("cannot press the close button of window {id:?}: {e}"))
+                        .and_then(|()| self.settled()),
+                )
+            }
+            TestStep::WindowScreenshot { id } => {
+                use base64::Engine as _;
+                let root = self
+                    .scene
+                    .window_root(&id)?
+                    .ok_or_else(|| format!("no window {id:?} is open"))?;
+                let png = self
+                    .native
+                    .window_screenshot(root)
+                    .map_err(|e| format!("cannot take a picture of window {id:?}: {e}"))?;
+                Ok(Value::from(
+                    base64::engine::general_purpose::STANDARD.encode(png),
+                ))
+            }
             TestStep::Scene { query } => self.scene_query(query),
         }
     }
@@ -1620,6 +1727,8 @@ impl Agent {
         self.settled()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
+        // The pointer acts in the window the view is in.
+        self.native.target_window(self.scene.window_of(id)?)?;
         if let Some((canvas, center)) = self.scene.canvas_node(selector)? {
             return Ok((
                 id,
