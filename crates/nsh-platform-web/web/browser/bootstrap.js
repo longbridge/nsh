@@ -5260,7 +5260,14 @@
 				tokens.update((value) => value + 1);
 			},
 			showLocale(tag) {
-				fields.locale.set(tag);
+				reactive.batch(() => {
+					const settings = reactive.untracked(fields.localeSettings);
+					fields.localeSettings.set({
+						...settings,
+						languages: [tag, ...settings.languages.filter((l) => l !== tag)]
+					});
+					fields.locale.set(tag);
+				});
 			},
 			setup(tailwind, theme, scheme, statusBar) {
 				if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
@@ -5283,7 +5290,8 @@
 //#region ../nsh-platform-web/web/browser/i18n.js
 /** `nsh/i18n` in the browser, as nsh-js's (`src/i18n.rs`): the bundle's
 	* translations (`nsh:rt`'s `i18n`, run before the app's modules), `t`
-	* looking a key up as rust-i18n does, and `setLocale`. The engine gets
+	* looking a key up as rust-i18n does in the first of the user's languages
+	* the app has, and `setLocale`. The engine gets
 	* both too (ops 407 and 408), for the core's components and the language
 	* it reports. The browser's own `Intl` formats every language, so the
 	* bundle's language data stays unused here. */
@@ -5298,12 +5306,19 @@
 			}
 			return locale === "en" ? void 0 : translations.en?.[key];
 		};
+		/** Whether the translations have `tag` or a shorter tag of it. */
+		const has = (tag) => {
+			for (; tag; tag = tag.includes("-") ? tag.slice(0, tag.lastIndexOf("-")) : "") if (Object.hasOwn(translations, tag)) return true;
+			return false;
+		};
+		/** The first of the user's preferred languages the app has, else the locale. */
+		const shown = () => env.api.localeSettings().languages.find(has) ?? env.api.locale();
 		return {
 			api: {
 				t(key, options) {
 					key = String(key);
 					version();
-					const { locale = env.api.locale(), ...args } = options && typeof options === "object" ? options : {};
+					const { locale = shown(), ...args } = options && typeof options === "object" ? options : {};
 					const text = lookup(String(locale), key);
 					if (text === void 0) return `${locale}.${key}`;
 					return text.replace(/%\{(\w+)\}/g, (pattern, name) => Object.hasOwn(args, name) ? String(args[name]) : pattern);
