@@ -2,7 +2,7 @@ import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { Button, Switch } from "nsh/base";
 import { Keyboard, keyboardFrame } from "nsh";
-import { button, buttonText, desktop, field, switchLook, tint, ui } from "./palette";
+import { button, buttonText, desktop, field, Segmented, switchLook, tint, ui } from "./palette";
 
 function App() {
   const draft = signal("");
@@ -14,10 +14,6 @@ function App() {
     messages.update((list) => [...list, draft().trim()]);
     draft.set("");
   };
-  const chip = (on: () => boolean) => button("secondary", { on, size: "sm" });
-  const chipText = (on: () => boolean) => buttonText("secondary", { on, size: "sm" });
-  const isPadding = () => behavior() === "padding";
-  const isHeight = () => behavior() === "height";
   return (
     <View
       style={{
@@ -34,13 +30,9 @@ function App() {
             ? "Desktops type with a hardware keyboard: its height stays 0 and the view keeps its layout. Open this on a phone to see it move."
             : "Tap the message field: the bar moves up with the keyboard."}
         </Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          <Button onPress={() => behavior.set("padding")} selected={isPadding()} {...chip(isPadding)}>
-            <Text style={chipText(isPadding)}>padding</Text>
-          </Button>
-          <Button onPress={() => behavior.set("height")} selected={isHeight()} {...chip(isHeight)}>
-            <Text style={chipText(isHeight)}>height</Text>
-          </Button>
+        {/* Exactly one of two ways to make room: a segmented choice. */}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+          <Segmented options={["padding", "height"] as const} value={behavior()} onChange={(next) => behavior.set(next)} />
           <Switch
             checked={enabled()}
             onChange={({ checked }) => enabled.set(checked)}

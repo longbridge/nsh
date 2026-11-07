@@ -87,14 +87,29 @@ fn tui_shows_startup_progress_and_keeps_running_host_diagnostics_in_its_log() {
 #[test]
 fn tui_rejects_invalid_cell_dimensions_before_launching() {
     for value in ["0x16", "8x-1", "NaNx16", "8xinf", "8", "8x16x32"] {
-        let app = app(&format!(r#"{{"tui":{{"pointsPerCell":"{value}"}}}}"#));
-        let output = run(&app, &[]);
+        let app = app("{}");
+        let output = run(&app, &["--points-per-cell", value]);
         assert!(!output.status.success(), "accepted {value}");
         assert!(!String::from_utf8_lossy(&output.stdout).contains("host arguments"));
     }
-    let app = app("{}");
-    let output = run(&app, &["--points-per-cell", "0x16"]);
-    assert!(!output.status.success());
+}
+
+#[test]
+fn tui_leaves_out_cell_dimensions_of_nsh_json_it_cannot_read() {
+    // A newer NSH's form (or a typo): warned of, and the default's taken.
+    for value in ["0x16", "auto"] {
+        let app = app(&format!(r#"{{"tui":{{"pointsPerCell":"{value}"}}}}"#));
+        let output = run(&app, &[]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let shown = String::from_utf8_lossy(&output.stdout);
+        assert!(shown.contains("--points-per-cell 8x16"), "{shown}");
+        let all = format!("{shown}{}", String::from_utf8_lossy(&output.stderr));
+        assert!(all.contains("tui.pointsPerCell"), "{all}");
+    }
 }
 
 #[test]

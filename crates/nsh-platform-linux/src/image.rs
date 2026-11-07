@@ -128,12 +128,13 @@ pub(crate) fn menu_icon(surface: &Surface, source: &ImageSource) -> Option<gio::
 
 /// Loads `source` fitted in a `side` × `side` pixel square, off the main
 /// thread; `done` runs on the main thread with it (an animation's first
-/// frame). For pixels that leave GTK: the tray's icon.
+/// frame), and whether it is an SVG (a template, painted in the panel's
+/// text color). For pixels that leave GTK: the tray's icon.
 pub(crate) fn load_icon(
     surface: &Surface,
     source: &ImageSource,
     side: u32,
-    done: impl FnOnce(Result<gdk::Texture, String>) + 'static,
+    done: impl FnOnce(Result<(gdk::Texture, bool), String>) + 'static,
 ) {
     let want = Want {
         size: nsh_core::geometry::size(Points(side as f32), Points(side as f32)),
@@ -147,7 +148,9 @@ pub(crate) fn load_icon(
         Frames::First,
         Priority::Normal,
         None,
-        Box::new(move |result| done(result.map(|(p, _)| p.texture))),
+        Box::new(move |result| {
+            done(result.map(|(p, _)| (p.texture, matches!(p.natural, Natural::Vector(_)))))
+        }),
     ) {
         load.detach();
     }

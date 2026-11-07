@@ -32,6 +32,16 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     /** The events it listens to, kinds below 64 ({@link Mounter#wants} has all). */
     long events;
     final Decor decor = new Decor();
+
+    /** An outer box shadow draws outside the bounds, and compositing the
+     * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
+     * it; such a view reports no overlapping rendering, so the alpha
+     * applies per draw op and the shadow fades with the content. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !decor.hasOuterShadows();
+    }
+
     boolean clip;
     /** 0 auto, 1 none, 2 box-none, 3 box-only. */
     int pointerEvents;
@@ -48,6 +58,15 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     private View overflowTarget;
     /** Children go here while the box both clips and casts a shadow. */
     private Box content;
+    /**
+     * True on a wrapper a split created (another box's {@link #content}): it
+     * only draws and clips. The event messages update the view the mounter
+     * maps the shared id to (the outer box), so a wrapper handling a touch
+     * itself would consume it with an empty event mask and dispatch nothing;
+     * its frame is the outer box's, so every touch it would take is the
+     * outer box's to take.
+     */
+    private boolean contentWrapper;
     private final Path clipPath = new Path();
     /** Whether a shader draws its box (`SHADER`; libnsh renders it). */
     private boolean shader;
@@ -481,6 +500,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             content = new Box(getContext(), mounter, id);
             content.setBackground(null);
             content.setClickable(false);
+            content.contentWrapper = true;
             while (getChildCount() > 0) {
                 View child = getChildAt(0);
                 removeViewAt(0);
@@ -795,6 +815,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent e) {
+        if (contentWrapper) return false;
         if (pointerEvents == 3) return true;
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
@@ -831,6 +852,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent e) {
+        if (contentWrapper) return false;
         if (pointerEvents == 2) return false;
         boolean pressable = pressable(), pannable = pannable(), twoFinger = twoFinger();
         if (!pressable && !pannable && !twoFinger) return false;

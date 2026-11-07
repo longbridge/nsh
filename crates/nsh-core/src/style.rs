@@ -10,7 +10,7 @@ use crate::{
     css,
     effects::{
         BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
-        KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
+        KeyframeAnimation, Keyframes, MacOsBackdrop, Outline, Transition, TransitionProps,
     },
     element::PropEnum,
     geometry::{
@@ -532,6 +532,10 @@ pub struct ViewStyle {
     pub backdrop_material: BackdropMaterial,
     /// `glassEffect`.
     pub glass_effect: GlassEffect,
+    /// `glassTintColor`: the tint of `glassEffect`'s native material.
+    pub glass_tint_color: Option<Color>,
+    /// The macOS backdrop from `macos={{ backdrop }}`, projected at mount time.
+    pub macos_backdrop: Option<MacOsBackdrop>,
     /// `outline*`.
     pub outline: Outline,
     /// `visibility: "hidden"`: not drawn and not touchable, still laid out.
@@ -857,6 +861,8 @@ impl Default for ViewStyle {
             blend_mode: BlendMode::Normal,
             backdrop_material: BackdropMaterial::UltraThin,
             glass_effect: GlassEffect::None,
+            glass_tint_color: None,
+            macos_backdrop: None,
             outline: Outline::NONE,
             hidden: false,
             cursor: Cursor::Auto,
@@ -1588,6 +1594,7 @@ style_keys! {
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
     MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included, whose blur then draws without the system material's tint. Not drawn on Windows and GPUI.",
     GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and macOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
+    GlassTintColor = "glassTintColor": View "ColorValue" "A tint of the glass material (`glassEffect`; iOS 26 and macOS 26 and later): the color the native glass takes on, or `null` for the system default. A transparent color is an explicit tint, not a reset. Has no effect without glass; the blur fallback on earlier systems stays unchanged.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
     OutlineColor = "outlineColor": View "ColorValue",
@@ -2886,6 +2893,7 @@ impl StyleKey {
             | K::BorderBottomColor
             | K::BorderLeftColor
             | K::TintColor
+            | K::GlassTintColor
             | K::OutlineColor
             | K::Color
             | K::TextDecorationColor
@@ -3665,6 +3673,7 @@ impl Style {
             }
             (K::BorderCurve, V::Bool(v)) => self.view.continuous_corners = *v,
             (K::TintColor, V::Color(c)) => self.view.tint_color = *c,
+            (K::GlassTintColor, V::Color(c)) => self.view.glass_tint_color = *c,
             (K::ObjectFit, V::ObjectFit(v)) => self.pending.object_fit = *v,
             (K::ObjectPosition, V::ObjectPosition(v)) => self.view.object_position = *v,
             (K::BackfaceVisibility, V::Bool(v)) => self.view.backface_hidden = *v,
@@ -4906,6 +4915,26 @@ mod tests {
         );
         assert_eq!(
             s.set("maskImage", StyleValue::Str("url(a.png)")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn glass_tint_color_parses_and_clears() {
+        let mut s = Style::default();
+        assert_eq!(s.view.glass_tint_color, None);
+        s.set("glassTintColor", StyleValue::Str("#ff0000")).unwrap();
+        assert_eq!(s.view.glass_tint_color, Some(Color(0xff00_00ff)));
+        s.set(
+            "glassTintColor",
+            StyleValue::Str("color-mix(in srgb, #00ff00 50%, transparent)"),
+        )
+        .unwrap();
+        assert!(s.view.glass_tint_color.is_some());
+        s.set("glassTintColor", StyleValue::Null).unwrap();
+        assert_eq!(s.view.glass_tint_color, None);
+        assert_eq!(
+            s.set("glassTintColor", StyleValue::Number(1.0)),
             Err(StyleError::InvalidValue)
         );
     }

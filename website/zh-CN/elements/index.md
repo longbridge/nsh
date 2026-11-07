@@ -443,6 +443,8 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `desktop` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `windowDrag` | `.window_drag(..)` | `boolean` | 按住视图拖动窗口，像按住标题栏一样；`false` 让可拖动视图中的一部分保持可点击。见[自定义标题栏](../modules/nsh-desktop.md#自定义标题栏)。 |
+| `windowControl` | `.window_control(..)` | `"minimize" \| "maximize" \| "close"` | 这个视图就是应用自绘标题栏中对应的窗口按钮：平台执行它的按下动作，辅助技术把它识别为该按钮。 |
+| `windowResize` | `.window_resize(..)` | `"top" \| "bottom" \| "left" \| "right" \| "topLeft" \| "topRight" \| "bottomLeft" \| "bottomRight"` | 按住这个视图从对应的边或角调整无边框窗口的大小。 |
 
 ```rust tabs
 use nsh_core::Ripple;
