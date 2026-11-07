@@ -350,6 +350,11 @@ Things that were found the hard way. Read the section of the area you change bef
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
   the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
   so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+- **Android 9, GIFs cannot play from an `AnimatedImageDrawable`**: its later frames decode on hwui's `AnimatedImageTh`, and
+  reading the source bytes there (`ByteArrayStream::read`, `SkGIFFrameContext`) needs a JNIEnv that thread does not have: the
+  process aborts with "Failed to get JNIEnv for JavaVM". Any `ImageDecoder` source backed by memory hits it; animated WebP does
+  not. Below API 30 a GIF plays from `android.graphics.Movie` (`MovieDrawable`): each view decodes its own, on the thread
+  that draws it.
 - **Android widgets**: `MediaPlayer.setPlaybackParams` starts playback (set the rate only while playing) and a paused player draws nothing until
   it seeks; `WebView` JavaScript bridge calls arrive on a binder thread (post to the UI thread).
 - **Android, negative letter spacing**: Minikin adds half the spacing on both sides of each glyph and trims the halves at line edges,
@@ -459,6 +464,17 @@ Things that were found the hard way. Read the section of the area you change bef
   `onTouchEvent` loses only the slop. A swipe that eased out jumped a quarter of its length or more in its first
   frame, all of it lost on a field. The agent's swipes ease in and out, a quarter frame apart as a drag's samples,
   so their first moves stay within the slop and each loses about the slop wherever it lands.
+
+- **Screenshots are copied from the windows' surfaces** (`PixelCopy`, `TestAgent.screenshot`): a view tree drawn
+  into a software `Canvas` holds only what the CPU draws, without `TextureView`s (video), `RenderEffect` filters, the
+  backdrop's blur (it draws a `RenderNode`, on hardware canvases only) and hardware layers. A copy holds the last frame
+  the window drew, so the agent invalidates the windows and waits for their next frame first (a frame commit callback,
+  two Choreographer frames on API 28); the copy is reported on a thread of its own, as the main thread runs the
+  request. A `<modal>` is a dialog window of its own (`ModalHost`), so the activity's copy holds none of it: the
+  agent copies each shown modal's window and the system alert's and places them over it, bottom to top. The dim
+  behind a dialog is the compositor's layer between the windows: the agent fills the picture so far with black at
+  the dialog's `dimAmount` (`FLAG_DIM_BEHIND`) before placing the dialog's copy over it. A window without a surface
+  (an activity stopped behind the lock screen of a phone) is drawn into a bitmap, the views as the CPU draws them.
 
 ## macOS, AppKit
 

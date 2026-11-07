@@ -2,6 +2,7 @@ import { type AnimatedValue, cleanup, Clipboard, createAnimatedValue, Easing, ef
 import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
+import { play as sound } from "../../nsh-gallery-ui/sound";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, mono, motion, pressSink, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
@@ -407,6 +408,7 @@ export function ButtonDemo() {
       last.set("Save: started");
       after(1200, () => {
         save.set("done");
+        sound("success");
         last.set("Save: done");
         after(1800, () => save.set("idle"));
       });
@@ -427,6 +429,7 @@ export function ButtonDemo() {
             progress.set(null);
             fill.set(0);
             doneUpload.set(true);
+            sound("success");
             last.set("Upload: done");
           });
       };
@@ -461,6 +464,7 @@ export function ButtonDemo() {
     const copied = signal<string | null>(null);
     const copy = (what: string, text: string) => {
       void Clipboard.writeText(text);
+      sound("success", { volume: 0.3 });
       copied.set(what);
       last.set(`copied ${what}`);
       after(1600, () => copied() === what && copied.set(null));
@@ -551,6 +555,7 @@ export function ButtonDemo() {
               onLongPress={() => {
                 resize();
                 state.set("done");
+                sound("close", { volume: 0.8 });
                 fill.set(0);
                 nudge.set(false);
                 last.set("deleted Q3 roadmap");

@@ -12,6 +12,7 @@ import { alpha, colors, finish, focusRing, mono, motion, TERMINAL_COLUMN, TERMIN
 import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type ButtonSize, roundButtonGlyph, roundButtonLook } from "./look/button";
 import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
+import { play } from "./sound";
 
 export * from "./theme";
 export * from "./look/button";
@@ -542,14 +543,18 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
 
 /**
  * An on / off switch (`nsh/base`'s `Switch`, in the gallery's look): the
- * knob springs across, the track changes color natively.
+ * knob springs across, the track changes color natively, and it sounds
+ * `toggle`, a little lower turning off.
  */
 export function Toggle(props: { value: boolean; onChange: (value: boolean) => void; label?: string }) {
   const look = switchLook(() => props.value);
   return (
     <Switch
       checked={props.value}
-      onChange={({ checked }) => props.onChange(checked)}
+      onChange={({ checked }) => {
+        play("toggle", { rate: checked ? 1 : 0.9 });
+        props.onChange(checked);
+      }}
       accessibilityLabel={props.label}
       // 8 pt more to press on every side (a hit slop around the small
       // track), without taking more room.
@@ -584,9 +589,16 @@ export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
 /**
  * A panel at the bottom over a dimmed backdrop while `open` (`nsh/base`'s
  * `Sheet`, in the gallery's look); a press on the backdrop, Escape or the
- * back button closes it (`onClose`: set `open` to false).
+ * back button closes it (`onClose`: set `open` to false). It comes in with
+ * `open` and goes with `close`, quietly.
  */
 export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
+  let was = props.open;
+  effect(() => {
+    const open = props.open;
+    if (open !== was) play(open ? "open" : "close", { volume: 0.45 });
+    was = open;
+  });
   return (
     <BaseSheet
       open={props.open}

@@ -589,10 +589,11 @@ prop scroll:text:"let a = 1;" scrollbar false
 prop scroll:text:"Alpha" horizontal true
 prop scroll:text:"Alpha" scrollbar false
 style text:"First item" color #0000ffff
-# A press on the link reports its URL; nothing opens it.
+# A press on the link reports its URL and the modifier keys held;
+# nothing opens it.
 expect Link: none
 tap span:the guide
-expect Link: https://example.com/guide
+expect Link: https://example.com/guide (Command: false)
 # HTML.
 expect From HTML
 expect An hypertext paragraph.

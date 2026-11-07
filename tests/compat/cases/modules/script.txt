@@ -87,6 +87,8 @@ tap id:case-mod-audio
 # "unavailable"; a volume out of range throws a RangeError.
 expect Available: false
 expect Sound: not loaded
+# an imported audio file is its URL
+expect Imported: asset:/sounds/click.wav
 tap id:play
 expect Refused: threw RangeError
 expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
@@ -101,7 +103,7 @@ expect Permission: unknown
 tap id:notify
 expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
-expect Shown: false
+expect Shown: false false
 covers [nsh] Notifications
 # mod-url-scheme
 tap id:case-mod-url-scheme
@@ -126,7 +128,7 @@ tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
-expect Calls: application done, quit function
+expect Calls: application done, quit function, restart function
 tap id:toggles
 expect Calls: toggles done
 covers [nsh/desktop] isAvailable
