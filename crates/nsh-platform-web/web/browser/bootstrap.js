@@ -3336,6 +3336,7 @@
 	const PLATFORM_PROPS = /* @__PURE__ */ new Set([
 		"ios",
 		"android",
+		"macos",
 		"desktop",
 		"web"
 	]);
@@ -5227,6 +5228,10 @@
 				token(name) {
 					tokens();
 					return invoke(402, [name, fields.colorScheme() === "dark"]);
+				},
+				setTheme(theme) {
+					invoke(406, [theme]);
+					tokens.update((value) => value + 1);
 				}
 			},
 			insets,
