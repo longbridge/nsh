@@ -48,6 +48,8 @@ pollster = { workspace = true, optional = true }
 # WebAssembly has no threads: `LocalEngine` drives the engine there.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+# A packaged app's update configuration (`updates`).
+nsh-updater.workspace = true
 
 # Thread priority (Apple), process CPU and memory (`perf`).
 [target.'cfg(unix)'.dependencies]

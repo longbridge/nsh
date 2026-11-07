@@ -761,6 +761,7 @@ impl RootView {
             picker: None,
             speech: None,
             audio: None,
+            windows: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
@@ -814,7 +815,7 @@ impl RootView {
         );
         // The app's downloaded images go through its disk cache.
         installed.set_image_cache(engine.image_cache());
-        if self.ivars().options.fps {
+        if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);

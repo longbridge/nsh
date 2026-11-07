@@ -179,6 +179,9 @@ define_class!(
 /// Called when the app reports a fatal error (development hosts show it).
 pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
+/// Turns the performance monitor on or off.
+type PerfToggle = Box<dyn Fn(bool)>;
+
 /// One engine and its views.
 pub(crate) struct Surface {
     key: u64,
@@ -246,6 +249,10 @@ pub(crate) struct Surface {
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
     perf_on: Arc<AtomicBool>,
+    /// Shows or hides the view's performance monitor
+    /// (`setFpsEnabled`): set by its [`crate::AppView`],
+    /// which owns the panel.
+    pub(crate) perf_toggle: RefCell<Option<PerfToggle>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
@@ -261,6 +268,9 @@ pub(crate) struct Surface {
     resized: RefCell<Vec<NshView>>,
     /// The background set under the root ([`crate::system`]).
     pub(crate) background: Cell<Option<nsh_core::Color>>,
+    /// The surface fills the standalone runner's window ([`crate::run_app`]),
+    /// not a view of a host app.
+    pub(crate) standalone: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
@@ -271,6 +281,9 @@ pub(crate) struct Surface {
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// What is held of the main window: its policies, title bar and look
+    /// ([`crate::window`]).
+    pub(crate) main_window: crate::window::Held,
     /// The window observed for its bounds ([`crate::window_state`]).
     pub(crate) window: crate::window_state::Watch,
     /// Videos, web views and registered native components.
@@ -344,12 +357,14 @@ impl Surface {
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
+            perf_toggle: RefCell::new(None),
             last_tick: Cell::new(0.0),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
             resized: RefCell::default(),
             background: Cell::new(None),
+            standalone: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),
@@ -359,6 +374,7 @@ impl Surface {
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            main_window: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
         });
@@ -716,6 +732,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
@@ -1163,7 +1180,7 @@ fn frame_rate_range(rate: Option<f32>, max: f32) -> objc2_quartz_core::CAFrameRa
 }
 
 /// Runs `f` on the main queue after `ms` milliseconds.
-fn after(ms: u64, f: impl FnOnce() + Send + 'static) {
+pub(crate) fn after(ms: u64, f: impl FnOnce() + Send + 'static) {
     let when = dispatch2::DispatchTime::NOW.time((ms * 1_000_000) as i64);
     if let Err(err) = DispatchQueue::main().after(when, f) {
         log::error!("cannot schedule a frame: {err:?}");

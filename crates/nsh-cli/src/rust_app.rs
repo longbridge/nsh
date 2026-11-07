@@ -330,6 +330,8 @@ pub(crate) struct RootConfig {
     /// `"schemes"`' schemes (checked, lower case): the URL schemes the
     /// app claims.
     url_schemes: Vec<String>,
+    /// `"window"` (JSON, checked): the main window's launch options.
+    window: Option<String>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -565,27 +567,55 @@ fn root_config(
     };
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
-        nsh_base::Theme::from_json(&json).map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
+        let (_, ignored) = nsh_base::Theme::from_json_lenient(&json)
+            .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
+        for what in ignored {
+            crate::ui::warn(format_args!(
+                "nsh.json: theme: {what}, ignored (one of a newer NSH, or a typo)"
+            ));
+        }
     }
     let appearance = match config.get("appearance").and_then(|a| a.as_str()) {
         None | Some("system") => None,
         Some(a @ ("light" | "dark")) => Some(a.to_owned()),
         Some(other) => {
-            bail!("nsh.json: appearance: {other:?} is not \"light\", \"dark\" or \"system\"")
+            crate::ui::warn(format_args!(
+                "nsh.json: appearance: {other:?} is not \"light\", \"dark\" or \"system\", ignored (one of a newer NSH, or a typo)"
+            ));
+            None
         }
     };
     let status_bar = match config.get("statusBar") {
         None => None,
         Some(v) => {
-            nsh_core::StatusBarSetting::from_json(v)
-                .map_err(|e| anyhow::anyhow!("nsh.json: statusBar: {e}"))?;
+            let (_, ignored) = nsh_core::StatusBarSetting::from_json_lenient(v);
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: statusBar: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
             Some(v.to_string())
         }
     };
     let url_schemes = match config.get("schemes") {
         None => Vec::new(),
-        Some(v) => nsh_core::url_scheme::schemes_from_json(v)
-            .map_err(|e| anyhow::anyhow!("nsh.json: {e}"))?,
+        Some(v) => {
+            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(v);
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
+            schemes
+        }
+    };
+    let window = match config.get("window") {
+        None => None,
+        Some(v) => {
+            nsh_core::desktop::MainWindowOptions::from_json(v)
+                .map_err(|e| anyhow::anyhow!("nsh.json: window: {e}"))?;
+            Some(v.to_string())
+        }
     };
     Ok(RootConfig {
         component,
@@ -594,6 +624,7 @@ fn root_config(
         app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
         status_bar,
         url_schemes,
+        window,
     })
 }
 
@@ -2371,7 +2402,7 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`, `"window"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!(
@@ -2405,7 +2436,7 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
         .status_bar
         .as_deref()
         .and_then(|json| serde_json::from_str(json).ok())
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok())
+        .map(|v| nsh_core::StatusBarSetting::from_json(&v))
     {
         let mut make_setting = "nsh_core::StatusBarSetting::default()".to_owned();
         if let Some(style) = setting.style {
@@ -2420,6 +2451,9 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
             make_setting.push_str(&format!(".hidden({hidden})"));
         }
         make.push_str(&format!("\n        .status_bar({make_setting})"));
+    }
+    if let Some(window) = &root.window {
+        make.push_str(&format!("\n        .main_window_json({window:?})"));
     }
     format!(
         "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and\n\
@@ -2744,6 +2778,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                window: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
@@ -2960,14 +2995,14 @@ mod tests {
                 "{bad}"
             );
         }
-        assert!(
-            super::root_config(
-                &dir,
-                &config(r#"{ "root": "App", "appearance": "dim" }"#),
-                &ws
-            )
-            .is_err()
-        );
+        // A value of a newer NSH (or a typo) is warned of and left out.
+        let root = super::root_config(
+            &dir,
+            &config(r#"{ "root": "App", "appearance": "dim" }"#),
+            &ws,
+        )
+        .unwrap();
+        assert_eq!(root.appearance, None);
         let root = super::root_config(
             &dir,
             &config(r#"{ "root": "App", "statusBar": { "foreground": "light" } }"#),
@@ -2978,26 +3013,16 @@ mod tests {
             root.status_bar.as_deref(),
             Some(r#"{"foreground":"light"}"#)
         );
-        for (bad, message) in [
-            (r#""light""#, "nsh.json: statusBar: expected an object"),
-            (
-                r#"{ "foreground": "dim" }"#,
-                "nsh.json: statusBar: foreground: \"dim\" is not",
-            ),
-            (
-                r#"{ "hidden": "yes" }"#,
-                "nsh.json: statusBar: hidden: \"yes\" is not true or false",
-            ),
-            (
-                r#"{ "style": "light" }"#,
-                "nsh.json: statusBar: unknown key \"style\"",
-            ),
+        for bad in [
+            r#""light""#,
+            r#"{ "foreground": "dim" }"#,
+            r#"{ "hidden": "yes" }"#,
         ] {
             let json = format!(r#"{{ "root": "App", "statusBar": {bad} }}"#);
-            let err = super::root_config(&dir, &config(&json), &ws)
-                .unwrap_err()
-                .to_string();
-            assert!(err.starts_with(message), "{err}");
+            assert!(
+                super::root_config(&dir, &config(&json), &ws).is_ok(),
+                "{bad}"
+            );
         }
         let code = super::root_fn(
             "#[cfg(x)]\n",
@@ -3009,6 +3034,9 @@ mod tests {
                 app_id: Some("com.example.app".into()),
                 status_bar: Some(r#"{"foreground":"light","hidden":false}"#.into()),
                 url_schemes: vec!["myapp".into()],
+                window: Some(
+                    r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
+                ),
             },
         );
         for line in [
@@ -3019,6 +3047,7 @@ mod tests {
             ".app_id(\"com.example.app\")",
             ".url_schemes([\"myapp\"])",
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
+            r#".main_window_json("{\"defaultSize\":{\"width\":900,\"height\":600},\"title\":\"Notes\"}")"#,
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
         }
@@ -3038,6 +3067,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                window: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -3650,6 +3680,7 @@ panic = \"abort\"
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                window: None,
             }),
         );
         app.write_workspace().unwrap();

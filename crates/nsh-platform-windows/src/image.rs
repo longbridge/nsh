@@ -20,11 +20,13 @@
 //! ([`load_bitmap`]).
 //!
 //! A [`Frame`] keeps its pixels (premultiplied BGRA) and makes its Direct2D
-//! bitmap on the main thread when first drawn (a bitmap is a device
-//! resource: after a device loss, [`crate::gfx::generation`] changes and
-//! the bitmap is made again from the pixels). The bitmap counts in its
-//! picture's entry once made ([`nsh_core::image::MemoryCache::add_cost`])
-//! and goes with it: evicting a picture releases its bitmaps. Bitmaps are
+//! bitmap when first drawn, on each UI thread that draws it (a bitmap is a
+//! device resource, and each UI thread has its own device: after a device
+//! loss, [`crate::gfx::generation`] changes and the bitmap is made again
+//! from the pixels). The bitmap counts in its picture's entry once made
+//! ([`nsh_core::image::MemoryCache::add_cost`]; once, however many threads
+//! made one) and goes with it: evicting a picture releases its bitmaps on
+//! every thread that holds one. Bitmaps are
 //! 96 DPI, so one image pixel is one point; a file named `…@2x.png` (or a
 //! source with a declared size) has its natural size scaled accordingly,
 //! as on iOS.
@@ -51,7 +53,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::{
-        Arc, LazyLock, OnceLock,
+        Arc, LazyLock, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -105,6 +107,7 @@ use crate::{
     render::{DrawCx, rect_f},
     surface::Surface,
     view::{NshView, ViewState},
+    window::UiThread,
 };
 
 /// The longest side of a decoded image, in pixels: larger images are
@@ -206,13 +209,13 @@ fn premultiply_bgra(data: &mut [u8]) {
 }
 
 thread_local! {
-    /// The main thread's Direct2D bitmaps by frame, with the device
+    /// This UI thread's Direct2D bitmaps by frame, with the device
     /// generation each was made in.
     static BITMAPS: RefCell<FxHashMap<u64, (u64, ID2D1Bitmap1)>> = RefCell::default();
 }
 
 /// One decoded image (or frame): its pixels, and its Direct2D bitmap on
-/// the main thread once drawn.
+/// the UI threads that drew it.
 pub(crate) struct Frame {
     pixels: Pixels,
     /// Names its bitmap in [`BITMAPS`].
@@ -222,6 +225,10 @@ pub(crate) struct Frame {
     key: OnceLock<Key>,
     /// It has a bitmap (or had one, released since).
     drawn: AtomicBool,
+    /// The UI threads holding a bitmap of it: the cache is shared by the
+    /// process, so frames may be drawn on several threads, each with its
+    /// own [`BITMAPS`].
+    bitmap_threads: Mutex<Vec<UiThread>>,
     /// Its bitmap's bytes were added to its entry's cost.
     counted: AtomicBool,
 }
@@ -234,6 +241,7 @@ impl Frame {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
             key: OnceLock::new(),
             drawn: AtomicBool::new(false),
+            bitmap_threads: Mutex::new(Vec::new()),
             counted: AtomicBool::new(false),
         })
     }
@@ -249,7 +257,7 @@ impl Frame {
     }
 
     /// Its bitmap on `dc`'s device, made on first use and again after a
-    /// device loss (main thread).
+    /// device loss (UI thread).
     pub(crate) fn bitmap(&self, dc: &ID2D1DeviceContext) -> Option<ID2D1Bitmap1> {
         let generation = crate::gfx::generation();
         let made = BITMAPS.with_borrow(|b| {
@@ -281,6 +289,16 @@ impl Frame {
         match made {
             Ok(b) => {
                 BITMAPS.with_borrow_mut(|m| m.insert(self.id, (generation, b.clone())));
+                {
+                    let ui = UiThread::current();
+                    let mut threads = self
+                        .bitmap_threads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if !threads.contains(&ui) {
+                        threads.push(ui);
+                    }
+                }
                 self.drawn.store(true, Ordering::Relaxed);
                 // The GPU copy counts in the budget, once: one made again
                 // after a device loss replaces the lost one.
@@ -302,14 +320,22 @@ impl Frame {
         }
     }
 
-    /// Releases its bitmap, on the main thread (any thread; a frame drawn
-    /// again makes it again).
+    /// Releases its bitmaps, each on the UI thread that holds it (any
+    /// thread; a frame drawn again makes it again).
     fn release(&self) {
         if self.drawn.swap(false, Ordering::Relaxed) {
             let id = self.id;
-            crate::window::invoke(move || {
-                BITMAPS.with_borrow_mut(|m| m.remove(&id));
-            });
+            let threads = std::mem::take(
+                &mut *self
+                    .bitmap_threads
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
+            for ui in threads {
+                ui.invoke(move || {
+                    BITMAPS.with_borrow_mut(|m| m.remove(&id));
+                });
+            }
         }
     }
 }
@@ -652,12 +678,14 @@ type Done = Box<dyn FnOnce(Result<(Picture, Lease), String>)>;
 /// Called with a download's bytes so far and its size (0: unknown).
 type Progress = Box<dyn Fn(u64, u64)>;
 
-/// Main-thread callbacks by id.
+/// UI-thread callbacks by id.
 type Waiting<T> = RefCell<FxHashMap<u64, T>>;
 
 thread_local! {
-    /// The main thread's side of the loads running: their callbacks
-    /// (`Box<dyn FnOnce(T)>`) and progress listeners, by id.
+    /// This UI thread's side of the loads running: their callbacks
+    /// (`Box<dyn FnOnce(T)>`) and progress listeners, by id. A load's
+    /// result returns to the thread that started it, even though the
+    /// loader and its cache are shared by the process.
     static WAITING: Waiting<Box<dyn Any>> = RefCell::default();
     static PROGRESS: Waiting<Rc<dyn Fn(u64, u64)>> = RefCell::default();
     static NEXT: Cell<u64> = const { Cell::new(0) };
@@ -670,15 +698,17 @@ fn next_id() -> u64 {
     })
 }
 
-/// Keeps `f` on the main thread as callback `id`; the function returned
-/// runs it there from any thread (posted, also from the main thread),
-/// unless it was forgotten ([`Load`]'s drop).
+/// Keeps `f` on the calling UI thread as callback `id`; the function
+/// returned runs it there from any thread (posted, also from that thread),
+/// unless it was forgotten ([`Load`]'s drop). Call it on the UI thread
+/// that owns `f`, never from a worker.
 fn on_main<T: Send + 'static>(f: impl FnOnce(T) + 'static) -> (u64, impl FnOnce(T) + Send) {
     let id = next_id();
+    let ui = UiThread::current();
     let f: Box<dyn FnOnce(T)> = Box::new(f);
     WAITING.with_borrow_mut(|w| w.insert(id, Box::new(f) as Box<dyn Any>));
     let run = move |value: T| {
-        crate::window::invoke(move || {
+        ui.invoke(move || {
             let f = WAITING.with_borrow_mut(|w| w.remove(&id));
             if let Some(f) = f.and_then(|f| f.downcast::<Box<dyn FnOnce(T)>>().ok()) {
                 f(value);
@@ -714,7 +744,8 @@ impl Drop for Load {
     }
 }
 
-/// Loads `source` at `want` for `surface`; `done` runs on the main thread.
+/// Loads `source` at `want` for `surface`; `done` runs on the calling UI
+/// thread (the surface's).
 /// Returns the load while it runs, `None` when `done` already ran (in
 /// memory, or a source that cannot load).
 ///
@@ -735,10 +766,11 @@ fn fetch(
         return None;
     };
     let listener = next_id();
+    let ui = surface.ui_thread();
     let progress = progress.map(|p| {
         PROGRESS.with_borrow_mut(|m| m.insert(listener, Rc::from(p)));
         Arc::new(move |loaded: u64, total: u64| {
-            crate::window::invoke(move || {
+            ui.invoke(move || {
                 if let Some(p) = PROGRESS.with_borrow(|m| m.get(&listener).cloned()) {
                     p(loaded, total);
                 }
@@ -820,8 +852,8 @@ pub(crate) fn load_menu_icon(
 }
 
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
-/// for a canvas off the main thread, at its natural size; `done` runs on
-/// the main thread with the image (an animation's first frame). Canvases
+/// for a canvas off the UI thread, at its natural size; `done` runs on
+/// the surface's UI thread with the image (an animation's first frame). Canvases
 /// draw bitmaps: an SVG is an image that failed to load.
 ///
 /// A cached image is handed over before this returns: callers must not
@@ -1250,7 +1282,7 @@ pub(crate) fn set(
         image.deferred = true;
         (image.generation, image.owner)
     };
-    crate::window::invoke(move || {
+    surface.ui_thread().invoke(move || {
         let (Some(surface), Some(view)) = (Surface::by_key(owner.0), owner_view(owner)) else {
             return;
         };
@@ -1781,7 +1813,8 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
                 // Drawn again after it paused: resumes once this pass is
                 // over (the view's state is borrowed while drawing).
                 let owner = image.owner;
-                crate::window::invoke(move || resume(owner));
+                // Drawing runs on the surface's UI thread.
+                UiThread::current().invoke(move || resume(owner));
             }
             p.frame()
         }
