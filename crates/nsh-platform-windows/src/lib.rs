@@ -83,4 +83,5 @@ pub use crate::{
     },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent, Wheel},
+    text::DWriteTextEngine,
 };
