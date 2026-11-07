@@ -18395,6 +18395,7 @@ mod rust_windows {
                         text("Doc 1")
                     }),
             )
+            .expect("opens on a desktop")
         };
         assert_eq!(doc.id(), "doc:1");
         let batch = c.commit().unwrap();
@@ -18412,7 +18413,7 @@ mod rust_windows {
             let _entered = c.components.runtime.enter();
             open_window(window().id("doc:1").content(|| text("Other")))
         };
-        assert!(again == doc);
+        assert!(again.as_ref() == Some(&doc));
         let batch = c.commit().unwrap();
         assert_eq!(
             desktop_commands(&batch),
@@ -18433,16 +18434,79 @@ mod rust_windows {
             "{:?}",
             batch.items
         );
+        // A closed ref's signals are gone; reading it is safe.
+        {
+            let _entered = c.components.runtime.enter();
+            assert_eq!(doc.state(), None);
+            assert_eq!(doc.title_bar(), Edges::default());
+        }
         // Closed, the id opens a new window.
         {
             let _entered = c.components.runtime.enter();
-            open_window(window().id("doc:1").content(|| text("Doc 1")));
+            assert!(open_window(window().id("doc:1").content(|| text("Doc 1"))).is_some());
         }
         let batch = c.commit().unwrap();
         assert!(matches!(
             &desktop_commands(&batch)[..],
             [(_, DesktopCommand::OpenWindow(_))]
         ));
+    }
+
+    #[component]
+    fn WithNotes() -> impl IntoElement {
+        view().child(window().id("notes").content(|| text("Notes")))
+    }
+
+    #[test]
+    fn rust_open_window_finds_declared_windows_and_follows_capabilities() {
+        use crate::element::desktop::open_window;
+        // Off the desktops: nothing opens.
+        let mut c = core();
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            assert!(open_window(window().id("doc")).is_none());
+        }
+        // A `window()` in the tree with the id: focused, not a second one.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<WithNotes>());
+        let batch = c.commit().unwrap();
+        let [(notes, DesktopCommand::OpenWindow(_))] = &desktop_commands(&batch)[..] else {
+            panic!("the declared window opens");
+        };
+        let notes = *notes;
+        {
+            let _entered = c.components.runtime.enter();
+            let found = open_window(window().id("notes").content(|| text("Other")));
+            assert_eq!(found.as_ref().map(|w| w.id()), Some("notes"));
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            desktop_commands(&batch),
+            [(notes, DesktopCommand::Request(WindowRequest::Focus))]
+        );
+        // Not granted by the capabilities: nothing opens, as `Window.open`
+        // throws.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        let mut access = crate::access::Access::all();
+        access.declared.windows = None;
+        c.set_access(std::sync::Arc::new(access));
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            assert!(open_window(window().id("doc")).is_none());
+        }
+        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
     }
 
     thread_local! {

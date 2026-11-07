@@ -142,15 +142,17 @@ const chat = Window.open(Chat, { id: "chat", title: "Chat", defaultSize: { width
 chat.focus();
 ```
 
-在 Rust 中，`open_window(window()...)` 是同样的写法（GPUI：`cx.open_window`）：可以在任何地方（事件处理、菜单项、任务）打开 `window()` builder 描述的窗口，并立即返回它的 `WindowRef`。它不使用 `.open(..)`；窗口一直打开，直到用户或 `close()` 关闭它，`.on_open_change(..)` 会收到通知。每个文档一个窗口时，给每个窗口自己的 id：
+在 Rust 中，`open_window(window()...)` 是同样的写法（GPUI：`cx.open_window`）：可以在任何地方（事件处理、菜单项、任务）打开 `window()` builder 描述的窗口，并立即返回它的 `WindowRef`。如果同 id 的窗口已经打开（无论是 `open_window` 打开的还是用 `window()` 声明的），它会聚焦该窗口并返回它的 ref。在 `Window.open` 会抛错的情况下（非桌面平台，或权限不允许该窗口），它返回 `None` 并记录警告。它不使用 `.open(..)`；窗口一直打开，直到用户或 `close()` 关闭它，`.on_open_change(..)` 会收到通知。每个文档一个窗口时，给每个窗口自己的 id：
 
 ```rust
-let doc = open_window(
+let Some(doc) = open_window(
     window()
         .id(format!("doc:{id}"))
         .title(name)
         .content(move || editor(id)),
-);
+) else {
+    return;
+};
 ```
 
 `Window.get(id)` 是 id 为 `id` 的已打开窗口，没有时为 `null`（响应式）；`"main"` 是主窗口。在非桌面平台上 `Window.open` 抛出 `code` 为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 的错误；应用的[权限](#权限)不允许的窗口抛出 `ERR_ACCESS_DENIED`。

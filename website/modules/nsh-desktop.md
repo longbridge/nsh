@@ -142,15 +142,17 @@ const chat = Window.open(Chat, { id: "chat", title: "Chat", defaultSize: { width
 chat.focus();
 ```
 
-In Rust, `open_window(window()...)` is the same (GPUI: `cx.open_window`): it opens the `window()` builder's window from anywhere, an event handler, a menu item or a task, and returns its `WindowRef` at once. Its `.open(..)` is not used; the window stays open until the user or `close()` closes it, and `.on_open_change(..)` hears it. For a window per document, give each its own id:
+In Rust, `open_window(window()...)` is the same (GPUI: `cx.open_window`): it opens the `window()` builder's window from anywhere, an event handler, a menu item or a task, and returns its `WindowRef` at once. With the id of a window that is already open (opened by `open_window` or declared with `window()`), it focuses that window and returns its ref. Where `Window.open` throws, off the desktops or when the capabilities do not grant the window, it returns `None` and logs a warning. Its `.open(..)` is not used; the window stays open until the user or `close()` closes it, and `.on_open_change(..)` hears it. For a window per document, give each its own id:
 
 ```rust
-let doc = open_window(
+let Some(doc) = open_window(
     window()
         .id(format!("doc:{id}"))
         .title(name)
         .content(move || editor(id)),
-);
+) else {
+    return;
+};
 ```
 
 `Window.get(id)` is the open window with `id`, or `null` (reactive); `"main"` is the main window. Off the desktops `Window.open` throws with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; a window the app's [capabilities](#capabilities) do not grant throws with `ERR_ACCESS_DENIED`.

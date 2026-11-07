@@ -1528,6 +1528,12 @@ impl<M: TextEngine> Core<M> {
     /// Sets what the app may reach: remote images, canvas images, video
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
+        // `open_window` checks windows as `Window.open` does.
+        {
+            let _entered = self.components.runtime.enter();
+            crate::element::global::<crate::element::desktop::WindowAccess>()
+                .set(crate::element::desktop::WindowAccess(Some(access.clone())));
+        }
         self.access = access;
     }
 
