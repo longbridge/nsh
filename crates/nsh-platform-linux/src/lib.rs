@@ -13,7 +13,7 @@
 //! [`AppView`] is one surface as a widget (for embedding); [`run_app`]
 //! opens one in a window. Off Linux this crate is empty.
 
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", not(target_env = "ohos")))]
 
 mod access;
 #[cfg(feature = "dev")]

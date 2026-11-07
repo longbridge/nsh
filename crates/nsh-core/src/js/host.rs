@@ -238,6 +238,8 @@ pub enum Platform {
     Ios,
     /// `android={{…}}`.
     Android,
+    /// `ohos={{…}}`.
+    Ohos,
     /// `desktop={{…}}` (macOS, Windows, Linux, desktop browsers).
     Desktop,
     /// `web={{…}}`.
@@ -1021,6 +1023,7 @@ pub fn declarations() -> String {
             (Platform::All, "", ""),
             (Platform::Ios, "IOS", " inside `ios={{…}}`"),
             (Platform::Android, "Android", " inside `android={{…}}`"),
+            (Platform::Ohos, "Ohos", " inside `ohos={{…}}`"),
             (Platform::Desktop, "Desktop", " inside `desktop={{…}}`"),
             (Platform::Web, "Web", " inside `web={{…}}`"),
         ] {
