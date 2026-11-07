@@ -138,7 +138,8 @@ belong to the app, which owns retention and its storage budget.
   `animationFrameRate`: `animation.md` "Frame rate"): `Surface::frame_rate` folds the graph's rate with the frame
   callbacks that report one (`Surface::cap_frame`, a view's keyframes alone); anything else (a JS frame request, a
   batch waiting, a transition, a scroll glide) wants the screen's highest. The range (`frame_rate_range`) is set when
-  the link starts or resumes and again whenever the folded rate changes. The link does not fire while the window is
+  the link starts or resumes, whenever the folded rate changes, and when the window's screen refreshes at another
+  highest rate than the range was made for (`Surface::follow_screen`, checked each frame). The link does not fire while the window is
   occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
   only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
   waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
