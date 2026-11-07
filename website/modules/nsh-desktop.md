@@ -1,12 +1,12 @@
 ---
 title: nsh/desktop
-description: "Desktop-only APIs: the window (title, title bar, maximize, full screen), a title bar of the app's own with draggable regions, the application menu, context menus and keyboard shortcuts."
+description: "Desktop-only APIs: the window (title, title bar, maximize, full screen, its bounds and display), the displays, a title bar of the app's own with draggable regions, the application menu, context menus and keyboard shortcuts."
 order: 12.5
 ---
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), `quit`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
+`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: the window's functions (`set_title`, `set_title_bar`, `title_bar`, `minimize`, … `close_window`), its state and the displays (`window_state`, `displays`, `set_window_bounds`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its window and menus are there.
 
 ```rust tabs
 use nsh_core::{
@@ -20,7 +20,7 @@ use nsh_core::{
 ```
 
 ```tsx tabs
-import { Application, isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { Application, displays, isAvailable, Menu, titleBar, Window, windowState } from "nsh/desktop";
 ```
 
 ## isAvailable
@@ -48,6 +48,7 @@ const Window: {
     size?: Partial<Size>;
     animated?: boolean;
   }): void;
+  setBounds(bounds: WindowBounds): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
   setSkipTaskbar(skip: boolean): void;
   orderFront(): void;
@@ -66,15 +67,16 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 | `minimize()` | `minimize()` | Minimizes the window. |
 | `toggleMaximize()` | `toggle_maximize()` | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | `toggle_full_screen()` | Enters or leaves full screen. |
-| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the window's top left corner, measured from the top left of the primary screen (on macOS the one with the menu bar) with `y` growing down, the same on every platform; a `height` without a `y` keeps the top edge where it is, so the window grows and shrinks at its bottom edge. `animated: true` enables macOS's resize animation (default: false). |
+| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the window's top left corner, measured from the top left of the primary screen (on macOS the one with the menu bar) with `y` growing down, the same on every platform; a `height` without a `y` keeps the top edge where it is, so the window grows and shrinks at its bottom edge. `animated: true` enables macOS's resize animation (default: false; GPUI apps ignore it). Use it to move or resize the window as it is; `setBounds` restores a saved window. |
+| `setBounds(bounds)` | `set_window_bounds(bounds)` | Restores a window saved earlier: puts it in `bounds.mode` (`"windowed"`, `"maximized"` or `"fullscreen"`) with its windowed bounds `bounds.bounds`, restored to them, then maximized or put in full screen when the mode says so. It takes what [`windowState()`](#the-windows-state-and-the-displays) reports as `windowBounds`, to open the window as the user left it. The bounds first go onto the displays there are now, as the display they were saved on may be unplugged since: they stay when at least 100 × 20 points of the window's top 40 points are on a display's visible bounds, where the user can take the window by its title bar; otherwise they are centered on the primary display's visible bounds, no larger than them. Calling it again with the same bounds changes nothing. Use `setFrame` to move or resize the window as it is. |
 | `setLevel(level)` | `set_level(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
 | `setSkipTaskbar(skip)` | `set_skip_taskbar(skip)` | On Windows, `true` keeps the window out of the taskbar (Electron's and Tauri's `skipTaskbar`), for overlays, pets and pop-ups; `false` puts it back. macOS's Dock and Linux's docks list apps rather than windows, so other platforms leave it as it is. |
 | `orderFront()` | `order_front()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | `close_window()` | Closes the window; the app ends with it. |
 
-Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. In GPUI apps, `setFrame` sets the window's size and the platform places it; GPUI's host chooses its position and level when opening the window.
+Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. In GPUI apps, `setFrame` sets the size of the window's content (each side at least 1 point) and the platform places it; GPUI's host chooses its position and level when opening the window. A maximized or full-screen GPUI window keeps its size, and on a tiling compositor (Hyprland, Sway) the compositor decides a tiled window's size: GPUI cannot tell a tiled window apart when the compositor draws the decorations.
 
-When sizing a window from content measured with `onLayout`, allow room for window decorations on macOS and Windows. `width` and `height` accept positive finite numbers; `x` and `y` accept finite numbers. Invalid fields keep their previous values.
+When sizing a window from content measured with `onLayout`, allow room for window decorations on macOS and Windows. GPUI apps on Linux with the window manager's decorations need none: the decorations come around the size you set. `width` and `height` accept positive finite numbers; `x` and `y` accept finite numbers. Invalid fields keep their previous values.
 
 ### Window.open
 
@@ -107,19 +109,21 @@ chat.focus();
 
 The window it returns has `id`, `focus()` (shows it, also after `hide()`, and brings it to the front), `hide()` and
 `close()` (its content unmounts). When the user closes it, it closes as `close()` would; closing the main window closes
-it too. `Window.open` runs on Linux and Windows; on other platforms it throws.
+it too. `Window.open` runs on macOS, Windows and Linux; on other platforms it throws.
 
 ## Application
 
 ```ts
 const Application: {
   quit(): void;
+  restart(): void;
 };
 ```
 
 | Member | Rust | Description |
 |---|---|---|
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
+| `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
 update. The app stops as when its last window closes, then its run ends, also when closing the window alone would
@@ -128,6 +132,23 @@ item: the standalone app on macOS returns from `run_app` as with Cmd+Q; in a GPU
 reaches its `AppView::on_close_request` handler as `CloseRequest::Quit`, which quits when the app is ready; elsewhere
 the quit goes ahead as the Quit item's does. A view
 embedded in another app leaves the app's lifecycle to that app. In the terminal the app ends, as with a quit role.
+
+`Application.restart()` is for a setting that takes effect at the next start, such as the app's language: the app asks
+the user first, then calls it. The app quits as with `quit()`, and once its process has exited the same program starts
+again with the arguments it was started with; the two processes never run side by side. On macOS an app inside an
+`.app` bundle comes back through Launch Services, as when the user opens it. It works in standalone apps on macOS,
+Windows and Linux, including those `nsh package` builds; a view embedded in another app (a GPUI app's `AppView`, say)
+leaves restarting to that app. Under `nsh run` the app quits, and `nsh run` ends with it: check restarting in an app
+`nsh package` builds.
+
+```tsx
+import { Application } from "nsh/desktop";
+
+async function changeLanguage(language: string) {
+  await saveLanguage(language);
+  if (await confirmRestart()) Application.restart();
+}
+```
 
 ## A title bar of your own
 
@@ -206,6 +227,70 @@ The hidden title bar's area, in points (reactive): its `height`, and the widths 
 | Linux | `height`, else the header bar's | The window buttons at the start (the desktop's button layout) | The window buttons at the end |
 
 On Windows the caption buttons are drawn by NSH in Windows 11's style and follow the app's appearance; hovering the maximize button shows Windows 11's snap layouts. The window keeps its resize borders, shadow and rounded corners on every platform.
+
+## The window's state and the displays
+
+```ts
+const windowState: Accessor<WindowState | null>;
+const displays: Accessor<Display[]>;
+
+interface WindowState {
+  bounds: Bounds;              // its outer frame now, decorations included
+  windowBounds: WindowBounds;  // its mode and the bounds it is restored to
+  minimized: boolean;
+  hidden: boolean;             // off the screen, not minimized: the app hidden, the window not shown
+  display: Display | null;     // the display with most of it
+}
+interface WindowBounds {
+  mode: "windowed" | "maximized" | "fullscreen";
+  bounds: Bounds;
+}
+interface Display {
+  id: string;                  // the same in the app's next launch
+  bounds: Bounds;
+  visibleBounds: Bounds;       // without the menu bar, the Dock or the taskbar
+  primary: boolean;
+}
+```
+
+`windowState()` is the app's window as the platform reports it, and `displays()` the displays, the primary one first; both are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setFrame` takes them. A change of mode, of display, or of being minimized or hidden is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `window_state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+
+`minimized` and `hidden` tell whether the window is on the screen: it is when neither is set. `hidden` is the app hidden (macOS's Hide) or the window not shown yet or any more. While the window is on the screen, [`lifecycle()`](./nsh.md#device) reporting `"background"` means other windows cover it.
+
+`windowBounds` is what to save to open the window as the user left it: a maximized or full screen window carries the bounds it returns to. The window and the displays are there when the app starts, so the root can restore the saved bounds as it first renders; the same entry serves a Rust root and a TSX one, as `WindowBounds`' serde form is the object TSX saves.
+
+```rust tabs
+#[component]
+fn App() -> impl IntoElement {
+    if let Some(saved) = Storage::get_item("window")
+        .and_then(|json| serde_json::from_str::<WindowBounds>(&json).ok())
+    {
+        set_window_bounds(saved); // fitted on today's displays
+    }
+    effect(|| {
+        if let Some(state) = window_state() {
+            let json = serde_json::to_string(&state.window_bounds).unwrap();
+            let _ = Storage::set_item("window", json);
+        }
+    });
+    view() // ...
+}
+```
+
+```tsx tabs
+import { effect, Storage } from "nsh";
+import { Window, windowState } from "nsh/desktop";
+
+const saved = await Storage.getItem("window");
+if (saved) Window.setBounds(JSON.parse(saved)); // fitted on today's displays
+
+effect(() => {
+  const state = windowState();
+  if (state) Storage.setItem("window", JSON.stringify(state.windowBounds));
+});
+```
+
+macOS reports the window's state and the displays. On iOS, Android and the web, `windowState()` is `null`, `displays()` is empty and `setBounds` does nothing.
 
 ## Menu
 
@@ -459,7 +544,7 @@ On macOS they ask the user for no permission. A letter is the key that types it 
 
 On Windows a keystroke is the app's alone: one another app holds, or one the system keeps (Win+L), resolves `false`. Holding the keys down presses once.
 
-On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`.
+On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.GlobalShortcuts`), the only way on Wayland. The keystroke is only a preference: the desktop may ask the user to confirm it or pick another. Hyprland binds them in its own configuration, by the app's id and the keystroke written in lowercase: `bind = CTRL ALT, K, global, com.example.mail:ctrl+alt+k`, or in a Lua configuration `hl.bind("CTRL + ALT + K", hl.dsp.global("com.example.mail:ctrl+alt+k"))`. The portal knows the app by its id, which needs the app's `.desktop` file: `nsh package` installs one, and `nsh run` writes one for an app with URL schemes.
 
 ```tsx
 import { GlobalShortcut, Window } from "nsh/desktop";

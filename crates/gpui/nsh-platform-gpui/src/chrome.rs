@@ -170,6 +170,8 @@ struct AskedSize {
 /// one left out keeps the window's, or the size asked last while the platform
 /// has not applied it. Once the window has changed (to that size, a size the
 /// platform allowed, or one the user dragged it to) its own size counts.
+/// Each side is at least 1 point: Wayland's viewport rejects a size under 1
+/// as a fatal protocol error.
 fn frame_size(
     current: Size<Pixels>,
     asked: Option<AskedSize>,
@@ -179,9 +181,10 @@ fn frame_size(
     let kept = asked
         .filter(|asked| asked.from == current)
         .map_or(current, |asked| asked.size);
+    let side = |side: f32| gpui::px(side.max(1.0));
     gpui::size(
-        width.map_or(kept.width, gpui::px),
-        height.map_or(kept.height, gpui::px),
+        width.map_or(kept.width, side),
+        height.map_or(kept.height, side),
     )
 }
 
@@ -366,6 +369,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
+        // Not on this backend yet.
+        DesktopCommand::SetBounds(_) => {}
         DesktopCommand::SetLevel(_) => {}
         // The docks show apps, not windows.
         DesktopCommand::SetSkipTaskbar(_) => {}
@@ -386,6 +391,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Hide | DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Close => push(surface, Op::Close),
         DesktopCommand::Quit => push(surface, Op::Quit),
+        // The backend for embedding: when the app restarts is the embedding
+        // app's to decide.
+        DesktopCommand::Restart => {}
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
@@ -720,6 +728,10 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
                 }
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
+            // A maximized or full-screen window keeps the size the platform
+            // gave it. (A tiling compositor's tiles cannot be told apart with
+            // server-side decorations: there the compositor decides.)
+            Op::Resize(..) if window.is_maximized() || window.is_fullscreen() => {}
             Op::Resize(width, height) => {
                 let chrome = &surface.chrome;
                 let from = window.bounds().size;
@@ -1368,6 +1380,7 @@ fn native_items(
     items: &[MenuItem],
     entries: &mut Vec<(u32, Option<MenuRole>)>,
     bindings: &mut Vec<gpui::KeyBinding>,
+    cx: &App,
 ) -> Vec<gpui::MenuItem> {
     items
         .iter()
@@ -1380,11 +1393,23 @@ fn native_items(
                 };
                 entries.push((a.id, a.role));
                 if let Some(s) = a.shortcut.or_else(|| a.role.and_then(|r| r.shortcut(true))) {
-                    bindings.push(gpui::KeyBinding::new(
-                        &gpui_keystroke(&s),
-                        action.clone(),
-                        Some(MENU_SHORTCUT_CONTEXT),
-                    ));
+                    // `KeyBinding::new` takes static keystrokes; `load` parses
+                    // this one with the same mapping on macOS, where the menu
+                    // bar is native.
+                    let context = gpui::KeyBindingContextPredicate::parse(MENU_SHORTCUT_CONTEXT)
+                        .unwrap()
+                        .into();
+                    bindings.push(
+                        gpui::KeyBinding::load(
+                            &gpui_keystroke(&s),
+                            Box::new(action.clone()),
+                            Some(context),
+                            false,
+                            None,
+                            cx,
+                        )
+                        .unwrap(),
+                    );
                 }
                 gpui::MenuItem::action(menus::label(a), action)
                     .checked(a.checked == Some(true))
@@ -1397,7 +1422,7 @@ fn native_items(
                 ..
             } => gpui::MenuItem::submenu(gpui::Menu {
                 name: label.clone().into(),
-                items: native_items(surface, items, entries, bindings),
+                items: native_items(surface, items, entries, bindings, cx),
                 disabled: !enabled,
             }),
         })
@@ -1440,7 +1465,7 @@ fn set_native_menus(surface: &Surface, cx: &mut App) {
                 ..
             } => Some(gpui::Menu {
                 name: label.clone().into(),
-                items: native_items(surface.key(), items, &mut entries, &mut bindings),
+                items: native_items(surface.key(), items, &mut entries, &mut bindings, cx),
                 disabled: !enabled,
             }),
             _ => None,
@@ -1558,6 +1583,18 @@ mod tests {
             frame_size(size(700.0, 500.0), asked, None, Some(400.0)),
             size(700.0, 400.0)
         );
+    }
+
+    #[test]
+    fn set_frame_sizes_each_side_at_least_one_point() {
+        let size = |width: f32, height: f32| gpui::size(gpui::px(width), gpui::px(height));
+        let current = size(800.0, 600.0);
+        assert_eq!(
+            frame_size(current, None, Some(0.4), Some(0.4)),
+            size(1.0, 1.0)
+        );
+        assert_eq!(frame_size(current, None, None, Some(0.0)), size(800.0, 1.0));
+        assert_eq!(frame_size(current, None, Some(1.5), None), size(1.5, 600.0));
     }
 
     #[gpui::test]

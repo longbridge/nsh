@@ -67,7 +67,9 @@ keyboard stays with the app you type in (`--foreground` lets them become the act
 ### Performance monitor
 
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
-`nsh run App.tsx --target macos --fps`, the host's `--fps`, or a packaged TSX app's `open -a MyApp --args --fps`) shows a panel at the top right of the
+`nsh run App.tsx --target macos --fps`, the host's `--fps`, a packaged TSX app's `open -a MyApp --args --fps`, or `NSHPerformanceMonitor` set to `true` in its `Info.plist`, which
+`nsh.json`'s `macos.infoPlist` adds ([Packaging](./packaging.md#infoplist-keys-and-entitlements)): it then shows however
+the app is opened) shows a panel at the top right of the
 app that updates twice a second:
 
 | Row | Measures |
@@ -152,15 +154,18 @@ For an app that is only an NSH app, `run_app(source, options)` (`AppSource::Rust
 (About, Hide, Quit, Edit, Minimize, Zoom, Enter Full Screen, Close), which the app can replace with
 `Menu.setApplicationMenu` ([`nsh/desktop`](../modules/nsh-desktop.md)), and runs until the window closes.
 By default, closing the window or choosing Quit stops the engine and returns from `run_app`;
-the caller can then finish cleanup or relaunch its executable.
+the caller can then finish cleanup or restart its executable.
 
 Set `AppOptions { keep_alive_on_close: true, ..Default::default() }` to keep the
 standalone session alive when its window closes. Closing hides the window;
 reopening from the Dock shows that same window and engine. For an explicit Exit
-or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
+or update restart, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while
 `nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
+`nsh_core::element::desktop::restart()` (TS: `Application.restart()`) quits the same way, and once the process has
+exited `run_app`'s runner starts the app again with the same arguments: inside an `.app` bundle through Launch Services
+(`open -n`), as when the user opens it.
 
 
 `AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:

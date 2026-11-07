@@ -23,7 +23,7 @@ nsh-core = { workspace = true, features = ["declarations"] }
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }
-nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor"] }
+nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor", "term"] }
 nsh-package.workspace = true
 nsh-testing = { workspace = true, features = ["agent", "bundle"] }
 crossbeam-channel.workspace = true
@@ -47,6 +47,8 @@ sha2.workspace = true
 base64.workspace = true
 image.workspace = true
 wasmparser.workspace = true
+# `--asset-url`: checked as an http(s) URL, its origin allowed to `connect-src`.
+url.workspace = true
 
 [build-dependencies]
 serde_json.workspace = true
@@ -67,3 +69,5 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 # The syntaxes file the web runtime fetches must be a dump its syntect reads.
 syntect.workspace = true
+# Pages loaded at the app's paths resolve their files as browsers do.
+url.workspace = true

@@ -15,9 +15,11 @@ use crate::element::Registry;
 
 mod accessibility;
 mod android;
+mod audio;
 mod clipboard;
 mod desktop;
 mod device;
+mod fonts;
 mod fs;
 mod host;
 mod image;
@@ -56,10 +58,13 @@ pub fn registries() -> &'static [Registry] {
         nsh.module::<crate::element::Keyboard>()
             .module::<image::Image>()
             .module::<device::Device>()
+            .module::<fonts::Fonts>()
             .module::<accessibility::Accessibility>()
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<speech::Speech>()
+            .class::<audio::Sound>()
+            .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()
             .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()

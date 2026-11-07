@@ -9,7 +9,8 @@
   `fadeDuration` (iOS: `CATransition`; Android: alpha over the placeholder; default 0 on iOS and 300ms on Android, as in React
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
-  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur). `onLoad` reports the
+  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
+  API 30 plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
   source's size in pixels on both platforms, whatever size the view decodes at. Downloads are shared per URI (also between
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
@@ -34,8 +35,9 @@
   at the size their view shows them: `Want` (the box in points, the device scale, the resize mode; an empty box: the
   natural size; one side alone scales by that side) gives the longest side the fitted image needs in pixels, rounded
   up to a size bucket (`image::bucket`), so views of similar sizes share an entry. The natural size comes from the
-  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is remembered, so a request
-  for an image decoded before is answered from memory, here and now. Entries are keyed by (source key, bucket,
+  bytes' header (`Natural::of`, `imagesize`; an SVG's `svg::size`) before the decode, and is retained while at least
+  one decoded entry for the source remains. Eviction of its last bucket releases the metadata too; active images
+  keep it through their leases. A cached request is answered from memory, here and now. Entries are keyed by (source key, bucket,
   `Frames`), one decode per key at a time. Every entry, the SVG drawings of `element::svg` included, counts in one
   `Budget` per process (`image::budget()`, `default_budget()`: on desktops a sixteenth of the memory, at most
   256 MiB; on phones an eighth, at most 128 MiB) with what it costs: its pixels, its GPU copies (`MemoryCache::add_cost`) and each variant (a smaller
@@ -53,10 +55,11 @@
   `window::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
   WIC cannot read; a `Frame` keeps its premultiplied BGRA pixels and makes its Direct2D bitmap when first drawn,
   which then adds its bytes to the entry (`add_cost`, once: one made again after a device loss replaces it);
-  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`; type-checked, not
-  run): ImageIO thumbnails (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it
-  shrinks) and the bucket's SVG raster; the CGImages are what Core Animation draws, counted once; a blur and the
-  view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
+  evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`): ImageIO thumbnails
+  (`CGImageSourceCreateThumbnailAtIndex`, `ThumbnailMaxPixelSize` the bucket's side when it shrinks) and the bucket's
+  SVG raster; each frame reserves two page-rounded stores at its actual CGImage row stride,
+  for the decoded pixels and Core Animation's display copy (a conservative estimate, not a process footprint cap);
+  a blur and the view's color matrix are baked into a variant (an entry of its own in the same budget, keyed by the decoded entry
   and the look) on a GCD queue; a view starts once its decoration sees a size and loads a larger bucket when it
   grows; it downloads through `UrlSession` (the shared `NSURLSession`, a task delegate per download handing the
   response and data to the loader thread, which cancels the task when its ticket is dropped, past `TIMEOUT` or past

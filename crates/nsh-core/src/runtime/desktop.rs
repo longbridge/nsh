@@ -4,7 +4,7 @@
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
+    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowBounds, WindowFrame, WindowLevel},
     element::{JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
@@ -103,6 +103,19 @@ impl Window {
         desktop(cx, DesktopCommand::SetFrame(frame));
     }
 
+    /// Restores a window saved earlier: puts it in `bounds.mode` with its
+    /// windowed bounds `bounds.bounds` (points, screen coordinates, as
+    /// `windowState()` reports them), restored to the bounds, then
+    /// maximized or in full screen when the mode says so; doing it again
+    /// changes nothing. The bounds are first fitted on the displays there
+    /// are now: unchanged when the window's title bar can still be taken on
+    /// one, else centered on the primary display, no larger than it.
+    /// `setFrame` moves and sizes the window as it is. A view embedded in
+    /// another app's window leaves its window to that app.
+    pub(crate) fn set_bounds(bounds: WindowBounds, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetBounds(bounds));
+    }
+
     /// Sets the window's level on macOS and Windows: `"normal"` restores the
     /// normal level; `"floating"` stays above normal windows. `"desktopIcon"`
     /// selects macOS's desktop icon level or moves a Windows window to the
@@ -147,5 +160,15 @@ impl Application {
     /// that app.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
+    }
+
+    /// Restarts the app: it quits as `quit` does, and once the app has
+    /// exited it starts again with the arguments it was started with. For a
+    /// setting that takes effect at the next start (the app's language, say):
+    /// ask the user first, then call it. Standalone apps on macOS, Windows
+    /// and Linux; a view embedded in another app leaves the app's lifecycle
+    /// to that app.
+    pub(crate) fn restart(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::Restart);
     }
 }

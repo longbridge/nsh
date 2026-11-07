@@ -83,6 +83,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--abi <abi>` | Android：APK 包含的 ABI，可重复或用逗号分隔（默认：`arm64-v8a` 和 `armeabi-v7a`）。 |
 | `--format <apk \| aab>` | Android：写出 APK（默认，直接安装）或用于 Google Play 的 Android App Bundle（见下文“Google Play：App Bundle”）。 |
 | `--run` | 构建完成后安装并启动：在 iOS 模拟器中，或在 `adb` 能看到的 Android 设备或模拟器上；macOS、Linux 和 Windows 应用在本机启动；Web 站点在本机提供服务并在浏览器中打开。不适用于 `--target ios`。 |
+| `--asset-url <URL>` | Web：站点文件所在的 http(s) 地址（CDN），页面按它引用这些文件；`index.html` 和 `manifest.webmanifest` 仍在页面自己的地址下（和不带它时一样按相对路径引用），CDN 要返回 `Access-Control-Allow-Origin`。默认：放在页面旁边，用相对路径引用。`--run` 从本机直接提供站点，所以不带它。 |
 
 ## iOS 模拟器
 
@@ -253,7 +254,7 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 | `CFBundleIdentifier` | `id` |
 | `CFBundleName`、`CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
-| `CFBundleURLTypes` | `deepLinks` |
+| `CFBundleURLTypes` | `schemes` |
 | iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
 | iOS：`UIUserInterfaceStyle` | `appearance` |
 | iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |

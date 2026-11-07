@@ -24,6 +24,7 @@ use nsh_core::{
     ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode,
     ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior,
     TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
+    audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
 
@@ -75,6 +76,8 @@ const NAV_SHADER: i32 = 38;
 /// An entry of the object table.
 pub(crate) enum Obj {
     Str(String),
+    /// A sound's bytes (`Audio.java`), a `byte[]` on the Java side.
+    Bytes(nsh_core::image::ImageData),
     Layout(GlobalRef),
 }
 
@@ -703,15 +706,37 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::HostCall { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
-                    | Command::PickScreenColor { .. }
-                    // No file dialogs (`Environment::file_requests`): the
-                    // core answers first.
-                    | Command::FileRequest { .. }
+                    | Command::PickScreenColor { .. } => e.int(-1),
+                    // `SystemUi.openPath`: the file at the path, a `content:`
+                    // URI the app's FilesProvider serves, to the system's
+                    // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
+                    // have no answer on Android.
+                    Command::FileRequest { id, request } => match *request {
+                        nsh_core::file_dialog::FileRequest::OpenPath(path) => {
+                            e.int(28);
+                            e.int(id as i32);
+                            e.string(path.to_string_lossy().into_owned());
+                        }
+                        // Every other file request has no Android
+                        // implementation. The environment says file
+                        // requests exist, so the core waits for an answer:
+                        // fail it now (op 30), or the call would hang.
+                        _ => {
+                            e.int(30);
+                            e.int(id as i32);
+                        }
+                    },
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_) => e.int(-1),
+                    // `Audio.java`: the sub-opcode, then the command's
+                    // fields (see `audio_command`).
+                    Command::Audio(command) => {
+                        e.int(47);
+                        audio_command(&mut e, command);
+                    }
                     Command::Notification(command) => {
                         use nsh_core::notifications::NotificationCommand as N;
                         e.int(44);
@@ -727,6 +752,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                                 e.string(notification.id);
                                 e.string(notification.title);
                                 e.string(notification.body);
+                                e.bool(notification.silent);
                             }
                             N::Close(id) => {
                                 e.int(2);
@@ -771,6 +797,87 @@ const DIALOG_TOKENS: [&str; 5] = [
     "primary",
     "destructive",
 ];
+
+/// An audio command after its opcode (47), as `Audio.command` reads it:
+/// 0 load (id, bytes, hint, max duration in ms), 1 load from a URL (id),
+/// 2 play (id, volume, rate), 3 stop (id), 4 unload (id), 5 open (id, src,
+/// volume, rate, loop), 6 preload (id), 7 resume (id), 8 pause (id), 9 seek
+/// (id, ms), 10 set (id, volume, rate, loop), 11 close (id).
+fn audio_command(e: &mut Encoded, command: AudioCommand) {
+    let ms = |d: std::time::Duration| d.as_millis().min(i32::MAX as u128) as i32;
+    match command {
+        AudioCommand::Load {
+            id,
+            bytes,
+            hint,
+            max_duration,
+        } => {
+            e.int(0);
+            e.int(id as i32);
+            let index = e.objects.len() as i32;
+            e.objects.push(Obj::Bytes(bytes));
+            e.int(index);
+            e.string(hint);
+            e.int(ms(max_duration));
+        }
+        AudioCommand::LoadUrl { id, .. } => {
+            e.int(1);
+            e.int(id as i32);
+        }
+        AudioCommand::Play { id, volume, rate } => {
+            e.int(2);
+            e.int(id as i32);
+            e.float(volume);
+            e.float(rate);
+        }
+        AudioCommand::Stop { id } => {
+            e.int(3);
+            e.int(id as i32);
+        }
+        AudioCommand::Unload { id } => {
+            e.int(4);
+            e.int(id as i32);
+        }
+        AudioCommand::Open { id, src, settings } => {
+            e.int(5);
+            e.int(id as i32);
+            e.string(src);
+            e.float(settings.volume);
+            e.float(settings.rate);
+            e.bool(settings.looped);
+        }
+        AudioCommand::Preload { id } => {
+            e.int(6);
+            e.int(id as i32);
+        }
+        AudioCommand::Resume { id } => {
+            e.int(7);
+            e.int(id as i32);
+        }
+        AudioCommand::Pause { id } => {
+            e.int(8);
+            e.int(id as i32);
+        }
+        AudioCommand::Seek { id, position } => {
+            e.int(9);
+            e.int(id as i32);
+            e.int(ms(position));
+        }
+        AudioCommand::Set { id, settings } => {
+            e.int(10);
+            e.int(id as i32);
+            e.float(settings.volume);
+            e.float(settings.rate);
+            e.bool(settings.looped);
+        }
+        AudioCommand::Close { id } => {
+            e.int(11);
+            e.int(id as i32);
+        }
+        // A command a newer core adds: nothing to do here.
+        _ => e.int(-1),
+    }
+}
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).
@@ -1728,6 +1835,54 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
                 e.float(offset.0);
                 e.int(argb(*color));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::file_dialog::{self, FileRequest};
+
+    use super::*;
+
+    /// The ints a batch of one file request is encoded as.
+    fn ints(request: FileRequest) -> Vec<i32> {
+        let batch = MountBatch {
+            items: vec![MountItem::Command {
+                id: 3,
+                command: Command::FileRequest {
+                    id: 7,
+                    request: Box::new(request),
+                },
+            }],
+        };
+        encode(batch)
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn open_path_is_sent_and_the_other_file_requests_fail() {
+        // `COMMAND`, the view id, op 28, the request id, the path's
+        // object index: `Mounter.java` opens the file and answers.
+        assert_eq!(
+            ints(FileRequest::OpenPath("/data/user/0/app/files/a.pdf".into())),
+            vec![COMMAND, 3, 28, 7, 0]
+        );
+
+        // `Environment::file_requests` is set, so the core waits for an
+        // answer to every request: op 30 fails the rest instead of leaving
+        // `pick_paths`, `pick_save_path`, `reveal_path` and `move_to_trash`
+        // pending forever.
+        for request in [
+            FileRequest::OpenDialog(file_dialog::OpenDialog::default()),
+            FileRequest::SaveDialog(file_dialog::SaveDialog::default()),
+            FileRequest::RevealPath("a".into()),
+            FileRequest::MoveToTrash("a".into()),
+        ] {
+            assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
     }
 }

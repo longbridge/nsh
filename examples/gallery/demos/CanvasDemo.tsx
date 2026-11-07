@@ -155,7 +155,7 @@ function Dial() {
           cx.save();
           cx.translate(centerX, cy);
           cx.rotate(angle);
-          cx.shadowColor = isDark() ? "rgba(0,0,0,0.6)" : "rgba(20,20,10,0.3)";
+          cx.shadowColor = isDark() ? "rgba(0,0,0,0.6)" : "rgba(16,20,30,0.3)";
           cx.shadowBlur = 6;
           cx.fillStyle = colors.text;
           cx.beginPath();
@@ -693,7 +693,7 @@ function Compositing() {
         style={{ height: 132 }}
         draw={(cx, { width, height }) => {
           const cy = height / 2;
-          const shadow = isDark() ? "rgba(0,0,0,0.55)" : "rgba(20,20,10,0.2)";
+          const shadow = isDark() ? "rgba(0,0,0,0.55)" : "rgba(16,20,30,0.2)";
           // An image clipped to a disc: larger than the disc, so the clip shows.
           const c1 = width / 6;
           cx.save();

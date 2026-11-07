@@ -57,6 +57,19 @@ test('disabled, fitting and phone scroll views do not reveal an overlay', () => 
   assert.equal(shown.length, 0);
 });
 
+test('scrollbar={false} hides the bar on either axis', () => {
+  for (const horizontal of [false, true]) {
+    const el = scroll(horizontal);
+    assert.equal(player.barShown(el), true);
+    el._indicator = false;
+    assert.equal(player.barShown(el), false);
+    // A built-in bar of the app's takes its place.
+    el._indicator = true;
+    el._replaced = true;
+    assert.equal(player.barShown(el), false);
+  }
+});
+
 // Sticky list cells: the few DOM operations their tracks use.
 class Node {
   constructor(props) {

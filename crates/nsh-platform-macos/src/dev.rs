@@ -193,6 +193,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
         DispatchQueue::main().exec_async(move || {
             if let Some(surface) = crate::surface::Surface::with_key(key_of_surface) {
                 surface.set_test_model(Some(model));
+                crate::system::testing_started(&surface);
             }
         });
         Box::new(crate::agent::MacNative::new(key_of_surface))

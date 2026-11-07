@@ -331,6 +331,7 @@ impl AppView {
             host: options.host.clone(),
             picker: None,
             speech: None,
+            audio: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -417,6 +418,7 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         file_requests: true,
         notifications: true,
+        audio: true,
         ..Environment::default()
     }
 }
@@ -428,6 +430,18 @@ thread_local! {
     /// The standalone app's application ([`run_app`]): what [`quit`] ends.
     static STANDALONE: RefCell<Option<glib::WeakRef<gtk::Application>>> =
         const { RefCell::new(None) };
+    /// The app asked to start again when its run ends.
+    static RESTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Quits the standalone app as [`quit`] does, and starts it again once
+/// this process has exited ([`nsh_core::restart`]). A view embedded in
+/// another app leaves the app's lifecycle to that app: nothing happens
+/// there.
+pub(crate) fn restart() {
+    if quit() {
+        RESTART.set(true);
+    }
 }
 
 /// Quits the standalone app ([`run_app`]), as its `quit` role and Ctrl+Q:
@@ -523,7 +537,18 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     });
     // GTK must not parse the host's own arguments: only the URL the app
     // was opened with goes to it (`open`).
-    app.run_with_args(&args)
+    let code = app.run_with_args(&args);
+    // The new process waits for this one to exit.
+    if RESTART.take() {
+        if cfg!(feature = "dev") {
+            // `nsh run` ends with its host and stops the dev server: a host
+            // started again would be cut off from both, so it only quits.
+            log::warn!("a development host quits on restart; restarting runs in a packaged app");
+        } else if let Err(err) = nsh_core::restart::spawn_after_exit() {
+            log::error!("cannot restart the app: {err}");
+        }
+    }
+    code
 }
 
 /// Draws with GSK's GL renderer instead of its Vulkan one (GTK's default

@@ -1,5 +1,6 @@
 //! `nsh/desktop`'s hand-written exports (with the registry's `Window`):
-//! `isAvailable`, `titleBar()` (the environment's accessor) and `Menu`,
+//! `isAvailable`, `titleBar()`, `windowState()` and `displays()` (the
+//! environment's accessors) and `Menu`,
 //! whose items call the app's functions: the menus are decoded natively
 //! into [`MenuItem`]s with an id per item, the functions kept by id, and
 //! the platform's [`EventKind::Menu`] calls the chosen item's.
@@ -827,7 +828,7 @@ fn menu(cx: *mut JsContext) -> JsValue {
 
 /// The platforms that show windows of the app's own.
 fn opens_windows(os: Os) -> bool {
-    matches!(os, Os::Linux | Os::Windows)
+    matches!(os, Os::Linux | Os::MacOs | Os::Windows)
 }
 
 /// Number property `key`, if it is a finite number.
@@ -1105,6 +1106,22 @@ pub(crate) const EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "windowState",
+        Export::Value(crate::env::window_state),
+        Ts::value(
+            "The app's window (reactive): its bounds on the screen, its mode with the\nbounds it returns to (`windowBounds`, what to save to open it the same\nway next time), whether it is minimized or hidden and the display it is on.\nA move or a resize comes once the window stops for a moment; a change of\nmode, display or being minimized or hidden at once. `null` off desktops\nand while the view is in no window.",
+            "Accessor<WindowState | null>",
+        ),
+    ),
+    (
+        "displays",
+        Export::Value(crate::env::displays),
+        Ts::value(
+            "The displays (reactive): their bounds and the parts of them windows\nuse, in points, in screen coordinates. Plugging in a display, unplugging\none or arranging them again changes them. Empty off desktops.",
+            "Accessor<Display[]>",
+        ),
+    ),
+    (
         "Window",
         Export::Value(window_module),
         Ts::value(
@@ -1175,8 +1192,28 @@ export interface WindowOpener {
    * the open window of the same `id`. The window runs in the app's one JS
    * runtime: it reads and writes the same signals, stores and modules as
    * the main window, so there is nothing to send between windows. Closing
-   * the main window closes it too. Linux and Windows; elsewhere it throws. */
+   * the main window closes it too. macOS, Windows and Linux; elsewhere it throws. */
   open(component: () => JSX.Element, options: WindowOpenOptions): AppWindow;
+}
+
+/** The app's window (`windowState()`). Rectangles are in points, in screen
+ * coordinates: from the primary display's top left corner, `y` growing
+ * down, as `Window.setFrame` takes them. */
+export interface WindowState {
+  /** Its outer frame now, window decorations included. */
+  bounds: Bounds;
+  /** Its mode and windowed bounds: what to save, and give to
+   * `Window.setBounds`, to open it the same way next time. */
+  windowBounds: WindowBounds;
+  /** It is minimized (in the Dock, the taskbar). */
+  minimized: boolean;
+  /** It is off the screen without being minimized: the app is hidden
+   * (macOS's Hide), or the window is not shown yet or any more. A window on
+   * the screen is `!minimized && !hidden`; one there that `lifecycle()`
+   * reports in the background is covered by other windows. */
+  hidden: boolean;
+  /** The display it is on (the one with most of it). */
+  display: Display | null;
 }
 
 /** The hidden title bar's area, in points. */

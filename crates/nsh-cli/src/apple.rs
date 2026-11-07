@@ -46,7 +46,7 @@ const RESERVED_INFO: [(&str, Owner); 8] = [
     ("CFBundleDisplayName", Owner::Config("name")),
     ("CFBundleShortVersionString", Owner::Config("version")),
     ("CFBundleVersion", Owner::Config("build")),
-    ("CFBundleURLTypes", Owner::Config("deepLinks")),
+    ("CFBundleURLTypes", Owner::Config("schemes")),
     ("CFBundleExecutable", Owner::Package),
     ("CFBundlePackageType", Owner::Package),
 ];
@@ -383,7 +383,7 @@ mod tests {
             serde_json::json!({ "infoPlist": { "CFBundleURLTypes": [] } }),
         );
         assert!(
-            error.contains("`CFBundleURLTypes` is set by NSH from `deepLinks`"),
+            error.contains("`CFBundleURLTypes` is set by NSH from `schemes`"),
             "{error}"
         );
         // A key that is NSH's on one platform only is the app's on the other.

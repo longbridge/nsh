@@ -341,9 +341,9 @@ fn send(surface: u64, (id, text, start): (NodeId, String, u32)) {
             id,
             EventKind::SelectionChange,
             EventPayload::Map(vec![
-                    ("text", PayloadValue::Str(text)),
-                    ("start", PayloadValue::Number(f64::from(start))),
-                ]),
+                ("text", PayloadValue::Str(text)),
+                ("start", PayloadValue::Number(f64::from(start))),
+            ]),
         );
     }
 }
