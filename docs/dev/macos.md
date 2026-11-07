@@ -24,6 +24,23 @@ cargo test -p nsh-platform-macos --test native -- --ignored # desktop session re
 Features: `js` (default; JS apps; without it the crate only runs Rust apps and links no QuickJS) and `dev` (the dev
 server client, log forwarding, the error overlay: `dev.rs`). The runtime needs macOS 14 (`NSView`'s display links).
 
+## Table accessibility
+
+`Table` and `Grid` roles expose `AXTable`, as WebKit maps tables for VoiceOver. Declared `Row` views expose
+`AXRow`, and `Cell` and `ColumnHeader` views expose `AXCell`. Press handlers keep their `AXPress` action without
+changing a declared role. Labels and the text children of rows and cells keep their existing behavior.
+
+`access/table.rs` derives the rows, columns, visible rows and cells, selected rows, headers and cell lookup from
+the mounted hierarchy when an accessibility client asks. It walks through row groups and layout wrappers, stops
+at nested tables, and respects hidden or folded content. Each row's `AXIndex` and each cell's row and column
+index range follow tree order, starting at zero and including header rows. Each cell spans one row and column.
+Only mounted rows participate, including offscreen rows; a virtualized list's unmounted data has no AX objects.
+
+Columns are stable `NSAccessibilityElement` objects with weak links to their table. They report their cells and
+header live, so retained columns follow changes without retaining the surface. The table's header is the first
+row containing column headers, and each column and cell links to its column headers. The ordinary-window
+`accessibility` test reads these relationships through `NSAccessibility`, including clipping, hiding and row presses.
+
 ## Architecture
 
 Web view downloads (`native.rs`) are opt-in through `onDownload`. Response policy uses WebKit's MIME support

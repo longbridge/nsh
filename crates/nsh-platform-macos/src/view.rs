@@ -41,13 +41,13 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventType, NSResponder,
-    NSTrackingArea, NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy,
+    NSAccessibility, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventType,
+    NSResponder, NSTrackingArea, NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy,
     NSWindowOrderingMode,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
-use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect, NSString};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSString};
 use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLeft};
 
 use crate::surface::{Surface, quiet};
@@ -775,6 +775,8 @@ define_class!(
                             &NshView(self.retain()),
                         )
                     })
+            } else if let Some(allowed) = crate::access::table::allows(&NshView(self.retain()), selector) {
+                allowed
             } else {
                 // SAFETY: NSView's own answer.
                 unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
@@ -858,6 +860,84 @@ define_class!(
                 crate::access::content_value(&NshView(self.retain()))
                     .map(|name| Retained::into_super(Retained::into_super(NSString::from_str(&name))))
             })
+        }
+
+        #[unsafe(method_id(accessibilityRows))]
+        fn accessibility_rows(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::rows(&NshView(self.retain()))
+                .map(|rows| crate::access::table::array(&rows))
+        }
+
+        #[unsafe(method_id(accessibilityVisibleRows))]
+        fn accessibility_visible_rows(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::rows(&NshView(self.retain())).map(|rows| {
+                crate::access::table::array(&rows.into_iter().filter(NshView::shown).collect::<Vec<_>>())
+            })
+        }
+
+        #[unsafe(method_id(accessibilityColumns))]
+        fn accessibility_columns(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::columns(&NshView(self.retain()), false)
+        }
+
+        #[unsafe(method_id(accessibilityVisibleColumns))]
+        fn accessibility_visible_columns(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::columns(&NshView(self.retain()), true)
+        }
+
+        #[unsafe(method_id(accessibilityVisibleCells))]
+        fn accessibility_visible_cells(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::visible_cells(&NshView(self.retain()))
+        }
+
+        #[unsafe(method_id(accessibilitySelectedRows))]
+        fn accessibility_selected_rows(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::rows(&NshView(self.retain())).map(|rows| {
+                crate::access::table::array(&rows.into_iter().filter(|r| r.ns().isAccessibilitySelected()).collect::<Vec<_>>())
+            })
+        }
+
+        #[unsafe(method(accessibilityRowCount))]
+        fn accessibility_row_count(&self) -> isize {
+            crate::access::table::rows(&NshView(self.retain())).map_or(0, |r| r.len() as isize)
+        }
+
+        #[unsafe(method(accessibilityColumnCount))]
+        fn accessibility_column_count(&self) -> isize {
+            crate::access::table::column_count(&NshView(self.retain())) as isize
+        }
+
+        #[unsafe(method(accessibilityIndex))]
+        fn accessibility_index(&self) -> isize {
+            crate::access::table::row_index(&NshView(self.retain())).map_or(0, |i| i as isize)
+        }
+
+        #[unsafe(method(accessibilityRowIndexRange))]
+        fn accessibility_row_index_range(&self) -> NSRange {
+            crate::access::table::range(&NshView(self.retain()), false)
+        }
+
+        #[unsafe(method(accessibilityColumnIndexRange))]
+        fn accessibility_column_index_range(&self) -> NSRange {
+            crate::access::table::range(&NshView(self.retain()), true)
+        }
+
+        #[unsafe(method_id(accessibilityCellForColumn:row:))]
+        fn accessibility_cell(&self, column: isize, row: isize) -> Option<Retained<AnyObject>> {
+            crate::access::table::cell(&NshView(self.retain()), column, row)
+                .map(|v| v.ns().retain().into_super().into_super().into_super())
+        }
+
+        #[unsafe(method_id(accessibilityHeader))]
+        fn accessibility_header(&self) -> Option<Retained<AnyObject>> {
+            crate::access::table::header(&NshView(self.retain()))
+                .map(|v| v.ns().retain().into_super().into_super().into_super())
+        }
+
+        #[unsafe(method_id(accessibilityColumnHeaderUIElements))]
+        fn accessibility_column_headers(&self) -> Option<Retained<NSArray>> {
+            crate::access::table::headers(&NshView(self.retain()))
+                .map(|headers| crate::access::table::array(&headers))
         }
 
         #[unsafe(method(viewDidMoveToSuperview))]
