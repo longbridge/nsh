@@ -509,25 +509,9 @@ struct UrlScheme {
     /// The listener waiting for a link.
     next: Option<AnswerSlot<String>>,
     /// The app's address: the last link taken, the page's on the web, or
-    /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy:
-    /// `UrlScheme.url()` follows it through `watchers`.
-    address: Option<String>,
-    /// Counts the address's changes, for the watchers.
-    version: u64,
-    /// The number of the last `UrlScheme.setUrl` taken.
-    js: u64,
-    /// Those waiting for an address after the version they know.
-    watchers: Vec<AnswerSlot<crate::url_scheme::AppUrl>>,
-}
-
-impl UrlScheme {
-    fn app_url(&self) -> crate::url_scheme::AppUrl {
-        crate::url_scheme::AppUrl {
-            version: self.version,
-            address: self.address.clone(),
-            js: self.js,
-        }
-    }
+    /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy,
+    /// which every VM's `System` shares ([`Core::app_url_cell`]).
+    address: crate::url_scheme::AppUrlCell,
 }
 
 /// The speech recognition session running ([`crate::speech`]).
@@ -789,6 +773,9 @@ impl Components {
         components.environment.window = viewport;
         // What components that run once read of the core.
         components.runtime.set_services(components.executor.clone());
+        components
+            .runtime
+            .set_app_url(components.url_schemes.address.clone());
         components.runtime.set_environment(components.environment);
         components.runtime.set_tokens(components.tokens.clone());
         components
@@ -5011,19 +4998,10 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
-    /// Makes `url` the app's address (`js`: `UrlScheme.setUrl`'s call
-    /// number) and tells the watchers.
-    fn set_app_address(&mut self, url: String, js: Option<u64>) {
-        let links = &mut self.components.url_schemes;
-        links.address = Some(url);
-        links.version += 1;
-        if let Some(js) = js {
-            links.js = js;
-        }
-        let state = links.app_url();
-        for watcher in links.watchers.drain(..) {
-            watcher.borrow_mut().deliver(state.clone());
-        }
+    /// The app's address, which the engine shares with every VM's
+    /// `System` (`UrlScheme.url()` reads it there).
+    pub fn app_url_cell(&self) -> crate::url_scheme::AppUrlCell {
+        self.components.url_schemes.address.clone()
     }
 
     /// Hands `url`, a link the system gave the app, to the listener, or
@@ -5041,7 +5019,7 @@ impl<M: TextEngine> Core<M> {
             log::warn!("link dropped: {dropped}");
             return;
         }
-        self.set_app_address(url.clone(), None);
+        self.components.url_schemes.address.set(url.clone());
         if quiet {
             return;
         }
@@ -5511,38 +5489,30 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Action::AppUrl(answer) => {
-                let address = self.components.url_schemes.address.clone();
+                let address = self.components.url_schemes.address.get();
                 answer.borrow_mut().deliver(address);
             }
-            Action::SetAppUrl { url, js } => {
+            Action::SetAppUrl(url) => {
                 // Checked where the app called (`set_app_url`, `setUrl`);
-                // on the web the address stays of the page's origin (TS's
-                // `setUrl` refuses others first).
+                // where the app is the page, the address stays of its
+                // origin (both refuse others first).
                 let web = self.components.environment.os == crate::platform::Os::Web;
-                if web
-                    && !crate::url_scheme::same_origin(
-                        self.components.url_schemes.address.as_deref(),
-                        &url,
-                    )
+                let address = self.components.url_schemes.address.clone();
+                if let Some(base) = address.page_base()
+                    && !crate::url_scheme::same_origin(Some(base.as_str()), &url)
                 {
                     log::warn!("set_app_url: {url} is not of the page's origin");
                     return;
                 }
-                self.set_app_address(url.clone(), js);
+                // Again for `setUrl`, which wrote it as it was called: in
+                // order with the page's address the core took since.
+                address.set(url.clone());
                 // Only the web shows an address (its history entries).
                 if web {
                     let _ = self.apply_op(Op::Command {
                         id: crate::ROOT_ID,
                         command: Command::SetAppUrl(url),
                     });
-                }
-            }
-            Action::WatchAppUrl(known, answer) => {
-                let links = &mut self.components.url_schemes;
-                if links.version == known {
-                    links.watchers.push(answer);
-                } else {
-                    answer.borrow_mut().deliver(links.app_url());
                 }
             }
             Action::WebInputAvailable(answer) => {
@@ -5947,6 +5917,16 @@ impl<M: TextEngine> Core<M> {
                 };
                 let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
                 let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
+                // The page's base URL (the web), which Rust's `set_app_url`
+                // resolves against.
+                if let Some(base) = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(s) if *k == crate::url_scheme::BASE => {
+                        url::Url::parse(s).ok()
+                    }
+                    _ => None,
+                }) {
+                    self.components.url_schemes.address.set_page_base(base);
+                }
                 self.url_scheme(url.clone(), page, quiet);
                 true
             }

@@ -1668,9 +1668,18 @@ test("the browser's back gives the core the entry's address with no open, and a 
     player.popState({ state: { nsh: 0, nshSession: "s" } });
     assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, quiet: true }]]);
     assert.equal(player.firstUrl, "https://a.test/inbox");
-    // A forward to a page that is gone goes back again, without `open`.
+    // A forward to a page the stack no longer has: handed to the app as a
+    // link (`open`); an app that shows nothing for it goes back where it was,
+    // and once that lands the core has that entry's address again.
+    location.href = "https://a.test/inbox?message=a";
     player.popState({ state: { nsh: 1, nshSession: "s" } });
-    assert.deepEqual(calls.splice(0), [["go", -1]]);
+    assert.deepEqual(calls.splice(0), [
+      ["event", "onUrlScheme", { url: "https://a.test/inbox?message=a", page: true }],
+      ["go", -1],
+    ]);
+    location.href = "https://a.test/inbox";
+    player.popState({ state: { nsh: 0, nshSession: "s" } });
+    assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, quiet: true }]]);
   } finally {
     Object.assign(globalThis, saved);
   }
@@ -1751,6 +1760,74 @@ test("an address the app sets while the browser's back pops its page wins over t
     player.back = () => { depth--; player.setPageUrl("."); return true; };
     player.popState({ state: { nsh: 0, nshSession: "s" } });
     assert.deepEqual(calls.splice(0), [["replace", undefined, "https://a.test/"]]);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
+test("an earlier load's entry is handed to the app as a link and becomes its first", () => {
+  const calls = [];
+  const saved = { history: globalThis.history, location: globalThis.location };
+  globalThis.location = { href: "https://a.test/inbox?message=3" };
+  globalThis.history = {
+    state: null,
+    replaceState(state) { calls.push(["replace", state.nsh, state.nshSession]); this.state = state; },
+    back() { calls.push(["back"]); },
+  };
+  try {
+    const player = Object.create(Player.prototype);
+    Object.assign(player, {
+      history: true, historyDepth: 0, ignoredPops: 0, historySession: "now", pageUrl: null,
+      event: (id, name, payload) => calls.push(["event", name, payload]),
+    });
+    player.popState({ state: { nsh: 2, nshSession: "earlier" } });
+    // In a session of its own: this load's entries after it are earlier
+    // ones too, so a forward to them is a link as well.
+    assert.notEqual(player.historySession, "now");
+    assert.deepEqual(calls.splice(0), [
+      ["replace", 0, player.historySession],
+      ["event", "onUrlScheme", { url: "https://a.test/inbox?message=3", page: true }],
+    ]);
+    assert.equal(player.firstUrl, "https://a.test/inbox?message=3");
+    location.href = "https://a.test/inbox";
+    player.popState({ state: { nsh: 0, nshSession: "now" } });
+    assert.deepEqual(calls.splice(0), [
+      ["replace", 0, player.historySession],
+      ["event", "onUrlScheme", { url: "https://a.test/inbox", page: true }],
+    ]);
+    // An entry from before the app's own: the app stays at its start.
+    player.popState({ state: null });
+    assert.deepEqual(calls, []);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
+test("a forward the app shows goes on from the entry the browser is at", () => {
+  const calls = [];
+  const saved = { history: globalThis.history, location: globalThis.location };
+  globalThis.location = { href: "https://a.test/inbox" };
+  globalThis.history = {
+    state: null,
+    pushState(state) { calls.push(["push", state.nsh]); this.state = state; },
+    replaceState(state, _title, url) { calls.push(["replace", state?.nsh, url]); },
+    go(n) { calls.push(["go", n]); },
+  };
+  try {
+    let depth = 0;
+    const player = Object.create(Player.prototype);
+    Object.assign(player, {
+      history: true, historyDepth: 0, ignoredPops: 0, historySession: "s", pageUrl: null,
+      backDepth: () => depth, showError: (m) => calls.push(["error", m]),
+      // The app takes the link: its stack shows the page again.
+      event: (id, name, payload) => { calls.push(["event", name, payload]); if (!payload.quiet) depth = 1; },
+    });
+    player.syncHistorySoon = () => player.syncHistory();
+    location.href = "https://a.test/inbox?message=a";
+    player.popState({ state: { nsh: 1, nshSession: "s" } });
+    // No traversal and no new entry: the browser is at the page's already.
+    assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox?message=a", page: true }]]);
+    assert.equal(player.historyDepth, 1);
   } finally {
     Object.assign(globalThis, saved);
   }

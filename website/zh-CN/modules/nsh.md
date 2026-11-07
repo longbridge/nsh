@@ -1921,13 +1921,12 @@ const UrlScheme: {
 | 平台 | `url()` | `setUrl(url)` |
 | --- | --- | --- |
 | Web，应用占据整个页面 | 页面的地址：加载时的地址、`setUrl` 设置的地址，或浏览器后退回到的那条记录的地址 | 替换当前历史记录的地址，与 `history.replaceState` 一样解析（相对于页面的 `<base href>`），在同一轮压入或弹出的页面的历史记录之后生效 |
-| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL |
+| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL；把它交给系统（Handoff、App Links）由嵌入应用负责 |
 
 URL 不是字符串、超过 16 KiB 或含有空白字符时抛出 `TypeError`；在 Web 上应用占据整个页面时，不是页面同源 URL 的地址同样抛出 `TypeError`。
-应用只有一个地址，Rust 读的也是它：`url()` 是一份副本，别处的改动（链接、Rust 的 `set_app_url`）从下一轮起可见，`setUrl` 设置的值立即可见。在原生平台上，系统在应用的代码开始运行之后才把启动应用的链接交给它，
-所以应用构建最初的路由时 `url()` 为 `null`，这个链接作为第一个 `open` 到达：监听 `open` 的应用会显示它指向的页面，如下例所示（在 Web 上，页面的地址从一开始就在）。
+应用只有一个地址，Rust 读的也是它，`url()` 直接读取它：链接、Rust 的 `set_app_url` 和 `setUrl` 的改动都立即可见。在上表的平台上，启动应用的链接在应用的代码运行之前就已到达，所以第一次调用 `url()` 就能读到它，它同时也作为第一个 `open` 到达（在 Web 上，页面的地址从一开始就在）。
 在 Web 上，正在显示的栈里压入的每个页面都有自己的历史记录，浏览器的后退就在应用内后退：栈的页面返回，地址变为那条记录的地址，
-和应用自己弹出页面一样不发 `open`（应用用 `popOnBack={false}` 或 `onBackPress` 留下的页面保留它的历史记录和地址）。前进到已经不在的页面时，应用停在原处。应用用 `url()` 构建最初的路由，在栈的
+和应用自己弹出页面一样不发 `open`（应用用 `popOnBack={false}` 或 `onBackPress` 留下的页面保留它的历史记录和地址）。前进到栈里已经没有的页面，以及回到页面上一次加载留下的历史记录（刷新会保留它们）时，这条记录的地址像链接一样作为 `open` 到达：应用显示它指向的页面（如下例），不处理它的应用停在原处。应用用 `url()` 构建最初的路由，在栈的
 [`onChange`](../elements/nav-stack.md) 里设置顶层页面的地址，并显示链接指向的页面，它的页面就在所有平台上都有了地址：
 
 ```tsx
@@ -1947,7 +1946,7 @@ const urlOf = (route: Route) => (route ? `?message=${encodeURIComponent(route)}`
 
 const nav = createNavStack<Route>(routesOf(UrlScheme.url()));
 
-// 应用 scheme 的链接。
+// 链接，以及 Web 上靠后退到不了的前进。
 UrlScheme.on("open", ({ url }) => nav.setRoutes(routesOf(url)));
 
 export function App() {
@@ -1964,7 +1963,7 @@ export function App() {
 ```
 
 Rust 代码 await `nsh_core::prelude` 的 `app_url()`，调用 `set_app_url(url)`，与 `next_url_scheme_open()` 并列；它们和 `url()`、
-`setUrl` 是同一个地址，`setUrl` 会抛错的 URL，`set_app_url` 返回错误。在 Web 上它接受绝对 URL，与页面不同源的地址会被丢弃并给出警告。
+`setUrl` 是同一个地址，`setUrl` 会抛错的 URL，`set_app_url` 返回错误。在 Web 上它和 `setUrl` 一样按页面的基准地址解析 URL，与页面不同源的地址返回错误。
 
 ## Speech
 

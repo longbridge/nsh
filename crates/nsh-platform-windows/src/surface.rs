@@ -159,6 +159,9 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
+    /// The URL the app was launched with, for the next engine to start
+    /// ([`Surface::set_launch_link`]).
+    launch_link: RefCell<Option<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
     /// The window drawn into (shared with the engine's sink).
@@ -275,6 +278,7 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
+            launch_link: RefCell::new(None),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             hwnd: Arc::new(std::sync::atomic::AtomicIsize::new(0)),
@@ -441,11 +445,17 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the launch URL is the app's address when its code first runs
+        // (`UrlScheme.url()`).
         let tokens = self.host_tokens.borrow().clone();
+        let launch = self.launch_link.take();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            if let Some(url) = launch {
+                crate::linking::dispatch(control, url);
             }
         };
         match Engine::start_with(config, move || DWriteTextEngine::new(family), sink, setup) {
@@ -492,6 +502,12 @@ impl Surface {
         if let Some(control) = &*self.control.borrow() {
             f(control);
         }
+    }
+
+    /// Sets the URL the app was launched with (`EventKind::UrlScheme`), which
+    /// the next engine to start applies before the app's code first runs.
+    pub(crate) fn set_launch_link(&self, url: String) {
+        *self.launch_link.borrow_mut() = Some(url);
     }
 
     /// Sends an event to JS.

@@ -36,17 +36,55 @@ pub(crate) const PAGE: &str = "page";
 /// address at start), with no `open` event.
 pub(crate) const QUIET: &str = "quiet";
 
-/// The app's address as the core has it, for a VM's copy
-/// (`UrlScheme.url()`).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct AppUrl {
-    /// Counts the address's changes.
-    pub(crate) version: u64,
-    /// The address.
-    pub(crate) address: Option<String>,
-    /// The number of the last `UrlScheme.setUrl` the core took: a VM whose
-    /// later calls the core has not taken yet keeps its own copy.
-    pub(crate) js: u64,
+/// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
+/// with the page's base URL (the web: its `document.baseURI`).
+pub(crate) const BASE: &str = "base";
+
+/// The app's address, kept once: the core writes it (links, the page's
+/// address, Rust's `set_app_url`) and every VM's `System` reads it
+/// (`UrlScheme.url()`), on the engine's thread. `UrlScheme.setUrl` writes
+/// it too, at once, so `url()` reads it back.
+#[derive(Debug, Clone, Default)]
+pub struct AppUrlCell(std::rc::Rc<std::cell::RefCell<AppUrlState>>);
+
+#[derive(Debug, Default)]
+struct AppUrlState {
+    address: Option<String>,
+    /// What the page's relative URLs resolve against (the web: its
+    /// `document.baseURI`), which Rust's `set_app_url` resolves with.
+    page_base: Option<url::Url>,
+}
+
+impl AppUrlCell {
+    /// The address; `None` when there is none.
+    pub fn get(&self) -> Option<String> {
+        self.0.borrow().address.clone()
+    }
+
+    /// Makes `url` the address.
+    pub(crate) fn set(&self, url: String) {
+        self.0.borrow_mut().address = Some(url);
+    }
+
+    /// The page's base URL (the web), once the page told it.
+    pub(crate) fn page_base(&self) -> Option<url::Url> {
+        self.0.borrow().page_base.clone()
+    }
+
+    pub(crate) fn set_page_base(&self, base: url::Url) {
+        self.0.borrow_mut().page_base = Some(base);
+    }
+}
+
+/// `url`, an address Rust's `set_app_url` sets on the web, resolved against
+/// the page's base as `history.replaceState` resolves it, of the page's
+/// origin (TS's `setUrl` applies the same rules, `browser/address.js`).
+pub(crate) fn resolve_on_page(url: &str, base: &url::Url) -> Result<String, String> {
+    let resolved = base.join(url).map_err(|e| format!("not a URL: {e}"))?;
+    if resolved.origin() != base.origin() {
+        return Err(format!("{resolved} is not of the page's origin"));
+    }
+    Ok(resolved.into())
 }
 
 /// Schemes an app may not claim: the web's, files', other apps' and those
@@ -200,6 +238,20 @@ pub(crate) fn same_origin(page: Option<&str>, url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rusts_address_resolves_against_the_page_and_keeps_its_origin() {
+        let base = url::Url::parse("https://a.test/app/?m=1").unwrap();
+        assert_eq!(
+            resolve_on_page("?message=42", &base).as_deref(),
+            Ok("https://a.test/app/?message=42")
+        );
+        assert_eq!(
+            resolve_on_page("/inbox", &base).as_deref(),
+            Ok("https://a.test/inbox")
+        );
+        assert!(resolve_on_page("https://b.test/x", &base).is_err());
+    }
 
     #[test]
     fn an_address_on_the_web_keeps_the_pages_origin() {

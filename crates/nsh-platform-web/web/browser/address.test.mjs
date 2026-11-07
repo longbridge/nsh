@@ -18,7 +18,6 @@ function urlScheme() {
     },
   };
   configureAddress(scheme, {
-    firstUrl: () => "https://a.test/app/",
     base: () => "https://a.test/app/",
     origin: "https://a.test",
   });
@@ -30,7 +29,6 @@ test("setUrl resolves a page's address against its base", () => {
   scheme.setUrl("?message=42");
   scheme.setUrl("/other");
   assert.deepEqual(set, ["https://a.test/app/?message=42", "https://a.test/other"]);
-  assert.equal(scheme.url(), "https://a.test/app/");
 });
 
 test("setUrl refuses what every platform refuses before resolving it", () => {

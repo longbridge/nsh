@@ -1988,18 +1988,19 @@ const UrlScheme: {
 | Platform | `url()` | `setUrl(url)` |
 | --- | --- | --- |
 | The web, the app the whole page | The page's address: the one it loaded, what `setUrl` set, or the entry's the browser's back went back to | Replaces the current history entry's address, resolved as `history.replaceState` resolves it (against the page's `<base href>`), after the entries of the pages pushed or popped in the same turn |
-| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()` |
+| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()`; giving it to the system (Handoff, App Links) is the embedding app's |
 
 A URL that is not a string, longer than 16 KiB or with whitespace is a `TypeError`, and so on the web, when the app is
-the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too: `url()` is a copy that shows a change
-made elsewhere (a link, Rust's `set_app_url`) from the next turn on, and what `setUrl` sets at once. On the native
-platforms the system hands the app the link that launched it after the app's code starts, so `url()` is `null` while
-the app builds its first routes and the link comes as the first `open`: an app that listens to `open` shows the page it
-names, as below (on the web the page's address is there from the start). Every page pushed
+the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too, and `url()` reads it as it is: a link,
+Rust's `set_app_url` and `setUrl` show at once. On the platforms
+above, the link that launched the app is there before its code runs, so the first `url()` reads it, and it also comes as the first `open`
+(on the web the page's address is there from the start). Every page pushed
 on a shown stack keeps its own history entry on the web, so the browser's back goes back in the app: the stack's pages
 go back and the address becomes the entry's, with no `open`, as for any page the app pops (a page the app keeps, with
-`popOnBack={false}` or `onBackPress`, keeps its entry and address). A forward to a page already gone stays where the
-app is. An app that builds its first routes from `url()`, sets the top
+`popOnBack={false}` or `onBackPress`, keeps its entry and address). A forward to a page the stack no longer has, and
+an entry of an earlier load of the page (a reload keeps them), come as `open` with the entry's address, as a link: the
+app shows the page it names, as below, and an app that shows nothing for it stays where it is. An app that builds its
+first routes from `url()`, sets the top
 page's address in its stack's [`onChange`](../elements/nav-stack.md) and shows the pages a link names has addresses for
 its pages everywhere:
 
@@ -2020,7 +2021,7 @@ const urlOf = (route: Route) => (route ? `?message=${encodeURIComponent(route)}`
 
 const nav = createNavStack<Route>(routesOf(UrlScheme.url()));
 
-// A link of the app's scheme.
+// A link, and on the web a forward the stack cannot reach by going back.
 UrlScheme.on("open", ({ url }) => nav.setRoutes(routesOf(url)));
 
 export function App() {
@@ -2038,7 +2039,7 @@ export function App() {
 
 Rust code awaits `app_url()` and calls `set_app_url(url)` of `nsh_core::prelude`, beside `next_url_scheme_open()`; the
 same address as `url()` and `setUrl`, and `set_app_url` returns an error for the URLs `setUrl` throws for. On the web it
-takes an absolute URL, and drops one of another origin than the page's with a warning.
+resolves a URL against the page's base, as `setUrl` does, and one of another origin than the page's is an error.
 
 ## Speech
 

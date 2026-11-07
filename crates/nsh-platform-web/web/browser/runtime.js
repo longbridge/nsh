@@ -221,13 +221,11 @@ export function createBrowserHost(player) {
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
-        // Where the app is the page, `UrlScheme.url()` is the page's address
-        // until a link or `setUrl` gives another, and `setUrl` takes a URL
-        // of the page's origin, resolved once as `history.replaceState`
-        // resolves it (against the page's `<base href>`).
+        // Where the app is the page, `setUrl` takes a URL of the page's
+        // origin, resolved once as `history.replaceState` resolves it
+        // (against the page's `<base href>`).
         if (nsh.UrlScheme && player.history) {
           scope.configureAddress(nsh.UrlScheme, {
-            firstUrl: () => player.firstUrl,
             base: () => document.baseURI,
             origin: location.origin,
           });

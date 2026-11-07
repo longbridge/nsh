@@ -702,26 +702,32 @@ browsers' touches into what phones report:
   `checkVisibility` does not see: the rule of `nsh_core::navigation::shown_in_layout`, which every backend asks); a
   stack's frame becoming empty or not (`op_f`) syncs the entries again (a view around a stack of its own size
   becoming empty does not: the entries follow at the next push, pop or back).
-- **Addresses**: the core keeps the app's one address (`UrlScheme.address`; Rust's `app_url`); `UrlScheme.url()`
-  reads its VM's copy, which a task follows (`WatchAppUrl`, by version), skipping what the core sent before it took
-  the VM's latest `setUrl` (numbered per VM). `setUrl` / `set_app_url` reach the root as `Command::SetAppUrl` on the
-  web, and `setPageUrl` resolves the URL against `document.baseURI`, drops one of another origin with a warning (TS's
-  `setUrl` throws for it first, in `runtime.js`) and keeps it in `pageUrl` when the app is the page. `syncHistory`
-  applies it last, with `history.replaceState(history.state, "", url)`, after pushing the entries of the turn's
-  pages, so the address lands on the new top entry; while a `history.go` of its own is in flight (`ignoredPops`) it
-  waits, and the last ignored `popstate` syncs again. A `replaceState` that throws shows the error. A new `run` clears
-  `pageUrl`. The player keeps the address of the app's first entry (`firstUrl`), where every run starts, and hands it
-  to the runtime before the app starts (`nsh_set_page_url`), which gives it to the core as the root's `onUrlScheme`
-  event `{ url, page: true, quiet: true }` before the app's code runs. A back the app followed sends the same with
-  `location.href` (the address only: the stack went back already, so no `open`, which would push a page opened at a
-  deep link again), unless the app's `onChange` set the address during the pops (a pop with no motion, a modal): a
-  `setUrl` wins whether it comes then or after. On the web Rust's `set_app_url` takes absolute URLs, and the core
-  drops one of another origin than its address's (`same_origin`). A back the app refused
-  (`popOnBack={false}`, `onBackPress`) sends nothing: the entries come again, and when no page went the top one gets
-  the address it showed (`shownUrl`); a forward to a screen that is gone is gone back over. `page` events are checked
-  as `http(s)` URLs (`check_page_url`) instead of against the app's schemes, and every address the app sets by
-  `check_address` (length, no whitespace), where it calls. In the browser runtime `UrlScheme.url()` answers
-  `firstUrl` until its copy follows the core.
+- **Addresses**: the core keeps the app's one address in an `AppUrlCell` (`url_scheme.rs`), which the engine shares
+  with every VM's `System` (`Core::app_url_cell`, `SystemConfig::app_url`): `UrlScheme.url()` reads it as it is, and
+  `setUrl` writes it at once, and again when the core takes the call (`SetAppUrl`), in order with the page's address the
+  core took since; the core then sends the web's history entry. Rust's `app_url()` / `set_app_url()` are the same
+  address; where the app is the page `set_app_url` resolves a URL against the page's base (the root `onUrlScheme`
+  event's `base`, kept in the cell) and refuses another origin (`resolve_on_page`, and the core again), as `browser/address.js` does for TS (which checks
+  the raw string as `check_address` does before resolving, in the app's realm). `setUrl` / `set_app_url` reach the
+  root as `Command::SetAppUrl` on the web, and `setPageUrl` keeps the URL in `pageUrl` when the app is the page.
+  `syncHistory` applies it last, with `history.replaceState(history.state, "", url)`, after pushing the entries of
+  the turn's pages, so the address lands on the new top entry; while a `history.go` of its own is in flight
+  (`ignoredPops`) it waits, and when the last ignored `popstate` lands the waiting address goes to the entry, or the
+  core takes the entry's (`tellAddress`). A `replaceState` that throws shows the error. A new `run` clears `pageUrl`.
+  The player keeps the address of the app's first entry (`firstUrl`), where every run starts, and hands it to the
+  runtime before the app starts (`nsh_set_page_url`), which gives it to the core as the root's `onUrlScheme` event
+  `{ url, page: true, quiet: true, base }` from `LocalEngine::start_with`'s `setup`, before the app's code runs; the engine applies root `UrlScheme` events
+  queued before its thread starts (`Engine::start_with`) before the bundle evaluates, which is how the native
+  backends hand the link that launched the app. `open` is a link the app is handed from outside: a back the app
+  followed sends the entry's address quietly (the stack went back already; an `open` would push a page opened at a
+  deep link again), unless the app's `onChange` set the address during the pops (a pop with no motion, a modal). A
+  forward to a screen the stack no longer has, and an entry of an earlier load (another `nshSession`, which becomes
+  the app's first, in a new session, so this load's later entries count as earlier ones), come as `open` with the
+  entry's address; an app that shows nothing for a forward goes back where it
+  was (`syncHistory`). A back the app refused (`popOnBack={false}`, `onBackPress`) sends nothing: the entries come
+  again, and when no page went the top one gets the address it showed (`shownUrl`). `page` events are checked as
+  `http(s)` URLs (`check_page_url`) instead of against the app's schemes, and every address the app sets by
+  `check_address` (length, no whitespace), where it calls.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

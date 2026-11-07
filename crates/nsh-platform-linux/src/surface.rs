@@ -374,11 +374,17 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the links that came before are the app's address when its code
+        // first runs (`UrlScheme.url()`).
         let tokens = self.host_tokens.borrow().clone();
+        let links = self.pending_links.take();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            for url in links {
+                control.dispatch_event(ROOT_ID, EventKind::UrlScheme, url_payload(url));
             }
         };
         match Engine::start_with(config, move || PangoTextEngine::new(family), sink, setup) {
@@ -395,9 +401,6 @@ impl Surface {
                 }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
-                for url in self.pending_links.take() {
-                    self.open_url(&url);
-                }
             }
             Err(err) => log::error!("cannot start the engine: {err}"),
         }
@@ -435,17 +438,14 @@ impl Surface {
     }
 
     /// Hands the app a URL the system opened it with (`EventKind::UrlScheme`),
-    /// kept until the engine starts.
+    /// kept until the engine starts, which applies it before the app's code
+    /// first runs.
     pub(crate) fn open_url(&self, url: &str) {
         if self.control.borrow().is_none() {
             self.pending_links.borrow_mut().push(url.to_owned());
             return;
         }
-        self.event(
-            nsh_core::ROOT_ID,
-            EventKind::UrlScheme,
-            EventPayload::Map(vec![("url", nsh_core::PayloadValue::Str(url.to_owned()))]),
-        );
+        self.event(ROOT_ID, EventKind::UrlScheme, url_payload(url.to_owned()));
     }
 
     /// Shows fatal app errors with `f` (development hosts).
@@ -745,6 +745,14 @@ impl Drop for Surface {
         let key = self.key;
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
+}
+
+/// The payload of a `UrlScheme` event reporting `url`.
+fn url_payload(url: String) -> EventPayload {
+    EventPayload::Map(vec![(
+        nsh_core::url_scheme::URL,
+        nsh_core::PayloadValue::Str(url),
+    )])
 }
 
 /// GLib's monotonic time in seconds, the clock GDK's frame times are on.

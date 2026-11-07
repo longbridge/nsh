@@ -136,7 +136,7 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config).map(|launched| (launched.engine, launched.batches))
+    launch(config, None).map(|launched| (launched.engine, launched.batches))
 }
 
 /// A started engine and what it sends.
@@ -148,7 +148,21 @@ struct Launched {
     wanted: Option<Arc<AtomicBool>>,
 }
 
-fn launch(config: EngineConfig) -> std::io::Result<Launched> {
+/// Reports `url` as a link the system handed the app.
+fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
+    control.dispatch_event(
+        ROOT_ID,
+        EventKind::UrlScheme,
+        EventPayload::Map(vec![(
+            nsh_core::url_scheme::URL,
+            PayloadValue::Str(url.to_owned()),
+        )]),
+    );
+}
+
+/// Starts `config`'s app; `link`: the link that launched it, there before
+/// the app's code runs (as a platform sends it).
+fn launch(config: EngineConfig, link: Option<&str>) -> std::io::Result<Launched> {
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
@@ -159,7 +173,16 @@ fn launch(config: EngineConfig) -> std::io::Result<Launched> {
         control: control.clone(),
         wanted: wanted.clone(),
     };
-    let engine = Engine::start(config, || ApproxTextEngine, sink)?;
+    let engine = Engine::start_with(
+        config,
+        || ApproxTextEngine,
+        sink,
+        |control| {
+            if let Some(url) = link {
+                send_url_scheme(control, url);
+            }
+        },
+    )?;
     let _ = control.set(engine.control());
     Ok(Launched {
         engine,
@@ -315,7 +338,18 @@ pub struct Headless {
 
 impl Headless {
     /// Starts `config`'s app ([`start`]).
-    pub fn start(mut config: EngineConfig) -> std::io::Result<Headless> {
+    pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
+        Self::launched_with(config, None)
+    }
+
+    /// Starts `config`'s app as the link `url` launches it: the app's
+    /// first `UrlScheme.url()` reads it, and its first `open` listener
+    /// gets it.
+    pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Headless> {
+        Self::launched_with(config, Some(url))
+    }
+
+    fn launched_with(mut config: EngineConfig, link: Option<&str>) -> std::io::Result<Headless> {
         let speech = config.speech.is_none().then(speech::FakeSpeech::default);
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
@@ -333,7 +367,7 @@ impl Headless {
             batches,
             errors,
             wanted,
-        } = launch(config)?;
+        } = launch(config, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         Ok(Headless {
@@ -518,14 +552,7 @@ impl Headless {
     /// Reports `url` as a link the system handed the app, without a step:
     /// the one that launches it.
     pub fn send_url_scheme(&self, url: &str) {
-        self.engine.control().dispatch_event(
-            ROOT_ID,
-            EventKind::UrlScheme,
-            EventPayload::Map(vec![(
-                nsh_core::url_scheme::URL,
-                PayloadValue::Str(url.to_owned()),
-            )]),
-        );
+        send_url_scheme(&self.engine.control(), url);
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a

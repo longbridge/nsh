@@ -263,7 +263,8 @@ impl AppView {
     }
 
     /// Hands the app a URL the system opened it with (`UrlScheme.on("open",
-    /// ...)` hears it; the app's listener may come later).
+    /// ...)` hears it; the app's listener may come later). Before an app
+    /// loads, the next one loaded starts at it (`UrlScheme.url()`).
     pub fn open_url(&self, url: &str) {
         self.surface.open_url(url);
     }
@@ -497,9 +498,17 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     };
     let shown: Rc<RefCell<Option<Shown>>> = Rc::default();
     let shown_open = shown.clone();
+    // The URLs the app was launched with: the view gets them before its app
+    // loads, so they are its address when its code first runs.
+    let launch: Rc<RefCell<Vec<String>>> = Rc::default();
+    let launch_open = launch.clone();
     app.connect_open(move |app, files, _| {
         if shown_open.borrow().is_none() {
+            launch_open
+                .borrow_mut()
+                .extend(files.iter().map(|file| file.uri().to_string()));
             app.activate();
+            return;
         }
         if let Some((window, view)) = &*shown_open.borrow() {
             for file in files {
@@ -524,6 +533,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             .build();
         let view = AppView::new(options.clone());
         window.set_child(Some(&view.widget()));
+        for url in launch.take() {
+            view.open_url(&url);
+        }
         match source {
             AppSource::Rust(root) => view.load(App::Rust(root)),
             AppSource::Bundle(bundle) => view.load(App::Js(bundle)),

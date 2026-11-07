@@ -58,6 +58,9 @@ pub struct System {
     pub refuse_connections: Option<RefuseConnections>,
     /// What `nsh/updater` runs on; `None`: the app does not update.
     pub updater: Option<Arc<dyn crate::runtime::UpdaterHost>>,
+    /// The app's address, the core's own (`UrlScheme.url()`,
+    /// [`Core::app_url_cell`](crate::Core::app_url_cell)).
+    pub app_url: crate::url_scheme::AppUrlCell,
 }
 
 /// What a host refuses the app's connections with
@@ -86,6 +89,7 @@ impl System {
             os: crate::platform::Os::default(),
             refuse_connections: None,
             updater: None,
+            app_url: Default::default(),
         }
     }
 
@@ -120,6 +124,12 @@ impl System {
     /// Sets what `nsh/updater` runs on.
     pub fn with_updater(mut self, updater: Option<Arc<dyn crate::runtime::UpdaterHost>>) -> Self {
         self.updater = updater;
+        self
+    }
+
+    /// Shares the core's address (`UrlScheme.url()`).
+    pub fn with_app_url(mut self, app_url: crate::url_scheme::AppUrlCell) -> Self {
+        self.app_url = app_url;
         self
     }
 

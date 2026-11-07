@@ -52,6 +52,8 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// The app's address (`set_app_url` resolves against its page base).
+    app_url: Option<crate::url_scheme::AppUrlCell>,
 }
 
 impl Ambient {
@@ -122,6 +124,12 @@ impl super::Runtime {
     pub(crate) fn set_services(&self, executor: Rc<Executor>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.executor = Some(executor));
+    }
+
+    /// The app's address, the core's (`set_app_url`).
+    pub(crate) fn set_app_url(&self, app_url: crate::url_scheme::AppUrlCell) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_url = Some(app_url));
     }
 
     /// Where the app's storage is kept.
@@ -814,30 +822,25 @@ pub fn app_url() -> Answer<Option<String>> {
 /// the current history entry's; the native platforms keep it for
 /// [`app_url`] ([`crate::url_scheme`]). An address longer than
 /// [`crate::url_scheme::MAX_URL_LEN`] or with whitespace is an error, as
-/// TS's `TypeError`, and so on the web is one that is not absolute (TS
-/// resolves its own against the page); there one of another origin than
-/// the page's is dropped with a warning.
+/// TS's `TypeError`; on the web a URL is resolved against the page's base,
+/// as TS's is, and one of another origin than the page's is an error.
 pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
-    let url = url.into();
+    let mut url = url.into();
     crate::url_scheme::check_address(&url)?;
-    if try_os() == Some(Os::Web) {
-        url::Url::parse(&url)
-            .map_err(|e| format!("on the web an address is an absolute URL: {e}"))?;
+    // Where the app is the page (the web), as TS's `setUrl` there.
+    if try_os() == Some(Os::Web)
+        && let Some(base) = with_data(|d| d.ambient.app_url.as_ref().and_then(|a| a.page_base()))
+    {
+        url = crate::url_scheme::resolve_on_page(&url, &base)?;
     }
-    act(Action::SetAppUrl { url, js: None });
+    act(Action::SetAppUrl(url));
     Ok(())
 }
 
-/// `UrlScheme.setUrl`'s part in the core: its call number `js`.
-pub(crate) fn set_app_url_from_js(url: String, js: u64) {
-    act(Action::SetAppUrl { url, js: Some(js) });
-}
-
-/// The app's address once it is not version `known`'s.
-pub(crate) fn watch_app_url(known: u64) -> Answer<crate::url_scheme::AppUrl> {
-    let (answer, slot) = Answer::new();
-    act(Action::WatchAppUrl(known, slot));
-    answer
+/// `UrlScheme.setUrl`'s part in the core: the address again, in order with
+/// what came since the VM wrote it, and the web's history entry.
+pub(crate) fn set_app_url_from_js(url: String) {
+    act(Action::SetAppUrl(url));
 }
 
 /// Whether a web view's ref gives its page trusted input here (TS:

@@ -9,14 +9,13 @@ const MAX_ADDRESS_BYTES = 16 * 1024;
 const NOT_IN_AN_ADDRESS = /[\p{White_Space}\p{Cc}]/u;
 
 /**
- * Makes `urlScheme` (`nsh`'s `UrlScheme`) the page's. `page`:
- * `firstUrl()`, the address the run started at, until the VM's copy follows
- * the core's; `base()`, what `history.replaceState` resolves against (the
- * page's `document.baseURI`); `origin`, the page's.
+ * Makes `urlScheme`'s `setUrl` (`nsh`'s `UrlScheme`) the page's. `page`:
+ * `base()`, what `history.replaceState` resolves against (the page's
+ * `document.baseURI`); `origin`, the page's. `url()` reads the core's
+ * address as it is, which has the page's from before the app's code runs.
  */
 export function configureAddress(urlScheme, page) {
-  const { url, setUrl } = urlScheme;
-  urlScheme.url = () => url() ?? page.firstUrl();
+  const { setUrl } = urlScheme;
   urlScheme.setUrl = (to) => {
     // What every platform refuses is checked on what the app passed, not on
     // the URL it resolves to (which escapes spaces): the core throws.

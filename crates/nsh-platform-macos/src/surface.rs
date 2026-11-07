@@ -219,6 +219,10 @@ pub(crate) struct Surface {
     /// ([`crate::AppView::set_theme_overrides`]): sent to every engine the
     /// surface starts, before its first frame.
     pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
+    /// Links that came before the engine started (the one that launched
+    /// the app): sent before the app's code runs, so its first
+    /// `UrlScheme.url()` reads them.
+    pub(crate) launch_links: RefCell<Vec<String>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Batches that arrived while animations run, and what came after
@@ -342,6 +346,7 @@ impl Surface {
             chunks: RefCell::new(None),
             host_environment: Cell::default(),
             host_tokens: RefCell::new(None),
+            launch_links: RefCell::new(Vec::new()),
             js_frame: Cell::new(false),
             queued: RefCell::default(),
             frame_callbacks: RefCell::default(),
@@ -421,11 +426,22 @@ impl Surface {
         let tokens = self.host_tokens.borrow().clone();
         // The displays are there as the app first renders.
         let displays = crate::window_state::displays(self.mtm);
+        let links = std::mem::take(&mut *self.launch_links.borrow_mut());
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
             control.set_displays(displays);
+            for url in links {
+                control.dispatch_event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::UrlScheme,
+                    nsh_core::EventPayload::Map(vec![(
+                        nsh_core::url_scheme::URL,
+                        nsh_core::PayloadValue::Str(url),
+                    )]),
+                );
+            }
         };
         // Remote images download with NSURLSession.
         crate::image::install_transport();

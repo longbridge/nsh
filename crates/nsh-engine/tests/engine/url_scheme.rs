@@ -26,8 +26,9 @@ function App() {
 mount(App);
 "#;
 
-/// Reads `url()` at the start, after the launch link, after a `setUrl` and
-/// after an address the platform gives with no `open` (`quiet`).
+/// Reads `url()` at the start (the launch link, which reached the core
+/// before the app's code ran), after a `setUrl` and after an address the
+/// platform gives with no `open` (`quiet`).
 const ADDRESS_APP: &str = r#"
 import { mount, UrlScheme, signal, Text } from "nsh";
 function App() {
@@ -104,11 +105,20 @@ fn run_app(
         ..EngineConfig::new(bundle.with_url_schemes(schemes.iter().copied()))
     };
     let (tx, rx) = crossbeam_channel::unbounded();
-    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    // The launch links before the engine starts, as a platform sends the
+    // link it was launched with.
+    let engine = Engine::start_with(
+        config,
+        || ApproxTextEngine,
+        ChannelSink(tx),
+        |control| {
+            for url in launch {
+                open(control, url);
+            }
+        },
+    )
+    .unwrap();
     let control = engine.control();
-    for url in launch {
-        open(&control, url);
-    }
     let mut text = String::new();
     let mut sent_later = false;
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -186,12 +196,44 @@ fn url_follows_the_cores_address_and_reads_back_what_set_url_set() {
         &["myapp://launch".to_owned()],
         quiet,
     );
-    // The copy follows the core from the turn after the first call;
-    // `setUrl` reads back at once; a quiet address opens nothing.
+    // `url()` reads the core's address: the launch link from the first
+    // call; `setUrl` reads back at once; a quiet address opens nothing.
     assert!(
         text.starts_with(
-            "url: start:null open:myapp://launch link:myapp://launch set:myapp://set later:myapp://set quiet:myapp://quiet done"
+            "url: start:myapp://launch open:myapp://launch link:myapp://launch set:myapp://set later:myapp://set quiet:myapp://quiet done"
         ),
         "{text}"
     );
+}
+
+/// Reads `url()` for the first time only later, in a timer, after a link
+/// came while the app ran.
+const LATE_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+function App() {
+  const said = signal("");
+  setTimeout(() => said.set(`late:${UrlScheme.url()}`), 600);
+  setTimeout(() => said.set(`${said()} done`), 900);
+  return <Text>{`url:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+#[test]
+fn a_late_first_url_reads_the_cores_address() {
+    let text = run_app(
+        bundle_of(LATE_APP, "nsh-app-url-late"),
+        &["myapp"],
+        &[],
+        |_| {},
+    );
+    // Nothing launched it and no link came before the timer.
+    assert_eq!(text, "url:late:null done");
+    let text = run_app(
+        bundle_of(LATE_APP, "nsh-app-url-late-link"),
+        &["myapp"],
+        &["myapp://launch".to_owned()],
+        |_| {},
+    );
+    assert_eq!(text, "url:late:myapp://launch done");
 }

@@ -508,6 +508,10 @@ thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Links that came before the app's engine started.
     static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// What [`run_app`] runs once launching finished: the link that launched
+    /// the app comes before (`application:openURLs:`), and reaches the
+    /// engine before the app's code runs.
+    static PENDING: RefCell<Option<AppSource>> = const { RefCell::new(None) };
     /// The app asked to start again when its run ends
     /// ([`DesktopCommand::Restart`](nsh_core::desktop::DesktopCommand)).
     static RESTART: Cell<bool> = const { Cell::new(false) };
@@ -518,6 +522,11 @@ thread_local! {
 /// the engine starts.
 fn url_scheme(url: String) {
     let mut url = Some(url);
+    // Before launching finished the app has not started: kept for its start.
+    if PENDING.with(|p| p.borrow().is_some()) {
+        URL_SCHEMES.with(|links| links.borrow_mut().extend(url.take()));
+        return;
+    }
     RUNNING.with(|running| {
         if let Some(running) = running.borrow().as_ref() {
             running.view.surface().control(|control| {
@@ -534,8 +543,36 @@ fn url_scheme(url: String) {
             });
         }
     });
-    if let Some(url) = url {
-        URL_SCHEMES.with(|links| links.borrow_mut().push(url));
+    let Some(url) = url else {
+        return;
+    };
+    // The app's view is there but its engine is not yet (a development
+    // session connecting): the link waits for the engine's start.
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    match view {
+        Some(view) => view.surface().launch_links.borrow_mut().push(url),
+        None => URL_SCHEMES.with(|links| links.borrow_mut().push(url)),
+    }
+}
+
+/// Starts [`run_app`]'s app, with the links that came before it.
+fn start_pending() {
+    let Some(source) = PENDING.with(|p| p.borrow_mut().take()) else {
+        return;
+    };
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    let Some(view) = view else {
+        return;
+    };
+    view.surface()
+        .launch_links
+        .borrow_mut()
+        .extend(URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())));
+    match source {
+        AppSource::Rust(root) => view.load(App::Rust(root)),
+        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
 }
 
@@ -597,6 +634,12 @@ define_class!(
                 }
                 window.makeKeyAndOrderFront(None);
             }
+        }
+
+        // The app starts once the links it was launched with came.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            start_pending();
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -824,12 +867,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     if let Some(display) = options.display {
         center_on_display(&window, display);
     }
-    match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
-        #[cfg(feature = "dev")]
-        AppSource::DevServer(url) => crate::dev::start(&view, url),
-    }
+    PENDING.with(|p| *p.borrow_mut() = Some(source));
     if options.background {
         // Shown without activating the app (it never is: its window is
         // never key, and the test agent's input goes to it directly).
@@ -847,9 +885,6 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
-    for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
-        url_scheme(url);
-    }
     app.run();
     stop_running();
     app.setDelegate(None);

@@ -779,11 +779,17 @@ impl RootView {
             #[cfg(feature = "dev")]
             test_model: self.ivars().test_model.clone(),
         };
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the links that came before are the app's address when its code
+        // first runs (`UrlScheme.url()`).
         let tokens = self.ivars().host_tokens.borrow().clone();
+        let links = std::mem::take(&mut *self.ivars().url_schemes.borrow_mut());
         let engine = match Engine::start_with(config, CoreTextEngine::default, sink, |control| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            for url in links {
+                send_url_scheme(control, url);
             }
         }) {
             Ok(engine) => engine,
@@ -818,10 +824,6 @@ impl RootView {
             installed.measure();
         }
         *mounter.get(mtm).borrow_mut() = Some(installed);
-        let links = std::mem::take(&mut *self.ivars().url_schemes.borrow_mut());
-        for url in links {
-            send_url_scheme(&engine.control(), url);
-        }
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
     }
@@ -1038,7 +1040,8 @@ impl Surface {
 
     /// Hands `url`, a link the system opened the app with, to the app's
     /// engine, whose core keeps it until the app listens (`UrlScheme`);
-    /// kept until the engine starts.
+    /// kept until the engine starts, which applies it before the app's code
+    /// first runs.
     pub(crate) fn url_scheme(&self, url: String) {
         match &*self.view.ivars().running.borrow() {
             Some(running) => send_url_scheme(&running.engine.control(), url),

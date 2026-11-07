@@ -708,22 +708,30 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         }
     });
     let text = Rc::new(WebTextEngine::default());
-    let Some(mut engine) = LocalEngine::start(config, text.clone(), Sink) else {
+    // The page's address, there before the app's code runs, with the page's
+    // base URL, which Rust's `set_app_url` resolves against as
+    // `history.replaceState` does.
+    let page = PAGE_URL.with(|u| u.borrow_mut().take()).map(|url| {
+        let base = BASE_URL
+            .with(|b| b.borrow().clone())
+            .unwrap_or_else(|| url.clone());
+        serde_json::json!({ "url": url, "page": true, "quiet": true, "base": base })
+    });
+    let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
+        if let Some(payload) = page {
+            control.dispatch_event(
+                ROOT_ID,
+                EventKind::UrlScheme,
+                event::payload(EventKind::UrlScheme, payload),
+            );
+        }
+    }) else {
         return -1.0;
     };
     // A task woken by a browser callback (a WebSocket message in an app's
     // crate, through wasm-bindgen) asks the page to pump, as input does.
     engine.set_wake(std::sync::Arc::new(ffi::request_pump));
     let control = engine.control();
-    // The core has the app's address before the app's code asks for it.
-    if let Some(url) = PAGE_URL.with(|u| u.borrow_mut().take()) {
-        let payload = serde_json::json!({ "url": url, "page": true, "quiet": true });
-        control.dispatch_event(
-            ROOT_ID,
-            EventKind::UrlScheme,
-            event::payload(EventKind::UrlScheme, payload),
-        );
-    }
     // The test moves its clock through the engine.
     #[cfg(feature = "dev")]
     TEST_MODEL.with(|m| {
