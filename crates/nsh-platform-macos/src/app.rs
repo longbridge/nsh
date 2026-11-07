@@ -19,7 +19,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSColor, NSEvent, NSEventModifierFlags,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
     NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
     NSWindowStyleMask,
 };
@@ -204,10 +204,10 @@ pub struct AppOptions {
     /// a `macos={{ backdrop }}` material blending behind the window). False
     /// by default.
     ///
-    /// Only a host that builds `AppOptions` and calls [`run_app`] itself
-    /// sets this: the hosts and runners nsh ships leave it false, so a
-    /// `nsh run` or packaged app's window stays opaque, and a backdrop
-    /// material blending `behindWindow` does not make it transparent.
+    /// A custom host's initial default: explicit main-window attributes
+    /// and later `WindowHandle::set` calls take precedence. Standard hosts
+    /// leave this false but can request transparency through their window
+    /// configuration. A view's `behindWindow` material never enables it.
     ///
     /// An embedded [`AppView`] draws no background over its host's content
     /// too, but never changes the host's window: the embedding app makes its
@@ -819,11 +819,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
         #[cfg(feature = "dev")]
         AppSource::DevServer(_) => None,
     };
-    let launch = loaded
+    let mut launch = loaded
         .as_ref()
         .and_then(App::main_window)
         .cloned()
         .unwrap_or_default();
+    if options.transparent {
+        launch.attributes.transparent.get_or_insert(true);
+    }
     // With `restoreBounds`, where it was last (the engine keeps it in the
     // app's storage as the window changes), fitted on the displays there
     // are now.
@@ -854,16 +857,13 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     // SAFETY: the window is kept in `RUNNING` until it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&options.title));
-    if options.transparent {
-        // A see-through window: AppKit draws none of its own background,
-        // and what the app leaves unpainted shows what is behind it.
-        window.setOpaque(false);
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-    }
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
     view.surface().standalone.set(true);
+    // The standalone window's attributes own its live transparency state;
+    // the surface-only flag remains for embedded AppViews.
+    view.surface().transparent.set(false);
     window.setContentView(Some(&view.view()));
     // Nothing is focused until the user or the app focuses it: the root
     // holds the keyboard, so becoming key never lets AppKit pick the first

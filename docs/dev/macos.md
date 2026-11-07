@@ -162,12 +162,10 @@ belong to the app, which owns retention and its storage budget.
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets). With `AppOptions::transparent` (false by default) a caller of `run_app` gets a
   window that is nonopaque with a clear background, and the surface paints none of its own background under the root,
-  so what the app leaves unpainted shows what is behind the window. Only a custom Rust host that builds `AppOptions`
-  itself can ask for it: the development host `nsh-macos-host` (`nsh run` builds it), `nsh-macos-app`'s `setup` (the
-  packaged TSX runner and the Rust runner `nsh` generates) keep `AppOptions::default()`'s `false`, so their windows
-  stay opaque, and a `macos={{ backdrop: { blending: "behindWindow" } }}` material does not make one transparent by
-  itself. An embedded `AppView` paints no surface background either, but never changes its host's window — the
-  embedding app makes that window nonopaque itself.
+  so what the app leaves unpainted shows what is behind the window. This is a custom Rust host's initial default;
+  explicit main-window attributes and later window updates take precedence. Standard hosts leave this
+  option false but can request transparency through their window configuration. A view's `behindWindow` material
+  never changes window transparency. An embedded `AppView` does not change its host's `NSWindow`.
 
 ## How each area maps to AppKit
 
@@ -355,10 +353,9 @@ password required right after sleep) to run tests that way.
   blending, whose radius AppKit picks, or a radius-exact `PlainBlur` under a mask), and glass alone draws
   nothing. The effect views are the view's first subview and refuse `hitTest:`, so they never take input. A material
   blending `behindWindow` shows what is behind the window only where the window is nonopaque:
-  `AppOptions::transparent`, or an embedding app's own nonopaque window. The blending itself never makes a window
-  transparent, and no host or runner nsh ships sets `transparent` (a standard `nsh run` or packaged app keeps an
-  opaque window). In-process screenshots cannot show backdrop effects or blend modes (`renderInContext:` and
-  `cacheDisplayInRect:` leave compositor effects out); check them on screen.
+  `AppOptions::transparent`, explicit window attributes, or an embedding app's own nonopaque window. The view's
+  blending never makes a window transparent. The test agent's composited screenshots show these effects;
+  in-process fallback screenshots (`renderInContext:` and `cacheDisplayInRect:`) do not.
 - **Inputs**: content types / autofill, keyboard types, autocapitalization, letter spacing; input accessory views are
   never shown (there is no software keyboard); `keyboardShouldPersistTaps` is ignored.
 - **Accessibility**: `accessibilityActions`.

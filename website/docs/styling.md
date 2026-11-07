@@ -338,10 +338,10 @@ default), `"sidebar"`, `"headerView"`, `"sheet"`, `"windowBackground"`, `"hudWin
 `glassEffect` and `backdropFilter`; without it, macOS keeps the glass on macOS 26 and later and the blur
 elsewhere. Rust uses `.macos_backdrop(backdrop)` with a `MacOsBackdrop` (the struct is `#[non_exhaustive]`: start from
 `MacOsBackdrop::default()` and set `material`, `blending` and `state`); `None` (the default) leaves the fallback.
-`"behindWindow"` shows what is behind the window only in a transparent one, which only a Rust host that opens its own
-`run_app` window with `AppOptions { transparent: true, .. }` makes: the standard hosts and runners (`nsh run`,
-`nsh-macos-app`) keep the window opaque, and the blending itself never makes it transparent. An embedded `AppView`
-leaves the window to its host.
+`"behindWindow"` shows what is behind the window only in a transparent one. Window attributes can request this;
+a custom Rust host can also use `AppOptions { transparent: true, .. }` as an initial default, overridden by explicit
+main-window attributes and later window updates. Standard hosts default to opaque windows, and a view's blending
+never enables transparency. An embedded `AppView` leaves its host window unchanged.
 
 ```tsx
 <View macos={{ backdrop: { material: "hudWindow", blending: "behindWindow" } }} style={{ height: 64 }} />

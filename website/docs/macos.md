@@ -171,11 +171,10 @@ exited `run_app`'s runner starts the app again with the same arguments: inside a
 
 `AppOptions { transparent: true, ..Default::default() }` opens `run_app`'s window nonopaque with a clear
 background, so what the app leaves unpainted shows what is behind the window (a HUD panel, a
-[`macos={{ backdrop }}`](./styling.md#filters-and-blending) with `behindWindow`). It is `false` by default, and
-only a Rust host that builds `AppOptions` and calls `run_app` itself can ask for it: the development host
-`nsh-macos-host` (`nsh run` builds it) and `nsh-macos-app` (its `setup`, the packaged TSX runner and the Rust runner
-`nsh` generates) keep it `false`, so their windows stay opaque, and a `behindWindow` material does not make a window
-transparent by itself.
+[`macos={{ backdrop }}`](./styling.md#filters-and-blending) with `behindWindow`). This option defaults to `false`.
+For a custom Rust host it supplies an initial default: explicit main-window attributes and later window updates
+take precedence. Standard hosts leave this option false but can request transparency through their window
+configuration. A view's `behindWindow` material never makes the window transparent by itself.
 An embedded `AppView` does not change the window it is put in: make your own `NSWindow` nonopaque with a clear
 `backgroundColor` for the same look.
 
@@ -255,9 +254,9 @@ Not supported, or different:
   `mixBlendMode` as the view layer's compositing filter, `macos={{ backdrop: { material, blending, state } }}` as an
   `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and
   `glassTintColor` as `glassEffect`'s tint on macOS 26; before macOS 26 the blur stands in for glass. These are
-  compositor effects, so `app.screenshot()` does not show them, and a `behindWindow` material shows the desktop only
-  through a see-through window (`AppOptions::transparent`, which only a Rust host that opens its own `run_app` window
-  sets; the blending never makes a window transparent itself).
+  compositor effects: the test agent's composited screenshots show them, but its in-process fallback cannot.
+  A `behindWindow` material shows the desktop only through a see-through window, requested by window attributes
+  or a custom host's `AppOptions::transparent`; the view's blending never enables transparency itself.
 - **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing; input accessory views
   are never shown (there is no software keyboard) and `keyboardShouldPersistTaps` is ignored.
 - **`WebView`'s `scrollable={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll
