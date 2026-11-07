@@ -5,6 +5,7 @@
 //! the main queue (`exec_sync`) and returns once the input is posted.
 
 use std::{
+    cell::RefCell,
     rc::Rc,
     sync::Mutex,
     time::{Duration, Instant},
@@ -16,17 +17,22 @@ use nsh_core::{
     geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_testing::agent::{Key, Native};
-use objc2::MainThreadMarker;
+use objc2::{
+    MainThreadMarker,
+    rc::Retained,
+    runtime::{AnyClass, NSObjectProtocol},
+};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventType, NSView, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
+    NSView, NSWindow,
 };
 use objc2_foundation::{NSRect, NSSize};
 
 use crate::{surface::Surface, synth};
 
 /// How long a press waits for the app to become active at most (a locked
-/// screen never lets it).
+/// screen never lets it, and is not waited for).
 const ACTIVATION: Duration = Duration::from_secs(1);
 /// A display frame, where the window's screen tells none.
 const FRAME: Duration = Duration::from_millis(16);
@@ -124,19 +130,26 @@ impl MacNative {
     /// Makes the app active, as presses into web views need (in another
     /// app, a click into a page only activates it): waits for it a second
     /// at most. An app run in the background (`AppOptions::background`)
-    /// cannot be activated, and is not asked to.
+    /// cannot be activated, and is not asked to; nor is one while the
+    /// screen is locked ([`crate::system::screen_locked`]), which never
+    /// lets it: its presses into web views go to them directly
+    /// ([`mouse`]).
     fn activate(&self) {
         let deadline = Instant::now() + ACTIVATION;
         while Instant::now() < deadline {
             let active = self.on_main(|_, window| {
                 let app = NSApplication::sharedApplication(MainThreadMarker::from(window));
-                if app.activationPolicy() == NSApplicationActivationPolicy::Prohibited {
+                if app.activationPolicy() == NSApplicationActivationPolicy::Prohibited
+                    || app.isActive()
+                {
                     return true;
                 }
-                if !app.isActive() {
-                    #[allow(deprecated)]
-                    app.activateIgnoringOtherApps(true);
+                if crate::system::screen_locked() {
+                    log::debug!("the screen is locked: input goes to the inactive app");
+                    return true;
                 }
+                #[allow(deprecated)]
+                app.activateIgnoringOtherApps(true);
                 app.isActive()
             });
             if active != Some(false) {
@@ -145,6 +158,81 @@ impl MacNative {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+}
+
+thread_local! {
+    /// The web view a left button press of the inactive app went to
+    /// directly ([`mouse`]): its drags and its release follow it there.
+    static WEB_PRESS: RefCell<Option<Retained<NSView>>> = const { RefCell::new(None) };
+}
+
+/// A left button event of `window` at `(x, y)` (content points), posted as
+/// the system posts it ([`synth::mouse`]); but a press into a web view
+/// while the app is not active (run in the background, or the screen
+/// locked) goes to the web view directly, and so do its drags and its
+/// release: AppKit hands an inactive app's window a first click only where
+/// the view accepts the first mouse, which a `WKWebView` does not for a
+/// click, so the press would only ask to activate the app. As
+/// `WebViewRef.sendInput` hands a page its clicks (`native::web_input`),
+/// and the web view takes the keyboard focus, as a click gives it.
+fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks: isize) {
+    let mtm = MainThreadMarker::from(window);
+    let Some(event) = synth::mouse_event(window, kind, x, y, clicks, NSEventModifierFlags::empty())
+    else {
+        return;
+    };
+    let web = if kind == NSEventType::LeftMouseDown {
+        let web = if NSApplication::sharedApplication(mtm).isActive() {
+            None
+        } else {
+            web_view_at(window, &event)
+        };
+        WEB_PRESS.set(web.clone());
+        web
+    } else {
+        WEB_PRESS.with_borrow(Clone::clone)
+    };
+    let Some(web) = web else {
+        // Through the event queue, as real clicks come (`synth::mouse_with`).
+        NSApplication::sharedApplication(mtm).postEvent_atStart(&event, false);
+        return;
+    };
+    match kind {
+        NSEventType::LeftMouseDown => {
+            let focused = window
+                .firstResponder()
+                .is_some_and(|f| std::ptr::eq(Retained::as_ptr(&f).cast(), Retained::as_ptr(&web)));
+            if !focused {
+                window.makeFirstResponder(Some(&web));
+            }
+            web.mouseDown(&event);
+        }
+        NSEventType::LeftMouseDragged => web.mouseDragged(&event),
+        _ => {
+            WEB_PRESS.set(None);
+            web.mouseUp(&event);
+        }
+    }
+}
+
+/// The web view (`WKWebView`) the press `event` lands in, picked as the
+/// window picks the view a click goes to (the root's `hitTest:`).
+fn web_view_at(window: &NSWindow, event: &NSEvent) -> Option<Retained<NSView>> {
+    let web_class = AnyClass::get(c"WKWebView")?;
+    let content = window.contentView()?;
+    // `hitTest:` takes a point in the superview's coordinates.
+    let p = match crate::view::superview(&content) {
+        Some(outer) => outer.convertPoint_fromView(event.locationInWindow(), None),
+        None => event.locationInWindow(),
+    };
+    let mut view = crate::view::scripted(event, || content.hitTest(p));
+    while let Some(v) = view {
+        if v.isKindOfClass(web_class) {
+            return Some(v);
+        }
+        view = crate::view::superview(&v);
+    }
+    None
 }
 
 /// `rect` of view `ns` in the window's content, from its top left; `None`
@@ -207,8 +295,8 @@ impl Native for MacNative {
             let clicks = self.click_count(x, y);
             // A real pointer arrives before it presses (hover state).
             synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
-            synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks);
+            mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+            mouse(window, NSEventType::LeftMouseUp, x, y, clicks);
         });
     }
 
@@ -218,12 +306,12 @@ impl Native for MacNative {
         let clicks = self.on_main(|_, window| {
             let clicks = self.click_count(x, y);
             synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+            mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
             clicks
         });
         std::thread::sleep(hold);
         let clicks = clicks.unwrap_or(1);
-        self.on_main(|_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        self.on_main(|_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
     }
 
     fn scroll(&self, at: Point<Points>, delta: Point<Points>) {
@@ -260,7 +348,7 @@ impl Native for MacNative {
             .on_main(move |_, window| {
                 let clicks = self.click_count(x, y);
                 synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-                synth::mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+                mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
                 clicks
             })
             .unwrap_or(1);
@@ -270,12 +358,12 @@ impl Native for MacNative {
             std::thread::sleep(nsh_testing::agent::FRAME);
             let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
             self.on_main(move |_, window| {
-                synth::mouse(window, NSEventType::LeftMouseDragged, x, y, clicks);
+                mouse(window, NSEventType::LeftMouseDragged, x, y, clicks);
             });
             last = at;
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
-        self.on_main(move |_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        self.on_main(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
     }
 
     fn type_text(&self, text: &str) {

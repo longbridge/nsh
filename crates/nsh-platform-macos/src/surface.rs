@@ -1007,7 +1007,7 @@ impl Surface {
     }
 
     /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
-    fn testing(&self) -> bool {
+    pub(crate) fn testing(&self) -> bool {
         #[cfg(feature = "dev")]
         return self.test_model.borrow().is_some();
         #[cfg(not(feature = "dev"))]

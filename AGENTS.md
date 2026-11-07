@@ -638,8 +638,9 @@ pull requests.
 2. Changes to the runtime (`nsh-js`), engine or core: run `nsh test --trace` and check item counts and timings. Changes to
    anything apps use: `cargo xtask compat` passes, and `tests/compat/` checks the change (`docs/dev/compatibility.md`).
 3. Changes to the platform layer: launch with `nsh run`, check screenshots and simulate input where needed (the terminal needs the Screen
-   Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
-   screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
+   Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and the
+   system's clicks fail, but window screenshots still work, and `nsh test --target macos` runs as unlocked: it is the way
+   to check a macOS change while the screen is locked). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
    Android: `adb exec-out screencap -p`, `adb shell input tap|swipe|text|keyevent` (all work with the screen locked).
    The desktops: `nsh test <entry> --target macos|linux|windows|gpui` with steps on standard input
    (`await app.screenshot("a.png"); await app.press("label:Plan")`) opens the app in the platform's window, acts with

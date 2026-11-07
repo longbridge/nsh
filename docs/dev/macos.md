@@ -290,6 +290,22 @@ rings of box shadows are missing from it, and so are outer box shadows under an 
 `shadowPath` casters, `visual.rs`). The composited picture also differs from the fallback in two ways a test may
 see: the window's rounded bottom corners are clear, and a sheet dims the window under it, as on screen.
 
+Tests run while the screen is locked (an agent can run them while the user is away), as they run unlocked: nothing
+the agent does goes through the window server's input or screen capture. Input is posted to the
+app's own event queue or handed to its window, keys go to the window whether or not it is key (`synth::key_event`),
+screenshots render in process, and frames the display link no longer gives come from the surface's deadline timer,
+which a test's app runs as it would on screen (`Surface::keep_deadline`). The agent finds a locked screen, or a
+session that is not the console's, with `CGSessionCopyCurrentDictionary` (`system::screen_locked`): with
+`--foreground` it does not wait for the app's activation then (the system never gives it), and the app's
+`lifecycle()` does not turn `background` because the lock covers its windows. A left button press into a web view
+while the app is not active (`--background`, the default, or a locked screen) goes to the `WKWebView` directly,
+with its drags and release (`agent::mouse`): AppKit gives an inactive window's first click only to a view that
+accepts the first mouse, which WebKit's does not for a click. The agent's mouse is the test window's only one: the
+root takes no pointer events but the agent's (`synth::from_agent`, by type and timestamp, which survive the copy
+AppKit makes of a posted event), so the user's mouse, and the enters and exits AppKit derives from where it really
+is, never change what a test hovers, locked or not, and the user may go on using it while tests run. Lock the screen with `pmset displaysleepnow` (with a
+password required right after sleep) to run tests that way.
+
 ## Not implemented, or different
 
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
