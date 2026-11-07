@@ -5460,6 +5460,7 @@ dependencies = [
  "nsh-core",
  "nsh-js",
  "nsh-package",
+ "nsh-updater",
  "oxc_sourcemap",
  "pollster 0.4.0",
  "rustc-hash 2.1.3",
