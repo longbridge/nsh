@@ -444,7 +444,9 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
-the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
+the content the core placed. A view of no size (`display: none` lays it out at none) is `nsh-empty`: it draws no border,
+outline or shadow of its own, as on the native backends, which draw inside a view's bounds (a CSS border-box is never
+smaller than its borders); its children still show. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
