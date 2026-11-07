@@ -1551,6 +1551,25 @@ mod tests {
             gates(&[("nsh/base", Some(&["Button", "Editor"]))]),
             ["nsh_part_core", "nsh_part_editor"]
         );
+        // Menus, popups, pickers, the command palette and toasts are
+        // parts apart from the core.
+        assert_eq!(
+            gates(&[(
+                "nsh/base",
+                Some(&["Button", "Select", "Menu", "Tooltip", "Toast", "toast"])
+            )]),
+            [
+                "nsh_part_core",
+                "nsh_part_menu",
+                "nsh_part_overlays",
+                "nsh_part_select",
+                "nsh_part_toast"
+            ]
+        );
+        assert_eq!(
+            gates(&[("nsh/base", Some(&["Combobox", "Command"]))]),
+            ["nsh_part_combobox", "nsh_part_command", "nsh_part_core"]
+        );
         assert_eq!(
             gates(&[
                 ("nsh/base", Some(&["TextView"])),
