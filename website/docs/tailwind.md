@@ -207,7 +207,7 @@ With this theme, `bg-brand-500`, `text-brand` (the `DEFAULT` shade), `border-ink
 | `aspect` | A ratio (`1.5`) | `aspect-*` |
 | `ease` | `[x1, y1, x2, y2]` | `ease-*` |
 
-Unknown keys and invalid values are build errors (`nsh.json: tailwind: unknown theme key 'colours'`). The theme is compiled into the bundle and applied before the first frame.
+An entry NSH cannot read, an unknown key or a value of a form it does not know, is a warning and is left out alone (`nsh.json: tailwind: unknown key 'colours', ignored`), at run time too, so a theme written for a newer NSH keeps its other entries on an older one. The theme is compiled into the bundle and applied before the first frame.
 
 The Tailwind theme shapes your classes. Typed methods keep Tailwind's default scales, so a Rust component looks the same in every app, and take the app's look from the design tokens of its theme, `"theme"` in `nsh.json` ([Rust](./rust.md#theme)).
 

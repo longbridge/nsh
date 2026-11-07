@@ -337,7 +337,7 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
     // it claims (`Bundle::read`).
     let app = out.join("app.json");
     let id = crate::package::app_id(entry)?;
-    let schemes = crate::package::read_config(&dunce::canonicalize(entry)?)?.url_schemes()?;
+    let schemes = crate::package::read_config(&dunce::canonicalize(entry)?)?.url_schemes();
     fs::write(
         &app,
         crate::package::app_json(serde_json::json!({ "id": id }), &schemes),
