@@ -226,23 +226,11 @@ export function createBrowserHost(player) {
         // of the page's origin, resolved once as `history.replaceState`
         // resolves it (against the page's `<base href>`).
         if (nsh.UrlScheme && player.history) {
-          const { url, setUrl } = nsh.UrlScheme;
-          // Before the copy follows the core (the first call's turn), the
-          // address the run started at.
-          nsh.UrlScheme.url = () => url() ?? player.firstUrl;
-          nsh.UrlScheme.setUrl = (to) => {
-            if (typeof to !== "string") return setUrl(to);
-            let resolved;
-            try {
-              resolved = new URL(to, document.baseURI);
-            } catch {
-              throw new TypeError(`UrlScheme.setUrl: not a URL: ${to}`);
-            }
-            if (resolved.origin !== location.origin) {
-              throw new TypeError(`UrlScheme.setUrl: ${resolved.href} is not of the page's origin`);
-            }
-            setUrl(resolved.href);
-          };
+          scope.configureAddress(nsh.UrlScheme, {
+            firstUrl: () => player.firstUrl,
+            base: () => document.baseURI,
+            origin: location.origin,
+          });
         }
         const base = modules.exports.get("nsh/base");
         if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
