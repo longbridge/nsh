@@ -72,7 +72,7 @@ it).
 ## `nsh dev`
 
 ```sh
-nsh dev App.tsx
+nsh dev App.tsx --server-only
 ```
 
 ```text
@@ -85,6 +85,10 @@ nsh dev App.tsx
 |---|---|
 | `--port <port>` | Dev server port. As for `nsh run`; with `--server-only`, the default is 8790, replacing the previous NSH session on it. |
 | `--release` | Serve release builds. |
+
+`nsh dev --server-only` listens on every address of this computer, so phones and other machines on the network can
+connect. `nsh run` and `nsh dev` with a host on this computer (a window, the terminal, Catalyst) listen on `127.0.0.1`;
+with `--target ios`, `android` or `web` they listen on every address, as `--server-only` does.
 
 Connect hosts to the printed URL:
 
@@ -100,7 +104,9 @@ installs the app's host.
 
 > [!NOTE]
 > A device on the LAN needs to reach your computer on the dev server's port: same network, no firewall in between.
-> Assets (images, fonts) are served over plain HTTP from the same port.
+> Assets are served over plain HTTP from the same port: the files the app imports, and the images, fonts, audio and
+> video in its directory outside hidden directories. Its sources and configuration (`nsh.json`, `.env`) stay on your
+> computer. The WebSocket takes the development hosts and the dev server's own web page.
 
 ## Rust edits
 
