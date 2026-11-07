@@ -103,7 +103,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
     };
-    let Some(window) = surface.root.ns().window() else {
+    let Some(window) = crate::input::event_root(surface).ns().window() else {
         return false;
     };
     if event.window(surface.mtm).as_deref() != Some(&*window) {
@@ -144,7 +144,8 @@ fn editing(surface: &Surface, window: &NSWindow) -> Option<bool> {
     let Some(view) = responder.downcast_ref::<NSView>() else {
         return Some(false);
     };
-    let root = surface.root.ns();
+    let root = crate::input::event_root(surface);
+    let root = root.ns();
     if !view.isDescendantOf(root) {
         return None;
     }

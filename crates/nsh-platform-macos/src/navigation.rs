@@ -1108,6 +1108,11 @@ impl Nav {
             let ns = st.view.ns();
             ns.window().is_some()
                 && !ns.isHiddenOrHasHiddenAncestor()
+                && nsh_core::navigation::shown_in_layout(
+                    std::iter::successors(Some(st.view.clone()), NshView::parent_view)
+                        .filter(|v| v.parent_view().is_some())
+                        .map(|v| v.state().frame),
+                )
                 && within.is_none_or(|w| ns.isDescendantOf(w.ns()))
                 && st.screens.takes_back(|top| {
                     self.screens
@@ -1448,6 +1453,9 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
 
 /// `ModalConfig`.
 pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &ModalConfig) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
@@ -1479,6 +1487,9 @@ pub(crate) fn deleted(surface: &Surface, view: &NshView) {
 
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::is_window(surface, view.id()) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     let m = nav.modals.entry(id).or_default();
@@ -1500,8 +1511,30 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     nav.presenting.push(id);
 }
 
+/// Modal `id` is shown in a window of its own (`Window.open`) instead:
+/// it leaves the surface's modals at once, without events or animation,
+/// and the focus it took goes back.
+pub(crate) fn release(surface: &Rc<Surface>, id: NodeId) {
+    let mut nav = surface.nav.borrow_mut();
+    nav.order.retain(|&m| m != id);
+    nav.presenting.retain(|&m| m != id);
+    let Some(mut m) = nav.modals.remove(&id) else {
+        return;
+    };
+    if let Some(view) = m.view.take()
+        && view.has_parent()
+    {
+        drop_focus(surface, view.ns());
+    }
+    let scope = nav.scope(surface);
+    restore_focus(surface, &scope, m.focus_before.take());
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
+    if crate::window::removed(surface, view) {
+        return;
+    }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     match nav.modals.get_mut(&id) {

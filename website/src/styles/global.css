@@ -84,16 +84,18 @@
   /* Code: Shiki emits the allsum-light colours (src/light.theme.json, the
      palette of TextView's built-in highlighting); the rules below map them
      onto these, so every snippet shares one palette. */
+  /* The theme's own palette: keywords in the citrus accent, names in the
+     ink's blue, strings a quiet sea green, numbers amber, comments gray. */
   --code-bg: #0a0c10;
-  --code-fg: #d6d9dd;
-  --code-keyword: #c4a7ff;
-  --code-string: #9fd68a;
-  --code-comment: #7d7a72;
-  --code-fn: #82b8ff;
-  --code-type: #6fd3d8;
-  --code-number: #f5b27a;
+  --code-fg: #d3d7de;
+  --code-keyword: #c8f26d;
+  --code-string: #93cdbf;
+  --code-comment: #6b717c;
+  --code-fn: #8fb2f5;
+  --code-type: #b6c8f0;
+  --code-number: #e9b872;
   --code-constant: var(--code-number);
-  --code-property: #f0c674;
+  --code-property: #d9c9a3;
   --code-variable: var(--code-property);
   --code-deletion: #f87171;
   --code-link: var(--doc-link);
@@ -147,6 +149,8 @@
   --active-shadow: 0 1px 2px rgb(0 0 0 / 35%);
   --callout-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px -12px rgb(0 0 0 / 45%);
 
+  /* Headings everywhere are set in the banner's Figtree; CJK falls back to the sans stack. */
+  --font-display: "Figtree Variable", var(--font-sans);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto,
     "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "Cascadia Mono", Consolas, monospace;
@@ -181,18 +185,18 @@ html.light {
 
 
 
-  --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
+  --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(16 20 30 / 5%);
   --accent-border: #a7cf3f;
 
-  --code-bg: #f7f7f8;
-  --code-fg: #24262a;
-  --code-keyword: #8250df;
-  --code-string: #116329;
-  --code-comment: #6e7781;
-  --code-fn: #0550ae;
-  --code-type: #0a7285;
-  --code-number: #953800;
-  --code-property: #7d4e00;
+  --code-bg: #f7f8fa;
+  --code-fg: #1d2129;
+  --code-keyword: #4a7d06;
+  --code-string: #2a7166;
+  --code-comment: #8a909a;
+  --code-fn: #2c53a8;
+  --code-type: #3c5f9e;
+  --code-number: #a35f00;
+  --code-property: #5b4a2a;
   --code-deletion: #cf222e;
 
   --grid-line: rgb(21 22 26 / 5%);
@@ -200,10 +204,10 @@ html.light {
   --scrollbar-thumb-hover: rgb(21 22 26 / 34%);
 
   --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 14%);
-  --shadow-raise: 0 1px 2px rgb(20 20 10 / 8%);
-  --shadow-window: 0 1px 2px rgb(20 20 10 / 5%), 0 12px 28px -8px rgb(20 20 10 / 12%), 0 40px 72px -28px rgb(20 20 10 / 16%);
-  --shadow-panel: 0 20px 50px -24px rgb(20 20 10 / 24%);
-  --shadow-dialog: 0 25px 60px -12px rgb(20 20 10 / 28%);
+  --shadow-raise: 0 1px 2px rgb(16 20 30 / 8%);
+  --shadow-window: 0 1px 2px rgb(16 20 30 / 5%), 0 12px 28px -8px rgb(16 20 30 / 12%), 0 40px 72px -28px rgb(16 20 30 / 16%);
+  --shadow-panel: 0 20px 50px -24px rgb(16 20 30 / 24%);
+  --shadow-dialog: 0 25px 60px -12px rgb(16 20 30 / 28%);
 
   --nav-shadow: 0 1px 0 rgb(40 40 20 / 4%);
   --nav-bg: color-mix(in srgb, var(--background) 74%, transparent);
@@ -222,25 +226,27 @@ html.light {
 }
 /* Over the gallery theme's light tokens, which load after this file. */
 html.light:root {
-  --nsh-gallery-primary: #96c823;
+  /* The primary button as in dark: one flat citrus with a fine top light,
+     only its edge a touch darker so it holds on white. */
+  --nsh-gallery-primary: #c2ea62;
   --nsh-gallery-primary-foreground: #13160c;
-  --nsh-gallery-finish-light-background-color: #8cc01d;
-  --nsh-gallery-finish-light-background-image: linear-gradient(180deg, #b2de45, #8cc01d 55%, #7cb015);
-  --nsh-gallery-finish-light-border-color: #6f9f12;
-  --nsh-gallery-finish-light-box-shadow: inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(63 102 6 / 25%), 0 1px 2px rgb(63 102 6 / 22%);
+  --nsh-gallery-finish-light-background-color: #c2ea62;
+  --nsh-gallery-finish-light-background-image: linear-gradient(180deg, #c2ea62 0%, #c2ea62 100%);
+  --nsh-gallery-finish-light-border-color: rgb(60 90 0 / 45%);
+  --nsh-gallery-finish-light-box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%), inset 0 1px 1px rgb(255 255 255 / 35%), 0 1px 1px rgb(0 0 0 / 8%);
   --logo-edge: #3f6606;
   --logo-shine: #d4f178;
   --logo-bead-lo: #1b1e24;
   --logo-bead-hi: #565c66;
   --logo-bead-rim: #07080a;
   --code-surface: rgb(24 24 27 / 2.5%);
-  --code-shadow: 0 1px 2px rgb(20 20 10 / 5%), 0 6px 18px rgb(20 20 10 / 5%);
+  --code-shadow: 0 1px 2px rgb(16 20 30 / 5%), 0 6px 18px rgb(16 20 30 / 5%);
   --chip-bg: rgb(21 22 26 / 5.5%);
   --chip-edge: rgb(21 22 26 / 4%);
   --glass-fill: rgb(255 255 255 / 62%);
   --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 81.1%));
-  --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(20 20 10 / 8%);
-  --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(20 20 10 / 14%);
+  --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(16 20 30 / 8%);
+  --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(16 20 30 / 14%);
   --nav-active: rgb(0 0 0 / 4.5%);
   --nav-hover: rgb(0 0 0 / 2.8%);
   --callout-tint: 7%;
@@ -278,6 +284,8 @@ body {
   font-size: 15px;
   letter-spacing: -0.003em;
 }
+
+h1, h2, h3 { font-family: var(--font-display); }
 
 html[lang^="zh"] body { letter-spacing: normal; }
 html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
@@ -783,8 +791,8 @@ html[lang^="zh"] .sidebar-group__title,
 html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 .doc-header h1 {
   margin: 0;
-  font-size: clamp(1.8rem, 2.8vw, 2.25rem);
-  font-weight: 680;
+  font-size: clamp(1.9rem, 3vw, 2.5rem);
+  font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.15;
 }
@@ -1339,3 +1347,33 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   color: var(--muted-foreground); font-size: 0.8125rem;
 }
 .doc-machine-notice a { color: var(--foreground); text-decoration: underline; }
+
+/* ====================================================================
+   Page heads: the inner pages open as the home page's sections do, a
+   Figtree title over a quiet lead, with the banner's halftone fading in
+   at the top right.
+   ==================================================================== */
+.page-head { position: relative; isolation: isolate; }
+.page-head::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -3rem;
+  right: calc(-1 * min(40vw, 32rem));
+  width: min(70vw, 52rem);
+  height: calc(100% + 5rem);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 16%, transparent) 1.1px, transparent 1.6px);
+  background-size: 15px 15px;
+  mask-image: radial-gradient(55% 65% at 70% 25%, black, transparent);
+  pointer-events: none;
+}
+html.light .page-head::before { background-image: radial-gradient(circle, rgb(52 60 78 / 20%) 1.1px, transparent 1.6px); }
+.page-head h1 { margin: 0; font-size: clamp(2.4rem, 4.6vw, 3.6rem); font-weight: 600; line-height: 1.04; letter-spacing: -0.03em; text-wrap: balance; }
+.page-head--compact h1 { font-size: clamp(1.9rem, 3vw, 2.4rem); }
+.page-head--compact::before { top: -2rem; height: calc(100% + 3rem); }
+.page-head__kicker { color: var(--muted-foreground); }
+.page-head__lead { max-width: 40rem; color: var(--muted-foreground); font-size: 1.05rem; line-height: 1.6; }
+html[lang^="zh"] .page-head h1 { letter-spacing: 0; line-height: 1.2; }
+@media (max-width: 900px) {
+  .page-head::before { right: 0; width: 100%; }
+}

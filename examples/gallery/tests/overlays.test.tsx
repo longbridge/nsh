@@ -67,6 +67,10 @@ test("choosing a reminder closes its popover, and its trigger shows the choice",
 test("a tooltip the app opens shows on a touch screen, which shows none of its own", async () => {
   await show("Tooltip", "Pin the tooltip");
   await app.longPress("Instant");
+  // On a desktop (`--target macos`, ...) the mouse rests on "Instant" after
+  // the press, and its tooltip shows at once until the mouse leaves; a
+  // phone has no mouse to move (`hover` rejects) and shows none at all.
+  await app.hover("Pin the tooltip").catch(() => {});
   expect(app.texts()).not.toContain("Shows at once");
   await app.press("Pin the tooltip");
   await app.waitFor("Shown while pinned or hovered");

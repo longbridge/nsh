@@ -146,9 +146,14 @@ define_class!(
             };
             connect(self.mtm(), scene);
             // The link that launched the app, if one did.
-            // SAFETY: a documented property, a set of `UIOpenURLContext`.
-            let contexts: Retained<NSSet<AnyObject>> = unsafe { msg_send![options, URLContexts] };
-            url_schemes(&contexts);
+            // SAFETY: a documented property, a set of `UIOpenURLContext`;
+            // nil when no link launched the app (iOS 27 returns nil, not an
+            // empty set).
+            let contexts: Option<Retained<NSSet<AnyObject>>> =
+                unsafe { msg_send![options, URLContexts] };
+            if let Some(contexts) = contexts {
+                url_schemes(&contexts);
+            }
         }
 
         // Links of the schemes the app claims (`CFBundleURLTypes`) while it

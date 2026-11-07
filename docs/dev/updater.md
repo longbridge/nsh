@@ -11,7 +11,9 @@ in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh
 2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives.
 3. `checkForUpdate` reads the asset, gets the manifest, checks the signature, the id and that the version is newer.
 4. `downloadUpdate` streams the asset into `<data dir>/updates`, checking its size and SHA-256.
-5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, starts it and exits.
+5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, then restarts the app as
+   `Application.restart()` does (`DesktopCommand::Restart`): this run quits, and the new version starts once it has
+   exited (`nsh_core::restart`).
 
 HTTP is the platform's `Network`, as `fetch`'s, through `UpdaterHost`, which the engine gives `System`: no second HTTP
 or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These requests are not subject to the app's
@@ -32,15 +34,18 @@ or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These
 - **Swapping.** Linux and macOS rename the whole directory or `.app`, which keeps a user's own name for it. Windows
   cannot rename a directory holding the running executable, but can rename the executable: `swap_entries` swaps entry
   by entry, undoes on failure, and the next check removes what was still in use.
-- **macOS** checks the new app with `codesign --verify --deep --strict` and launches with `open -n`. Whether Gatekeeper
+- **Restarting** is `Application.restart()`'s path, the one way an NSH app starts again: the app quits as the user's
+  quit does (storage written, windows closed), and the new version starts only after this process has exited, so the
+  two never run side by side. Everything that can refuse the new app (its id, its executable, its signature) is
+  checked before the swap; after it the app is the new one, whether or not it starts.
+- **macOS** checks the new app with `codesign --verify --deep --strict` and starts it with `open -n`. Whether Gatekeeper
   accepts it is the developer's signing and notarization.
 - **No Cargo feature.** `zip`, `tar`, `semver` and `nsh-updater` add about 125 KB to a 51 MB Linux runner (`nm -S`), and
   `sha2`, `ed25519-dalek` and `flate2` are linked already. `nsh-updater` is not a dependency in WebAssembly, where
   `checkForUpdate` resolves `null`.
 - **Rust apps** (`nsh.json` `"root"`) have no JS modules: they use `nsh-updater` directly and bring their own HTTP.
-  After verifying the archive, use `Installation::install_and_launch` and exit only on success. It retains the old
-  installation until launching succeeds and rolls back on launch failure. Separate `install` / `launch` calls do not
-  provide that transaction.
+  After verifying the archive, they call `Installation::install`, then `nsh_core::element::desktop::restart()` as
+  `installAndRestart` does.
 - **Concurrent calls** are refused while a check, download or install is in progress. Downloads use exclusively
   created unique files, so a retry cannot truncate a previously verified archive.
 - **Public records** (`Config`, `Manifest`, `Asset`, `Available`) are non-exhaustive and implement `Default`, so later
@@ -50,6 +55,5 @@ or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These
 
 - iOS and Android only check and report a link (`--link`): stores do not allow replacing the binary, and installing an
   APK needs a permission an SDK must not declare for its hosts.
-- `installAndRestart` waits 300 ms for storage's writer thread, then exits the process with no further teardown.
 - Downgrades are refused by the version check; a signed manifest of an older version is therefore harmless.
 - `nsh#914`: desktop TLS uses the webpki roots, so a custom host on a certificate chain they lack fails to connect.

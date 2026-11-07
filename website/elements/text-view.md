@@ -326,7 +326,9 @@ Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress`
 [`WebView`](./web-view.md), a scroll to a heading). Headings have anchors (GitHub's: `## Getting started` is
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
 `#footnote-<label>`. In a terminal Tab reaches each link and footnote reference in turn, and Return presses the focused
-one: `onLinkPress` hears it as it hears a press.
+one: `onLinkPress` hears it as it hears a press. The event also has the modifier keys held when the press began
+(`modifiers`, as a press's), so an app can open a Command-click (Control off macOS) in the browser and route a plain
+one itself; a press from the keyboard or an assistive technology holds none.
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};
@@ -814,7 +816,7 @@ parts with [`TextViewParts`](#typed-part-styles).
 
 | Event | Rust | Description |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url, modifiers }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote, and the modifier keys held. |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
 | `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | The selection of a `selectable` `TextView` changed: `{ text, start }`, the selected text as Copy takes it, `""` once nothing is selected ([Reading the selection](./text-selection.md#reading-the-selection)). Inside a selectable view the outer view reports instead. |
 

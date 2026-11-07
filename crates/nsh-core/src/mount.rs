@@ -662,8 +662,10 @@ pub struct ImageOptions {
 #[derive(Debug, Clone)]
 pub enum MountItem {
     /// Mounted nodes in depth-first logical tree order, independent of native
-    /// stacking (`Insert`). Opt-in through `Core::set_tree_order_tracking`;
-    /// emitted after structural changes in the same batch as the affected views.
+    /// stacking (`Insert`); a list's cells, which it recycles, in the order
+    /// they are on screen. Opt-in through `Core::set_tree_order_tracking`;
+    /// emitted after structural changes and when a list's cells move, in the
+    /// same batch as the affected views.
     TreeOrder(Vec<NodeId>),
     /// Create a native view. It starts detached and invisible.
     Create {
@@ -782,7 +784,7 @@ pub enum MountItem {
         scrollbar_visible: bool,
         /// A built-in bar of the app's takes the indicator's place (the
         /// core's, over the viewport): the platform shows none on either
-        /// axis, also where a horizontal view keeps its own.
+        /// axis.
         replaced: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,

@@ -82,9 +82,9 @@ function installAndRestart(): Promise<void>;
 ```
 
 Unpacks the downloaded archive next to the app, checks the new app (its id and executable, and on macOS its code
-signature), swaps it in, starts it and exits this run. The promise settles only on failure, which leaves the installed
-app as it was: it rejects when nothing was downloaded or the app cannot be replaced. Save what the user would lose
-before calling it.
+signature), swaps it in and restarts the app as `Application.restart()` does: this run quits as when the user quits
+it, and the new version starts once it has exited. The promise settles only on failure, which leaves the installed app
+as it was: it rejects when nothing was downloaded or the app cannot be replaced.
 
 On Linux and macOS the whole directory or `.app` is replaced, keeping the name the user gave it; on Windows the files
 are replaced one by one and put back if one fails.
@@ -148,5 +148,5 @@ semver. `nsh update-manifest` writes `latest.json` and its signature for one rel
 ## Rust
 
 Rust apps (`nsh.json` `"root"`) use the `nsh-updater` crate directly with an HTTP client of their own:
-`Config::check` verifies the manifest, `Download` the archive, and `Installation::install_and_launch` replaces the app
-and starts it, rolling back if the launch fails ([App Updates](../docs/app-updates.md#rust-apps)).
+`Config::check` verifies the manifest, `Download` the archive, `Installation::install` replaces the app, and
+`nsh_core::element::desktop::restart()` starts the new version ([App Updates](../docs/app-updates.md#rust-apps)).

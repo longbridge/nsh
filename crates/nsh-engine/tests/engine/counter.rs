@@ -53,6 +53,7 @@ fn config() -> EngineConfig {
         host: Default::default(),
         picker: None,
         speech: None,
+        audio: None,
     }
 }
 

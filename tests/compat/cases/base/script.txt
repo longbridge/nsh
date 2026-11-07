@@ -589,10 +589,11 @@ prop scroll:text:"let a = 1;" scrollbar false
 prop scroll:text:"Alpha" horizontal true
 prop scroll:text:"Alpha" scrollbar false
 style text:"First item" color #0000ffff
-# A press on the link reports its URL; nothing opens it.
+# A press on the link reports its URL and the modifier keys held;
+# nothing opens it.
 expect Link: none
 tap span:the guide
-expect Link: https://example.com/guide
+expect Link: https://example.com/guide (Command: false)
 # HTML.
 expect From HTML
 expect An hypertext paragraph.
@@ -4273,3 +4274,24 @@ covers [events] HoverCard.onOpenChange
 covers [events] HoverCard.onOpen
 covers [events] HoverCard.onClose
 covers [events] HoverCard.onPosition
+# base-terminal
+tap id:case-base-terminal
+# The output, its color and moves interpreted: `d` replaced the first
+# line's `n`; the title the program set; the size once laid out.
+expect red lide
+expect second
+expect Title Build
+expect Size truextrue
+# What the user types goes to the app as data.
+type label:Shell ls
+expect Typed [ls]
+# The ref's text, then a reset clears it.
+tap id:read
+expect Typed [red lide]
+tap id:reset
+absent second
+covers [nsh/base] Terminal
+covers [props] accessibilityLabel
+covers [events] Terminal.onData
+covers [events] Terminal.onResize
+covers [events] Terminal.onTitleChange

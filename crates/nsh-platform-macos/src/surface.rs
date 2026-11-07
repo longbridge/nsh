@@ -191,6 +191,9 @@ pub(crate) struct Surface {
     pub(crate) anim: RefCell<UiAnimation>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
+    /// The app's own windows (`Window.open`), by the dialog root each
+    /// shows ([`crate::window`]).
+    pub(crate) windows: RefCell<rustc_hash::FxHashMap<NodeId, crate::window::AppWindow>>,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
     /// The text selection ([`crate::text::Selected`]).
@@ -224,8 +227,8 @@ pub(crate) struct Surface {
     /// its deadline ([`Next::At`]; a new one's is when it was added).
     frame_callbacks: RefCell<Vec<(FrameCallback, Option<f64>)>>,
     /// How many of the frame callbacks have only cosmetic work left (a
-    /// scroll indicator fading out): what [`Surface::animating`] does not
-    /// count.
+    /// scroll indicator fading out, keyframes repeating forever): what
+    /// [`Surface::animating`] does not count.
     #[cfg(feature = "dev")]
     cosmetic_frames: Cell<usize>,
     /// The model of a test session's app (`nsh test --target`).
@@ -262,10 +265,14 @@ pub(crate) struct Surface {
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The engine's sounds and players ([`crate::audio`]).
+    pub(crate) audio: crate::audio::Speaker,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// The window observed for its bounds ([`crate::window_state`]).
+    pub(crate) window: crate::window_state::Watch,
     /// Videos, web views and registered native components.
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
@@ -313,6 +320,7 @@ impl Surface {
             mounter: RefCell::new(Mounter::new(root.clone())),
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
+            windows: RefCell::default(),
             input: Default::default(),
             selection: Default::default(),
             engine: RefCell::new(None),
@@ -345,11 +353,13 @@ impl Surface {
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),
+            audio: Default::default(),
             image_cache: RefCell::new(None),
             native: Default::default(),
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            window: Default::default(),
             shaders: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
@@ -397,10 +407,13 @@ impl Surface {
         *self.pending.borrow_mut() = pending;
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.borrow().clone();
+        // The displays are there as the app first renders.
+        let displays = crate::window_state::displays(self.mtm);
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
+            control.set_displays(displays);
         };
         // Remote images download with NSURLSession.
         crate::image::install_transport();
@@ -434,6 +447,7 @@ impl Surface {
         crate::system::clear(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
+        crate::window::close_all(self);
         crate::input::reset(self);
         crate::keymap::clear(self);
         crate::tray::release(self.key);
@@ -755,8 +769,9 @@ impl Surface {
     }
 
     /// A frame callback's work left became cosmetic (`on`: a scroll
-    /// indicator fading out, which shows nothing the app did) or no longer
-    /// is; it ends with `on` false.
+    /// indicator fading out, which shows nothing the app did; keyframes
+    /// repeating forever, a spinner, which never end) or no longer is; it
+    /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
         #[cfg(feature = "dev")]
         {
@@ -769,9 +784,10 @@ impl Surface {
     }
 
     /// Whether a native animation runs: the graph's (not one looping
-    /// forever, which no test step waits for), or the platform's own
-    /// (scroll glides, zooms; not a scroll indicator's fade, after which
-    /// nothing changes); or batches wait for the next frame.
+    /// forever, which no test step waits for), the platform's own (scroll
+    /// glides, zooms; not a scroll indicator's fade, after which nothing
+    /// changes) or a view's transitions (not its keyframes repeating
+    /// forever); or batches wait for the next frame.
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
         self.anim.borrow().finishing()
@@ -991,7 +1007,7 @@ impl Surface {
     }
 
     /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
-    fn testing(&self) -> bool {
+    pub(crate) fn testing(&self) -> bool {
         #[cfg(feature = "dev")]
         return self.test_model.borrow().is_some();
         #[cfg(not(feature = "dev"))]
