@@ -203,9 +203,16 @@ impl Xtest {
             if code == 0 {
                 return None;
             }
-            let shift = (self.keycode_to_keysym)(self.display, code, 0) != keysym
-                && (self.keycode_to_keysym)(self.display, code, 1) == keysym;
-            Some((code, shift))
+            if (self.keycode_to_keysym)(self.display, code, 0) == keysym {
+                Some((code, false))
+            } else if (self.keycode_to_keysym)(self.display, code, 1) == keysym {
+                Some((code, true))
+            } else {
+                // XKeysymToKeycode searches every group and level. A key
+                // needing AltGr or another group cannot be typed with
+                // Shift alone; let stroke borrow its spare key instead.
+                None
+            }
         }
     }
 
@@ -421,6 +428,36 @@ mod tests {
                 assert!(wait_until(|| field.text() == "xBCd中"));
                 x.restore_mapping();
                 assert_eq!(x.keycode(char_keysym('中')), None);
+
+                // A layout can already map a character beyond the two
+                // levels stroke handles (backslash on German keyboards,
+                // for example). It must still use the spare-key path.
+                let spare = x.spare.expect("Xvfb has an unused keycode");
+                let symbol = char_keysym('🦄');
+                let syms = [char_keysym('a'), char_keysym('A'), symbol, symbol];
+                // SAFETY: the unused keycode belongs to this test's Xvfb
+                // display; restore_mapping clears it after the stroke.
+                unsafe {
+                    (x.change_keyboard_mapping)(
+                        x.display,
+                        c_int::from(spare),
+                        syms.len() as c_int,
+                        syms.as_ptr(),
+                        1,
+                    );
+                }
+                x.remapped.set(true);
+                x.flush();
+                // Let GDK consume the mapping change before querying it.
+                assert!(wait_until(|| {
+                    // SAFETY: query the same display on its GTK thread.
+                    unsafe { (x.keysym_to_keycode)(x.display, symbol) == spare }
+                }));
+                assert_eq!(x.keycode(symbol), None);
+                assert!(x.stroke(&[], symbol));
+                assert!(wait_until(|| field.text() == "xBCd中🦄"));
+                x.restore_mapping();
+                assert_eq!(x.keycode(symbol), None);
                 window.close();
             })
             .expect("X11 tests require the XTest extension and libXtst");
