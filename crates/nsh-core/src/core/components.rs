@@ -1030,6 +1030,10 @@ impl<M: TextEngine> Core<M> {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
         }
+        // A main window that keeps its placement saves it as it changes.
+        if let Some(state) = environment.window_state {
+            self.keep_window_placement(crate::ROOT_ID, &state);
+        }
     }
 
     /// The surface's size changed (the environment's window).
@@ -2714,6 +2718,24 @@ impl<M: TextEngine> Core<M> {
             let _ = self.apply_op(Op::Draw {
                 id,
                 drawing: Box::new((**drawing).clone()),
+            });
+        }
+        if new.window != old.window
+            && let Some(window) = &new.window
+        {
+            // Opened once; then only its attributes follow (the record sends
+            // what changed).
+            let command = if old.window.is_none() {
+                crate::desktop::DesktopCommand::OpenWindow(Box::new(crate::desktop::OpenWindow {
+                    options: (**window).clone(),
+                    ..Default::default()
+                }))
+            } else {
+                crate::desktop::DesktopCommand::SetAttributes(Box::new(window.attributes.clone()))
+            };
+            let _ = self.apply_op(Op::Command {
+                id,
+                command: crate::Command::Desktop(Box::new(command)),
             });
         }
     }
@@ -5240,14 +5262,7 @@ impl<M: TextEngine> Core<M> {
 
     fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Command(id, mut command) => {
-                // Saved bounds go onto the displays there are now, whichever
-                // side (Rust or JS) restores them.
-                if let Command::Desktop(desktop) = &mut command
-                    && let crate::desktop::DesktopCommand::SetBounds(bounds) = desktop.as_mut()
-                {
-                    *bounds = self.components.runtime.fit_window_bounds(*bounds);
-                }
+            Action::Command(id, command) => {
                 let _ = self.apply_op(Op::Command { id, command });
             }
             Action::Dialog(mut dialog, answer) => {
@@ -5696,6 +5711,26 @@ impl<M: TextEngine> Core<M> {
             _ => None,
         };
         match kind {
+            // A window that keeps its placement saves it as it changes; the
+            // event goes on to the app.
+            EventKind::Window => {
+                if let EventPayload::Window(event) = payload {
+                    match event.as_ref() {
+                        crate::desktop::WindowEvent::State(state) => {
+                            self.keep_window_placement(id, state);
+                        }
+                        // Rust listeners of the main window's; JS's hear it
+                        // from the event.
+                        crate::desktop::WindowEvent::ClosePress { reason }
+                            if id == crate::ROOT_ID =>
+                        {
+                            self.components.runtime.main_close_pressed(*reason);
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
             EventKind::Dialog => {
                 let Some(dialog) = number("id") else {
                     return false;

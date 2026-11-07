@@ -21,6 +21,7 @@ import ModPicker from "./mod-picker";
 import ModNotifications from "./mod-notifications";
 import ModSpeech from "./mod-speech";
 import ModStorage from "./mod-storage";
+import ModUpdater from "./mod-updater";
 
 const cases: Record<string, () => JSX.Element> = {
   "mod-standard-access": ModStandardAccess,
@@ -41,6 +42,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-notifications": ModNotifications,
   "mod-speech": ModSpeech,
   "mod-storage": ModStorage,
+  "mod-updater": ModUpdater,
 };
 const shown = signal("");
 

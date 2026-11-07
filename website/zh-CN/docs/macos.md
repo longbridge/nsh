@@ -156,7 +156,7 @@ view.load(Bundle::source(code).into());
 关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
 应用自己的代码用 `nsh_core::element::desktop::quit()`（TS：`Application.quit()`）以同样的方式退出，而
-`nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
+`current_window().close()`（`nsh_core::element::desktop`）遵循所选的窗口关闭策略。
 `nsh_core::element::desktop::restart()`（TS：`Application.restart()`）以同样的方式退出，进程结束后由 `run_app`
 以相同的参数重新启动应用：`.app` 包里的应用通过 Launch Services（`open -n`）打开，与用户打开它时相同。
 
@@ -171,6 +171,14 @@ Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
 `AlertDialog` 以 `NSAlert` 表单的形式显示在窗口上：不超过两个操作的提示框操作排成一行（取消操作在最左边，最后一个普通操作是
 Return 的默认操作）；更多操作以及操作表的操作按顺序竖排，取消操作在最后，没有默认操作；Escape 选择取消操作。
+
+### 表格无障碍
+
+VoiceOver 和 UI 自动化工具将 `Table` 和 `Grid` 读取为 `AXTable`，将 `Row` 读取为 `AXRow`，将 `Cell` 和
+`ColumnHeader` 读取为 `AXCell`。表格会提供已挂载的行和列、可见的行和单元格，以及表头。
+行和单元格的索引按树中的顺序从零开始，包含表头行，每个单元格占一行一列。
+表格、列和单元格都关联到相应的列标题。带有 `onPress` 的行保留按压操作和行角色，
+无障碍客户端仍可读取标签和文本子元素。
 
 ### 键盘
 

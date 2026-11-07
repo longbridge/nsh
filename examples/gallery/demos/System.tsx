@@ -3,7 +3,7 @@ import { createAnimatedValue, Easing } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh";
 import { AlertDialog, type AlertDialogAction, Dialog, type StatusBarForeground } from "nsh/base";
 import { keyboardFrame, safeArea } from "nsh";
-import { Menu, Window } from "nsh/desktop";
+import { Menu } from "nsh/desktop";
 import { fpsEnabled, keymap, platform, setFpsEnabled } from "nsh";
 import { Icon, type IconName, lucideSvg } from "../icons";
 import { toast } from "../toast";
@@ -396,66 +396,6 @@ function ContextMenu() {
   );
 }
 
-/** Sizes the window (desktops: `Window.setFrame`). */
-function WindowFrame() {
-  const size = () => `${Math.round(windowSize().width)} × ${Math.round(windowSize().height)}`;
-  return (
-    <Card icon="system" title="Window frame" subtitle="nsh/desktop · Window.setFrame" right={<Badge label={size()} tone="neutral" />}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Button label="1000 × 720" variant="secondary" onPress={() => Window.setFrame({ size: { width: 1000, height: 720 } })} />
-        <Button label="Width 800" variant="secondary" onPress={() => Window.setFrame({ size: { width: 800 } })} />
-        <Button
-          label="Width, then height"
-          variant="secondary"
-          onPress={() => {
-            Window.setFrame({ size: { width: 900 } });
-            Window.setFrame({ size: { height: 640 } });
-          }}
-        />
-      </View>
-      <Text style={{ fontSize: 12, color: colors.faint }}>
-        "Width, then height" makes 900 × 640 in one go. A maximized or full-screen window keeps its size.
-      </Text>
-    </Card>
-  );
-}
-
-/** Shared by the main window and the second one: one JS runtime renders
- * both, so a signal is all they need. */
-const sharedCount = signal(0);
-
-function SecondWindow() {
-  return (
-    <View style={{ flex: 1, padding: 20, gap: 12, backgroundColor: colors.background }}>
-      <Text style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>Second window</Text>
-      <Text testID="second-count" style={{ fontSize: 14, color: colors.muted }}>{`Shared count: ${sharedCount()}`}</Text>
-      <Button label="Add one" icon="plus" onPress={() => sharedCount.set(sharedCount() + 1)} />
-      <Button label="Close" onPress={() => Window.open(SecondWindow, { id: "second" }).close()} />
-    </View>
-  );
-}
-
-function Windows() {
-  const supported = platform.os === "linux" || platform.os === "macos" || platform.os === "windows";
-  return (
-    <Card icon="system" title="Windows" subtitle="nsh/desktop · Window.open">
-      <Text testID="main-count" style={{ fontSize: 14, color: colors.muted }}>
-        {supported ? `Shared count: ${sharedCount()}` : "Window.open is on the desktops"}
-      </Text>
-      {supported && (
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button
-            label="Open second window"
-            icon="plus"
-            onPress={() => Window.open(SecondWindow, { id: "second", title: "Second window", size: { width: 360, height: 240 } }).focus()}
-          />
-          <Button label="Add one" onPress={() => sharedCount.set(sharedCount() + 1)} />
-        </View>
-      )}
-    </Card>
-  );
-}
-
 type Post = { id: number; title: string };
 
 function Network() {
@@ -521,6 +461,6 @@ function Network() {
 }
 
 export function System() {
-  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, WindowFrame, Windows, Network];
+  const sections = [Environment, StatusBarCard, Dialogs, FramesAndTimers, Shortcuts, ContextMenu, Network];
   return <DemoPage cards={sections} />;
 }
