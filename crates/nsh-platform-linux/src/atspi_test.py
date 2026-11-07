@@ -85,12 +85,26 @@ try:
     action = get_action(button)
     assert action, "button has no AT-SPI Action interface"
     try:
-        count = action_count(action, None)
-        assert count == 1, f"expected one AT-SPI action, got {count}"
-        assert string(action_name, action, 0) == "nsh.activate"
-        accepted = bool(do_action(action, 0, None))
-        print(f"AT-SPI target_pid={os.getppid()} actions={count} name=nsh.activate accepted={accepted}", flush=True)
-        assert accepted, "AT-SPI rejected activation"
+        def attempt(expected):
+            count = action_count(action, None)
+            assert count == expected, f"expected {expected} AT-SPI actions, got {count}"
+            if expected:
+                assert string(action_name, action, 0) == "nsh.activate"
+            # Retain index 0 even when it is no longer advertised. A stale
+            # client must not get success or deliver an event in that state.
+            error = pointer()
+            accepted = bool(do_action(action, 0, ctypes.byref(error)))
+            failed = bool(error.value)
+            if failed:
+                bind(glib, "g_error_free", None, [pointer])(error)
+            assert accepted == bool(expected), "AT-SPI activation availability differs"
+            print(f"AT-SPI target_pid={os.getppid()} actions={count} accepted={accepted} error={failed}", flush=True)
+
+        if "--interactive" in sys.argv:
+            for line in sys.stdin:
+                attempt(int(line))
+        else:
+            attempt(0 if "--blocked" in sys.argv else 1)
     finally:
         unref(action)
 finally:

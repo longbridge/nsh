@@ -284,9 +284,13 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
   and real live regions (emulated by announcements).
   Press listeners and app-drawn window controls expose the parameterless `nsh.activate` action through AT-SPI.
   Presses use the keyboard's event order and payload, stay inside the newest modal of the target window, and leave
-  keyboard focus alone. A shown native modal also blocks its transient parent; independent windows keep their scope.
-  Hidden, disabled, removed or untargetable controls cannot activate. Blocked actions can remain listed by AT-SPI;
-  runtime checks prevent their dispatch.
+  keyboard focus alone. Alerts and action sheets block their NSH host subtree until dismissal. A shown native modal
+  also blocks its direct transient parent. Hidden, disabled, removed or untargetable controls cannot activate.
+  GTK queries the private action group's admission live for each AT-SPI request, including retained client objects;
+  blocked actions are omitted and stale action indices are rejected. Activation rechecks admission before dispatch.
+  This group is for the AT bridge, not signal-driven `GtkActionable` bindings. Native GTK group grabs can block more
+  windows than the direct-parent check, including independent windows and portal dialogs; that wider scope remains
+  unsupported by this check.
 - **No desktop equivalent**: the status bar; `AccessibilityFocus` moves keyboard focus when the view can take it.
 - **Packaged apps** are a directory and a `.tar.gz` (`embedding.md`); GTK 4, Pango and (with the release runner's
   default `webview` feature) WebKitGTK 6.0 must be installed where they run.

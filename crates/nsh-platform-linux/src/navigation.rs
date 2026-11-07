@@ -1309,10 +1309,15 @@ impl Nav {
 
 /// Whether `view` is inside the newest modal of its own window.
 pub(crate) fn in_focus_scope(surface: &Surface, view: &NshView) -> bool {
-    let root = crate::window::root_of(surface, view);
-    let nav = surface.nav.borrow();
+    // AT can query an inserted action during a mount/navigation mutation.
+    let (Ok(_windows), Ok(nav)) = (surface.windows.try_borrow(), surface.nav.try_borrow()) else {
+        return false;
+    };
+    let Some(window) = crate::window::try_root_id(surface, view) else {
+        return false;
+    };
     let scope = nav
-        .newest_in(surface, root.id())
+        .newest_in(surface, window)
         .and_then(|id| nav.modals.get(&id))
         .and_then(|modal| modal.view.as_ref());
     scope.is_none_or(|scope| view == scope || view.is_ancestor(scope))

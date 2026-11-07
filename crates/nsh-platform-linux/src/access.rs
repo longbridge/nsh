@@ -43,8 +43,8 @@ use crate::{surface::Surface, view::NshView};
 /// What was last given to GTK for one view.
 #[derive(Debug, Default)]
 pub(crate) struct Applied {
-    /// The native press action, allocated only for a view that takes presses.
-    activation: Option<gtk::gio::SimpleAction>,
+    /// The native action, allocated for a press handler or app-drawn window control.
+    activation: Option<ActivationGroup>,
     /// The applied description; `None` until the first update.
     spec: Option<Box<Spec>>,
     /// The text a text view's label was taken from.
@@ -88,6 +88,93 @@ thread_local! {
     /// The roles of the views the batch being applied creates
     /// ([`prepare`]), taken when they are created ([`created`]).
     static PENDING: RefCell<FxHashMap<NodeId, Gtk>> = RefCell::default();
+}
+
+gtk::glib::wrapper! {
+    /// Private AT action: GTK's AT-SPI bridge queries admission on every call.
+    /// This is not a signal-driven GtkActionable binding: no enabled state is cached.
+    pub(crate) struct ActivationGroup(ObjectSubclass<activation_group::Group>) @implements gtk::gio::ActionGroup;
+}
+
+impl ActivationGroup {
+    fn new(surface: &Rc<Surface>, view: &NshView) -> Self {
+        use gtk::glib::subclass::prelude::*;
+        let group: Self = gtk::glib::Object::new();
+        assert!(
+            group
+                .imp()
+                .target
+                .set((Rc::downgrade(surface), view.downgrade()))
+                .is_ok()
+        );
+        group
+    }
+}
+
+mod activation_group {
+    use std::{cell::OnceCell, rc::Weak};
+
+    use gio::subclass::prelude::*;
+    use gtk::{gio, glib};
+
+    use super::*;
+
+    #[derive(Default)]
+    pub(crate) struct Group {
+        pub(super) target: OnceCell<(Weak<Surface>, glib::WeakRef<NshView>)>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Group {
+        const NAME: &'static str = "NshActivationGroup";
+        type Type = ActivationGroup;
+        type Interfaces = (gio::ActionGroup,);
+    }
+
+    impl ObjectImpl for Group {}
+
+    impl Group {
+        fn target(&self) -> Option<(Rc<Surface>, NshView)> {
+            let (surface, view) = self.target.get()?;
+            Some((surface.upgrade()?, view.upgrade()?))
+        }
+
+        fn enabled(&self) -> bool {
+            self.target()
+                .is_some_and(|(surface, view)| can_activate(&surface, &view))
+        }
+    }
+
+    impl ActionGroupImpl for Group {
+        fn list_actions(&self) -> Vec<String> {
+            vec!["activate".into()]
+        }
+        // Keep this local name owned even when blocked: do not fall through to a parent.
+        fn has_action(&self, name: &str) -> bool {
+            name == "activate"
+        }
+        fn query_action(
+            &self,
+            name: &str,
+        ) -> Option<(
+            bool,
+            Option<glib::VariantType>,
+            Option<glib::VariantType>,
+            Option<glib::Variant>,
+            Option<glib::Variant>,
+        )> {
+            (name == "activate").then(|| (self.enabled(), None, None, None, None))
+        }
+        fn change_action_state(&self, _: &str, _: &glib::Variant) {}
+        fn activate_action(&self, name: &str, parameter: Option<&glib::Variant>) {
+            if name == "activate"
+                && parameter.is_none()
+                && let Some((surface, view)) = self.target()
+            {
+                activate(&surface, &view);
+            }
+        }
+    }
 }
 
 /// A batch is about to be applied: finds the roles of the views it
@@ -170,37 +257,29 @@ pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
             && s.access.activation.is_none()
     };
     if install {
-        let action = gtk::gio::SimpleAction::new("activate", None);
-        let weak_surface = Rc::downgrade(surface);
-        let weak_view = view.downgrade();
-        action.connect_activate(move |_, _| {
-            let (Some(surface), Some(view)) = (weak_surface.upgrade(), weak_view.upgrade()) else {
-                return;
-            };
-            activate(&surface, &view);
-        });
-        let group = gtk::gio::SimpleActionGroup::new();
-        group.add_action(&action);
+        let group = ActivationGroup::new(surface, view);
         view.insert_action_group("nsh", Some(&group));
-        view.state_mut().access.activation = Some(action);
+        view.state_mut().access.activation = Some(group);
     }
     update(view);
 }
 
-fn activation_enabled(view: &NshView) -> bool {
-    let s = view.state();
-    let a = &s.props.accessibility;
-    (s.events.contains(EventKind::Press) || s.props.window_control.is_some())
-        && !s.style.hidden
-        && !a.hidden
-        && !a.state.disabled
-        && a.accessible != Some(false)
-}
-
 fn can_activate(surface: &Surface, view: &NshView) -> bool {
-    if !activation_enabled(view)
+    let (Ok(mounter), Ok(state)) = (surface.mounter.try_borrow(), view.try_state()) else {
+        return false;
+    };
+    let a = &state.props.accessibility;
+    if !(state.events.contains(EventKind::Press) || state.props.window_control.is_some())
+        || a.state.disabled
+        || a.accessible == Some(false)
         || !view.is_mapped()
-        || surface.mounter.borrow().views.get(&view.id()) != Some(view)
+        || mounter.views.get(&state.id) != Some(view)
+    {
+        return false;
+    }
+    drop(state);
+    drop(mounter);
+    if crate::system::blocks_activation(view)
         || !crate::navigation::in_focus_scope(surface, view)
         || crate::window::blocked_by_modal(surface, view)
     {
@@ -209,7 +288,9 @@ fn can_activate(surface: &Surface, view: &NshView) -> bool {
     let mut at = Some(view.clone());
     while let Some(view) = at {
         {
-            let s = view.state();
+            let Ok(s) = view.try_state() else {
+                return false;
+            };
             if !view.can_target()
                 || !view.is_visible()
                 || s.style.hidden
@@ -289,10 +370,6 @@ pub(crate) fn announce(widget: &impl IsA<gtk::Accessible>, text: &str) {
 /// Brings what GTK knows of the view up to date; true if its label
 /// changed.
 fn update(view: &NshView) -> bool {
-    let action = view.state().access.activation.clone();
-    if let Some(action) = action {
-        action.set_enabled(activation_enabled(view));
-    }
     let (spec, old, live) = {
         let mut s = view.state_mut();
         let s = &mut *s;
@@ -702,9 +779,20 @@ mod tests {
             let mut events = EventMask::default();
             events.set(EventKind::Press, true);
             apply(&surface, &[MountItem::Events { id: 2, events }]);
+            assert!(!button.is_mapped());
+            let _window = TestWindow(crate::gtk_test::show(&surface));
+            apply(
+                &surface,
+                &[MountItem::Insert {
+                    parent: nsh_core::ROOT_ID,
+                    child: 2,
+                    before: None,
+                }],
+            );
+            assert!(crate::gtk_test::wait_until(|| button.is_mapped()));
             let action = button.state().access.activation.clone().unwrap();
-            assert!(action.is_enabled());
-            assert!(action.parameter_type().is_none());
+            assert!(action.is_action_enabled("activate"));
+            assert!(action.action_parameter_type("activate").is_none());
 
             props.accessibility.accessible = Some(false);
             apply(
@@ -714,7 +802,7 @@ mod tests {
                     props: props.clone(),
                 }],
             );
-            assert!(!action.is_enabled());
+            assert!(!action.is_action_enabled("activate"));
             props.accessibility.accessible = None;
             apply(
                 &surface,
@@ -723,14 +811,14 @@ mod tests {
                     props: props.clone(),
                 }],
             );
-            assert!(action.is_enabled());
+            assert!(action.is_action_enabled("activate"));
             events.set(EventKind::Press, false);
             events.set(EventKind::LongPress, true);
             apply(&surface, &[MountItem::Events { id: 2, events }]);
-            assert!(!action.is_enabled());
+            assert!(!action.is_action_enabled("activate"));
             events.set(EventKind::Press, true);
             apply(&surface, &[MountItem::Events { id: 2, events }]);
-            assert!(action.is_enabled());
+            assert!(action.is_action_enabled("activate"));
 
             props.accessibility.state.disabled = true;
             apply(
@@ -740,7 +828,7 @@ mod tests {
                     props: props.clone(),
                 }],
             );
-            assert!(!action.is_enabled());
+            assert!(!action.is_action_enabled("activate"));
             props.accessibility.state.disabled = false;
             props.accessibility.hidden = true;
             apply(
@@ -750,10 +838,10 @@ mod tests {
                     props: props.clone(),
                 }],
             );
-            assert!(!action.is_enabled());
+            assert!(!action.is_action_enabled("activate"));
             props.accessibility.hidden = false;
             apply(&surface, &[MountItem::ViewProps { id: 2, props }]);
-            assert!(action.is_enabled());
+            assert!(action.is_action_enabled("activate"));
             assert_eq!(button.state().access.activation.as_ref(), Some(&action));
 
             let mut style = button.state().style.clone();
@@ -765,10 +853,10 @@ mod tests {
                     style: style.clone(),
                 }],
             );
-            assert!(!action.is_enabled());
+            assert!(!action.is_action_enabled("activate"));
             style.hidden = false;
             apply(&surface, &[MountItem::ViewStyle { id: 2, style }]);
-            assert!(action.is_enabled());
+            assert!(action.is_action_enabled("activate"));
 
             for (id, kind, event) in [
                 (4, ViewKind::View, EventKind::LongPress),
@@ -956,10 +1044,15 @@ mod tests {
     }
 
     fn atspi_activate() {
+        atspi_attempt(true);
+    }
+
+    fn atspi_attempt(enabled: bool) {
         let mut client = std::process::Command::new("python3")
             .arg("-I")
             .arg("-c")
             .arg(include_str!("atspi_test.py"))
+            .args(if enabled { &[][..] } else { &["--blocked"][..] })
             .spawn()
             .expect("the AT-SPI client starts");
         let mut status = None;
@@ -975,9 +1068,217 @@ mod tests {
         assert!(status.unwrap().success(), "AT-SPI activation failed");
     }
 
+    #[cfg(feature = "dev")]
+    fn show_test_dialog(surface: &Rc<Surface>, sheet: bool) {
+        crate::system::command(
+            surface,
+            nsh_core::ROOT_ID,
+            &nsh_core::Command::Dialog(Box::new(nsh_core::Dialog {
+                id: 1,
+                title: Some("Confirm".into()),
+                message: None,
+                buttons: vec![nsh_core::DialogButton {
+                    text: "Done".into(),
+                    style: nsh_core::DialogButtonStyle::Default,
+                }],
+                cancelable: false,
+                sheet,
+            })),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "dev")]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_respects_system_dialogs() {
+        assert!(
+            with_activation(|surface, button, events| {
+                for sheet in [false, true] {
+                    show_test_dialog(surface, sheet);
+                    atspi_attempt(false);
+                    flush(surface);
+                    assert!(events.lock().unwrap().is_empty(), "dialog sheet={sheet}");
+                    let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+                    assert!(
+                        gtk::prelude::GtkWindowExt::focus(&window)
+                            .is_some_and(|w| !w.is::<NshView>())
+                    );
+                    real_key(&window);
+                    assert!(crate::gtk_test::wait_until(|| {
+                        !crate::system::blocks_activation(button)
+                    }));
+                    flush(surface);
+                    assert!(
+                        events.lock().unwrap().is_empty(),
+                        "Return answers the native dialog"
+                    );
+                    atspi_activate();
+                    flush(surface);
+                    assert_eq!(*events.lock().unwrap(), expected_press());
+                    events.lock().unwrap().clear();
+                }
+            })
+            .is_some()
+        );
+    }
+
+    struct AtspiClient {
+        child: std::process::Child,
+        lines: std::sync::mpsc::Receiver<String>,
+    }
+
+    impl AtspiClient {
+        fn new() -> Self {
+            use std::io::BufRead;
+            let mut child = std::process::Command::new("python3")
+                .args(["-I", "-c", include_str!("atspi_test.py"), "--interactive"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let output = child.stdout.take().unwrap();
+            let (send, lines) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                for line in std::io::BufReader::new(output).lines() {
+                    if send.send(line.unwrap()).is_err() {
+                        break;
+                    }
+                }
+            });
+            Self { child, lines }
+        }
+
+        fn attempt(&mut self, enabled: bool) {
+            use std::io::Write;
+            writeln!(self.child.stdin.as_mut().unwrap(), "{}", u8::from(enabled)).unwrap();
+            let mut reply = None;
+            assert!(
+                crate::gtk_test::wait_until(|| {
+                    reply = self.lines.try_recv().ok();
+                    if let Some(status) = self.child.try_wait().unwrap() {
+                        assert!(status.success(), "persistent AT-SPI client failed");
+                    }
+                    reply.is_some()
+                }),
+                "persistent AT-SPI client timed out"
+            );
+            println!("{}", reply.unwrap());
+        }
+    }
+
+    impl Drop for AtspiClient {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_queries_a_retained_action_live() {
+        assert!(
+            with_activation(|surface, button, events| {
+                let mut client = AtspiClient::new();
+                client.attempt(true);
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                events.lock().unwrap().clear();
+                button.set_can_target(false);
+                client.attempt(false);
+                flush(surface);
+                assert!(events.lock().unwrap().is_empty());
+                button.set_can_target(true);
+                client.attempt(true);
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                events.lock().unwrap().clear();
+                surface.root.set_can_target(false);
+                client.attempt(false);
+                surface.root.set_can_target(true);
+                client.attempt(true);
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                events.lock().unwrap().clear();
+                let modal = present_modal(surface, 9000, nsh_core::ROOT_ID);
+                client.attempt(false);
+                flush(surface);
+                assert!(events.lock().unwrap().is_empty());
+                crate::gtk_test::apply(surface, &[MountItem::Remove { id: modal.id() }]);
+                crate::navigation::end_batch(surface);
+                client.attempt(true);
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+            })
+            .is_some()
+        );
+    }
+
     #[test]
     fn activation_delivers_one_press_without_keyboard_focus() {
         let _ = activation_case(|button| button.activate_action("nsh.activate", None).unwrap());
+    }
+
+    #[test]
+    fn activation_queries_fail_closed_during_mutations() {
+        with_activation(|surface, button, events| {
+            use gtk::{gio::subclass::prelude::ActionGroupImpl, glib::subclass::prelude::*};
+            let group = button.state().access.activation.clone().unwrap();
+            assert!(group.is_action_enabled("activate"));
+            assert!(!group.has_action("item-1"));
+            assert!(group.imp().query_action("item-1").is_none());
+            let parent = gtk::gio::SimpleActionGroup::new();
+            let fallback = gtk::gio::SimpleAction::new("activate", None);
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let called = calls.clone();
+            fallback.connect_activate(move |_, _| called.set(called.get() + 1));
+            parent.add_action(&fallback);
+            let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+            window.insert_action_group("nsh", Some(&parent));
+            let blocked = || {
+                assert!(group.has_action("activate"));
+                assert_eq!(
+                    group.imp().query_action("activate"),
+                    Some((false, None, None, None, None))
+                );
+                assert!(!group.is_action_enabled("activate"));
+                button.activate_action("nsh.activate", None).unwrap();
+                assert_eq!(calls.get(), 0, "a disabled local name never falls through");
+            };
+            {
+                let _borrow = surface.mounter.borrow_mut();
+                blocked();
+            }
+            {
+                let _borrow = surface.windows.borrow_mut();
+                blocked();
+            }
+            {
+                let _borrow = surface.nav.borrow_mut();
+                blocked();
+            }
+            {
+                let _borrow = button.state_mut();
+                blocked();
+            }
+            {
+                let _borrow = surface.root.state_mut();
+                blocked();
+            }
+            assert!(group.is_action_enabled("activate"));
+            group.change_action_state("activate", &true.to_variant());
+            group.activate_action("activate", Some(&true.to_variant()));
+            flush(surface);
+            assert!(events.lock().unwrap().is_empty());
+            crate::gtk_test::apply(surface, &[MountItem::Remove { id: button.id() }]);
+            blocked();
+            let detached = NshView::new(9901, ViewKind::View);
+            let dead_group = ActivationGroup::new(surface, &detached);
+            drop(detached);
+            assert_eq!(
+                dead_group.imp().query_action("activate"),
+                Some((false, None, None, None, None))
+            );
+        });
     }
 
     #[test]
@@ -1158,7 +1459,7 @@ mod tests {
                         .activation
                         .as_ref()
                         .unwrap()
-                        .is_enabled()
+                        .has_action("activate")
                 );
             }
         });
@@ -1221,6 +1522,38 @@ mod tests {
         pair
     }
 
+    #[cfg(feature = "dev")]
+    fn real_key(window: &gtk::Window) {
+        let released = Rc::new(std::cell::Cell::new(false));
+        let controllers: Vec<_> = gtk::Window::list_toplevels()
+            .into_iter()
+            .map(|window| {
+                let keys = gtk::EventControllerKey::new();
+                keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+                let released = released.clone();
+                keys.connect_key_released(move |_, key, _, _| {
+                    if key == gtk::gdk::Key::Return {
+                        released.set(true);
+                    }
+                });
+                window.add_controller(keys.clone());
+                (window, keys)
+            })
+            .collect();
+        crate::xtest::Xtest::with(|x| {
+            x.focus(window);
+            assert!(x.stroke(&[], 0xff0d));
+        })
+        .expect("real XTest is required");
+        assert!(
+            crate::gtk_test::wait_until(|| released.get()),
+            "real Return release is observed"
+        );
+        for (window, keys) in controllers {
+            window.remove_controller(&keys);
+        }
+    }
+
     fn move_to_window(surface: &Rc<Surface>, button: &NshView, parent: NodeId) {
         crate::gtk_test::apply(
             surface,
@@ -1243,7 +1576,7 @@ mod tests {
             events.lock().unwrap().clear();
             let (modal_root, modal_window) = native_modal_window(surface, 9600, nsh_core::ROOT_ID);
             assert!(button.is_mapped(), "the background button remains mapped");
-            atspi_activate();
+            atspi_attempt(false);
             flush(surface);
             assert!(
                 events.lock().unwrap().is_empty(),
@@ -1274,7 +1607,7 @@ mod tests {
             let (independent_root, _independent_window) = secondary_window(surface, 9800);
             let attempt = |parent: NodeId, expected: &[(EventKind, EventPayload)]| {
                 move_to_window(surface, button, parent);
-                atspi_activate();
+                atspi_attempt(!expected.is_empty());
                 flush(surface);
                 assert_eq!(*events.lock().unwrap(), expected, "window {parent}");
                 events.lock().unwrap().clear();
@@ -1361,7 +1694,7 @@ mod tests {
         });
     }
 
-    fn window_scope_case(activate: impl Fn() + Send + 'static) -> Option<()> {
+    fn window_scope_case(activate: impl Fn(bool) + Send + 'static) -> Option<()> {
         with_activation(move |surface, button, events| {
             let (other_root, _window) = secondary_window(surface, 9100);
             crate::gtk_test::apply(
@@ -1374,12 +1707,12 @@ mod tests {
             );
             assert!(crate::gtk_test::wait_until(|| button.is_mapped()));
             present_modal(surface, 9000, nsh_core::ROOT_ID);
-            activate();
+            activate(true);
             flush(surface);
             assert_eq!(*events.lock().unwrap(), expected_press());
             events.lock().unwrap().clear();
             let modal = present_modal(surface, 9200, other_root.id());
-            activate();
+            activate(false);
             flush(surface);
             assert!(
                 events.lock().unwrap().is_empty(),
@@ -1395,7 +1728,7 @@ mod tests {
             );
             assert!(crate::gtk_test::wait_until(|| button.is_mapped()));
             present_modal(surface, 9300, nsh_core::ROOT_ID);
-            activate();
+            activate(true);
             flush(surface);
             assert_eq!(*events.lock().unwrap(), expected_press());
         })
@@ -1404,7 +1737,7 @@ mod tests {
     #[test]
     #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
     fn atspi_activation_uses_target_window_scope() {
-        assert!(window_scope_case(atspi_activate).is_some());
+        assert!(window_scope_case(atspi_attempt).is_some());
     }
 
     fn window_control(surface: &Rc<Surface>) -> NshView {
@@ -1552,23 +1885,23 @@ mod tests {
         });
     }
 
-    fn stacked_modal_case(activate: impl Fn(&NshView) + Send + 'static) -> Option<()> {
+    fn stacked_modal_case(activate: impl Fn(&NshView, bool) + Send + 'static) -> Option<()> {
         with_activation(move |surface, button, events| {
             let older = present_modal(surface, 9000, nsh_core::ROOT_ID);
             move_to_window(surface, button, older.id());
-            activate(button);
+            activate(button, true);
             flush(surface);
             assert_eq!(*events.lock().unwrap(), expected_press());
             events.lock().unwrap().clear();
             let newer = present_modal(surface, 9100, nsh_core::ROOT_ID);
             assert!(older.is_mapped());
             assert!(button.is_mapped());
-            activate(button);
+            activate(button, false);
             flush(surface);
             assert!(events.lock().unwrap().is_empty());
             crate::gtk_test::apply(surface, &[MountItem::Remove { id: newer.id() }]);
             crate::navigation::end_batch(surface);
-            activate(button);
+            activate(button, true);
             flush(surface);
             assert_eq!(*events.lock().unwrap(), expected_press());
         })
@@ -1576,13 +1909,13 @@ mod tests {
 
     #[test]
     fn activation_respects_stacked_modals() {
-        stacked_modal_case(|button| button.activate_action("nsh.activate", None).unwrap());
+        stacked_modal_case(|button, _| button.activate_action("nsh.activate", None).unwrap());
     }
 
     #[test]
     #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
     fn atspi_activation_respects_stacked_modals() {
-        let ran = stacked_modal_case(|_| atspi_activate());
+        let ran = stacked_modal_case(|_, enabled| atspi_attempt(enabled));
         assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
     }
 
@@ -1781,7 +2114,7 @@ mod tests {
         let ran = with_activation(|surface, button, events| {
             let modal = present_modal(surface, 9000, nsh_core::ROOT_ID);
             assert!(button.is_mapped());
-            atspi_activate();
+            atspi_attempt(false);
             flush(surface);
             assert!(
                 events.lock().unwrap().is_empty(),
@@ -1797,7 +2130,7 @@ mod tests {
             );
             assert!(crate::gtk_test::wait_until(|| button.is_mapped()));
             button.set_can_target(false);
-            atspi_activate();
+            atspi_attempt(false);
             flush(surface);
             assert!(
                 events.lock().unwrap().is_empty(),
@@ -1805,7 +2138,7 @@ mod tests {
             );
             button.set_can_target(true);
             modal.set_can_target(false);
-            atspi_activate();
+            atspi_attempt(false);
             flush(surface);
             assert!(
                 events.lock().unwrap().is_empty(),
