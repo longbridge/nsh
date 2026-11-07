@@ -408,9 +408,7 @@ impl Native for MacNative {
             last = at;
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
-        self.on_target(move |_, window| {
-            mouse(window, NSEventType::LeftMouseUp, x, y, clicks)
-        });
+        self.on_target(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
     }
 
     fn type_text(&self, text: &str) {
