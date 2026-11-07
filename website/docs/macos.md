@@ -69,8 +69,10 @@ keyboard stays with the app you type in (`--foreground` lets them become the act
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
 `nsh run App.tsx --target macos --fps`, the host's `--fps`, a packaged TSX app's `open -a MyApp --args --fps`, the
 environment variable `NSH_FPS=1`, or the app's own `setFpsEnabled(true)`) shows a panel at the top right of the app that
-updates twice a second. A packaged app opened from the Dock or Finder takes `NSH_FPS` from its `Info.plist`'s
-`LSEnvironment`, which `nsh.json`'s `macos.infoPlist` adds ([Packaging](./packaging.md#infoplist-keys-and-entitlements)):
+updates twice a second. A packaged TSX app can also set `NSHPerformanceMonitor` to `true` in its `Info.plist` to show
+the panel however the app is opened. Add this key through `nsh.json`'s `macos.infoPlist`
+([Packaging](./packaging.md#infoplist-keys-and-entitlements)). A packaged app can also take `NSH_FPS` from its
+`Info.plist`'s `LSEnvironment`.
 
 | Row | Measures |
 |---|---|

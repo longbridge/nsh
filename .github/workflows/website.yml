@@ -50,7 +50,7 @@ permissions:
 # Pages takes one deployment at a time; queue rather than cancel, so the
 # latest push always ends up deployed.
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 env:

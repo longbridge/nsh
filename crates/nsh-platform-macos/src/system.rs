@@ -317,6 +317,13 @@ pub(crate) fn host_environment_changed(surface: &Surface) {
     update(surface);
 }
 
+/// `nsh test --target macos` started driving the surface: its lifecycle
+/// no longer follows a locked screen (`lifecycle`).
+#[cfg(feature = "dev")]
+pub(crate) fn testing_started(surface: &Surface) {
+    update(surface);
+}
+
 /// Writes the system's settings and the surface's own values into its
 /// environment.
 fn update(surface: &Surface) {
@@ -335,7 +342,7 @@ fn update(surface: &Surface) {
     env.idiom = Idiom::Desktop;
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
-    env.lifecycle = lifecycle(surface.mtm);
+    env.lifecycle = lifecycle(surface.mtm, surface.testing());
     env.window_state = crate::window_state::read(surface);
     surface.set_environment(env);
 }
@@ -347,20 +354,57 @@ fn time_zone() -> TimeZone {
 
 /// Whether the app is in use: `background` while none of it shows (hidden,
 /// or its windows minimized or covered), `active` while it is the active
-/// app, `inactive` otherwise.
-fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
+/// app, `inactive` otherwise. A test's app (`testing`) is not in the
+/// background because the screen is locked: it runs as it does on screen
+/// (`Surface::keep_deadline`), so its tests see what they see unlocked.
+fn lifecycle(mtm: MainThreadMarker, testing: bool) -> Lifecycle {
     let app = NSApplication::sharedApplication(mtm);
-    if app.isHidden()
-        || !app
-            .occlusionState()
-            .contains(NSApplicationOcclusionState::Visible)
-    {
+    let occluded = !app
+        .occlusionState()
+        .contains(NSApplicationOcclusionState::Visible);
+    if app.isHidden() || (occluded && !(testing && screen_locked())) {
         Lifecycle::Background
     } else if app.isActive() {
         Lifecycle::Active
     } else {
         Lifecycle::Inactive
     }
+}
+
+/// Whether the user's session cannot show windows now: the screen is
+/// locked, or the session is not the console's (another user switched in).
+/// The window server then draws no window, the display link stops and the
+/// app cannot become active, while its windows, posted events and
+/// in-process drawing still work. One call to the window server; without
+/// a session at all, it counts as locked.
+pub(crate) fn screen_locked() -> bool {
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+
+    // Declared here: `objc2-core-graphics` has it behind its `CGSession`
+    // feature, which the workspace does not turn on.
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGSessionCopyCurrentDictionary() -> Option<NonNull<CFDictionary>>;
+    }
+    // SAFETY: CoreGraphics' public function: no arguments, and it returns
+    // a dictionary the caller owns (the Copy rule), or null without a
+    // window server session.
+    let Some(raw) = (unsafe { CGSessionCopyCurrentDictionary() }) else {
+        return true;
+    };
+    // SAFETY: an owned reference, as the Copy rule hands it over.
+    let session = unsafe { CFRetained::from_raw(raw) };
+    let flag = |name: &'static str| -> Option<bool> {
+        let key = CFString::from_static_str(name);
+        // SAFETY: the dictionary's keys are `CFString`s, as `key` is.
+        let value = unsafe { session.value((&*key as *const CFString).cast()) };
+        // SAFETY: a value of the dictionary (a CF object) or null; it
+        // lives as long as the dictionary, which outlives this use.
+        let value = unsafe { value.cast::<CFType>().as_ref() }?;
+        value.downcast_ref::<CFBoolean>().map(CFBoolean::value)
+    };
+    // The first key is there only while the screen is locked.
+    flag("CGSSessionScreenIsLocked") == Some(true) || flag("kCGSSessionOnConsoleKey") == Some(false)
 }
 
 /// The surface's environment changed: its background follows the scheme.

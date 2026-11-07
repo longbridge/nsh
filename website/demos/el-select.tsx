@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { type JSX, mount, signal, Text, token, View } from "nsh";
 import { Button, type OpenChangeReason, Select, type SelectEntry, type SelectGroup, Switch } from "nsh/base";
 import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Icon, Log, Panel, size, Split, switchLook, ui } from "./palette";
 
@@ -52,7 +52,7 @@ const surface = () =>
     ? { ...ui().card, borderRadius: 12, padding: 4 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30, maxHeight: "70%" as const };
 
-const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+const backdrop = () => ({ backgroundColor: token("scrim") });
 
 /** The trigger: the shared button's look, the chosen title at the start and a chevron in a lane as wide as it. */
 function Trigger(props: { title?: string; placeholder: string; open: boolean; disabled?: boolean; clearable?: boolean }) {
@@ -207,7 +207,7 @@ function App() {
               offset={4}
               margin={8}
               popupStyle={surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               trigger={<Trigger title={titleOf(LANGUAGES, language())} placeholder="Choose a language" open={languageOpen()} />}
               renderItem={(item) => <Row item={item} />}
@@ -234,7 +234,7 @@ function App() {
               margin={8}
               // Wider than the trigger on the desktops: the titles and their codes side by side.
               popupStyle={desktop ? { ...surface(), width: 340 } : surface()}
-              backdropStyle={backdrop}
+              backdropStyle={backdrop()}
               itemClass={rowClass}
               // As wide as the trigger, so the clear button lands over its end.
               style={desktop ? { width: 260 } : undefined}

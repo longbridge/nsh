@@ -105,13 +105,26 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
-    // `open -a <App> --args --fps` shows the performance monitor.
-    options.fps = std::env::args().any(|arg| arg == "--fps");
+    // `open -a <App> --args --fps` shows the performance monitor, and so
+    // does `NSHPerformanceMonitor` (a boolean) in the bundle's Info.plist:
+    // a build that opens with it however it is launched (the Dock, Finder,
+    // Spotlight pass no arguments).
+    options.fps = std::env::args().any(|arg| arg == "--fps") || monitor_in_info_plist();
     // NSH_CHUNK_DIR: the directory `import()` loads chunks from — the
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
     (dir, options)
+}
+
+/// Whether the bundle's Info.plist has `NSHPerformanceMonitor` true.
+#[cfg(target_os = "macos")]
+fn monitor_in_info_plist() -> bool {
+    use nsh_platform_macos::objc2_foundation::{NSBundle, NSNumber, NSString};
+    NSBundle::mainBundle()
+        .objectForInfoDictionaryKey(&NSString::from_str("NSHPerformanceMonitor"))
+        .and_then(|value| value.downcast::<NSNumber>().ok())
+        .is_some_and(|value| value.boolValue())
 }
 
 /// Not on macOS: says so and exits.
