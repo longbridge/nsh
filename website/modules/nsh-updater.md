@@ -45,7 +45,9 @@ interface AppUpdate {
 ```
 
 Fetches the manifest from the source in `nsh.json` and resolves the newer version it describes, or `null` when the app
-is up to date, has no `"updater"`, or runs where apps do not update (the web, `nsh run`).
+is up to date, has no `"updater"`, or runs where apps do not update (the web, `nsh run`). A run on a
+[package](#checkforpackage) of that version or a later one is up to date too: the app's own version stays the one it
+shipped as, but its code is already the release's.
 
 | Field | Meaning |
 | --- | --- |

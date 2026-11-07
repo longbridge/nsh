@@ -313,7 +313,10 @@ mod native {
             };
             let available = config
                 .check(&manifest, signature.as_deref(), &nsh_updater::platform())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+                .filter(|available| {
+                    !package_covers(worker.running_package().as_ref(), &available.version)
+                });
             Ok(available.map(|available| (bytes, config, available)))
         })
         .await?;
@@ -643,9 +646,31 @@ mod native {
     pub(super) async fn install(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
+    /// Whether the package this run's code came from is already the
+    /// release `offered` or a later one. The app's own version is the one it
+    /// shipped as, so after restarting into a package of the latest release
+    /// the manifest would still look newer, and the whole app would be
+    /// downloaded and offered again for what already runs.
+    fn package_covers(running: Option<&PackageVersion>, offered: &str) -> bool {
+        running.is_some_and(|running| nsh_updater::version_at_least(&running.version, offered))
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn a_running_package_of_the_release_or_later_covers_it() {
+            let running = |version: &str| PackageVersion {
+                version: version.into(),
+                build: 35,
+            };
+            assert!(!package_covers(None, "0.2.1"));
+            assert!(package_covers(Some(&running("0.2.1")), "0.2.1"));
+            assert!(package_covers(Some(&running("0.2.10")), "0.2.9"));
+            // A release the package is older than comes as the whole app (a newer runtime).
+            assert!(!package_covers(Some(&running("0.2.1")), "0.3.0"));
+        }
 
         #[test]
         fn operations_are_serial_and_release_on_error_or_cancellation() {
