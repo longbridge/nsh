@@ -1,6 +1,6 @@
 import { Canvas, mount, signal, Text, View } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { desktop, Log, Split, tint, toggleGlyph, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui } from "./palette";
+import { desktop, Log, Split, tint, toggleGlyph, toggleLabel, toggleLook, toolbarRule, toolbarTrack, ui, sectionSurface } from "./palette";
 
 type Mark = "bold" | "italic" | "underline";
 type Align = "left" | "center" | "right";
@@ -101,7 +101,7 @@ function App() {
         </ToggleGroup>
 
         {/* The text the toolbar formats: the app reads its own values. */}
-        <View style={{ ...ui().card, borderRadius: 14, padding: 14 }}>
+        <View style={{ ...sectionSurface({ padded: true }) }}>
           <Text
             style={{
               fontSize: 15,
