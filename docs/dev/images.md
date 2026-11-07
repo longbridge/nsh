@@ -51,8 +51,8 @@
   `image` crate and `thumbnail` (shrunk as decoded, before it takes 4 bytes a pixel), others with GDK's loaders; an
   entry costs its pixels twice (the texture and its GSK upload); a frame that grows past the bucket shown loads the
   next one and swaps it in without load events; dropping the view drops its loads and leases. Windows
-  (`nsh-platform-windows` `image.rs`; type-checked, not run): the same, posting to the UI thread with
-  `window::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
+  (`nsh-platform-windows` `image.rs`; type-checked, not run): the same, posting back to the UI thread
+  that asked with `UiThread::invoke`; WIC decodes and its scaler (Fant) shrinks to the bucket, the `image` crate for animations and what
   WIC cannot read; a `Frame` keeps its premultiplied BGRA pixels and makes its Direct2D bitmap when first drawn,
   which then adds its bytes to the entry (`add_cost`, once: one made again after a device loss replaces it);
   evicting the entry releases its bitmaps (`on_evict`). macOS (`nsh-platform-macos` `image.rs`): ImageIO thumbnails
