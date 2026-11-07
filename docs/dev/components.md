@@ -757,7 +757,10 @@ A theme file is shadcn's registry `cssVars`, as shadcn and tweakcn export them: 
 where `dark` leaves them out). Values are CSS: colors (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, names,
 `color-mix()`, `var(--x[, fallback])` of the same appearance's tokens, the file's or the default's), lengths (`rem`
 is 16 pt, `px`) and font family lists for `font-*` names (the first family that is not generic, `system-ui` /
-`sans-serif` / ... meaning the system's); values of no kind a token has (shadows, letter spacing) are left out. An
+`sans-serif` / ... meaning the system's); values of no kind a token has (shadows, letter spacing) are left out. A
+value written as a color that is none (`#zz`, `lab()`, a `var()` that names no color) is left out and reported, and so
+is one that is no color in one appearance where the other's is a color (that color is both's): `nsh build` warns of
+them, the core logs them, `setTheme` refuses the file for them. An
 app sets its own in `nsh.json`: `"theme": "brand.json"` (relative to `nsh.json`) or the same JSON inline, over the
 default. Names the theme adds (`surface`, `up`, `radius-card`) are the app's own tokens, as the variables of a
 Tailwind 4 `@theme` are (`Theme::color` / `number` / `font`, `set_color` / `set_number` / `set_font`): classes name
@@ -768,10 +771,13 @@ them (`bg-surface`, `bg-up/30`, `rounded-(--radius-card)`; `styles.md`) and TS r
 theme; the entry hands the file to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any
 view is made and has `token()` read its tokens at once (`Core::theme_tokens`, given to JS before the bundle runs: the
 op reaches the core only after the turn of the first render, which reads them already); the core makes tokens of it
-with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s `tokens_of`, which also gives the defaults when the
-engine starts). A Rust app's root carries them (`Root::tokens`), and an app that picks its theme while it runs sets
+with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s `read_tokens`, which also gives the defaults when the
+engine starts and returns what of a file it left out). A Rust app's root carries them (`Root::tokens`), and an app that picks its theme while it runs sets
 them with `element::set_tokens(tokens)` (`set_tokens(theme.into())` of an `nsh_base::Theme`; the setter beside the
-`tokens()` accessor, as `set_color_scheme` is beside `color_scheme()`). The core sends the tokens drawn with to the
+`tokens()` accessor, as `set_color_scheme` is beside `color_scheme()`). A TSX app calls `setTheme(theme)` of `nsh`
+(`nsh-js` `env.rs`; the web's `browser/environment.js` and op 406): `setup`'s way, the root's `uiTheme` and `token()`
+reading the new tokens at once, for a file read whole (`ThemeTokens::checked`, else a `TypeError` naming what it
+cannot read and nothing changed); `null` sends the file the entry gave again. The core sends the tokens drawn with to the
 platform when they change (`Command::Tokens` on the root), which colors its own controls with them (Linux's menus:
 `docs/dev/linux.md`; Android's alerts and action sheets: `popover` behind, `popover-foreground` for the title and
 the options, `muted-foreground` for the message, `primary` for the buttons and `destructive` for a destructive action,

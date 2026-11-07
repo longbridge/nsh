@@ -843,7 +843,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Registry::tokens_from`]); set before the first op. Runs the
     /// sets' setup functions ([`Registry::setup`]).
     pub fn set_components(&mut self, registry: Registry) {
-        if let Some(Ok(tokens)) = registry.tokens(None) {
+        if let Some(Ok((tokens, _))) = registry.tokens(None) {
             self.set_tokens(tokens);
         }
         {
@@ -866,11 +866,18 @@ impl<M: TextEngine> Core<M> {
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
-    /// UI set that reads themes makes tokens of.
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
+    /// which the UI set that reads themes makes tokens of. What it cannot
+    /// read is left out and the rest applies, so a bundle made by a newer
+    /// NSH keeps its theme here.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
         match self.components.registry.tokens(Some(json)) {
-            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Ok((tokens, left_out))) => {
+                for what in left_out {
+                    log::warn!("theme: {what}, ignored");
+                }
+                self.set_tokens(tokens);
+            }
             Some(Err(e)) => log::warn!("theme: {e}"),
             None => log::warn!("theme: no UI set reads themes"),
         }

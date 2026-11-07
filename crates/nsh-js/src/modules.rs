@@ -114,6 +114,7 @@ pub(crate) struct NativeModule {
 /// `nsh`: the API apps write against.
 const NSH: &[Item] = &[
     crate::env::TOKEN_EXPORT,
+    crate::env::SET_THEME_EXPORT,
     (
         "signal",
         Export::Function(reactive::signal, 2),
@@ -359,6 +360,21 @@ export type Component<P = {}> = (props: P) => JSX.Element;
  * the app's (`.nsh/types/nsh/tokens.d.ts`, from `nsh.json` `"theme"`).
  */
 export interface Tokens {}
+
+/**
+ * A theme, as `nsh.json`'s `"theme"` writes it: shadcn/ui's `cssVars`, the
+ * values as CSS writes them (colors, `var(--name)`, `color-mix()`, lengths in
+ * `px` or `rem`, font family lists for `font-*`). `theme`'s apply in both
+ * appearances, `light`'s in the light one and in the dark one where `dark`
+ * leaves them out, `dark`'s in the dark one.
+ */
+export interface Theme {
+  cssVars: {
+    theme?: Record<string, string | number>;
+    light?: Record<string, string | number>;
+    dark?: Record<string, string | number>;
+  };
+}
 "#;
 
 /// The sources of what `nsh` serves (`NativeModule::moved_to`), kept by
