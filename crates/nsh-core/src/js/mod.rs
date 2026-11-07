@@ -15,7 +15,7 @@
 /// add theirs (`Registry::specifier`: `nsh/base`, an app's set) or the
 /// functions of nsh's own (`Image.getSize` on `nsh`, `nsh/mobile`'s
 /// `BackHandler`).
-pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/mobile"];
+pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/i18n", "nsh/mobile"];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.
 /// Privileged entries route through NSH capability adapters.

@@ -64,7 +64,7 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   classes in `crates/nsh-js/src/web/` (module docs there), made on first use of any of those globals (zero startup cost
   otherwise), as in browsers so libraries such as axios work (`fetch.rs` lists where they differ). `Intl`
   (`NumberFormat`, `DateTimeFormat`) and the `toLocaleString`s of numbers, BigInts and dates, which QuickJS lacks, are
-  there too (`web/intl/`): formatted in Rust for the common languages (limits in its module doc), in `Environment::locale` by
+  there too (`web/format/`): formatted in Rust for the common languages (limits in its module doc), in `Environment::locale` by
   default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`), local time `Date`'s,
   named as the zone the C library computes it in (`TZ`, `/etc/localtime`; on Windows and Android as the platform
   reports it, `LocaleSettings::time_zone`, `localeSettings().timeZone`).

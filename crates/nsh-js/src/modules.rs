@@ -448,6 +448,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: decl!(desktop::TYPES),
     },
     NativeModule {
+        name: "nsh/i18n",
+        exports: crate::i18n::EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: "",
+    },
+    NativeModule {
         name: "nsh/mobile",
         exports: platform_modules::MOBILE_EXPORTS,
         also: MOBILE_SOURCES,
