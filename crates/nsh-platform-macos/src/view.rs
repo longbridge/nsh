@@ -806,6 +806,14 @@ define_class!(
             }
         }
 
+        #[unsafe(method(accessibilityFrame))]
+        fn accessibility_frame(&self) -> NSRect {
+            crate::access::frame(self).unwrap_or_else(|| {
+                // SAFETY: NSView's own geometry for an unattached view.
+                unsafe { msg_send![super(self), accessibilityFrame] }
+            })
+        }
+
         // What VoiceOver reaches of the children ([`crate::access::reached`]).
         #[unsafe(method_id(accessibilityChildren))]
         fn accessibility_children(&self) -> Option<Retained<NSArray>> {
