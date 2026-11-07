@@ -115,27 +115,32 @@ expect Listener: stopped
 covers [nsh] UrlScheme
 # mod-desktop
 tap id:case-mod-desktop
-# no title bar area, the window, app and menu functions do nothing, and a popup
-# closes at once.
+# no title bar area, the main window is the only one, a window of the app's
+# own neither renders nor opens, the window, app and menu functions do
+# nothing, and a popup closes at once.
 expect Desktop: false
 expect Title bar: 0 0 0
 expect Window state: null displays 0
+expect Current: main true null state null
+expect Windows: main focused null get true null
+absent Inside a window
 expect Calls: not called
 expect Popup: not shown
 tap id:window
-expect Calls: window done, close function, minimize function, setBounds function
+expect Calls: window done, open ERR_FEATURE_UNAVAILABLE_ON_PLATFORM, close function
 tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
 expect Calls: application done, quit function, restart function
-tap id:toggles
-expect Calls: toggles done
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState
 covers [nsh/desktop] displays
 covers [nsh/desktop] Window
+covers [nsh/desktop] currentWindow
+covers [nsh/desktop] windows
+covers [nsh/desktop] focusedWindow
 covers [nsh/desktop] Menu
 covers [nsh/desktop] Application
 # mod-device
@@ -252,3 +257,13 @@ event id:heard onHost type=event event=tick payload=2
 wait 50
 expect Host heard: [1]
 covers [nsh] host
+# mod-fps
+tap id:case-mod-fps
+# no performance monitor headless: it reports none, and the calls go through.
+expect Fps enabled: false
+expect Calls: not called
+tap id:toggle
+expect Calls: done
+expect Fps enabled: false
+covers [nsh] fpsEnabled
+covers [nsh] setFpsEnabled

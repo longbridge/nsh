@@ -67,8 +67,12 @@ keyboard stays with the app you type in (`--foreground` lets them become the act
 ### Performance monitor
 
 `--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
-`nsh run App.tsx --target macos --fps`, the host's `--fps`, or a packaged TSX app's `open -a MyApp --args --fps`) shows a panel at the top right of the
-app that updates twice a second:
+`nsh run App.tsx --target macos --fps`, the host's `--fps`, a packaged TSX app's `open -a MyApp --args --fps`, the
+environment variable `NSH_FPS=1`, or the app's own `setFpsEnabled(true)`) shows a panel at the top right of the app that
+updates twice a second. A packaged TSX app can also set `NSHPerformanceMonitor` to `true` in its `Info.plist` to show
+the panel however the app is opened. Add this key through `nsh.json`'s `macos.infoPlist`
+([Packaging](./packaging.md#infoplist-keys-and-entitlements)). A packaged app can also take `NSH_FPS` from its
+`Info.plist`'s `LSEnvironment`.
 
 | Row | Measures |
 |---|---|
@@ -160,7 +164,7 @@ reopening from the Dock shows that same window and engine. For an explicit Exit
 or update restart, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while
-`nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
+`current_window().close()` (`nsh_core::element::desktop`) follows the chosen window-close policy.
 `nsh_core::element::desktop::restart()` (TS: `Application.restart()`) quits the same way, and once the process has
 exited `run_app`'s runner starts the app again with the same arguments: inside an `.app` bundle through Launch Services
 (`open -n`), as when the user opens it.

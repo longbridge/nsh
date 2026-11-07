@@ -973,6 +973,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 
 无论系统外观如何，立即以 `scheme` 显示应用：`colorScheme()`、`dark:` 类、组件的主题和平台控件（警告框、状态栏的默认样式）都随之变化；`"system"` 重新跟随系统。`nsh.json` 的 `"appearance"` 从启动时就设置它。Rust：`set_color_scheme(Appearance::Dark)`（`Appearance::Light`、`Appearance::System`）。
 
+### fpsEnabled 和 setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` 打开性能监视器，`false` 关闭它：macOS 上是应用右上角的面板（见 [macOS](../docs/macos.md#性能监视器)），iOS、Windows、Linux 和 GPUI 上是每秒一行 `nsh::perf` 日志，终端上是一行状态（见[性能](../docs/performance.md#在屏幕上--fps)）。`fpsEnabled()` 表示监视器是否在测量，以平台报告的为准（响应式），所以开关显示的是平台实际的状态；应用用 `--fps` 或环境变量 `NSH_FPS=1` 启动时它也为开。在没有监视器的平台上（Android、Web），`fpsEnabled()` 保持为 `false`。Rust：`set_fps_enabled(true)`、`fps_enabled() -> bool`。
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
 ### platform
 
 ```ts

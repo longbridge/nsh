@@ -8,13 +8,18 @@
 
 use std::{
     rc::Rc,
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
 use gtk4::{self as gtk, gdk, glib, prelude::*};
 use nsh_core::{
-    NodeId,
+    NodeId, ROOT_ID,
+    desktop::WindowState,
     geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_testing::agent::{Key, Native};
@@ -36,11 +41,49 @@ const SCROLL_STEP: f32 = 20.0;
 /// The surface the agent acts on, by key (its calls must be `Send`).
 pub(crate) struct LinuxNative {
     key: u64,
+    /// The window pointer input goes to (its root node; `target_window`).
+    target: Arc<AtomicU32>,
 }
 
 impl LinuxNative {
     pub(crate) fn new(key: u64) -> Self {
-        LinuxNative { key }
+        LinuxNative {
+            key,
+            target: Arc::new(AtomicU32::new(ROOT_ID)),
+        }
+    }
+
+    /// `f` on the main thread with pointer input aimed at the target
+    /// window (points in its content); `press` activates it first, as a
+    /// real press in a window does.
+    fn sim<R: Send + 'static>(
+        &self,
+        press: bool,
+        f: impl FnOnce(&Rc<Surface>) -> R + Send + 'static,
+    ) -> Option<R> {
+        let target = self.target.load(Ordering::Relaxed);
+        self.on_main(move |s| {
+            let root = (target != ROOT_ID)
+                .then(|| crate::window::root_view(s, target))
+                .flatten();
+            crate::input::set_event_root(s, root);
+            if press
+                && let Some(window) = crate::window::native_window(s, target)
+                && !window.is_active()
+            {
+                window.present();
+            }
+            f(s)
+        })
+    }
+
+    /// `f` with the window keys go to (the focused one) on the main thread.
+    fn with_key_window<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(&Rc<Surface>, &gtk::Window) -> R + Send + 'static,
+    ) -> Option<R> {
+        self.on_main(move |surface| crate::window::key_window(surface).map(|w| f(surface, &w)))
+            .flatten()
     }
 
     /// `f` with the surface on the main thread, waited for; `None` once
@@ -89,7 +132,7 @@ impl LinuxNative {
         // The focus first, handled before the keys come: GTK drops a key
         // that comes with the window's focus-in.
         let moved = self
-            .with_window(|_, w| Xtest::with(|x| x.focus(w)))
+            .with_key_window(|_, w| Xtest::with(|x| x.focus(w)))
             .flatten()?;
         if moved {
             std::thread::sleep(KEY_SETTLE);
@@ -105,12 +148,14 @@ impl LinuxNative {
     fn click(&self, at: Point<Points>, hold: Duration) {
         let (x, y) = (at.x.0, at.y.0);
         // A real pointer arrives before it presses (hover state).
-        self.on_main(move |s| {
+        self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
             crate::input::simulate(s, Simulated::Down(x, y));
         });
         std::thread::sleep(hold);
-        self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)));
+        self.sim(false, move |s| {
+            crate::input::simulate(s, Simulated::Up(x, y))
+        });
     }
 }
 
@@ -121,7 +166,8 @@ impl Native for LinuxNative {
             if !view.is_drawable() {
                 return None;
             }
-            let r = view.compute_bounds(&surface.root)?;
+            // In the content of the window it is in.
+            let r = view.compute_bounds(&crate::window::root_of(surface, &view))?;
             Some(Bounds::new(
                 point(Points(r.x()), Points(r.y())),
                 Size::new(Points(r.width()), Points(r.height())),
@@ -137,7 +183,7 @@ impl Native for LinuxNative {
                 return None;
             }
             let (x, y, width, height) = crate::text::range_rect(&view.state(), start, end)?;
-            let r = view.compute_bounds(&surface.root)?;
+            let r = view.compute_bounds(&crate::window::root_of(surface, &view))?;
             Some(Bounds::new(
                 point(Points(r.x() + x), Points(r.y() + y)),
                 Size::new(Points(width), Points(height)),
@@ -147,8 +193,16 @@ impl Native for LinuxNative {
     }
 
     fn viewport(&self) -> Size<Points> {
+        // The target window's content.
+        let target = self.target.load(Ordering::Relaxed);
         let (width, height) = self
-            .on_main(|s| (s.root.width() as f32, s.root.height() as f32))
+            .on_main(move |s| {
+                let root = (target != ROOT_ID)
+                    .then(|| crate::window::root_view(s, target))
+                    .flatten()
+                    .unwrap_or_else(|| s.root.clone());
+                (root.width() as f32, root.height() as f32)
+            })
             .unwrap_or((0.0, 0.0));
         Size::new(Points(width), Points(height))
     }
@@ -171,7 +225,9 @@ impl Native for LinuxNative {
         let mut next = Instant::now();
         for _ in 0..n {
             let (sx, sy) = (dx / n as f32, dy / n as f32);
-            self.on_main(move |s| crate::input::simulate(s, Simulated::Wheel(x, y, sx, sy)));
+            self.sim(false, move |s| {
+                crate::input::simulate(s, Simulated::Wheel(x, y, sx, sy))
+            });
             next += frame;
             std::thread::sleep(next.saturating_duration_since(Instant::now()));
         }
@@ -179,7 +235,7 @@ impl Native for LinuxNative {
 
     fn drag(&self, from: Point<Points>, to: Point<Points>) {
         let (x, y) = (from.x.0, from.y.0);
-        self.on_main(move |s| {
+        self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
             crate::input::simulate(s, Simulated::Down(x, y));
         });
@@ -188,16 +244,20 @@ impl Native for LinuxNative {
         for at in nsh_testing::agent::drag_path(from, to) {
             std::thread::sleep(FRAME);
             let (x, y) = (at.x.0, at.y.0);
-            self.on_main(move |s| crate::input::simulate(s, Simulated::Move(x, y)));
+            self.sim(false, move |s| {
+                crate::input::simulate(s, Simulated::Move(x, y))
+            });
             last = at;
         }
         let (x, y) = (last.x.0, last.y.0);
-        self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)));
+        self.sim(false, move |s| {
+            crate::input::simulate(s, Simulated::Up(x, y))
+        });
     }
 
     fn drag_and_hold(&self, from: Point<Points>, to: Point<Points>) -> Result<(), String> {
         let (x, y) = (from.x.0, from.y.0);
-        self.on_main(move |s| {
+        self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
             crate::input::simulate(s, Simulated::Down(x, y));
         })
@@ -206,14 +266,16 @@ impl Native for LinuxNative {
         for at in nsh_testing::agent::drag_path(from, to) {
             std::thread::sleep(FRAME);
             let (x, y) = (at.x.0, at.y.0);
-            self.on_main(move |s| crate::input::simulate(s, Simulated::Move(x, y)));
+            self.sim(false, move |s| {
+                crate::input::simulate(s, Simulated::Move(x, y))
+            });
         }
         Ok(())
     }
 
     fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
-        match self.on_main(move |s| crate::file_drop::drop_uris(s, x, y, uris)) {
+        match self.sim(false, move |s| crate::file_drop::drop_uris(s, x, y, uris)) {
             Some(true) => Ok(()),
             Some(false) => Err("no view there listens to `onFileDrop`".into()),
             None => Err("the window is gone".into()),
@@ -222,8 +284,10 @@ impl Native for LinuxNative {
 
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
-        self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)))
-            .ok_or_else(|| "the window is gone".to_owned())
+        self.sim(false, move |s| {
+            crate::input::simulate(s, Simulated::Up(x, y))
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn type_text(&self, text: &str) {
@@ -233,7 +297,7 @@ impl Native for LinuxNative {
             if self.real_keys(move |x| x.stroke(&[], keysym)) == Some(true) {
                 continue;
             }
-            self.with_window(move |_, w| synth::type_text(w, &ch.to_string()));
+            self.with_key_window(move |_, w| synth::type_text(w, &ch.to_string()));
         }
     }
 
@@ -247,7 +311,7 @@ impl Native for LinuxNative {
         if self.real_keys(move |x| x.stroke(modifiers, keysym)) == Some(true) {
             return;
         }
-        self.with_window(move |_, w| match key {
+        self.with_key_window(move |_, w| match key {
             Key::Return => synth::enter(w),
             Key::Backspace => synth::backspace(w),
             Key::SelectAll => synth::select_all(w),
@@ -260,8 +324,10 @@ impl Native for LinuxNative {
 
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
-        self.on_main(move |s| crate::input::simulate(s, Simulated::ContextMenu(x, y)))
-            .ok_or_else(|| "the window is gone".to_owned())
+        self.sim(false, move |s| {
+            crate::input::simulate(s, Simulated::ContextMenu(x, y))
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
@@ -309,8 +375,10 @@ impl Native for LinuxNative {
 
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
-        self.on_main(move |s| crate::input::simulate(s, Simulated::Hover(x, y)))
-            .ok_or_else(|| "the window is gone".to_owned())
+        self.sim(false, move |s| {
+            crate::input::simulate(s, Simulated::Hover(x, y))
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn press_keys(&self, keys: &str) -> Result<(), String> {
@@ -358,19 +426,21 @@ impl Native for LinuxNative {
         match stroke.key {
             // The focused field's own keys, through its signals.
             K::Enter if plain => {
-                self.with_window(|_, w| synth::enter(w));
+                self.with_key_window(|_, w| synth::enter(w));
             }
             K::Backspace if plain => {
-                self.with_window(|_, w| synth::backspace(w));
+                self.with_key_window(|_, w| synth::backspace(w));
             }
             K::Char('a') if m.ctrl && !m.alt && !m.cmd => {
-                self.with_window(|_, w| synth::select_all(w));
+                self.with_key_window(|_, w| synth::select_all(w));
             }
             K::Char(c) if plain => {
                 let c = if m.shift { shifted(c) } else { c };
-                self.with_window(move |_, w| synth::type_text(w, &c.to_string()));
+                self.with_key_window(move |_, w| synth::type_text(w, &c.to_string()));
             }
-            // The root's keys: going back.
+            // The focused window's keys: Escape closes a window of the
+            // app's own that `closeOnEscape` lets close; the main window's
+            // go back.
             K::Escape | K::Left => {
                 let key = if stroke.key == K::Escape {
                     gdk::Key::Escape
@@ -378,6 +448,12 @@ impl Native for LinuxNative {
                     gdk::Key::Left
                 };
                 self.on_main(move |surface| {
+                    let window = crate::window::key_window(surface);
+                    let main = synth::window(surface);
+                    if let Some(window) = window.as_ref().filter(|&w| Some(w) != main.as_ref()) {
+                        crate::window::press_key(surface, window, key, modifiers);
+                        return;
+                    }
                     crate::navigation::key_pressed(surface, key, modifiers);
                 });
             }
@@ -387,7 +463,7 @@ impl Native for LinuxNative {
     }
 
     fn focused(&self) -> Option<NodeId> {
-        self.with_window(|_, w| {
+        self.with_key_window(|_, w| {
             let field = synth::focused_text(w)?;
             let view = field
                 .ancestor(crate::view::NshView::static_type())
@@ -402,7 +478,7 @@ impl Native for LinuxNative {
         // without the system's clipboard: reported, then its text inserted
         // where the input inserts pastes.
         let content = content.clone();
-        self.with_window(move |surface, w| {
+        self.with_key_window(move |surface, w| {
             let field = synth::focused_text(w).ok_or("no focused input to paste into")?;
             let view = field
                 .ancestor(crate::view::NshView::static_type())
@@ -470,6 +546,28 @@ impl Native for LinuxNative {
             .map_err(|_| "the window drew no picture".to_owned())?
     }
 
+    fn window_screenshot(&self, window: NodeId) -> Result<Vec<u8>, String> {
+        let (tx, rx) = mpsc::channel();
+        let key = self.key;
+        glib::MainContext::default().invoke_with_priority(glib::Priority::DEFAULT, move || {
+            let Some(surface) = Surface::by_key(key) else {
+                let _ = tx.send(Err("the window is gone".to_owned()));
+                return;
+            };
+            // The main window's for `ROOT_ID`.
+            let Some(native) = crate::window::native_window(&surface, window) else {
+                let _ = tx.send(Err(format!("no window of the app has root node {window}")));
+                return;
+            };
+            // Once what changed so far is painted, as `screenshot`.
+            synth::after_paint(&native, move |w| {
+                let _ = tx.send(synth::shot(w));
+            });
+        });
+        rx.recv_timeout(MAIN)
+            .map_err(|_| "the window drew no picture".to_owned())?
+    }
+
     fn resize(&self, width: Points, height: Points) -> Result<(), String> {
         self.with_window(move |_, w| w.set_default_size(width.0 as i32, height.0 as i32))
             .ok_or_else(|| "the window is gone".to_owned())
@@ -478,6 +576,34 @@ impl Native for LinuxNative {
     fn set_dark(&self, dark: bool) -> Result<(), String> {
         self.on_main(move |_| crate::system::simulate_system_scheme(dark))
             .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn target_window(&self, window: NodeId) -> Result<(), String> {
+        let open = self
+            .on_main(move |s| crate::window::native_window(s, window).is_some())
+            .ok_or("the window is gone")?;
+        if !open {
+            return Err(format!("no window of the app has root node {window}"));
+        }
+        self.target.store(window, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn window_state(&self, window: NodeId) -> Result<Option<WindowState>, String> {
+        self.on_main(move |s| crate::window::current_state(s, window))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn press_window_close(&self, window: NodeId) -> Result<(), String> {
+        // What the title bar's close button does: `gtk_window_close`,
+        // whose `close-request` answers the window's policy.
+        self.on_main(move |s| {
+            let native = crate::window::native_window(s, window)
+                .ok_or_else(|| format!("no window of the app has root node {window}"))?;
+            crate::window::press_close(&native, nsh_core::desktop::CloseReason::CloseButton);
+            Ok(())
+        })
+        .unwrap_or_else(|| Err("the window is gone".to_owned()))
     }
 
     fn quit(&self) {

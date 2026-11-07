@@ -141,6 +141,21 @@ export const colors: Palette = tokens<keyof Palette>({
   down: "down",
 });
 
+/**
+ * The window buttons an app draws for a frameless window on macOS (the
+ * traffic lights): close, minimize and zoom in the system's hues, the
+ * glyphs' ink over them, their hairline edge, and `off`, all three while
+ * the window is in the background.
+ */
+export const windowControls = tokens<"close" | "minimize" | "zoom" | "ink" | "edge" | "off">({
+  close: "window-close",
+  minimize: "window-minimize",
+  zoom: "window-zoom",
+  ink: "window-control-ink",
+  edge: "window-control-edge",
+  off: "window-control-off",
+});
+
 /** `color` at opacity `a`. */
 export function alpha(color: string, a: number) {
   return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
@@ -188,10 +203,11 @@ export interface Finish {
  * at rest, further than a hover does, so on and off read apart at a
  * glance. Dark, a step lighter than the raised fill; light, where a raised
  * fill is all but the color of the card and the inset under it, a deeper
- * neutral with an edge.
+ * neutral with an edge. `groove` is a hairline's lip of light under it, a
+ * menu's separator cut into the surface.
  */
 export const finish = themed<
-  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "knobOn" | "pill" | "on" | "chip" | "glass" | "menu", Finish>
+  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "knobOn" | "pill" | "on" | "chip" | "glass" | "menu" | "groove", Finish>
 >(finishes.dark, finishes.light);
 
 export type Tone = "neutral" | "accent" | "info" | "warn" | "danger" | "up" | "down";

@@ -458,7 +458,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
     empty. A command that runs at the commit (a component's or ref's method) cannot throw: given an unknown id or
     index it does nothing and logs a warning.
   - Methods whose parameters may grow take their options as one object (`net.connect({ host, port })`,
-    `Window.setTitleBar({ style, height })`); parameters the user judged will not grow stay positional
+    `WindowRef.setBounds({ origin, size, animated })`); parameters the user judged will not grow stay positional
     (`setSelection(start, end?)`, `seek(seconds)`, `DockArea.addPanel(panel, placement?, size?)`,
     `DataTable.scrollToRow(row, animated?)`, `Editor.revealPosition(position, center)`, a range's start and end):
     decided per method by the user (2026-10-28), not changed on reading this rule.
@@ -612,7 +612,10 @@ merging a pull request starts a run that runs nothing but takes its concurrency 
 has queued or running. The jobs that build (all but `CI paths`) are debounced: they name the environment
 `ci-debounce` with `deployment: false`, whose wait timer holds them a few minutes without a runner, so a push
 followed by another within that time cancels the first run before it starts. Each workflow's concurrency group is
-the ref, with `cancel-in-progress` (Website's pushes to `main` queue instead: each one deploys).
+the pull request's number, or the ref for pushes and queue runs (`github.event.pull_request.number || github.ref`):
+a merged pull request's `closed` event carries the base branch as its ref, so a group of the ref alone would cancel
+`main`'s run of the merge commit. Groups cancel in progress (Website's pushes to `main` queue instead: each one
+deploys).
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'

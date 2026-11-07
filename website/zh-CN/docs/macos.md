@@ -55,7 +55,11 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 ### 性能监视器
 
 `--fps`（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`，嵌入时用 `AppView::set_fps_monitor(true)`，
-以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`）会在应用右上角显示一个每秒刷新两次的面板：
+以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`、环境变量
+`NSH_FPS=1`，或应用自己调用 `setFpsEnabled(true)`）会在应用右上角显示一个每秒刷新两次的面板。打包后的 TSX 应用也可以在
+`Info.plist` 中把 `NSHPerformanceMonitor` 设为 `true`，这样无论从哪里打开应用都会显示面板。通过 `nsh.json` 的
+`macos.infoPlist` 添加这个键（见[打包](./packaging.md#infoplist-键与-entitlements)）。打包应用也可以从 `Info.plist` 的
+`LSEnvironment` 取得 `NSH_FPS`。
 
 | 行 | 测量内容 |
 |---|---|
@@ -152,7 +156,7 @@ view.load(Bundle::source(code).into());
 关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
 应用自己的代码用 `nsh_core::element::desktop::quit()`（TS：`Application.quit()`）以同样的方式退出，而
-`nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
+`current_window().close()`（`nsh_core::element::desktop`）遵循所选的窗口关闭策略。
 `nsh_core::element::desktop::restart()`（TS：`Application.restart()`）以同样的方式退出，进程结束后由 `run_app`
 以相同的参数重新启动应用：`.app` 包里的应用通过 Launch Services（`open -n`）打开，与用户打开它时相同。
 

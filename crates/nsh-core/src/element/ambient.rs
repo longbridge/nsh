@@ -49,6 +49,12 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
+    /// Whether the performance monitor measures, as the platform reports
+    /// it.
+    perf_monitor: Option<Signal<bool>>,
+    /// The main window's close presses: how many, and the last one's
+    /// reason ([`crate::element::desktop::WindowHandle::on_close_press`]).
+    main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
 }
 
 impl Ambient {
@@ -155,14 +161,33 @@ impl super::Runtime {
         }
     }
 
-    /// `bounds` fitted on the displays now (`set_window_bounds`), without
-    /// subscribing to them.
-    pub(crate) fn fit_window_bounds(
-        &self,
-        bounds: crate::desktop::WindowBounds,
-    ) -> crate::desktop::WindowBounds {
+    /// Whether the performance monitor measures now: what read it runs
+    /// again.
+    pub(crate) fn set_perf_monitor(&self, enabled: bool) {
         let _entered = self.enter();
-        displays_signal().with_untracked(|d| bounds.fit_on_displays(d))
+        let signal = perf_monitor_signal();
+        if signal.get_untracked() != enabled {
+            signal.set(enabled);
+        }
+    }
+
+    /// The user asked to close the main window: what listens hears it.
+    pub(crate) fn main_close_pressed(&self, reason: crate::desktop::CloseReason) {
+        let _entered = self.enter();
+        main_close_press_signal().update(|(count, last)| {
+            *count += 1;
+            *last = reason;
+        });
+    }
+
+    /// `placement` fitted on the displays now (`setPlacement`, a restored
+    /// window's), without subscribing to them.
+    pub(crate) fn fit_window_placement(
+        &self,
+        placement: crate::desktop::WindowPlacement,
+    ) -> crate::desktop::WindowPlacement {
+        let _entered = self.enter();
+        displays_signal().with_untracked(|d| placement.fit_on_displays(d))
     }
 
     /// The design tokens now: what read them runs again.
@@ -1493,6 +1518,42 @@ fn displays_signal() -> Signal<Arc<[crate::desktop::Display]>> {
     }
     let signal = Owner::detached().run(|| super::signal(Arc::from(Vec::new())));
     with_data(|d| d.ambient.displays = Some(signal));
+    signal
+}
+
+/// Whether the platform's performance monitor measures (TS:
+/// `fpsEnabled()`), as the platform reports it: reading it in a binding
+/// subscribes it.
+pub fn fps_enabled() -> bool {
+    perf_monitor_signal().get()
+}
+
+/// Turns the platform's performance monitor on or off (TS:
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
+/// monitor ignore it; [`fps_enabled`] follows what the platform did.
+pub fn set_fps_enabled(enabled: bool) {
+    act(super::services::perf_monitor(enabled));
+}
+
+/// The performance monitor's signal, off until the platform reports it.
+fn perf_monitor_signal() -> Signal<bool> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(false));
+    with_data(|d| d.ambient.perf_monitor = Some(signal));
+    signal
+}
+
+/// The main window's close presses, none until the platform reports one.
+pub(crate) fn main_close_press_signal() -> Signal<(u64, crate::desktop::CloseReason)> {
+    if let Some(signal) = with_data(|d| d.ambient.main_close_press) {
+        return signal;
+    }
+    let signal =
+        Owner::detached().run(|| super::signal((0, crate::desktop::CloseReason::default())));
+    with_data(|d| d.ambient.main_close_press = Some(signal));
     signal
 }
 

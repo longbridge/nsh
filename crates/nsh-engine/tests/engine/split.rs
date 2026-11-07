@@ -113,6 +113,7 @@ fn config(bundle: Bundle) -> EngineConfig {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     }
 }
 

@@ -1585,3 +1585,25 @@ test("a mouse makes a desktop at any width, a touch screen a tablet or a phone (
     globalThis.screen = saved.screen;
   }
 });
+
+test("a view laid out at no size draws nothing of its own, its border overlay included", () => {
+  const { player } = fakePlayer();
+  const classes = new Set();
+  const el = {
+    _kind: "view",
+    _animation: {},
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+  };
+  Object.assign(player, { view: () => el, placeFrame() {}, readingChanged() {} });
+  // `display: none`: the core lays the view out at no size.
+  player.op_f(["f", 2, 0, 0, 0, 0]);
+  assert.ok(classes.has("nsh-empty"));
+  player.op_f(["f", 2, 8, 8, 40, 32]);
+  assert.ok(!classes.has("nsh-empty"));
+  // One side of no size is no size too.
+  player.op_f(["f", 2, 8, 8, 40, 0]);
+  assert.ok(classes.has("nsh-empty"));
+  // What the class takes away: the border overlay, the outline and the shadow.
+  assert.match(source, /\.nsh-empty > \.nsh-border \{ display: none; \}/);
+  assert.match(source, /\.nsh-v\.nsh-empty \{ outline: none; box-shadow: none; \}/);
+});

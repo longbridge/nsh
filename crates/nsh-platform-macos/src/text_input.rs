@@ -64,9 +64,9 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSEvent,
-    NSEventModifierFlags, NSEventType, NSFocusRingType, NSFontAttributeName,
-    NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
+    NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
+    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
     NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate, NSTextInputClient,
     NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
@@ -934,7 +934,90 @@ define_field!(
     NSObject
 );
 
-define_class!(
+/// Defines a direct subclass of `NSTextView` that an input edits with, as
+/// `define_class!` does, with its file drags appended to its methods:
+/// files dragged over the text go to the file drop target around the input
+/// ([`crate::file_drop::text_entered`]); `surface` names the function that
+/// gives the surface of a view of the class.
+macro_rules! define_text_view {
+    (
+        $(#[$($attr:tt)*])*
+        struct $name:ident;
+        surface = $surface:path;
+
+        unsafe impl NSObjectProtocol for $protocol_for:ident {}
+
+        impl $impl_for:ident {
+            $($methods:tt)*
+        }
+    ) => {
+        define_class!(
+            $(#[$($attr)*])*
+            struct $name;
+
+            unsafe impl NSObjectProtocol for $name {}
+
+            impl $name {
+                $($methods)*
+
+                #[unsafe(method(draggingEntered:))]
+                fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+                    $surface(self)
+                        .and_then(|surface| crate::file_drop::text_entered(&surface, sender))
+                        // SAFETY: NSTextView's own method.
+                        .unwrap_or_else(|| unsafe { msg_send![super(self), draggingEntered: sender] })
+                }
+
+                #[unsafe(method(draggingUpdated:))]
+                fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+                    $surface(self)
+                        .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                        // SAFETY: NSTextView's own method.
+                        .unwrap_or_else(|| unsafe { msg_send![super(self), draggingUpdated: sender] })
+                }
+
+                #[unsafe(method(draggingExited:))]
+                fn dragging_exited(&self, sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+                    if let Some(surface) = $surface(self) {
+                        crate::file_drop::clear(&surface);
+                    }
+                    // SAFETY: NSTextView's own method.
+                    let _: () = unsafe { msg_send![super(self), draggingExited: sender] };
+                }
+
+                #[unsafe(method(prepareForDragOperation:))]
+                fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+                    $surface(self)
+                        .and_then(|surface| crate::file_drop::text_updated(&surface, sender))
+                        .is_some()
+                        // SAFETY: NSTextView's own method.
+                        || unsafe { msg_send![super(self), prepareForDragOperation: sender] }
+                }
+
+                #[unsafe(method(performDragOperation:))]
+                fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+                    $surface(self)
+                        .and_then(|surface| crate::file_drop::text_performed(&surface, sender))
+                        // SAFETY: NSTextView's own method.
+                        .unwrap_or_else(|| unsafe { msg_send![super(self), performDragOperation: sender] })
+                }
+
+                #[unsafe(method(draggingEnded:))]
+                fn dragging_ended(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) {
+                    if let Some(surface) = $surface(self) {
+                        crate::file_drop::clear(&surface);
+                    }
+                    if NSTextView::class().responds_to(sel!(draggingEnded:)) {
+                        // SAFETY: NSTextView's own method, when it has one.
+                        let _: () = unsafe { msg_send![super(self), draggingEnded: sender] };
+                    }
+                }
+            }
+        );
+    };
+}
+
+define_text_view!(
     /// The text view of a multiline input: tells [`Ctx`] when it takes and
     /// loses the focus, and which modifiers its keys hold.
     #[unsafe(super(NSTextView, NSText, NSView, NSResponder, NSObject))]
@@ -942,6 +1025,7 @@ define_class!(
     #[ivars = OnceCell<Ctx>]
     #[name = "NshTextView"]
     struct TextArea;
+    surface = area_surface;
 
     unsafe impl NSObjectProtocol for TextArea {}
 
@@ -1029,6 +1113,11 @@ define_class!(
     }
 );
 
+/// The surface of text area `area`, for its drags.
+fn area_surface(area: &TextArea) -> Option<Rc<Surface>> {
+    area.ivars().get()?.surface.upgrade()
+}
+
 /// A test's paste (`nsh test --target macos`): `content` on a pasteboard of
 /// its own (the machine's clipboard stays as it was), pasted into the
 /// focused input as the user's paste is: reported, then its text read
@@ -1109,13 +1198,14 @@ fn text_area_pasting(area: &TextArea, pasteboard: &NSPasteboard) -> bool {
     area.ivars().get().is_none_or(|cx| cx.pasting(pasteboard))
 }
 
-define_class!(
+define_text_view!(
     /// The field editor of a single-line input ([`FieldCell`]): AppKit's
     /// shared one, but for pastes, which an input reports (`onPaste`).
     #[unsafe(super(NSTextView, NSText, NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "NshFieldEditor"]
     struct FieldEditor;
+    surface = editor_surface;
 
     unsafe impl NSObjectProtocol for FieldEditor {}
 
@@ -1151,6 +1241,11 @@ define_class!(
         }
     }
 );
+
+/// The surface of the input field `editor` edits, for its drags.
+fn editor_surface(editor: &FieldEditor) -> Option<Rc<Surface>> {
+    field_ctx(editor)?.surface.upgrade()
+}
 
 /// The input of the field `editor` edits (its delegate, while it edits).
 fn field_ctx(editor: &FieldEditor) -> Option<Ctx> {

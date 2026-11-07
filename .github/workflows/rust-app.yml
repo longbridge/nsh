@@ -71,7 +71,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-app-${{ github.ref }}
+  group: rust-app-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

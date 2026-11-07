@@ -96,6 +96,8 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | `.header_left_symbol(..)` | `ios={{ headerLeftSymbol }}` | `NavPage` | 标题栏开头显示 UIKit 自带的 SF Symbol 按钮，按下即按下 `headerLeft`。 |
 | `.back_forward_gestures(..)` | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 | `.window_drag(..)` | `desktop={{ windowDrag }}` | 所有元素 | 按住它拖动窗口，像系统标题栏一样（见 [nsh/desktop](../modules/nsh-desktop.md#自定义标题栏)）。 |
+| `.window_control(..)` | `desktop={{ windowControl }}` | 所有元素 | 这个视图就是窗口的最小化、最大化或关闭按钮，由应用绘制。 |
+| `.window_resize(..)` | `desktop={{ windowResize }}` | 所有元素 | 按住它从一条边或一个角调整无边框窗口的大小。 |
 
 在 TSX 中，`desktop={{…}}` 和 `web={{…}}` 在所有地方都可以使用。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
 
@@ -103,7 +105,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 
 ## 平台模块
 
-在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（窗口：`set_title`、`set_title_bar`、`title_bar`、`minimize`、`toggle_maximize`、`toggle_full_screen`、`set_frame`、`set_window_bounds`、`set_level`、`order_front`、`close_window`、`window_state`、`displays`；应用：`quit`、`restart`；菜单：`set_application_menu`、`popup_menu`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
+在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（窗口：`window`、`current_window` 及其 `WindowHandle`、`title_bar`、`displays`；应用：`quit`、`restart`；菜单：`set_application_menu`、`popup_menu`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
 
 ### nsh/mobile
 
@@ -163,9 +165,10 @@ Rust 应用用 `nsh_core::element::desktop` 绘制自己的标题栏（[用 Rust
 
 | 导出 | 说明 |
 |---|---|
-| `Window` | 窗口：`setTitle`、`setTitleBar({ style: "hidden" })`（自定义标题栏）、`minimize`、`toggleMaximize`、`toggleFullScreen`、`setBounds`（按用户离开时的样子打开窗口）、`close`。 |
+| `Window` | 应用自己的窗口：组件树中的 `<Window>`、命令式的 `Window.open`，有五个种类（`normal`、`dialog`、`panel`、`popup`、`overlay`），都由应用唯一的引擎渲染。 |
+| `currentWindow`、`windows`、`focusedWindow` | 主窗口和应用自己的窗口的 `WindowRef`：`set({ title, titleBar, level, … })`、`setMode`、`setBounds`、`setPlacement`（按用户离开时的样子打开窗口）、`close` 以及事件。 |
 | `titleBar` | 隐藏的标题栏的高度，以及系统窗口按钮占用的空间（响应式）。 |
-| `windowState`、`displays` | 窗口的外框、模式和所在显示器，以及各个显示器（响应式）。 |
+| `windowState`、`displays` | 当前窗口的外框、模式和所在显示器，以及各个显示器（响应式）。 |
 | `Menu` | `setApplicationMenu(items)`（菜单栏，带快捷键）和 `popup(items, at?)`（右键菜单）。菜单项的 `icon` 和 `<Image>` 的 `src` 一样是图片，菜单因此显示应用自己的图标：SVG 跟随菜单文字的颜色，位图保留自己的颜色。macOS 和 Windows 上会显示；GTK 的菜单不在文字旁显示图标。 |
 | `isAvailable` | 在窗口和菜单 API 可用的地方为 `true`：macOS、Windows 和 Linux。桌面浏览器的 `platform.desktop` 为 `true`，窗口和菜单仍是浏览器自己的。 |
 

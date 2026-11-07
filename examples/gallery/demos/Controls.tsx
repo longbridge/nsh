@@ -1498,7 +1498,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     pointer
       ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
       : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
-  const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+  const backdrop = { backgroundColor: token("scrim") };
   /** The clear button's inset from the trigger's end: centered where the chevron's lane is. The button is in the
       select's view, outside the trigger, so its inset counts the trigger's 1 pt border too. */
   const clearInset = 1 + 10 + size.check / 4 - size.clear / 2;
