@@ -1992,7 +1992,10 @@ const UrlScheme: {
 
 A URL that is not a string, longer than 16 KiB or with whitespace is a `TypeError`, and so on the web, when the app is
 the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too: `url()` is a copy that shows a change
-made elsewhere (a link, Rust's `set_app_url`) from the next turn on, and what `setUrl` sets at once. Every page pushed
+made elsewhere (a link, Rust's `set_app_url`) from the next turn on, and what `setUrl` sets at once. On the native
+platforms the system hands the app the link that launched it after the app's code starts, so `url()` is `null` while
+the app builds its first routes and the link comes as the first `open`: an app that listens to `open` shows the page it
+names, as below (on the web the page's address is there from the start). Every page pushed
 on a shown stack keeps its own history entry on the web, so the browser's back goes back in the app: the stack's pages
 go back and the address becomes the entry's, with no `open`, as for any page the app pops (a page the app keeps, with
 `popOnBack={false}` or `onBackPress`, keeps its entry and address). A forward to a page already gone stays where the
