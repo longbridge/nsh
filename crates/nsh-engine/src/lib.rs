@@ -29,6 +29,8 @@ mod shader_frame;
 mod storage;
 #[cfg(feature = "js-core")]
 mod symbolicate;
+#[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
+pub mod updates;
 
 // The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
 // nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
@@ -184,6 +186,31 @@ pub struct Bundle {
     /// The signed package the bundle came from ([`Bundle::from_package`]),
     /// named in the app's errors ([`AppError::package`]).
     pub package: Option<Arc<PackageInfo>>,
+    /// The update configuration `nsh/updater` reads (`nsh-updater.json`,
+    /// as `nsh package` wrote it), from the installed app's own resources;
+    /// `None`: the file among the app's assets, if any. A packaged app
+    /// running a newer package of its code sets the shipped one
+    /// (`updates::launch`).
+    pub updater_config: Option<Arc<[u8]>>,
+    /// Told how the app fares, while it has not proved it runs: a package
+    /// of a packaged app's code running for the first time
+    /// (`updates::launch`).
+    pub trial: Option<Arc<dyn Trial>>,
+}
+
+/// How long an app on [`Bundle::trial`] runs past its first frame without
+/// a fatal error to be healthy.
+pub const TRIAL_PERIOD: Duration = Duration::from_secs(10);
+
+/// A run on trial ([`Bundle::trial`]): the engine tells it once whether
+/// the app is healthy or failed (later calls are its to ignore). A crash
+/// of the process tells it nothing.
+pub trait Trial: Send + Sync + std::fmt::Debug + 'static {
+    /// The app ran [`TRIAL_PERIOD`] past its first frame, or its engine
+    /// stopped after the first frame, without a fatal error.
+    fn healthy(&self);
+    /// The app did not start, or its VM was stopped ([`AppError::is_fatal`]).
+    fn failed(&self, error: &AppError);
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -309,6 +336,8 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            updater_config: None,
+            trial: None,
         }
     }
 
@@ -324,6 +353,8 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            updater_config: None,
+            trial: None,
         }
     }
 
@@ -686,11 +717,16 @@ pub trait FetchTask: Send {
 /// (so its TLS and proxies), and the file `nsh package` left among the assets.
 struct UpdaterOverNetwork {
     network: Arc<dyn Network>,
-    assets: Arc<dyn Assets>,
+    assets: Option<Arc<dyn Assets>>,
+    /// [`Bundle::updater_config`].
+    config: Option<Arc<[u8]>>,
+    /// [`Bundle::package`].
+    running: Option<Arc<PackageInfo>>,
 }
 
 impl UpdaterOverNetwork {
-    /// `None` without both (nothing to update from).
+    /// `None` without a network, or without both assets and the bundle's
+    /// configuration (nothing to update from).
     #[cfg_attr(
         not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
         allow(dead_code)
@@ -698,18 +734,51 @@ impl UpdaterOverNetwork {
     fn host(
         network: Option<Arc<dyn Network>>,
         assets: Option<Arc<dyn Assets>>,
+        bundle: &Bundle,
     ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        if assets.is_none() && bundle.updater_config.is_none() {
+            return None;
+        }
         Some(Arc::new(UpdaterOverNetwork {
             network: network?,
-            assets: assets?,
+            assets,
+            config: bundle.updater_config.clone(),
+            running: bundle.package.clone(),
         }))
     }
 }
 
 impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
     fn config(&self) -> Option<Vec<u8>> {
+        if let Some(config) = &self.config {
+            return Some(config.to_vec());
+        }
         // Only a package has it; a dev server answers nothing for it.
-        self.assets.read("asset:/nsh-updater.json").ok()
+        self.assets.as_ref()?.read("asset:/nsh-updater.json").ok()
+    }
+
+    fn running_package(&self) -> Option<nsh_core::runtime::PackageVersion> {
+        let running = self.running.as_ref()?;
+        let mut version = nsh_core::runtime::PackageVersion::default();
+        version.version = running.version.clone();
+        version.build = running.build;
+        Some(version)
+    }
+
+    #[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
+    fn verify_package(
+        &self,
+        file: &std::path::Path,
+        updates: &std::path::Path,
+        app_id: &str,
+        roots: &[String],
+        newer_than: u64,
+    ) -> Result<nsh_core::runtime::PackageVersion, String> {
+        let app = updates::verify_download(file, updates, app_id, roots, newer_than)?;
+        let mut version = nsh_core::runtime::PackageVersion::default();
+        version.version = app.version;
+        version.build = app.build;
+        Ok(version)
     }
 
     fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
@@ -1445,6 +1514,36 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
+    drive(&mut driver, &rx);
+    // Stopped on purpose (a crash never gets here): a trial is over.
+    if let Some(trial) = &driver.trial {
+        trial.healthy();
+    }
+}
+
+/// Tells `trial` the app is healthy [`TRIAL_PERIOD`] after its first frame
+/// (it ignores this after a fatal error).
+fn start_trial(trial: Arc<dyn Trial>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let spawned = std::thread::Builder::new()
+            .name("nsh-trial".into())
+            .spawn(move || {
+                std::thread::sleep(TRIAL_PERIOD);
+                trial.healthy();
+            });
+        if let Err(err) = spawned {
+            log::error!("cannot time the app's trial: {err}");
+        }
+    }
+    // WebAssembly runs no packaged apps' updates.
+    #[cfg(target_arch = "wasm32")]
+    drop(trial);
+}
+
+/// Runs the engine's loop until it stops.
+#[cfg(not(target_arch = "wasm32"))]
+fn drive<M: TextEngine + 'static>(driver: &mut Driver<M>, rx: &Receiver<Message>) {
     loop {
         let message = match driver.deadline() {
             Some(deadline) => match rx.recv_deadline(deadline) {
@@ -1459,12 +1558,12 @@ fn run<M: TextEngine + 'static, S: MountSink>(
         };
         let started = driver.state.perf.is_some().then(Instant::now);
         if let Some(message) = message {
-            if !driver.handle(message, &rx) {
+            if !driver.handle(message, rx) {
                 return;
             }
             // Coalesce everything already queued into this frame.
             while let Ok(message) = rx.try_recv() {
-                if !driver.handle(message, &rx) {
+                if !driver.handle(message, rx) {
                     return;
                 }
             }
@@ -1631,6 +1730,9 @@ struct Driver<M: TextEngine + 'static> {
     /// The engine's attachment to the embedding app's channel: its events
     /// come here while the engine runs.
     _host: host_channel::HostAttachment,
+    /// [`Bundle::trial`], told the app is healthy when the engine stops
+    /// after its first frame.
+    trial: Option<Arc<dyn Trial>>,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -1644,6 +1746,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
+        let trial = match &config.app {
+            App::Js(bundle) => bundle.trial.clone(),
+            App::Rust(_) => None,
+        };
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let system_tx = tx.clone();
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
@@ -1832,6 +1938,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             context: config.context.clone(),
             last_frame: None,
             _host: config.host.attach(host_tx, rx.clone()),
+            trial: trial.clone(),
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -1845,6 +1952,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         updater: UpdaterOverNetwork::host(
                             config.network.clone(),
                             config.assets.clone(),
+                            bundle,
                         ),
                         data_dir: config
                             .data_dir
@@ -1920,6 +2028,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                 );
             }
             sink.submit(batch);
+        }
+        if let Some(trial) = trial {
+            start_trial(trial);
         }
         // A resize that came while the app started is in the first frame:
         // reported as a turn reports it, or a platform waiting for the

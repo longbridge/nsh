@@ -60,7 +60,7 @@ pub(crate) struct Host {
     limits: Mutex<nsh_engine::Limits>,
     /// Where loaded apps keep their data, each in a directory named by its
     /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
-    data_dir: Option<std::path::PathBuf>,
+    pub(crate) data_dir: Option<std::path::PathBuf>,
     /// The directory loaded apps keep their storage in, overriding their own
     /// (`NshView.setStorageDirectory`); `None`: theirs.
     storage: Mutex<Option<std::path::PathBuf>>,
@@ -961,6 +961,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     source_map: JString<'_>,
     capabilities: JString<'_>,
     app: JString<'_>,
+    updater: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -992,10 +993,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
         let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
         bundle = bundle.with_app_id(id);
     }
-    match bundle.with_capabilities_json(declared.as_deref()) {
-        Ok(bundle) => host.load(bundle),
-        Err(err) => log::error!("cannot load the bundle: {err}"),
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))]
+    let mut bundle = match bundle.with_capabilities_json(declared.as_deref()) {
+        Ok(bundle) => bundle,
+        Err(err) => return log::error!("cannot load the bundle: {err}"),
+    };
+    // A packaged app (`AppActivity`) runs a newer signed package of its code
+    // it downloaded instead.
+    #[cfg(feature = "js")]
+    if bytecode != 0
+        && !updater.is_null()
+        && let Some(run) = crate::package::downloaded(&mut env, host, &mut bundle, &updater)
+    {
+        return host.load(run);
     }
+    #[cfg(not(feature = "js"))]
+    let _ = updater;
+    host.load(bundle);
 }
 
 /// Runs a Rust app's root in the `NshView` with native handle `handle`
