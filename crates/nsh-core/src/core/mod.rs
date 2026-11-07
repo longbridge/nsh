@@ -1532,6 +1532,12 @@ impl<M: TextEngine> Core<M> {
     /// Sets what the app may reach: remote images, canvas images, video
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
+        // `open_window` checks windows as `Window.open` does.
+        {
+            let _entered = self.components.runtime.enter();
+            crate::element::global::<crate::element::desktop::WindowAccess>()
+                .set(crate::element::desktop::WindowAccess(Some(access.clone())));
+        }
         self.access = access;
     }
 
@@ -6235,7 +6241,19 @@ impl<M: TextEngine> Core<M> {
             {
                 let mut config = root.modal;
                 config.window = self.window_of(key);
-                self.mount.push(MountItem::ModalConfig { id, config });
+                // A platform presents a dialog when it is inserted, over the
+                // window its config names: a dialog inserted in this batch
+                // (one that mounts in a window of the app's own already
+                // open) gets its config ahead of its insertion.
+                let item = MountItem::ModalConfig { id, config };
+                match self
+                    .mount
+                    .iter()
+                    .position(|m| matches!(m, MountItem::Insert { child, .. } if *child == id))
+                {
+                    Some(at) => self.mount.insert(at, item),
+                    None => self.mount.push(item),
+                }
             }
             if flags & dirty::NAV_SHADER != 0
                 && let Some(root) = &node.root

@@ -1,7 +1,7 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
-import { Button, Tree, type TreeItem, type TreeRef } from "nsh/base";
+import { Tree, type TreeItem, type TreeRef } from "nsh/base";
 import type { IconName } from "../icons";
-import { Caption, Card, colors, DemoPage, desktop, mono, terminal, TreeRow, treeItemClass, Toggle as Switch } from "../ui";
+import { Button as GalleryButton, Caption, Card, colors, DemoPage, desktop, mono, terminal, TreeRow, treeItemClass, Toggle as Switch } from "../ui";
 
 // `nsh/base`'s `Tree` owns which items are expanded, which one is selected,
 // the keyboard (one Tab stop: the arrows move the selection, Right and Left
@@ -25,18 +25,9 @@ function Actions(props: { children: JSX.Element }) {
   return <View style={{ flexDirection: "row", gap: 6, alignSelf: desktop() ? undefined : "flex-start" }}>{props.children}</View>;
 }
 
-/** A small button of the gallery's, in a card's header. */
+/** A small secondary button of the gallery's (`buttonLook`), in a card's header. */
 function Action(props: { label: string; disabled?: boolean; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      disabled={props.disabled}
-      class="rounded-md border border-border bg-raised px-2.5 transition-colors motion-reduce:transition-none hover:bg-hover active:opacity-70 disabled:opacity-40 focus:outline-2 focus:outline-ring"
-      style={{ height: pointer ? 26 : 36, justifyContent: "center" }}
-    >
-      <Text style={{ fontSize: pointer ? 12 : 14, fontWeight: "500", color: colors.text }}>{props.label}</Text>
-    </Button>
-  );
+  return <GalleryButton label={props.label} variant="secondary" size="small" disabled={props.disabled} onPress={props.onPress} />;
 }
 
 const project: TreeItem[] = [

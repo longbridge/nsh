@@ -479,6 +479,12 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **A view's display link follows the window to another screen but keeps the frame rates it was asked for**: one
+  resumed while the window was on a 60 Hz screen (range 60–60) and kept running by a looping animation or the
+  performance monitor drew at 60 Hz after the window moved to a 120 Hz built-in screen (measured, macOS 26, a 120 Hz
+  built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
+  `maximumFramesPerSecond` differs from the one it was made for.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no

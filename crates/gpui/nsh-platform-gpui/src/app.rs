@@ -1043,7 +1043,6 @@ fn main_window_options(
         is_resizable: a.resizable.unwrap_or(true),
         is_minimizable: a.minimizable.unwrap_or(true),
         is_movable: a.movable.unwrap_or(true),
-        tabbing_identifier: a.tab_group.clone().flatten(),
         ..Default::default()
     }
 }

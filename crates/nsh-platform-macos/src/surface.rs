@@ -246,6 +246,9 @@ pub(crate) struct Surface {
     /// The rate the display link was last asked for
     /// ([`Surface::frame_rate`]; `None`: the screen's highest).
     link_rate: Cell<Option<f32>>,
+    /// The highest refresh rate of the screen the display link was last
+    /// asked on ([`Surface::frame_rate_range`]), in Hz; `0` before any.
+    link_screen_max: Cell<f32>,
     /// The frame callbacks that asked for a rate in the last frame
     /// ([`Surface::cap_frame`]): how many, and the highest rate.
     capped_frames: Cell<(usize, f32)>,
@@ -363,6 +366,7 @@ impl Surface {
             test_model: RefCell::default(),
             link: RefCell::new(None),
             link_rate: Cell::new(None),
+            link_screen_max: Cell::new(0.0),
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
@@ -963,15 +967,33 @@ impl Surface {
     /// The frame rates the display link asks for ([`frame_rate_range`]) at
     /// the rate it was last asked for, on the window's screen.
     fn frame_rate_range(&self) -> objc2_quartz_core::CAFrameRateRange {
-        let max = self
-            .root
+        let max = self.screen_max();
+        self.link_screen_max.set(max);
+        frame_rate_range(self.link_rate.get(), max)
+    }
+
+    /// The highest refresh rate of the window's screen (the main screen
+    /// while the root is in no window), in Hz.
+    fn screen_max(&self) -> f32 {
+        self.root
             .ns()
             .window()
             .and_then(|w| w.screen())
             .or_else(|| objc2_app_kit::NSScreen::mainScreen(self.mtm))
             .map_or(60, |s| s.maximumFramesPerSecond())
-            .max(1) as f32;
-        frame_rate_range(self.link_rate.get(), max)
+            .max(1) as f32
+    }
+
+    /// Asks the display link for its rates again when the window's screen
+    /// refreshes at another rate than the one they were made for: the
+    /// window moved to another screen, or the screen's mode changed. The
+    /// link follows the window's screen, but its rates stay what they were
+    /// asked for: one resumed on a 60 Hz screen and kept running (a looping
+    /// animation, the performance monitor) stays at 60 Hz on a 120 Hz one.
+    fn follow_screen(&self, link: &CADisplayLink) {
+        if self.screen_max() != self.link_screen_max.get() {
+            link.setPreferredFrameRateRange(self.frame_rate_range());
+        }
     }
 
     /// When the next thing that changes the app's state comes due without
@@ -1058,6 +1080,7 @@ impl Surface {
         if !self.wants_frames() && self.perf.borrow().is_none() {
             link.setPaused(true);
         } else {
+            self.follow_screen(link);
             self.update_frame_rate(link, false);
         }
     }

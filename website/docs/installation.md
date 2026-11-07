@@ -105,6 +105,17 @@ nsh --version
 
 The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) development host, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
 
+## Installing the nightly build
+
+Every night that `main` changes, it is built and published as the [nightly release](https://github.com/longbridge/nsh/releases/tag/nightly), with the same archives as a release. On macOS and Linux, install it with the install script:
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+It installs to `~/.nsh` as a release does, and running it again updates to the latest nightly; the plain command goes back to the latest release. `-V` shows the revision of `main` it was built from. Apps written in Rust build their runner with NSH's crates on crates.io at the CLI's version, which is the last release's; for those apps, use a release or the source.
+
 ## Installing the latest source
 
 On macOS and Linux, install the latest `main` with Git, Rust and the platform build dependencies below:
