@@ -229,6 +229,9 @@ struct View {
     /// The text a text view shows, styles included, so a step can read a
     /// span's style.
     attributed: Option<Arc<nsh_core::AttributedText>>,
+    /// Where a text view's layout goes inside it (inside padding and
+    /// border).
+    text_content: Bounds<Points>,
     /// Which touches it and its subtree receive (`pointerEvents`).
     pointer_events: PointerEvents,
     /// Its children are read in screen order along this axis (a list in
@@ -274,6 +277,41 @@ impl Clip {
             Clip::Within(clip) => Clip::Within(clip.intersect(&bounds)),
         }
     }
+}
+
+/// A view on screen as layout placed it ([`Screen::layout_nodes`]): for
+/// checks of the layout itself (what overflows, overlaps or is cut).
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct LayoutNode {
+    /// The view.
+    pub id: NodeId,
+    /// Its kind.
+    pub kind: Option<ViewKind>,
+    /// Its `testID`.
+    pub test_id: Option<Arc<str>>,
+    /// The view it is in (`None` below the root).
+    pub parent: Option<NodeId>,
+    /// Its bounds in the root's points: moved by the views around it and
+    /// the offsets of the scroll views around it (transforms aside); a
+    /// modal's from the window's origin.
+    pub bounds: Bounds<Points>,
+    /// It or a view around it is hidden (`visibility: hidden`).
+    pub hidden: bool,
+    /// It clips what it holds (`overflow: hidden`).
+    pub clips: bool,
+    /// It is a scroll view.
+    pub is_scroll: bool,
+    /// A scroll view that scrolls horizontally (else vertically).
+    pub horizontal: bool,
+    /// A scroll view's content size, once known.
+    pub content_size: Option<Size<Points>>,
+    /// A text view's text as laid out (its runs' fonts, line limit,
+    /// ellipsis), to measure it with the engine that laid it out.
+    pub text: Option<Arc<nsh_core::AttributedText>>,
+    /// Where a text view's layout goes inside it (inside padding and
+    /// border), in its own points: the width its text was given.
+    pub text_content: Bounds<Points>,
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -419,11 +457,14 @@ impl Screen {
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
             }
-            MountItem::Text { id, text, .. } => {
+            MountItem::Text {
+                id, text, content, ..
+            } => {
                 {
                     let view = self.nodes.entry(*id).or_default();
                     view.text = Some(text.text.clone());
                     view.attributed = Some(Arc::clone(text));
+                    view.text_content = *content;
                 }
                 self.set_spans(*id, text);
             }
@@ -766,6 +807,62 @@ impl Screen {
             } else if let Some(children) = self.children.get(&id) {
                 stack.extend(children.iter().rev());
             }
+        }
+        out
+    }
+
+    /// The views of [`Screen::attached`] (below the root, of a stack only
+    /// its top screen, spans of text aside), in tree order, as layout
+    /// placed them.
+    pub fn layout_nodes(&self) -> Vec<LayoutNode> {
+        let mut out = Vec::new();
+        // A view, the origin of its parent's content in the root's points,
+        // and whether a view around it is hidden.
+        let mut stack = vec![(ROOT, Point::default(), false)];
+        while let Some((id, origin, hidden)) = stack.pop() {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
+                continue;
+            }
+            let root = View::default();
+            let view = match self.nodes.get(&id) {
+                Some(view) if view.span.is_some() => continue,
+                Some(view) => view,
+                None if id == ROOT => &root,
+                None => continue,
+            };
+            let hidden = hidden || view.hidden;
+            let origin = if view.kind == Some(ViewKind::Modal) {
+                Point::default()
+            } else {
+                origin
+            };
+            let bounds = Bounds::new(origin + view.frame.origin, view.frame.size);
+            let mut content = bounds.origin;
+            if let Some(scroll) = &view.scroll {
+                content -= Point::new(scroll.x, scroll.y);
+            }
+            if id != ROOT {
+                out.push(LayoutNode {
+                    id,
+                    kind: view.kind,
+                    test_id: view.test_id.clone(),
+                    parent: view.parent,
+                    bounds,
+                    hidden,
+                    clips: view.clips,
+                    is_scroll: view.scroll.is_some(),
+                    horizontal: view.scroll.as_ref().is_some_and(|s| s.horizontal),
+                    content_size: view.scroll.as_ref().and_then(|s| s.content),
+                    text: view.attributed.clone(),
+                    text_content: view.text_content,
+                });
+            }
+            let children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+                self.screens(id).last().copied().into_iter().collect()
+            } else {
+                self.children.get(&id).cloned().unwrap_or_default()
+            };
+            stack.extend(children.into_iter().rev().map(|c| (c, content, hidden)));
         }
         out
     }

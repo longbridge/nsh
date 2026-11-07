@@ -88,7 +88,7 @@ pub use self::{
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };
 pub use self::{
-    screen::{Pick, Screen},
+    screen::{LayoutNode, Pick, Screen},
     storage::MemoryStorage,
 };
 
