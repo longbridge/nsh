@@ -242,10 +242,11 @@ impl AppView {
             .unwrap_or_else(|| Arc::new(nsh_core::clipboard::MemoryClipboard::default()));
         let surface = Surface::default();
         surface.wake.set(options.wake.clone());
+        let fps = options.fps || nsh_engine::perf::enabled_by_env();
         let output = crate::perf::SharedOutput::default();
-        output.enabled.set(options.fps);
+        output.enabled.set(fps);
         Self {
-            perf: options.fps.then(crate::perf::Monitor::new),
+            perf: fps.then(crate::perf::Monitor::new),
             output,
             options,
             #[cfg(feature = "dev")]
@@ -1060,6 +1061,9 @@ impl AppView {
             )
         });
         self.tree.apply(batch);
+        if let Some(enabled) = self.tree.perf_monitor.take() {
+            self.set_fps_monitor(enabled);
+        }
         #[cfg(feature = "dev")]
         if let Some((model, batch)) = observed {
             model.apply(&batch);

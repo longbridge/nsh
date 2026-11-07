@@ -79,5 +79,9 @@ name = "accessibility"
 harness = false
 
 [[test]]
+name = "background"
+harness = false
+
+[[test]]
 name = "draw_on_show"
 harness = false

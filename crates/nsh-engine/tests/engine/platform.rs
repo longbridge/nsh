@@ -293,3 +293,67 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     engine.control().set_displays(Vec::new());
     read("none | no displays");
 }
+
+const FPS_APP: &str = r#"import { fpsEnabled, mount, setFpsEnabled, Text } from "nsh";
+
+mount(() => <Text onPress={() => setFpsEnabled(true)}>{`fps ${fpsEnabled()}`}</Text>);
+"#;
+
+#[test]
+fn js_turns_the_performance_monitor_on_and_follows_it() {
+    use nsh_core::{Command, EventKind, EventPayload, ROOT_ID};
+    let dir = std::env::temp_dir().join(format!("nsh-fps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, FPS_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)));
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    // The text's node and what it shows, and whether the app asked for the
+    // monitor, until it shows `until`.
+    let node = std::cell::Cell::new(None);
+    let read = |until: &str| -> bool {
+        let mut asked = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while let Ok(batch) = rx.recv_deadline(deadline) {
+            let mut shown = false;
+            for item in batch.items {
+                match item {
+                    MountItem::Text { id, text, .. } => {
+                        node.set(Some(id));
+                        shown |= text.text == until;
+                    }
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::PerfMonitor(true),
+                    } => asked = true,
+                    _ => {}
+                }
+            }
+            if shown || (until.is_empty() && asked) {
+                return asked;
+            }
+        }
+        panic!("never showed {until:?}");
+    };
+    read("fps false");
+    engine
+        .control()
+        .dispatch_event(node.get().unwrap(), EventKind::Press, EventPayload::None);
+    assert!(read(""), "the press asks the platform for the monitor");
+    // The platform installs it, and removes it.
+    engine.control().set_perf_monitor(Some(std::sync::Arc::new(
+        nsh_engine::perf::PerfMonitor::new(),
+    )));
+    read("fps true");
+    engine.control().set_perf_monitor(None);
+    read("fps false");
+    let _ = std::fs::remove_dir_all(&dir);
+}

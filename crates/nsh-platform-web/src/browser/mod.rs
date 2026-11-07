@@ -200,9 +200,8 @@ impl Runtime {
             }
             405 => {
                 let json = args.index(0)?.as_string().unwrap_or_default();
-                if let Ok(value) = serde_json::from_str(&json)
-                    && let Ok(setting) = nsh_core::StatusBarSetting::from_json(&value)
-                {
+                if let Ok(value) = serde_json::from_str(&json) {
+                    let setting = nsh_core::StatusBarSetting::from_json(&value);
                     self.bindings.ops.borrow_mut().push(nsh_core::Op::Command {
                         id: 1,
                         command: nsh_core::Command::SetStatusBar(setting),

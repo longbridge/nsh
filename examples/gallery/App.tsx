@@ -1,15 +1,15 @@
-import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
+import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { platform, windowSize } from "nsh";
+import { fpsEnabled, platform, setColorScheme, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
-import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
+import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
-import { Icon } from "./icons";
+import { Icon, LucideIcon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
-import { loadSounds, play } from "../nsh-gallery-ui/sound";
+import { loadSounds, play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
 import attentionSound from "./sounds/attention.wav";
 import closeSound from "./sounds/close.wav";
 import errorSound from "./sounds/error.wav";
@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -277,9 +277,6 @@ function Phone() {
     </NavStack>
   );
 }
-
-/** The platforms' names as people write them. */
-const osName: Record<string, string> = { macos: "macOS", ios: "iOS", android: "Android", windows: "Windows", linux: "Linux", web: "Web" };
 
 /** The demo the desktop layout shows. */
 const selected = signal<DemoEntry>(groups[0].demos[0]);
@@ -554,6 +551,7 @@ function Sidebar() {
         >
           {/* The mark at the sidebar's top left, past the window's controls. */}
           {!terminal && <Logo size={22} />}
+          {!terminal && <Text style={{ marginLeft: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
           <View style={{ flex: 1 }} />
           <SidebarToggle />
         </View>
@@ -566,15 +564,62 @@ function Sidebar() {
             terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
           ]}
         >
-          {/* Its name over the platform's, as elsewhere: side by side they do not fit a terminal's sidebar. */}
-          <View style={{ flex: 1, gap: 0 }}>
-            <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
-            <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
-          </View>
-          <Toggles />
+          {/* Where NSH lives, for screenshots of the gallery. */}
+          <Text style={{ flex: 1, numberOfLines: 1, fontSize: 13, fontWeight: "500", color: colors.muted }}>nsh.dev</Text>
+          <SettingsMenu />
         </View>
       </View>
     </View>
+  );
+}
+
+/** One setting of the sidebar's menu, checked while it is on. */
+function SettingItem(props: { label: string; icon: JSX.Element; checked: boolean; onSelect: () => void }) {
+  const look = menuItemLook({ style: terminal ? { height: TERMINAL_ROW, gap: TERMINAL_GAP } : { height: 32, gap: 10 } });
+  return (
+    <MenuItem
+      checked={props.checked}
+      closeOnSelect={false}
+      onSelect={props.onSelect}
+      {...look}
+    >
+      {!terminal && props.icon}
+      <Text style={menuItemLabel()}>{props.label}</Text>
+      {!terminal && (
+        <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
+          <If when={props.checked}><Icon name="check" size={14} tint={colors.text} /></If>
+        </View>
+      )}
+    </MenuItem>
+  );
+}
+
+/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds and the appearance. */
+function SettingsMenu() {
+  const flipSounds = () => {
+    if (soundsOn()) {
+      play("toggle", { rate: 0.9 });
+      setSoundsOn(false);
+    } else {
+      setSoundsOn(true);
+      play("toggle");
+    }
+  };
+  const trigger = terminal ? (
+    <Text style={{ color: colors.text }}>Menu</Text>
+  ) : (
+    <View accessibilityLabel="Settings menu" hoverStyle={hovered()} activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }} style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}>
+      <LucideIcon name="settings" size={16} tint={colors.muted} />
+    </View>
+  );
+  return (
+    <Menu placement="top" align="end" offset={6} margin={8} trigger={trigger}>
+      <MenuPanel side="top" minWidth={210}>
+        <SettingItem label="Performance monitor" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
+        <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
+        <SettingItem label="Dark appearance" icon={<LucideIcon name="moon" size={16} tint={colors.muted} />} checked={isDark()} onSelect={() => setColorScheme(isDark() ? "light" : "dark")} />
+      </MenuPanel>
+    </Menu>
   );
 }
 

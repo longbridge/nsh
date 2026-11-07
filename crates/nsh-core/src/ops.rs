@@ -1909,6 +1909,11 @@ pub enum Command {
     },
     /// Have the screen reader read a message (on the root).
     Announce(String),
+    /// Turn the performance monitor on or off (on the root;
+    /// `setFpsEnabled`): what the platform has of one, the
+    /// macOS panel or the other platforms' `nsh::perf` lines. Platforms
+    /// without a monitor ignore it.
+    PerfMonitor(bool),
     /// Load the image at `uri` (keeping its bytes for views that show it
     /// next) and report its pixel size as [`EventKind::ImageInfo`] `id`
     /// (on the root).
@@ -2128,37 +2133,42 @@ impl StatusBarSetting {
     }
 
     /// The app's default (`nsh.json` `"statusBar"`): `{ "foreground":
-    /// "auto" | "light" | "dark", "hidden": bool }`, both optional. The
-    /// error says what is wrong, for `nsh.json: statusBar: …`.
-    pub fn from_json(value: &crate::JsonValue) -> Result<Self, String> {
-        let Some(object) = value.as_object() else {
-            return Err(format!(
-                "expected an object ({{ \"foreground\": \"light\", \"hidden\": false }}), got {value}"
-            ));
-        };
+    /// "auto" | "light" | "dark", "hidden": bool }`, both optional. What it
+    /// cannot read, an unknown key or a value of a form it does not know,
+    /// is left out and the rest applies: a bundle made by a newer NSH keeps
+    /// its setting on an older runtime.
+    pub fn from_json(value: &crate::JsonValue) -> Self {
+        Self::from_json_lenient(value).0
+    }
+
+    /// [`StatusBarSetting::from_json`], with what it left out
+    /// (`foreground: "dim" is not "auto", "light" or "dark"`), which the
+    /// toolchain warns of (a newer NSH's, or a typo).
+    pub fn from_json_lenient(value: &crate::JsonValue) -> (Self, Vec<String>) {
         let mut setting = Self::default();
+        let mut ignored = Vec::new();
+        let Some(object) = value.as_object() else {
+            ignored.push(format!(
+                "{value} is not an object ({{ \"foreground\": \"light\", \"hidden\": false }})"
+            ));
+            return (setting, ignored);
+        };
         for (key, v) in object {
             match key.as_str() {
-                "foreground" => {
-                    let style = v.as_str().and_then(StatusBarStyle::from_name);
-                    setting.style = Some(style.ok_or_else(|| {
-                        format!("foreground: {v} is not \"auto\", \"light\" or \"dark\"")
-                    })?);
-                }
-                "hidden" => {
-                    setting.hidden = Some(
-                        v.as_bool()
-                            .ok_or_else(|| format!("hidden: {v} is not true or false"))?,
-                    );
-                }
-                other => {
-                    return Err(format!(
-                        "unknown key {other:?} (\"foreground\" and \"hidden\" are known)"
-                    ));
-                }
+                "foreground" => match v.as_str().and_then(StatusBarStyle::from_name) {
+                    Some(style) => setting.style = Some(style),
+                    None => ignored.push(format!(
+                        "foreground: {v} is not \"auto\", \"light\" or \"dark\""
+                    )),
+                },
+                "hidden" => match v.as_bool() {
+                    Some(hidden) => setting.hidden = Some(hidden),
+                    None => ignored.push(format!("hidden: {v} is not true or false")),
+                },
+                other => ignored.push(format!("unknown key `{other}`")),
             }
         }
-        Ok(setting)
+        (setting, ignored)
     }
 
     /// This setting over `below`.

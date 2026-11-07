@@ -179,6 +179,9 @@ define_class!(
 /// Called when the app reports a fatal error (development hosts show it).
 pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
+/// Turns the performance monitor on or off.
+type PerfToggle = Box<dyn Fn(bool)>;
+
 /// One engine and its views.
 pub(crate) struct Surface {
     key: u64,
@@ -246,6 +249,10 @@ pub(crate) struct Surface {
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
     perf_on: Arc<AtomicBool>,
+    /// Shows or hides the view's performance monitor
+    /// (`setFpsEnabled`): set by its [`crate::AppView`],
+    /// which owns the panel.
+    pub(crate) perf_toggle: RefCell<Option<PerfToggle>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
@@ -261,6 +268,9 @@ pub(crate) struct Surface {
     resized: RefCell<Vec<NshView>>,
     /// The background set under the root ([`crate::system`]).
     pub(crate) background: Cell<Option<nsh_core::Color>>,
+    /// The surface fills the standalone runner's window ([`crate::run_app`]),
+    /// not a view of a host app.
+    pub(crate) standalone: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
@@ -344,12 +354,14 @@ impl Surface {
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
+            perf_toggle: RefCell::new(None),
             last_tick: Cell::new(0.0),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
             resized: RefCell::default(),
             background: Cell::new(None),
+            standalone: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),

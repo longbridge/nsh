@@ -53,8 +53,9 @@ pub enum Error {
 
 /// Where an app finds its updates, and what it is now: `nsh.json`'s
 /// `"updater"` with the app's id and version, as `nsh package` writes it.
+/// Fields it does not know (a newer NSH's) are ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Config {
     /// The app's id: a manifest for another app is refused.
