@@ -574,6 +574,140 @@ mod tests {
 
     use super::*;
 
+    struct Recorder(Arc<std::sync::Mutex<Vec<EventKind>>>);
+
+    #[nsh_core::element::component]
+    fn Activation() -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
+        let events = engine_context::<Recorder>().unwrap().0.clone();
+        let down = events.clone();
+        let up = events.clone();
+        view()
+            .test_id("activation")
+            .accessibility_label("Activate")
+            .w(px(100.0))
+            .h(px(40.0))
+            .on_press_down(move || down.lock().unwrap().push(EventKind::PressDown))
+            .on_press_up(move || up.lock().unwrap().push(EventKind::PressUp))
+            .on_press(move || events.lock().unwrap().push(EventKind::Press))
+    }
+
+    fn flush(surface: &Surface) {
+        let (sent, received) = std::sync::mpsc::channel();
+        surface.control(|control| {
+            control.flush(move |done| {
+                let _ = sent.send(done);
+            });
+        });
+        assert!(crate::gtk_test::wait_until(
+            || received.try_recv() == Ok(true)
+        ));
+    }
+
+    fn activation_case(activate: impl FnOnce(&NshView) + Send + 'static) -> Option<()> {
+        crate::gtk_test::run(move || {
+            let surface = crate::gtk_test::surface();
+            let events = Arc::new(std::sync::Mutex::new(Vec::<EventKind>::new()));
+            let mut config = nsh_engine::EngineConfig::new(nsh_engine::Root::of::<Activation>());
+            config.context = config.context.with(Recorder(events.clone()));
+            surface.start(config);
+            let window = crate::gtk_test::show(&surface);
+            let mut button = None;
+            assert!(crate::gtk_test::wait_until(|| {
+                button = surface
+                    .mounter
+                    .borrow()
+                    .views
+                    .values()
+                    .find(|view| view.state().props.test_id.as_deref() == Some("activation"))
+                    .filter(|view| view.is_mapped())
+                    .cloned();
+                button.is_some()
+            }));
+            let button = button.unwrap();
+            assert!(!button.is_focus());
+            activate(&button);
+            flush(&surface);
+            assert_eq!(
+                *events.lock().unwrap(),
+                [EventKind::PressDown, EventKind::PressUp, EventKind::Press]
+            );
+            assert!(!button.is_focus());
+
+            events.lock().unwrap().clear();
+            let mut props = surface.root.state().props.clone();
+            props.accessibility.hidden = true;
+            crate::gtk_test::apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: nsh_core::ROOT_ID,
+                    props: props.clone(),
+                }],
+            );
+            button.activate_action("nsh.activate", None).unwrap();
+            flush(&surface);
+            assert!(
+                events.lock().unwrap().is_empty(),
+                "a hidden ancestor blocks activation"
+            );
+            props.accessibility.hidden = false;
+            crate::gtk_test::apply(
+                &surface,
+                &[MountItem::ViewProps {
+                    id: nsh_core::ROOT_ID,
+                    props,
+                }],
+            );
+            button.activate_action("nsh.activate", None).unwrap();
+            flush(&surface);
+            assert_eq!(
+                *events.lock().unwrap(),
+                [EventKind::PressDown, EventKind::PressUp, EventKind::Press]
+            );
+
+            events.lock().unwrap().clear();
+            crate::gtk_test::apply(&surface, &[MountItem::Remove { id: button.id() }]);
+            button.activate_action("nsh.activate", None).unwrap();
+            flush(&surface);
+            assert!(
+                events.lock().unwrap().is_empty(),
+                "a retained removed button cannot activate"
+            );
+            window.destroy();
+        })
+    }
+
+    #[test]
+    fn activation_delivers_one_press_without_keyboard_focus() {
+        let _ = activation_case(|button| button.activate_action("nsh.activate", None).unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_delivers_one_press_without_keyboard_focus() {
+        let ran = activation_case(|_| {
+            let mut client = std::process::Command::new("python3")
+                .arg("-I")
+                .arg("-c")
+                .arg(include_str!("atspi_test.py"))
+                .spawn()
+                .expect("the AT-SPI client starts");
+            let mut status = None;
+            let finished = crate::gtk_test::wait_until(|| {
+                status = client.try_wait().expect("the AT-SPI client can be polled");
+                status.is_some()
+            });
+            if !finished {
+                let _ = client.kill();
+                let _ = client.wait();
+                panic!("the AT-SPI client timed out");
+            }
+            assert!(status.unwrap().success(), "AT-SPI activation failed");
+        });
+        assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
     fn with_role(role: Role) -> Accessibility {
         Accessibility {
             role,
