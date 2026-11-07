@@ -414,14 +414,13 @@ pub(crate) fn keep_aspect(rect: &mut RECT, edge: u32, ratio: f32, extra: (i32, i
     }
 }
 
+/// A window's minimum and maximum outer sizes in pixels (`None`: unset).
+pub(crate) type TrackSizes = (Option<(i32, i32)>, Option<(i32, i32)>);
+
 /// The minimum and maximum outer sizes (pixels) of a window whose frame
 /// takes `extra` pixels, at `scale` pixels per point; `None` where the
 /// app sets none.
-pub(crate) fn track_sizes(
-    attrs: &Attrs,
-    scale: f32,
-    extra: (i32, i32),
-) -> (Option<(i32, i32)>, Option<(i32, i32)>) {
+pub(crate) fn track_sizes(attrs: &Attrs, scale: f32, extra: (i32, i32)) -> TrackSizes {
     let outer = |s: Size<Points>| {
         (
             (s.width.0 * scale).round() as i32 + extra.0,
@@ -624,7 +623,7 @@ pub(crate) fn sync(surface: &Surface, hwnd: HWND, before: Option<Attrs>, after: 
     let Some(shell) = crate::window::shell(hwnd) else {
         return;
     };
-    let changed = |f: &dyn Fn(&Attrs) -> bool| before.as_ref().is_none_or(|b| f(b));
+    let changed = |f: &dyn Fn(&Attrs) -> bool| before.as_ref().is_none_or(f);
     let frame = changed(&|b| {
         b.title_bar != after.title_bar
             || b.frame != after.frame
@@ -1227,8 +1226,10 @@ mod tests {
 
     #[test]
     fn size_limits_are_outer_pixels() {
-        let mut attrs = Attrs::default();
-        attrs.min_size = Some(size(px(300.0), px(200.0)));
+        let attrs = Attrs {
+            min_size: Some(size(px(300.0), px(200.0))),
+            ..Default::default()
+        };
         let (min, max) = track_sizes(&attrs, 1.5, (16, 39));
         assert_eq!(min, Some((466, 339)));
         assert_eq!(max, None);

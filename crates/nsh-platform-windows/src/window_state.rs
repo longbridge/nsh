@@ -523,19 +523,25 @@ mod tests {
     #[test]
     fn bounds_change_by_the_fields_given() {
         let start = Bounds::new(point(px(10.0), px(20.0)), size(px(300.0), px(200.0)));
-        let mut frame = WindowFrame::default();
-        frame.width = Some(px(500.0));
+        let frame = WindowFrame {
+            width: Some(px(500.0)),
+            ..Default::default()
+        };
         let next = moved(start, &frame);
         assert_eq!(next.origin, start.origin);
         assert_eq!(next.size, size(px(500.0), px(200.0)));
-        let mut frame = WindowFrame::default();
-        frame.x = Some(px(-40.0));
-        frame.height = Some(px(f32::NAN));
+        let frame = WindowFrame {
+            x: Some(px(-40.0)),
+            height: Some(px(f32::NAN)),
+            ..Default::default()
+        };
         let next = moved(start, &frame);
         assert_eq!(next.origin.x, px(-40.0));
         assert_eq!(next.size.height, px(200.0), "not a number keeps the height");
-        let mut frame = WindowFrame::default();
-        frame.width = Some(px(0.0));
+        let frame = WindowFrame {
+            width: Some(px(0.0)),
+            ..Default::default()
+        };
         assert_eq!(moved(start, &frame).size.width, px(300.0));
     }
 }

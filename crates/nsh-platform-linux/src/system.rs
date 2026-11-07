@@ -856,8 +856,8 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
 }
 
 /// Hosts `widget` over the views of root view `root` (a window's) and
-/// fades it in.
-fn add_overlay(root: &NshView, widget: gtk::Widget, kind: OverlayKind) {
+/// fades it in (at once with `reduce_motion`).
+fn add_overlay(root: &NshView, widget: gtk::Widget, kind: OverlayKind, reduce_motion: bool) {
     widget.add_css_class("nsh-overlay");
     let overlay = Overlay {
         root: root.clone(),
@@ -871,7 +871,7 @@ fn add_overlay(root: &NshView, widget: gtk::Widget, kind: OverlayKind) {
     fade(
         &widget,
         1.0,
-        if env.reduce_motion { 0.0 } else { FADE_IN },
+        if reduce_motion { 0.0 } else { FADE_IN },
         || {},
     );
 }
@@ -1206,6 +1206,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
             gutter,
             dismiss: cancelable.then(|| answer.clone()),
         },
+        surface.environment.get().reduce_motion,
     );
     if let Some(focus) = focus {
         focus.grab_focus();

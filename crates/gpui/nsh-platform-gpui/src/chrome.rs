@@ -285,6 +285,7 @@ pub(crate) fn traffic_lights(height: f32) -> gpui::Point<Pixels> {
 /// Where the traffic lights go: where the app put them
 /// (`titleBar.controlsOffset`), else centered in a bar `height` points
 /// tall.
+#[cfg(target_os = "macos")]
 fn traffic_lights_at(offset: Option<(f32, f32)>, height: f32) -> gpui::Point<Pixels> {
     match offset {
         Some((x, y)) => gpui::point(px(x), px(y)),
