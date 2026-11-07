@@ -103,7 +103,7 @@ impl Display {
 
 /// A window's mode and its normal bounds (GPUI's `WindowBounds`): what an
 /// app saves to open its window as the user left it, and gives
-/// `WindowRef.setPlacement` (Rust [`crate::element::desktop::WindowHandle::set_placement`])
+/// `WindowRef.setPlacement` (Rust [`crate::element::desktop::WindowRef::set_placement`])
 /// to restore it. A maximized or full screen window carries the bounds it
 /// returns to.
 ///
@@ -152,7 +152,7 @@ impl WindowPlacement {
     /// visible area (the first display's without one), no larger than it.
     /// A size that is not finite and positive takes the visible area's.
     /// The mode stays. Without displays (off desktops) the bounds stay.
-    /// What `WindowHandle::set_placement` does to the bounds it is given.
+    /// What `WindowRef::set_placement` does to the bounds it is given.
     pub(crate) fn fit_on_displays(self, displays: &[Display]) -> WindowPlacement {
         let bounds = self.bounds;
         let valid = |v: Points| v.0.is_finite() && v.0 > 0.0;
@@ -202,7 +202,7 @@ fn grabbable(bounds: Bounds<Points>, area: Bounds<Points>) -> bool {
 }
 
 /// A window as the platform reports it (TS `WindowRef.state()` and
-/// `windowState()`, Rust [`crate::element::desktop::WindowHandle::state`]).
+/// `windowState()`, Rust [`crate::element::desktop::WindowRef::state`]).
 /// A move or a resize is reported once the window stops for a moment; a
 /// change of mode, of display, of the focus or of being minimized or
 /// hidden at once.

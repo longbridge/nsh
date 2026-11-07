@@ -6,11 +6,11 @@
 //! a window of the app's own in the tree, controlled as a dialog is: open
 //! while [`Window::open`] holds, its content in the same reactive graph as
 //! the rest of the app. [`current_window`] is the window the calling code
-//! renders in (the main window outside any [`window`]): a [`WindowHandle`]
-//! whose [`WindowHandle::set`] changes its attributes and whose requests
-//! ([`WindowHandle::set_mode`], [`WindowHandle::minimize`], ...) the
+//! renders in (the main window outside any [`window`]): a [`WindowRef`]
+//! whose [`WindowRef::set`] changes its attributes and whose requests
+//! ([`WindowRef::set_mode`], [`WindowRef::minimize`], ...) the
 //! platform carries out, reporting what happened in
-//! [`WindowHandle::state`]. [`quit`] and [`restart`] are `Application`'s.
+//! [`WindowRef::state`]. [`quit`] and [`restart`] are `Application`'s.
 //!
 //! A custom title bar hides the system's (`TitleBarOptions` with
 //! [`TitleBarStyle::Hidden`](crate::desktop::TitleBarStyle::Hidden)),
@@ -22,7 +22,7 @@
 //!
 //! An app that opens its window as the user left it saves
 //! [`WindowState::placement`] when it changes and gives it back to
-//! [`WindowHandle::set_placement`], which fits it on the displays there
+//! [`WindowRef::set_placement`], which fits it on the displays there
 //! are now; a [`window`] with [`Window::restore_bounds`] has the core do
 //! both.
 //!
@@ -84,7 +84,7 @@ pub fn set_menu_bar(mode: MenuBarMode) {
 }
 
 /// The current window's state (TS: `windowState()`):
-/// [`WindowHandle::state`] of [`current_window`].
+/// [`WindowRef::state`] of [`current_window`].
 pub fn window_state() -> Option<WindowState> {
     current_window().state()
 }
@@ -104,7 +104,7 @@ pub fn display(id: DisplayId) -> Option<Display> {
 
 // --- Windows ---------------------------------------------------------------------------
 
-/// Where a [`WindowHandle`]'s commands go.
+/// Where a [`WindowRef`]'s commands go.
 #[derive(Clone, Copy)]
 enum Target {
     /// The main window: the root.
@@ -119,7 +119,7 @@ enum Target {
 /// the platform may decline or adjust a request, and [`Self::state`]
 /// reports what happened. Commands to a closed window do nothing.
 #[derive(Clone)]
-pub struct WindowHandle {
+pub struct WindowRef {
     id: Rc<str>,
     target: Target,
     /// The state of a window of the app's own (the main window's is the
@@ -129,30 +129,30 @@ pub struct WindowHandle {
     /// window's is the environment's).
     title_bar: Option<Signal<Edges<Points>>>,
     /// Closes a window of the app's own as its element does
-    /// ([`WindowHandle::close`]).
+    /// ([`WindowRef::close`]).
     close: Option<Rc<dyn Fn(WindowCloseCause)>>,
     /// The close presses of a window of the app's own: how many, and the
     /// last one's reason (the main window's are the environment's).
     close_press: Option<Signal<(u64, CloseReason)>>,
 }
 
-impl fmt::Debug for WindowHandle {
+impl fmt::Debug for WindowRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WindowHandle")
+        f.debug_struct("WindowRef")
             .field("id", &self.id)
             .finish_non_exhaustive()
     }
 }
 
-impl PartialEq for WindowHandle {
+impl PartialEq for WindowRef {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
 /// The main window.
-pub fn main_window() -> WindowHandle {
-    WindowHandle {
+pub fn main_window() -> WindowRef {
+    WindowRef {
         id: Rc::from("main"),
         target: Target::Main,
         state: None,
@@ -166,11 +166,11 @@ pub fn main_window() -> WindowHandle {
 /// nearest [`window`] around it, else the main window. Never the focused
 /// window. Call it while rendering and keep the handle: listeners and
 /// tasks find no window around them.
-pub fn current_window() -> WindowHandle {
-    super::use_context::<WindowHandle>().unwrap_or_else(main_window)
+pub fn current_window() -> WindowRef {
+    super::use_context::<WindowRef>().unwrap_or_else(main_window)
 }
 
-impl WindowHandle {
+impl WindowRef {
     /// Its id: the app's (`"main"` for the main window).
     pub fn id(&self) -> &str {
         &self.id
@@ -393,7 +393,6 @@ type OpenChangeFn = Rc<dyn Fn(&OpenChange)>;
 type ClosePressFn = Rc<dyn Fn(CloseReason)>;
 type BindFn = Rc<dyn Fn(&mut WindowAttributes)>;
 type ContentFn = Rc<dyn Fn() -> Vec<AnyElement>>;
-type HandleSlot = Rc<RefCell<Option<WindowHandle>>>;
 
 /// A window of the app's own in the tree (TS: `<Window>`), made by
 /// [`window`]: open while [`Self::open`] holds and the user has not closed
@@ -406,7 +405,8 @@ pub struct Window {
     content: Option<ContentFn>,
     on_open_change: Option<OpenChangeFn>,
     on_close_press: Option<ClosePressFn>,
-    handle: Option<HandleSlot>,
+    /// Its ref, made before it opens ([`open_window`]).
+    opened: Option<WindowRef>,
 }
 
 /// A window of the app's own (TS: `<Window>`): a window the platform shows
@@ -437,7 +437,7 @@ pub fn window() -> Window {
         content: None,
         on_open_change: None,
         on_close_press: None,
-        handle: None,
+        opened: None,
     }
 }
 
@@ -530,7 +530,7 @@ impl Window {
 
     /// Runs `f` when the window closed while `open` held (the user's close
     /// press with `close_on_press`, Escape, losing the focus, its parent
-    /// closing, [`WindowHandle::close`]): the app sets its `open` state
+    /// closing, [`WindowRef::close`]): the app sets its `open` state
     /// from it.
     pub fn on_open_change(mut self, f: impl Fn(&OpenChange) + 'static) -> Self {
         self.on_open_change = Some(Rc::new(f));
@@ -550,12 +550,6 @@ impl Window {
         self.content = Some(Rc::new(move || content().into_elements()));
         self
     }
-
-    /// Fills `slot` with its handle while it is open (`None` after).
-    pub fn handle(mut self, slot: Rc<RefCell<Option<WindowHandle>>>) -> Self {
-        self.handle = Some(slot);
-        self
-    }
 }
 
 impl IntoElement for Window {
@@ -571,7 +565,7 @@ impl IntoElement for Window {
             content,
             on_open_change,
             on_close_press,
-            handle,
+            opened,
         } = self;
         let open = open.unwrap_or(super::Reactive::Static(true));
         // Closed by the user while `open` stayed true: hidden until the app
@@ -592,10 +586,21 @@ impl IntoElement for Window {
         let bound = Rc::new(bound);
         let reactive = Rc::new(reactive);
         super::when(is_open, move || {
-            let element = super::element_ref();
-            let state = super::signal(None::<WindowState>);
-            let title_bar = super::signal(Edges::<Points>::default());
-            let close_press = super::signal((0u64, CloseReason::default()));
+            let (element, state, title_bar, close_press) = match &opened {
+                Some(WindowRef {
+                    target: Target::Own(element),
+                    state: Some(state),
+                    title_bar: Some(title_bar),
+                    close_press: Some(close_press),
+                    ..
+                }) => (*element, *state, *title_bar, *close_press),
+                _ => (
+                    super::element_ref(),
+                    super::signal(None::<WindowState>),
+                    super::signal(Edges::<Points>::default()),
+                    super::signal((0u64, CloseReason::default())),
+                ),
+            };
             let close: Rc<dyn Fn(WindowCloseCause)> = {
                 let on_open_change = on_open_change.clone();
                 Rc::new(move |cause: WindowCloseCause| {
@@ -608,7 +613,7 @@ impl IntoElement for Window {
                     }
                 })
             };
-            let this = WindowHandle {
+            let this = WindowRef {
                 id: Rc::from(options.id.as_str()),
                 target: Target::Own(element),
                 state: Some(state),
@@ -616,11 +621,6 @@ impl IntoElement for Window {
                 close: Some(close.clone()),
                 close_press: Some(close_press),
             };
-            if let Some(slot) = &handle {
-                *slot.borrow_mut() = Some(this.clone());
-                let slot = slot.clone();
-                cleanup(move || *slot.borrow_mut() = None);
-            }
             super::provide_context(this);
             let mut modal = super::modal().element_ref(&element);
             {
@@ -685,6 +685,143 @@ impl IntoElement for Window {
             modal
         })
         .into_element()
+    }
+}
+
+/// The windows [`open_window`] opened, in the order they opened.
+#[derive(Default, Clone)]
+struct OpenedWindows(Vec<Opened>);
+
+/// A window [`open_window`] opened: its id, and its [`Window`] until it
+/// renders.
+#[derive(Clone)]
+struct Opened {
+    id: Rc<str>,
+    window: Rc<RefCell<Option<Window>>>,
+}
+
+impl PartialEq for Opened {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.window, &other.window)
+    }
+}
+
+/// Opens `window` (made with [`window`]) from anywhere: an event handler, a
+/// menu item, a task (TS: `Window.open`; GPUI: `cx.open_window`). It
+/// renders from the app's one engine, so it shares the app's signals,
+/// context and theme, and stays open until it closes (the user, its
+/// [`WindowRef::close`]); its [`Window::open`] is not used. One window per
+/// id: with the id of a window it opened that is still open, it focuses
+/// that window and returns its ref (a document window per document:
+/// `.id(format!("doc:{id}"))`). Without an id it gets a new one.
+///
+/// ```ignore
+/// let inspector = open_window(
+///     window()
+///         .id("inspector")
+///         .kind(WindowKind::Panel)
+///         .title("Inspector")
+///         .content(inspector_panel),
+/// );
+/// inspector.set_mode(WindowMode::Normal);
+/// ```
+///
+/// Off the desktops it opens nothing and returns a ref whose commands do
+/// nothing.
+pub fn open_window(mut window: Window) -> WindowRef {
+    let opened = super::global::<OpenedWindows>();
+    if window.options.id.is_empty() {
+        thread_local!(static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+        let n = NEXT.with(|n| {
+            n.set(n.get() + 1);
+            n.get()
+        });
+        window.options.id = format!("window-{n}");
+    }
+    let id: Rc<str> = Rc::from(window.options.id.as_str());
+    let open = opened.with_untracked(|o| {
+        o.0.iter()
+            .find(|w| w.id == id)
+            .and_then(|w| w.window.borrow().as_ref().and_then(|w| w.opened.clone()))
+    });
+    if let Some(open) = open {
+        open.focus();
+        return open;
+    }
+    let user = window.on_open_change.take();
+    let on_open_change: OpenChangeFn = {
+        let id = id.clone();
+        Rc::new(move |change: &OpenChange| {
+            opened.update(|o| o.0.retain(|w| w.id != id));
+            if let Some(f) = &user {
+                f(change);
+            }
+        })
+    };
+    let this = Owner::detached().run(|| WindowRef {
+        id: id.clone(),
+        target: Target::Own(super::element_ref()),
+        state: Some(super::signal(None)),
+        title_bar: Some(super::signal(Edges::default())),
+        close: Some({
+            let on_open_change = on_open_change.clone();
+            Rc::new(move |reason| {
+                on_open_change(&OpenChange {
+                    open: false,
+                    reason,
+                })
+            })
+        }),
+        close_press: Some(super::signal((0, CloseReason::default()))),
+    });
+    window.on_open_change = Some(on_open_change);
+    window.open = None;
+    window.opened = Some(this.clone());
+    opened.update(|o| {
+        o.0.push(Opened {
+            id,
+            window: Rc::new(RefCell::new(Some(window))),
+        })
+    });
+    this
+}
+
+/// The windows [`open_window`] opened: the core renders it beside the
+/// app's root.
+pub(crate) struct OpenedWindowsHost;
+
+impl super::Component for OpenedWindowsHost {
+    type Props = ();
+    type Event = super::NoEvent;
+
+    fn view(_: (), _: super::Scope<super::NoEvent>) -> impl IntoElement {
+        super::each(
+            move || super::global::<OpenedWindows>().get().0,
+            |w: &Opened| w.id.clone(),
+            |w, _| {
+                let w = w.get_untracked();
+                let window = w.window.borrow().as_ref().map(|w| Window {
+                    options: w.options.clone(),
+                    bound: w.bound.clone(),
+                    reactive: Vec::new(),
+                    open: None,
+                    content: w.content.clone(),
+                    on_open_change: w.on_open_change.clone(),
+                    on_close_press: w.on_close_press.clone(),
+                    opened: w.opened.clone(),
+                });
+                let reactive = w
+                    .window
+                    .borrow_mut()
+                    .as_mut()
+                    .map(|w| std::mem::take(&mut w.reactive))
+                    .unwrap_or_default();
+                window.map(|mut window| {
+                    window.reactive = reactive;
+                    window
+                })
+            },
+        )
     }
 }
 

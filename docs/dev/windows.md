@@ -348,9 +348,8 @@ carries its own content: a UI Automation tree of its own views on
 `WM_GETOBJECT`, its popups and dialogs inside its root, its web views in its own
 composition and the windows of native components as its children. The app's
 keymap, menu shortcuts and the mouse's back button work in whichever window has
-the input. Windows has no per-window control offset, workspaces, edited
-indicator, represented file or tab groups; those attributes are accepted and
-have no effect there.
+the input. Windows has no per-window control offset or workspaces; those
+attributes are accepted and have no effect there.
 
 ### Transparent windows
 

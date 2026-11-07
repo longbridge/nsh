@@ -53,7 +53,7 @@ pub(crate) struct Ambient {
     /// it.
     perf_monitor: Option<Signal<bool>>,
     /// The main window's close presses: how many, and the last one's
-    /// reason ([`crate::element::desktop::WindowHandle::on_close_press`]).
+    /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
 }
 

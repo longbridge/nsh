@@ -47,7 +47,6 @@ use nsh_core::{
         Workspaces,
     },
     geometry::{Edges, point},
-    platform::Appearance,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -60,11 +59,10 @@ use objc2_app_kit::{
     NSProgressIndicator, NSProgressIndicatorStyle, NSRequestUserAttentionType, NSResponder,
     NSScreen, NSStatusWindowLevel, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
     NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton, NSWindowCollectionBehavior,
-    NSWindowDelegate, NSWindowOrderingMode, NSWindowSharingType, NSWindowStyleMask,
-    NSWindowTabbingMode,
+    NSWindowDelegate, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_core_graphics::kCGDesktopIconWindowLevel;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use crate::{
     chrome::TitleBar,
@@ -262,8 +260,6 @@ pub(crate) struct Held {
     /// The window shows through (`transparent`, or a `backdrop`): nothing
     /// is painted behind the root.
     transparent: Cell<bool>,
-    /// Its own appearance (`colorScheme`), over the app's.
-    color_scheme: Cell<Appearance>,
     /// Its backdrop under the root.
     backdrop: RefCell<Option<Retained<NSVisualEffectView>>>,
     /// Its title bar.
@@ -292,7 +288,6 @@ impl Default for Held {
             minimizable: Cell::new(true),
             closable: Cell::new(true),
             transparent: Cell::new(false),
-            color_scheme: Cell::new(Appearance::System),
             backdrop: RefCell::new(None),
             title_bar: TitleBar::default(),
             pending_close: Cell::new(None),
@@ -623,13 +618,6 @@ fn apply(
     if let Some(max) = a.max_size {
         window.setContentMaxSize(max.map_or(NSSize::new(f64::MAX, f64::MAX), ns_size));
     }
-    if let Some(ratio) = a.aspect_ratio {
-        match ratio {
-            Some(r) => window.setContentAspectRatio(NSSize::new(f64::from(r), 1.0)),
-            // Resize increments replace an aspect ratio.
-            None => window.setResizeIncrements(NSSize::new(1.0, 1.0)),
-        }
-    }
     if let Some(movable) = a.movable {
         window.setMovable(movable);
     }
@@ -680,39 +668,6 @@ fn apply(
     }
     if let Some(shadow) = a.shadow {
         window.setHasShadow(shadow);
-    }
-    if let Some(protected) = a.content_protected {
-        window.setSharingType(if protected {
-            NSWindowSharingType::None
-        } else {
-            NSWindowSharingType::ReadOnly
-        });
-    }
-    if let Some(edited) = a.edited {
-        window.setDocumentEdited(edited);
-    }
-    if let Some(file) = &a.represented_file {
-        let url = file
-            .as_deref()
-            .map(|path| NSURL::fileURLWithPath(&NSString::from_str(path)));
-        window.setRepresentedURL(url.as_deref());
-    }
-    if let Some(group) = &a.tab_group {
-        match group {
-            Some(group) => {
-                window.setTabbingIdentifier(&NSString::from_str(group));
-                window.setTabbingMode(NSWindowTabbingMode::Preferred);
-            }
-            None => window.setTabbingMode(NSWindowTabbingMode::Disallowed),
-        }
-    }
-    if let Some(scheme) = a.color_scheme {
-        held.color_scheme.set(scheme);
-        let appearance = match scheme {
-            Appearance::System => surface.root.ns().appearance(),
-            scheme => crate::system::ns_appearance(scheme),
-        };
-        window.setAppearance(appearance.as_deref());
     }
     if a.transparent.is_some() || a.backdrop.is_some() {
         let transparent = a.transparent.unwrap_or(held.transparent.get());
@@ -1199,6 +1154,8 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         let windows = surface.windows.borrow();
         let w = windows.get(&id).expect("just inserted");
         apply(surface, id, &window, kind, &w.held, a);
+        // It takes the app's appearance, as the main window's root does.
+        window.setAppearance(surface.root.ns().appearance().as_deref());
         crate::window_state::observe(surface, Target::Own(id), &w.watch, Some(&window));
     }
     // A dialog stays above its parent and moves with it.
@@ -1930,15 +1887,13 @@ pub(crate) fn root_containing(surface: &Surface, view: &NshView) -> Option<NshVi
 }
 
 /// The app's appearance changed (`setColorScheme`): its windows follow, as
-/// the main window's root does, but for a window with a scheme of its own.
+/// the main window's root does.
 pub(crate) fn set_appearance(surface: &Surface, appearance: Option<&objc2_app_kit::NSAppearance>) {
     let Ok(windows) = surface.windows.try_borrow() else {
         return;
     };
     for w in windows.values() {
-        if w.held.color_scheme.get() == Appearance::System {
-            w.window.setAppearance(appearance);
-        }
+        w.window.setAppearance(appearance);
         w.view.ns().setAppearance(appearance);
     }
 }

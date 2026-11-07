@@ -17,7 +17,6 @@ use crate::{
     NodeId,
     element::{JsHost, JsIn, JsKind, JsObject, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Edges, Percentage, Point, Points, Size},
-    platform::Appearance,
 };
 
 /// What a window is for: a set of defaults its attributes start from
@@ -458,8 +457,6 @@ attributes! {
     min_size: Option<Size<Points>> = "minSize", nullable;
     /// The largest size the user may give it (content size, points).
     max_size: Option<Size<Points>> = "maxSize", nullable;
-    /// The width to height ratio the user's resizing keeps.
-    aspect_ratio: Option<f32> = "aspectRatio", nullable;
     /// The window follows its content's laid-out size.
     size_to_content: SizeToContent = "sizeToContent", plain;
     /// The user may resize it.
@@ -497,18 +494,8 @@ attributes! {
     backdrop: Backdrop = "backdrop", plain;
     /// The system's shadow around it.
     shadow: bool = "shadow", plain;
-    /// The appearance of its title bar and system controls.
-    color_scheme: Appearance = "colorScheme", plain;
-    /// Screenshots, recordings and screen sharing leave its content out.
-    content_protected: bool = "contentProtected", plain;
     /// Progress on its taskbar button or the Dock's icon.
     progress: Option<WindowProgress> = "progress", nullable;
-    /// It has unsaved changes (macOS's dot in the close button).
-    edited: bool = "edited", plain;
-    /// The file it shows (macOS's title bar icon and path menu).
-    represented_file: Option<String> = "representedFile", nullable;
-    /// Windows of the same group are tabs of one window (macOS).
-    tab_group: Option<String> = "tabGroup", nullable;
 }
 
 // `window().attributes(WindowAttributes { .. })`: a static value.
@@ -524,7 +511,6 @@ impl WindowAttributes {
             frame: Some(super::WindowFrameStyle::Default),
             min_size: Some(None),
             max_size: Some(None),
-            aspect_ratio: Some(None),
             size_to_content: Some(SizeToContent::Off),
             resizable: Some(true),
             movable: Some(true),
@@ -543,12 +529,7 @@ impl WindowAttributes {
             transparent: Some(false),
             backdrop: Some(Backdrop::None),
             shadow: Some(true),
-            color_scheme: Some(Appearance::System),
-            content_protected: Some(false),
             progress: Some(None),
-            edited: Some(false),
-            represented_file: Some(None),
-            tab_group: Some(None),
         };
         match kind {
             WindowKind::Normal => normal,
@@ -614,9 +595,8 @@ impl WindowAttributes {
         self.pointer_events == Some(WindowPointerEvents::None)
     }
 
-    /// Keeps the values in their ranges: a size not finite and positive, a
-    /// ratio not finite and positive and a progress out of 0 to 1 are left
-    /// out (with `false`), the title bar's height capped as
+    /// Keeps the values in their ranges: a size not finite and positive and
+    /// a progress out of 0 to 1 are left out (with `false`), the title bar's height capped as
     /// [`super::title_bar_height`] does.
     pub fn sanitize(&mut self) -> bool {
         let mut fine = true;
@@ -630,12 +610,6 @@ impl WindowAttributes {
                 *size = None;
                 fine = false;
             }
-        }
-        if let Some(Some(r)) = self.aspect_ratio
-            && !(r.is_finite() && r > 0.0)
-        {
-            self.aspect_ratio = None;
-            fine = false;
         }
         if let Some(Some(p)) = &mut self.progress
             && let Some(v) = p.value
@@ -1257,7 +1231,6 @@ mod tests {
     fn values_out_of_range_are_left_out() {
         let mut a = WindowAttributes {
             min_size: Some(Some(size(px(-1.0), px(10.0)))),
-            aspect_ratio: Some(Some(f32::NAN)),
             progress: Some(Some(WindowProgress {
                 value: Some(Percentage(2.0)),
                 state: ProgressState::Normal,
@@ -1266,7 +1239,6 @@ mod tests {
         };
         assert!(!a.sanitize());
         assert_eq!(a.min_size, None);
-        assert_eq!(a.aspect_ratio, None);
         assert_eq!(a.progress.unwrap().unwrap().value, Some(Percentage(1.0)));
     }
 }

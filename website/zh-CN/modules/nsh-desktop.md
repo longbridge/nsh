@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowHandle`）、显示器（`displays`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -122,7 +122,7 @@ function Toolbar() {
 }
 ```
 
-在 Rust 中，`window()` 是一个 builder：`.id()`、`.kind()`、`.parent()`、`.modal()`、`.default_size()`、`.default_position()`、`.display()`、`.default_mode()`、`.restore_bounds()`、`.title()` 和 `.attributes(..)`（一个 `WindowAttributes`、它的 signal 或闭包）、`.open(..)`、`.on_open_change(..)`、`.on_close_press(..)`、`.content(..)`（每次打开时生成）和 `.handle(..)`（窗口打开期间的 `WindowHandle`）。在非桌面平台上，`<Window>` 和 `window()` 什么也不显示。
+在 Rust 中，`window()` 是一个 builder：`.id()`、`.kind()`、`.parent()`、`.modal()`、`.default_size()`、`.default_position()`、`.display()`、`.default_mode()`、`.restore_bounds()`、`.title()` 和 `.attributes(..)`（一个 `WindowAttributes`、它的 signal 或闭包）、`.open(..)`、`.on_open_change(..)`、`.on_close_press(..)` 和 `.content(..)`（每次打开时生成）；内容中的 `current_window()` 就是它的 `WindowRef`。在非桌面平台上，`<Window>` 和 `window()` 什么也不显示。
 
 ### Window.open
 
@@ -140,6 +140,17 @@ function Chat() {
 
 const chat = Window.open(Chat, { id: "chat", title: "Chat", defaultSize: { width: 360, height: 480 } });
 chat.focus();
+```
+
+在 Rust 中，`open_window(window()...)` 是同样的写法（GPUI：`cx.open_window`）：可以在任何地方（事件处理、菜单项、任务）打开 `window()` builder 描述的窗口，并立即返回它的 `WindowRef`。它不使用 `.open(..)`；窗口一直打开，直到用户或 `close()` 关闭它，`.on_open_change(..)` 会收到通知。每个文档一个窗口时，给每个窗口自己的 id：
+
+```rust
+let doc = open_window(
+    window()
+        .id(format!("doc:{id}"))
+        .title(name)
+        .content(move || editor(id)),
+);
 ```
 
 `Window.get(id)` 是 id 为 `id` 的已打开窗口，没有时为 `null`（响应式）；`"main"` 是主窗口。在非桌面平台上 `Window.open` 抛出 `code` 为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 的错误；应用的[权限](#权限)不允许的窗口抛出 `ERR_ACCESS_DENIED`。
@@ -184,7 +195,6 @@ chat.focus();
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`：系统标题栏，或应用自己的标题栏（[见下](#自定义标题栏)）。`controlsOffset`（`{ x, y }`）设置隐藏标题栏中 macOS 红绿灯的位置。 |
 | | `frame` | `"default"`，或 `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
 | 尺寸 | `minSize`、`maxSize` | 用户能调整到的最小和最大内容尺寸，`{ width, height }`，单位为点；`null` 清除。 |
-| | `aspectRatio` | 用户调整大小时保持的宽高比；`null` 清除。 |
 | | `sizeToContent` | `true`、`"width"` 或 `"height"`：窗口跟随内容布局后的尺寸，原生完成，不经过 JS。 |
 | 行为 | `resizable`、`movable`、`minimizable`、`maximizable`、`closable` | 用户能对它做什么。应用的请求不受它们限制。 |
 | | `focusable` | 它接受键盘焦点。 |
@@ -198,14 +208,9 @@ chat.focus();
 | 外观 | `transparent` | 背景透明：只显示应用的视图。 |
 | | `backdrop` | 内容背后的系统材质：`"none"`、`"window"`、`"sidebar"`、`"popover"` 或 `"hud"`。各平台映射到自己的材质（macOS 的视觉效果材质，Windows 11 的 Mica 和 Acrylic）。 |
 | | `shadow` | 窗口周围的系统阴影。 |
-| | `colorScheme` | 标题栏和系统控件的外观：`"light"`、`"dark"` 或 `"system"`。 |
-| | `contentProtected` | 截图、录屏和屏幕共享不包含它的内容。需要 `windows` 权限的 `contentProtected`。 |
-| 任务栏与文档 | `progress` | `{ value?, state? }` 或 `null`：任务栏按钮或 Dock 图标上的进度；`value` 从 0 到 1，`state` 为 `"normal"`、`"indeterminate"`、`"paused"` 或 `"error"`。 |
-| | `edited` | 有未保存的修改（macOS 关闭按钮中的圆点）。 |
-| | `representedFile` | 它显示的文件：macOS 标题栏的图标和路径菜单。 |
-| | `tabGroup` | 同一组的窗口是同一个窗口的标签页（macOS）。 |
+| 任务栏 | `progress` | `{ value?, state? }` 或 `null`：任务栏按钮或 Dock 图标上的进度；`value` 从 0 到 1，`state` 为 `"normal"`、`"indeterminate"`、`"paused"` 或 `"error"`。 |
 
-平台的窗口没有的属性会被保留，在那里不起作用：Linux 上由窗口管理器放置窗口和安排层叠，因此位置、层级和 `taskbar` 由它决定；`edited`、`representedFile` 和 `tabGroup` 是 macOS 的。
+平台的窗口没有的属性会被保留，在那里不起作用：Linux 上由窗口管理器放置窗口和安排层叠，因此位置、层级和 `taskbar` 由它决定。
 
 ### currentWindow
 
@@ -226,7 +231,7 @@ function SaveButton() {
 
 `windows()` 是已打开的窗口，主窗口在前，然后是应用自己的窗口，按打开顺序排列；`focusedWindow()` 是拥有键盘焦点的窗口，焦点在其他应用时为 `null`。两者都是响应式的。
 
-Rust：`current_window() -> WindowHandle`，同样通过组件的 context 查找；以及 `main_window()`。
+Rust：`current_window() -> WindowRef`，同样通过组件的 context 查找；以及 `main_window()`。
 
 ### WindowRef
 
@@ -255,7 +260,7 @@ interface WindowRef {
 type WindowMode = "normal" | "maximized" | "fullScreen";
 ```
 
-Rust 列给出 `WindowHandle` 的方法。
+Rust 列给出 `WindowRef` 的方法。
 
 | 成员 | Rust | 说明 |
 |---|---|---|
@@ -289,7 +294,7 @@ Rust 列给出 `WindowHandle` 的方法。
 | `boundsChange` | `{ bounds }` | 它被移动或调整大小，在移动或调整结束后报告。 |
 | `displayChange` | `{ display }` | 它移到了另一个显示器。 |
 
-`win.on("focusChange", l)` 返回一个停止监听的函数；组件渲染时注册的监听随组件一起移除。`<Window>` 以 props 的形式接受同样的事件（`onClosePress`、`onFocusChange`……）。Rust：`WindowHandle::on_focus_change`、`on_mode_change`、`on_bounds_change`、`on_display_change`，以及 `window()` 的 `.on_close_press(..)` 和 `.on_open_change(..)`。
+`win.on("focusChange", l)` 返回一个停止监听的函数；组件渲染时注册的监听随组件一起移除。`<Window>` 以 props 的形式接受同样的事件（`onClosePress`、`onFocusChange`……）。Rust：`WindowRef::on_focus_change`、`on_mode_change`、`on_bounds_change`、`on_display_change`，以及 `window()` 的 `.on_close_press(..)` 和 `.on_open_change(..)`。
 
 ### 关闭
 
@@ -333,7 +338,7 @@ function Editor() {
 
 ### 权限
 
-nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）外所有种类的窗口。声明了权限的应用，在 `capabilities.windows` 允许时才能打开自己的窗口（[沙箱与权限](../docs/sandbox-and-capabilities.md#windows)）。浮层、点击穿透的窗口（`pointerEvents: "none"`）和 `contentProtected` 只有声明后才会授予。对于不允许的窗口，`Window.open` 和 `<Window>` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"windows"`，`resource` 为窗口的 id；`set()` 中不允许的属性保持不变，并给出警告。
+nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）外所有种类的窗口。声明了权限的应用，在 `capabilities.windows` 允许时才能打开自己的窗口（[沙箱与权限](../docs/sandbox-and-capabilities.md#windows)）。浮层和点击穿透的窗口（`pointerEvents: "none"`）只有声明后才会授予。对于不允许的窗口，`Window.open` 和 `<Window>` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"windows"`，`resource` 为窗口的 id；`set()` 中不允许的属性保持不变，并给出警告。
 
 ## Application
 
@@ -504,7 +509,7 @@ interface Display {
 }
 ```
 
-`win.state()` 是平台报告的一个窗口的状态，`windowState()` 是当前窗口的，`displays()` 是各个显示器，主显示器排在最前；它们都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setBounds` 相同。模式、所在显示器、焦点、最小化或可见状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`WindowHandle::state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
+`win.state()` 是平台报告的一个窗口的状态，`windowState()` 是当前窗口的，`displays()` 是各个显示器，主显示器排在最前；它们都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setBounds` 相同。模式、所在显示器、焦点、最小化或可见状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`WindowRef::state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
 
 窗口在屏上而 [`lifecycle()`](./nsh.md#device) 报告 `"background"` 时，说明它被别的窗口挡住了。
 

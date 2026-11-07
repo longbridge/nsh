@@ -19,13 +19,13 @@ function App() {
           const win = Window.open(() => <Text>Document</Text>, { id: "doc", defaultSize: { width: 500, height: 400 }, defaultMode: "normal", restoreBounds: true });
           for (const w of [win, main]) {
             w.set({ title: "Doc", titleBar: { style: "hidden", height: 44, controlsOffset: { x: 12, y: 14 } }, frame: "default" });
-            w.set({ minSize: { width: 300, height: 200 }, maxSize: null, aspectRatio: 1.5, sizeToContent: "width" });
+            w.set({ minSize: { width: 300, height: 200 }, maxSize: null, sizeToContent: "width" });
             w.set({ resizable: true, movable: true, minimizable: true, maximizable: true, closable: true, focusable: true, activate: true });
             w.set({ closeOnPress: false, closeOnEscape: true, closeOnBlur: false });
             w.set({ level: "aboveDock", taskbar: false, workspaces: "all", pointerEvents: "auto" });
-            w.set({ transparent: false, backdrop: "window", shadow: true, colorScheme: "dark" });
-            w.set({ progress: { value: 0.4, state: "paused" }, edited: true, representedFile: "/tmp/doc.txt", tabGroup: "docs" });
-            w.set({ progress: null, representedFile: null, tabGroup: null });
+            w.set({ transparent: false, backdrop: "window", shadow: true });
+            w.set({ progress: { value: 0.4, state: "paused" } });
+            w.set({ progress: null });
             w.show();
             w.hide();
             w.focus();

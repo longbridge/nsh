@@ -1266,16 +1266,6 @@ fn window_api(
             }
             Some(Some(LRESULT(0)))
         }
-        WM_SIZING => {
-            if let Some(ratio) = shell.attrs().aspect_ratio {
-                // SAFETY: `lparam` is the dragged rectangle, writable.
-                let rect = unsafe { &mut *(lparam.0 as *mut RECT) };
-                let (l, t, r, b) = frame_extents(hwnd);
-                crate::shell::keep_aspect(rect, wparam.0 as u32, ratio, (l + r, t + b));
-                return Some(Some(LRESULT(1)));
-            }
-            None
-        }
         WM_SYSCOMMAND => {
             let command = (wparam.0 & 0xFFF0) as u32;
             let attrs = shell.attrs();

@@ -372,7 +372,7 @@ orders that window front; it creates neither another engine nor another session.
 Explicit application Quit and `quit_app()` always take the stop-and-return
 path, including while the window is hidden. `quit_app()` dispatches to the main
 thread and only affects the standalone runner; an embedded host retains its own
-application lifecycle. `WindowHandle::close()` (TS `WindowRef.close()`) remains a window-close
+application lifecycle. `WindowRef::close()` (TS `WindowRef.close()`) remains a window-close
 request; an Exit or restart uses `quit_app()` from the host, or the app's
 `quit()` (TS: `Application.quit()`), which takes the same path. `restart()` (TS: `Application.restart()`) takes it
 too (`app.rs` `restart_app`) and marks the run; once `app.run()` returns, `run_app` calls

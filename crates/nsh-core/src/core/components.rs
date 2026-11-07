@@ -955,6 +955,24 @@ impl<M: TextEngine> Core<M> {
             child: id,
             before: None,
         });
+        // The windows `open_window` opens render beside the root (desktops).
+        let desktop = crate::element::os().is_desktop();
+        if let Some(host) = desktop
+            .then(|| {
+                self.make_component(
+            <crate::element::desktop::OpenedWindowsHost as crate::element::Component>::element(())
+                .into_element(),
+            |_, _| {},
+        )
+            })
+            .flatten()
+        {
+            let _ = self.apply_op(Op::Insert {
+                parent: ROOT_ID,
+                child: host,
+                before: None,
+            });
+        }
         self.own_direction();
     }
 

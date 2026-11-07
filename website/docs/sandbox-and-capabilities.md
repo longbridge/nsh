@@ -229,11 +229,9 @@ for every kind but overlays, or an object that narrows it:
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
 | `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
 | `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
-| `contentProtected` | `boolean` | Windows left out of screenshots and screen sharing. Never granted unless declared, also for an app without `"capabilities"`. |
 
-`overlay` and `contentProtected` are separate because a transparent, click-through window above every other can pass
-for the system's own UI, and a protected one hides what it shows from the user's recordings. The main window needs no
-grant.
+`overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
+The main window needs no grant.
 
 ### Storage
 

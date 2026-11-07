@@ -447,16 +447,17 @@ pub(crate) fn invalidate_all(surface: &Surface) {
     }
 }
 
-/// The app's appearance changed: the windows' frames follow it, unless
-/// they have a scheme of their own.
+/// The app's appearance changed: the windows' frames follow it.
 pub(crate) fn appearance_changed(surface: &Surface) {
     let Ok(windows) = surface.windows.try_borrow() else {
         return;
     };
     for window in windows.iter() {
-        if let Some(shell) = crate::window::shell(window.hwnd) {
-            crate::shell::set_color_scheme(surface, window.hwnd, shell.attrs().color_scheme);
-        }
+        crate::shell::set_color_scheme(
+            surface,
+            window.hwnd,
+            nsh_core::platform::Appearance::System,
+        );
         invalidate(window);
     }
 }

@@ -163,7 +163,7 @@ fn window_bar() -> impl IntoElement {
 ```
 
 `TitleBarStyle::Default` 的标题栏恢复系统标题栏。带 `.window_control(..)` 的视图就是窗口的最小化、
-最大化或关闭按钮：平台执行它的按下动作，关闭遵循窗口的 `close_on_press`。`WindowHandle`
+最大化或关闭按钮：平台执行它的按下动作，关闭遵循窗口的 `close_on_press`。`WindowRef`
 有窗口的其他请求（`set_mode`、`minimize`、`set_bounds`、`close`……），`window()` 打开应用自己的窗口，
 这个模块还有菜单（`set_application_menu`、`popup_menu`）：见 [nsh/desktop](../modules/nsh-desktop.md)。
 

@@ -634,24 +634,20 @@ fn set_attributes(surface: &Rc<Surface>, id: NodeId, diff: &WindowAttributes) {
     if diff.pointer_events.is_some() {
         pass_pointer(surface, id);
     }
-    if diff.color_scheme.is_some() {
-        apply_scheme(surface, id);
-    }
 }
 
 /// Window `id` of the app's own takes the app's appearance (the root's
-/// background, the menus in it), or the one its `colorScheme` fixes.
+/// background, the menus in it).
 fn apply_scheme(surface: &Surface, id: NodeId) {
-    let Some((root, scheme)) = surface
+    let Some(root) = surface
         .windows
         .borrow()
         .get(&id)
-        .and_then(|w| Some((w.view.upgrade()?, w.attributes.color_scheme)))
+        .and_then(|w| w.view.upgrade())
     else {
         return;
     };
-    let dark = scheme_dark(surface, scheme);
-    let (add, remove) = if dark {
+    let (add, remove) = if main_dark(surface) {
         ("nsh-dark", "nsh-light")
     } else {
         ("nsh-light", "nsh-dark")
@@ -660,25 +656,12 @@ fn apply_scheme(surface: &Surface, id: NodeId) {
     root.add_css_class(add);
 }
 
-/// Whether a window with `colorScheme` `scheme` is dark: the app's
-/// appearance unless it fixes one.
-fn scheme_dark(surface: &Surface, scheme: Option<nsh_core::platform::Appearance>) -> bool {
-    match scheme {
-        Some(nsh_core::platform::Appearance::Dark) => true,
-        Some(nsh_core::platform::Appearance::Light) => false,
-        _ => surface.environment.get().color_scheme == nsh_core::platform::ColorScheme::Dark,
-    }
-}
-
-/// Whether the main window's content is dark (its `colorScheme`, else the
-/// app's).
+/// Whether the app's content is dark (its appearance).
 pub(crate) fn main_dark(surface: &Surface) -> bool {
-    let scheme = surface.main_window.borrow().attributes.color_scheme;
-    scheme_dark(surface, scheme)
+    surface.environment.get().color_scheme == nsh_core::platform::ColorScheme::Dark
 }
 
-/// The app's appearance changed: every window of its own follows, but
-/// for one whose `colorScheme` fixes its own.
+/// The app's appearance changed: every window of its own follows.
 pub(crate) fn schemes_applied(surface: &Surface) {
     let ids: Vec<NodeId> = surface.windows.borrow().keys().copied().collect();
     for id in ids {
@@ -1447,9 +1430,6 @@ pub(crate) fn main_attributes(surface: &Rc<Surface>, diff: &WindowAttributes) {
     apply(surface, &window, surface.root.upcast_ref(), &full, diff);
     if diff.pointer_events.is_some() {
         pass_pointer(surface, ROOT_ID);
-    }
-    if diff.color_scheme.is_some() {
-        crate::system::environment_applied(surface);
     }
 }
 

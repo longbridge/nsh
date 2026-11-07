@@ -909,15 +909,6 @@ fn apply(
         };
         window.set_background_appearance(background(transparent, backdrop));
     }
-    if let Some(edited) = attributes.edited {
-        window.set_window_edited(edited);
-    }
-    if let Some(file) = &attributes.represented_file {
-        window.set_document_path(file.as_deref().map(std::path::Path::new));
-    }
-    if let Some(group) = &attributes.tab_group {
-        window.set_tabbing_identifier(group.clone());
-    }
     if let Some(pointer) = attributes.pointer_events {
         let through = pointer == WindowPointerEvents::None;
         // Wayland's and X11's input regions; the others' native flags.
@@ -925,44 +916,27 @@ fn apply(
         native::set_click_through(window, through);
     }
     native::apply(window, attributes);
-    if let Some(own) = own
-        && attributes.color_scheme.is_some()
-    {
-        follow_simulated_scheme(own, window);
+    if own.is_some() {
+        follow_simulated_scheme(window);
     }
 }
 
-/// A window of the app's own whose `colorScheme` follows the system takes
-/// the scheme a test made the system's (`nsh test --target`) in its frame.
-fn follow_simulated_scheme(own: &AppWindow, window: &Window) {
-    use nsh_core::platform::Appearance;
-    if own
-        .attribute(|a| a.color_scheme)
-        .unwrap_or(Appearance::System)
-        != Appearance::System
-    {
-        return;
-    }
+/// A window of the app's own takes the scheme a test made the system's
+/// (`nsh test --target`) in its frame.
+fn follow_simulated_scheme(window: &Window) {
     if let Some(dark) = crate::system::simulated_scheme() {
-        let mut a = WindowAttributes::default();
-        a.color_scheme = Some(if dark {
-            Appearance::Dark
-        } else {
-            Appearance::Light
-        });
-        native::apply(window, &a);
+        native::set_scheme(window, Some(dark));
     }
 }
 
 /// A test changed the system's scheme: every window of the app's own draws
-/// again in it (its frame unless its `colorScheme` fixes one).
+/// again in it (its frame too).
 #[cfg(feature = "dev")]
 pub(crate) fn scheme_simulated(surface: &Surface) {
     invalidate_all(surface);
     for w in surface.windows.borrow().iter() {
-        let own = w.clone();
         with_window(w, move |window, _| {
-            follow_simulated_scheme(&own, window);
+            follow_simulated_scheme(window);
             window.refresh();
         });
     }
@@ -1211,7 +1185,6 @@ fn open_gpui(surface: &Rc<Surface>, w: &Rc<AppWindow>, open: &OpenWindow, cx: &m
         } else {
             gpui::WindowDecorations::Server
         }),
-        tabbing_identifier: a.tab_group.clone().flatten(),
         inactive_frame_interval: None,
         app_id: None,
         ..Default::default()

@@ -178,7 +178,7 @@ fn window_bar() -> impl IntoElement {
 A title bar with `TitleBarStyle::Default` restores the system's. A view with
 `.window_control(..)` is the window's minimize, maximize or close button: the
 platform carries out its press, and a close goes through the window's
-`close_on_press`. The `WindowHandle` has the window's other requests
+`close_on_press`. The `WindowRef` has the window's other requests
 (`set_mode`, `minimize`, `set_bounds`, `close`, ...), `window()` opens windows of
 the app's own, and the module has the menus (`set_application_menu`,
 `popup_menu`) too: [nsh/desktop](../modules/nsh-desktop.md).

@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowHandle`), the displays (`displays`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
 
 ```rust tabs
 use nsh_core::{
@@ -122,7 +122,7 @@ function Toolbar() {
 }
 ```
 
-In Rust, `window()` is a builder: `.id()`, `.kind()`, `.parent()`, `.modal()`, `.default_size()`, `.default_position()`, `.display()`, `.default_mode()`, `.restore_bounds()`, `.title()` and `.attributes(..)` (a `WindowAttributes`, a signal of one or a closure), `.open(..)`, `.on_open_change(..)`, `.on_close_press(..)`, `.content(..)` (made each time it opens) and `.handle(..)` (the window's `WindowHandle` while it is open). Off the desktops `<Window>` and `window()` show nothing.
+In Rust, `window()` is a builder: `.id()`, `.kind()`, `.parent()`, `.modal()`, `.default_size()`, `.default_position()`, `.display()`, `.default_mode()`, `.restore_bounds()`, `.title()` and `.attributes(..)` (a `WindowAttributes`, a signal of one or a closure), `.open(..)`, `.on_open_change(..)`, `.on_close_press(..)` and `.content(..)` (made each time it opens); `current_window()` in its content is its `WindowRef`. Off the desktops `<Window>` and `window()` show nothing.
 
 ### Window.open
 
@@ -140,6 +140,17 @@ function Chat() {
 
 const chat = Window.open(Chat, { id: "chat", title: "Chat", defaultSize: { width: 360, height: 480 } });
 chat.focus();
+```
+
+In Rust, `open_window(window()...)` is the same (GPUI: `cx.open_window`): it opens the `window()` builder's window from anywhere, an event handler, a menu item or a task, and returns its `WindowRef` at once. Its `.open(..)` is not used; the window stays open until the user or `close()` closes it, and `.on_open_change(..)` hears it. For a window per document, give each its own id:
+
+```rust
+let doc = open_window(
+    window()
+        .id(format!("doc:{id}"))
+        .title(name)
+        .content(move || editor(id)),
+);
 ```
 
 `Window.get(id)` is the open window with `id`, or `null` (reactive); `"main"` is the main window. Off the desktops `Window.open` throws with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; a window the app's [capabilities](#capabilities) do not grant throws with `ERR_ACCESS_DENIED`.
@@ -184,7 +195,6 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`: the system's title bar, or a title bar of the app's own ([below](#a-title-bar-of-your-own)). `controlsOffset` (`{ x, y }`) places macOS's traffic lights in a hidden title bar. |
 | | `frame` | `"default"`, or `"none"`: no title bar or border, the app draws everything. |
 | Size | `minSize`, `maxSize` | The least and largest content size the user may give it, `{ width, height }` in points; `null` clears it. |
-| | `aspectRatio` | The width to height ratio the user's resizing keeps; `null` clears it. |
 | | `sizeToContent` | `true`, `"width"` or `"height"`: the window follows its content's laid-out size, natively, without JS on the path. |
 | Behavior | `resizable`, `movable`, `minimizable`, `maximizable`, `closable` | What the user may do with it. The app's requests are not limited by them. |
 | | `focusable` | It takes the keyboard focus. |
@@ -198,14 +208,9 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 | Look | `transparent` | Its background is transparent: the app's views are all it shows. |
 | | `backdrop` | The system's material behind its content: `"none"`, `"window"`, `"sidebar"`, `"popover"` or `"hud"`. Each platform maps them to its own (macOS's visual effect materials, Windows 11's Mica and Acrylic). |
 | | `shadow` | The system's shadow around it. |
-| | `colorScheme` | The appearance of its title bar and system controls: `"light"`, `"dark"` or `"system"`. |
-| | `contentProtected` | Screenshots, recordings and screen sharing leave its content out. Needs the `windows` capability's `contentProtected`. |
-| Taskbar and documents | `progress` | `{ value?, state? }` or `null`: progress on its taskbar button or the Dock's icon; `value` from 0 to 1, `state` `"normal"`, `"indeterminate"`, `"paused"` or `"error"`. |
-| | `edited` | It has unsaved changes (macOS's dot in the close button). |
-| | `representedFile` | The file it shows: macOS's title bar icon and path menu. |
-| | `tabGroup` | Windows of one group are tabs of one window (macOS). |
+| Taskbar | `progress` | `{ value?, state? }` or `null`: progress on its taskbar button or the Dock's icon; `value` from 0 to 1, `state` `"normal"`, `"indeterminate"`, `"paused"` or `"error"`. |
 
-An attribute a platform's windows do not have is kept and has no effect there: the window manager on Linux places and stacks windows itself, so positions, levels and `taskbar` are its; `edited`, `representedFile` and `tabGroup` are macOS's.
+An attribute a platform's windows do not have is kept and has no effect there: the window manager on Linux places and stacks windows itself, so positions, levels and `taskbar` are its.
 
 ### currentWindow
 
@@ -226,7 +231,7 @@ function SaveButton() {
 
 `windows()` is the open windows, the main window first, then the app's own in the order they opened; `focusedWindow()` is the one with the keyboard focus, `null` while another app has it. Both are reactive.
 
-Rust: `current_window() -> WindowHandle`, the same lookup through the component's context, and `main_window()`.
+Rust: `current_window() -> WindowRef`, the same lookup through the component's context, and `main_window()`.
 
 ### WindowRef
 
@@ -255,7 +260,7 @@ interface WindowRef {
 type WindowMode = "normal" | "maximized" | "fullScreen";
 ```
 
-The Rust column names the methods of `WindowHandle`.
+The Rust column names the methods of `WindowRef`.
 
 | Member | Rust | Description |
 |---|---|---|
@@ -289,7 +294,7 @@ Double-clicking a `windowDrag` view does the system's title bar action natively,
 | `boundsChange` | `{ bounds }` | It moved or was resized, once the move or resize settles. |
 | `displayChange` | `{ display }` | It moved to another display. |
 
-`win.on("focusChange", l)` returns a function that stops the listener; a listener registered while a component renders goes with the component. `<Window>` takes the same as props (`onClosePress`, `onFocusChange`, …). Rust: `WindowHandle::on_focus_change`, `on_mode_change`, `on_bounds_change`, `on_display_change`, and `window()`'s `.on_close_press(..)` and `.on_open_change(..)`.
+`win.on("focusChange", l)` returns a function that stops the listener; a listener registered while a component renders goes with the component. `<Window>` takes the same as props (`onClosePress`, `onFocusChange`, …). Rust: `WindowRef::on_focus_change`, `on_mode_change`, `on_bounds_change`, `on_display_change`, and `window()`'s `.on_close_press(..)` and `.on_open_change(..)`.
 
 ### Closing
 
@@ -333,7 +338,7 @@ It takes the [options](#options) `defaultSize`, `defaultPosition`, `display` and
 
 ### Capabilities
 
-An app without `"capabilities"` in nsh.json may open windows of every kind except overlays. An app that declares its capabilities opens windows of its own when `capabilities.windows` grants them ([Sandbox and capabilities](../docs/sandbox-and-capabilities.md#windows)). Overlays, click-through windows (`pointerEvents: "none"`) and `contentProtected` are granted only when declared. `Window.open` and `<Window>` throw `ERR_ACCESS_DENIED` with `permission` `"windows"` and `resource` the window's id for a window not granted; an attribute not granted in `set()` is left as it is, with a warning.
+An app without `"capabilities"` in nsh.json may open windows of every kind except overlays. An app that declares its capabilities opens windows of its own when `capabilities.windows` grants them ([Sandbox and capabilities](../docs/sandbox-and-capabilities.md#windows)). Overlays and click-through windows (`pointerEvents: "none"`) are granted only when declared. `Window.open` and `<Window>` throw `ERR_ACCESS_DENIED` with `permission` `"windows"` and `resource` the window's id for a window not granted; an attribute not granted in `set()` is left as it is, with a warning.
 
 ## Application
 
@@ -512,7 +517,7 @@ interface Display {
 }
 ```
 
-`win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowHandle::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+`win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
 
 While the window is on the screen, [`lifecycle()`](./nsh.md#device) reporting `"background"` means other windows cover it.
 
