@@ -973,6 +973,19 @@ function setColorScheme(scheme: "light" | "dark" | "system"): void;
 
 无论系统外观如何，立即以 `scheme` 显示应用：`colorScheme()`、`dark:` 类、组件的主题和平台控件（警告框、状态栏的默认样式）都随之变化；`"system"` 重新跟随系统。`nsh.json` 的 `"appearance"` 从启动时就设置它。Rust：`set_color_scheme(Appearance::Dark)`（`Appearance::Light`、`Appearance::System`）。
 
+### fpsEnabled 和 setFpsEnabled
+
+```ts
+const fpsEnabled: Accessor<boolean>;
+function setFpsEnabled(enabled: boolean): void;
+```
+
+`setFpsEnabled(true)` 打开性能监视器，`false` 关闭它：macOS 上是应用右上角的面板（见 [macOS](../docs/macos.md#性能监视器)），iOS、Windows、Linux 和 GPUI 上是每秒一行 `nsh::perf` 日志，终端上是一行状态（见[性能](../docs/performance.md#在屏幕上--fps)）。`fpsEnabled()` 表示监视器是否在测量，以平台报告的为准（响应式），所以开关显示的是平台实际的状态；应用用 `--fps` 或环境变量 `NSH_FPS=1` 启动时它也为开。在没有监视器的平台上（Android、Web），`fpsEnabled()` 保持为 `false`。Rust：`set_fps_enabled(true)`、`fps_enabled() -> bool`。
+
+```tsx
+<Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
 ### platform
 
 ```ts
@@ -1835,6 +1848,12 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 `show` 的结果表示系统是否接收了这条通知；没有权限时为 `false`。应用在前台时通知照常显示。用相同的 `id` 再次显示会替换旧通知，`Notifications.close(id)` 用于移除。
 
+`silent: true` 让通知显示时不发声、不振动，与 Web 的 `Notification` 一致；默认播放系统提示音。Apple 平台显示不带声音的通知，Android 把它放进不提醒的分组（无声音、振动和弹出横幅），Windows 显示静音的 toast，Linux 附带通知服务的 `suppress-sound` 提示，Web 把 `silent` 交给浏览器。
+
+```tsx
+await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
 ### Notifications.on
 
 `press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
@@ -2083,7 +2102,7 @@ type AudioErrorCode =
 
 ### Sound.load
 
-从打包资源的路径（`"sounds/click.wav"`）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
 
 ### Sound.play
 
@@ -2091,8 +2110,9 @@ type AudioErrorCode =
 
 ```tsx
 import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
 
-const tap = await Sound.load("sounds/tap.wav");
+const tap = await Sound.load(tapFile);
 
 function Key(props: { label: string }) {
   return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;

@@ -854,14 +854,17 @@ fn action_or_press(surface: &Surface, view: &NshView, name: &str, press: bool) -
     }
 }
 
-/// `WM_GETOBJECT`: the root of the provider tree for UI Automation.
+/// `WM_GETOBJECT`: the root of window `window`'s provider tree for UI
+/// Automation (`ROOT_ID`: the main window; each window of the app's own
+/// exposes the tree of its dialog root).
 pub(crate) fn get_object(
     surface: &Rc<Surface>,
+    window: NodeId,
     hwnd: HWND,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> Option<LRESULT> {
-    uia::get_object(surface, hwnd, wparam, lparam)
+    uia::get_object(surface, window, hwnd, wparam, lparam)
 }
 
 #[cfg(test)]

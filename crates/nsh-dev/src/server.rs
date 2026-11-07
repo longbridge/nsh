@@ -87,6 +87,8 @@ pub struct AppInfo {
     /// The app's id (`nsh.json` `"id"`), which names where it keeps its
     /// data.
     pub id: Option<String>,
+    /// The main window's launch-time options (`nsh.json` `"window"`, JSON).
+    pub window: Option<String>,
 }
 
 struct Bundle {
@@ -96,6 +98,7 @@ struct Bundle {
     source_map: Option<axum::body::Bytes>,
     capabilities: Option<String>,
     app_id: Option<String>,
+    window: Option<String>,
     /// The UI sets it imports.
     ui_sets: Arc<[String]>,
 }
@@ -412,6 +415,7 @@ impl DevServer {
             source_map: source_map.map(Into::into),
             capabilities: app.capabilities,
             app_id: app.id,
+            window: app.window,
             ui_sets,
         })));
     }
@@ -1001,6 +1005,7 @@ async fn send_event(
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
                     app_id: bundle.app_id.clone(),
+                    window: bundle.window.clone(),
                     limits,
                 },
             )

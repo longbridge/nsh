@@ -9,7 +9,8 @@
   `fadeDuration` (iOS: `CATransition`; Android: alpha over the placeholder; default 0 on iOS and 300ms on Android, as in React
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
-  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur). `onLoad` reports the
+  (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
+  API 30 plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
   source's size in pixels on both platforms, whatever size the view decodes at. Downloads are shared per URI (also between
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core

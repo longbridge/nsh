@@ -247,8 +247,12 @@ pub(crate) fn settings_changed(surface: &Rc<Surface>) {
 pub(crate) fn environment_applied(surface: &Surface) {
     let hwnd = surface.hwnd();
     if !hwnd.is_invalid() {
-        crate::window::set_dark_title_bar(hwnd, dark(surface));
+        // The window's own scheme, else the app's.
+        let scheme =
+            crate::window::shell(hwnd).map_or(Appearance::System, |s| s.attrs().color_scheme);
+        crate::shell::set_color_scheme(surface, hwnd, scheme);
     }
+    crate::app_window::appearance_changed(surface);
     // Menus follow the scheme; the caption buttons are drawn again.
     crate::chrome::appearance_changed(surface);
 }
@@ -758,6 +762,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::Announce(text) => crate::access::announce(surface, text),
+        Command::PerfMonitor(true) => surface.enable_fps(),
+        Command::PerfMonitor(false) => surface.disable_fps(),
         Command::Notification(command) => crate::notifications::command(surface, command),
         Command::Audio(command) => {
             let base = surface.asset_base.borrow().clone();

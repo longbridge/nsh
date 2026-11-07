@@ -358,9 +358,12 @@ mod imp {
         const NAME: &'static str = "NshView";
         type Type = super::NshView;
         type ParentType = gtk::Widget;
-        // Range roles (sliders, progress bars) expose their value to
-        // assistive technologies through it (`crate::access`).
-        type Interfaces = (gtk::AccessibleRange,);
+        // `gtk::Accessible` again, as GObject installs a subclass's
+        // overrides only for the interfaces it lists: the reading order
+        // below. Range roles (sliders, progress bars) expose their value to
+        // assistive technologies through `gtk::AccessibleRange`
+        // (`crate::access`).
+        type Interfaces = (gtk::Accessible, gtk::AccessibleRange);
     }
 
     // Screen readers go through a scroll view's content, and a list's
@@ -532,8 +535,13 @@ mod imp {
             let mut child = self.obj().first_child();
             while let Some(widget) = child {
                 child = widget.next_sibling();
+                // GTK expects a measure before every allocation of a widget
+                // with a queued resize (added, shown, restyled), and warns
+                // without one. It is cheap: an `NshView`'s is constant, and
+                // GTK caches a native's until its next queued resize.
                 if let Some(rect) = natives.iter().find(|n| n.widget == widget).map(|n| n.rect) {
                     let t = placement(rect.origin.x.0, rect.origin.y.0, None, scale);
+                    widget.measure(gtk::Orientation::Horizontal, -1);
                     widget.allocate(
                         rect.size.width.0.ceil().max(0.0) as i32,
                         rect.size.height.0.ceil().max(0.0) as i32,
@@ -559,6 +567,7 @@ mod imp {
                 }
                 let t = placement(x, f.origin.y.0 - sy + s.shift.1, s.transform(), scale);
                 drop(s);
+                widget.measure(gtk::Orientation::Horizontal, -1);
                 widget.allocate(
                     f.size.width.0.ceil().max(0.0) as i32,
                     f.size.height.0.ceil().max(0.0) as i32,

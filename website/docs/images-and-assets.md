@@ -359,6 +359,7 @@ function RemoteImage(props: { url: string }) {
 | File | Rust (`asset!`) | TSX import | Page |
 |---|---|---|---|
 | `.ttf`, `.otf`, `.woff`, `.woff2` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
+| `.wav`, `.m4a`, `.aac`, `.mp3` | A `FileAsset` with its URI | The file's `asset:/` URL | [Sound](../modules/nsh.md#sound) |
 | `.json` and other files | A `FileAsset` with its URI | `.json`: the parsed value, bundled into the script | [Project structure](./project-structure.md#modules) |
 
 Fonts are registered before the first frame in both.

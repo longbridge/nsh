@@ -747,9 +747,19 @@ impl Mounter {
     /// Measures the surface's frames and commits with a performance
     /// monitor ([`crate::fps`]) from now on.
     pub(crate) fn measure(&mut self) {
+        if self.fps.is_some() {
+            return;
+        }
         let fps = crate::fps::Fps::start(self.mtm);
         self.control.set_perf_monitor(Some(fps.monitor.clone()));
         self.fps = Some(fps);
+    }
+
+    /// Stops measuring ([`Mounter::measure`]).
+    fn stop_measuring(&mut self) {
+        if self.fps.take().is_some() {
+            self.control.set_perf_monitor(None);
+        }
     }
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
@@ -1742,6 +1752,8 @@ impl Mounter {
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
+            (Command::PerfMonitor(true), _) => self.measure(),
+            (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),

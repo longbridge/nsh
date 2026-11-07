@@ -2,6 +2,7 @@
 title: Terminal
 description: "The Terminal component: a program's output drawn with the platform's own text, the keys the user types sent back, on every platform; the emulator replaceable by the app."
 group: base
+demo: el-terminal
 ---
 
 # Terminal
