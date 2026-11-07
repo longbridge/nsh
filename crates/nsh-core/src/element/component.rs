@@ -1116,10 +1116,13 @@ impl Registry {
         }
     }
 
-    /// The tokens of theme file `json` (`None`: the defaults), by the
-    /// source a set brings ([`Registry::tokens_from`]; `None`: no set
-    /// does).
-    pub fn tokens(&self, json: Option<&str>) -> Option<Result<super::Tokens, String>> {
+    /// The tokens of theme file `json` (`None`: the defaults) and what of it
+    /// was left out, by the source a set brings ([`Registry::tokens_from`];
+    /// `None`: no set does).
+    pub fn tokens(
+        &self,
+        json: Option<&str>,
+    ) -> Option<Result<(super::Tokens, Vec<String>), String>> {
         self.tokens.map(|source| source(json))
     }
 

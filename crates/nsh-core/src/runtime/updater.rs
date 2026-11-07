@@ -42,6 +42,13 @@ pub trait UpdaterHost: Send + Sync + 'static {
         None
     }
 
+    /// Whether the app's launcher runs signed packages, so that a package
+    /// [`verify_package`](Self::verify_package) accepts runs at the next
+    /// start. `false` (the default): the host runs none.
+    fn runs_packages(&self) -> bool {
+        false
+    }
+
     /// Verifies the package downloaded to `file` as the app's launcher
     /// will before running it: signed by a release key one of `roots`
     /// certifies, for app `app_id`, its build newer than `newer_than` and
@@ -121,6 +128,47 @@ pub(crate) struct RunningPackage {
     pub(crate) version: String,
     /// Its build number.
     pub(crate) build: f64,
+}
+
+/// The installed app the code runs in, and the runtime built into it.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub(crate) struct ShellInfo {
+    /// The installed app's version as it was packaged (`nsh.json`
+    /// `"version"`; on iOS its `CFBundleShortVersionString`).
+    pub(crate) version: Option<String>,
+    /// The installed app's build number as it was packaged (`nsh.json`
+    /// `"build"`; on iOS its `CFBundleVersion`).
+    pub(crate) build: Option<f64>,
+    /// The version of the NSH runtime built into the installed app.
+    pub(crate) nsh_version: String,
+    /// Whether the installed app runs signed packages of its code
+    /// (`checkForPackage`): its launcher runs them and its `nsh.json` trusts
+    /// package roots.
+    pub(crate) packages: bool,
+}
+
+impl ShellInfo {
+    /// From the shipped update configuration (`nsh-updater.json`), if any,
+    /// and whether the launcher runs packages.
+    fn new(config: Option<&[u8]>, runs_packages: bool) -> ShellInfo {
+        // (version, build, trusts package roots); nothing updates on the web
+        #[cfg(not(target_arch = "wasm32"))]
+        let shipped = config
+            .and_then(|bytes| nsh_updater::Config::parse(bytes).ok())
+            .map(|config| {
+                let roots = !config.package_roots().is_empty();
+                (config.version, config.build.unwrap_or(1), roots)
+            });
+        #[cfg(target_arch = "wasm32")]
+        let shipped: Option<(String, u64, bool)> = config.and(None);
+        ShellInfo {
+            version: shipped.as_ref().map(|(version, _, _)| version.clone()),
+            build: shipped.as_ref().map(|(_, build, _)| *build as f64),
+            nsh_version: env!("CARGO_PKG_VERSION").to_owned(),
+            packages: runs_packages && shipped.is_some_and(|(_, _, roots)| roots),
+        }
+    }
 }
 
 /// Checking for a newer version of the app and installing it.
@@ -203,6 +251,22 @@ impl Updater {
             version: running.version,
             build: running.build as f64,
         })
+    }
+
+    /// The installed app this code runs in, its shell: the version and build
+    /// it was packaged with (on iOS its `CFBundleShortVersionString` and
+    /// `CFBundleVersion`), the NSH runtime built into it (`nshVersion`) and
+    /// whether it runs signed packages. A package replaces the app's code,
+    /// not its shell: `runningPackage()` says which code runs, this what runs
+    /// it. `version` and `build` are `null` for an app without `"updater"`
+    /// in `nsh.json`, and where apps do not update (the web, a development
+    /// run); `packages` is false there.
+    pub(crate) fn shell_info(sys: System) -> ShellInfo {
+        let host = sys.updater.as_ref();
+        ShellInfo::new(
+            host.and_then(|host| host.config()).as_deref(),
+            host.is_some_and(|host| host.runs_packages()),
+        )
     }
 }
 
@@ -313,7 +377,10 @@ mod native {
             };
             let available = config
                 .check(&manifest, signature.as_deref(), &nsh_updater::platform())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+                .filter(|available| {
+                    !package_covers(worker.running_package().as_ref(), &available.version)
+                });
             Ok(available.map(|available| (bytes, config, available)))
         })
         .await?;
@@ -643,9 +710,54 @@ mod native {
     pub(super) async fn install(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
+    /// Whether the package this run's code came from is already the
+    /// release `offered` or a later one. The app's own version is the one it
+    /// shipped as, so after restarting into a package of the latest release
+    /// the manifest would still look newer, and the whole app would be
+    /// downloaded and offered again for what already runs.
+    fn package_covers(running: Option<&PackageVersion>, offered: &str) -> bool {
+        running.is_some_and(|running| nsh_updater::version_at_least(&running.version, offered))
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn a_running_package_of_the_release_or_later_covers_it() {
+            let running = |version: &str| PackageVersion {
+                version: version.into(),
+                build: 35,
+            };
+            assert!(!package_covers(None, "0.2.1"));
+            assert!(package_covers(Some(&running("0.2.1")), "0.2.1"));
+            assert!(package_covers(Some(&running("0.2.10")), "0.2.9"));
+            // A release the package is older than comes as the whole app (a newer runtime).
+            assert!(!package_covers(Some(&running("0.2.1")), "0.3.0"));
+        }
+
+        #[test]
+        fn shell_info_reads_the_shipped_configuration() {
+            let config = br#"{"id":"dev.noop.app","version":"0.2.1","github":"o/r","build":35,
+                "packages":{"roots":["SJl1kuuXiy0WqZM03S0Q16OIGNX7e+RTI8H5Flk8JLo="]}}"#;
+            let info = ShellInfo::new(Some(config), true);
+            assert_eq!(info.version.as_deref(), Some("0.2.1"));
+            assert_eq!(info.build, Some(35.0));
+            assert_eq!(info.nsh_version, env!("CARGO_PKG_VERSION"));
+            assert!(info.packages);
+            // A launcher that runs no packages, or a configuration that trusts no roots.
+            assert!(!ShellInfo::new(Some(config), false).packages);
+            let plain = br#"{"id":"dev.noop.app","version":"0.2.1","github":"o/r"}"#;
+            let info = ShellInfo::new(Some(plain), true);
+            assert_eq!(info.build, Some(1.0));
+            assert!(!info.packages);
+            // No configuration: a development run, an app without `"updater"`.
+            let info = ShellInfo::new(None, true);
+            assert_eq!(
+                (info.version, info.build, info.packages),
+                (None, None, false)
+            );
+        }
 
         #[test]
         fn operations_are_serial_and_release_on_error_or_cancellation() {

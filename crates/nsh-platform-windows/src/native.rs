@@ -198,8 +198,10 @@ pub struct Wheel {
 pub struct ComponentContext {
     id: NodeId,
     control: EngineControl,
-    /// The surface's key and window, to draw again from any thread.
+    /// The surface's key and the UI thread it lives on, to draw again
+    /// from any thread.
     surface: u64,
+    ui: crate::window::UiThread,
 }
 
 impl std::fmt::Debug for ComponentContext {
@@ -234,7 +236,7 @@ impl ComponentContext {
     /// thread).
     pub fn redraw(&self) {
         let key = self.surface;
-        crate::window::invoke(move || {
+        self.ui.invoke(move || {
             if let Some(surface) = Surface::by_key(key) {
                 surface.invalidate();
             }
@@ -451,6 +453,7 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
         id: view.id(),
         control,
         surface: surface.key(),
+        ui: surface.ui_thread(),
     });
     if let Some(hwnd) = made.window() {
         // A child of the window its view shows in (it moves with the view

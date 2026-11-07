@@ -24,7 +24,7 @@ use nsh_core::{
 };
 use nsh_testing::agent::{Key, Native};
 
-use crate::{input::Simulated, surface::Surface, synth};
+use crate::{input::Simulated, surface::Surface, synth, xtest::Xtest};
 
 /// How long a call waits for the main thread at most.
 const MAIN: Duration = Duration::from_secs(10);
@@ -32,6 +32,9 @@ const MAIN: Duration = Duration::from_secs(10);
 const CLICK: Duration = Duration::from_millis(60);
 /// A display frame, where the window's monitor tells none.
 const FRAME: Duration = Duration::from_millis(16);
+/// How long the X server's key events take to come back to GDK, at most
+/// about.
+const KEY_SETTLE: Duration = Duration::from_millis(20);
 /// How far one scroll event moves at most, in points.
 const SCROLL_STEP: f32 = 20.0;
 
@@ -119,6 +122,27 @@ impl LinuxNative {
     ) -> Option<R> {
         self.on_main(move |surface| synth::window(surface).map(|w| f(surface, &w)))
             .flatten()
+    }
+
+    /// Real key events (XTest) under X11: `f` on the main thread with the
+    /// window given the X focus, then a wait for GTK to have handled them.
+    /// `None` where there is no XTest (Wayland), and the agent keeps to the
+    /// widgets' signals; else what `f` says (false: it typed nothing).
+    fn real_keys(&self, f: impl FnOnce(&Xtest) -> bool + Send + 'static) -> Option<bool> {
+        // The focus first, handled before the keys come: GTK drops a key
+        // that comes with the window's focus-in.
+        let moved = self
+            .with_key_window(|_, w| Xtest::with(|x| x.focus(w)))
+            .flatten()?;
+        if moved {
+            std::thread::sleep(KEY_SETTLE);
+            self.on_main(|_| ());
+        }
+        let typed = self.on_main(move |_| Xtest::with(f)).flatten()?;
+        // The events come back through GDK's source on the main loop.
+        std::thread::sleep(KEY_SETTLE);
+        self.on_main(|_| Xtest::with(Xtest::restore_mapping));
+        Some(typed)
     }
 
     fn click(&self, at: Point<Points>, hold: Duration) {
@@ -269,11 +293,24 @@ impl Native for LinuxNative {
     fn type_text(&self, text: &str) {
         // Key by key, as a keyboard's characters come.
         for ch in text.chars() {
+            let keysym = crate::xtest::char_keysym(ch);
+            if self.real_keys(move |x| x.stroke(&[], keysym)) == Some(true) {
+                continue;
+            }
             self.with_key_window(move |_, w| synth::type_text(w, &ch.to_string()));
         }
     }
 
     fn key(&self, key: Key) {
+        use crate::xtest::CONTROL_L;
+        let (modifiers, keysym): (&'static [u64], u64) = match key {
+            Key::Return => (&[], 0xff0d),
+            Key::Backspace => (&[], 0xff08),
+            Key::SelectAll => (&[CONTROL_L], u64::from('a')),
+        };
+        if self.real_keys(move |x| x.stroke(modifiers, keysym)) == Some(true) {
+            return;
+        }
         self.with_key_window(move |_, w| match key {
             Key::Return => synth::enter(w),
             Key::Backspace => synth::backspace(w),
@@ -306,8 +343,11 @@ impl Native for LinuxNative {
 
     fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
         let mut mask = gdk::ModifierType::empty();
+        let mut keysyms = Vec::new();
         for name in keys.split('+') {
-            mask |= match name.trim().to_ascii_lowercase().as_str() {
+            let name = name.trim().to_ascii_lowercase();
+            keysyms.extend(crate::xtest::modifier_keysym(&name));
+            mask |= match name.as_str() {
                 // Linux's command key is Control.
                 "mod" | "ctrl" | "control" => gdk::ModifierType::CONTROL_MASK,
                 "alt" | "option" => gdk::ModifierType::ALT_MASK,
@@ -320,6 +360,15 @@ impl Native for LinuxNative {
                 }
             };
         }
+        // The keys held for real too where there are real key events, so
+        // the keys typed meanwhile carry them; the simulated pointer's
+        // events carry the mask.
+        self.real_keys(move |x| {
+            for k in keysyms {
+                x.key(k, down);
+            }
+            true
+        });
         self.on_main(move |_| crate::input::hold(mask, down))
             .ok_or_else(|| "the window is gone".to_owned())
     }
@@ -336,6 +385,23 @@ impl Native for LinuxNative {
         use nsh_core::keymap::{Key as K, Keystroke};
         let stroke =
             Keystroke::parse(keys, nsh_core::platform::Os::Linux).map_err(|e| e.to_string())?;
+        // A real keystroke where there are real key events: GTK's
+        // shortcut controllers, the focus' key bindings and the input
+        // method see it as they see a keyboard's.
+        let m = stroke.modifiers;
+        let held: Vec<u64> = [
+            (m.ctrl, crate::xtest::CONTROL_L),
+            (m.alt, crate::xtest::ALT_L),
+            (m.shift, crate::xtest::SHIFT_L),
+            (m.cmd, crate::xtest::SUPER_L),
+        ]
+        .into_iter()
+        .filter_map(|(on, k)| on.then_some(k))
+        .collect();
+        let keysym = crate::xtest::key_keysym(stroke.key);
+        if self.real_keys(move |x| x.stroke(&held, keysym)) == Some(true) {
+            return Ok(());
+        }
         // The app's shortcuts first, as GTK's shortcut controller (capture
         // phase) runs before the focus.
         if self

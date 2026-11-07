@@ -1385,7 +1385,7 @@ impl Nav {
 /// batch being applied is in.
 pub(crate) fn default_back(surface: &Rc<Surface>) {
     let key = surface.key();
-    crate::window::invoke(move || {
+    surface.ui_thread().invoke(move || {
         if let Some(surface) = Surface::by_key(key)
             && let Ok(mut nav) = surface.nav.try_borrow_mut()
         {

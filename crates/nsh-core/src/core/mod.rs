@@ -653,6 +653,8 @@ struct Node {
     elevation: Points,
     /// `ios={{ backdropMaterial }}`.
     backdrop_material: crate::BackdropMaterial,
+    /// `macos={{ backdrop }}`.
+    macos_backdrop: Option<crate::MacOsBackdrop>,
     /// A text block: its attachments (inline views and images, in text
     /// order) whose native views are inside its own.
     attached: Vec<NodeId>,
@@ -740,6 +742,7 @@ impl Node {
         let mut style = Box::new(self.view_style.clone());
         style.elevation = self.elevation;
         style.backdrop_material = self.backdrop_material;
+        style.macos_backdrop = self.macos_backdrop;
         // A list in its parent's viewport is a plain view clipping its
         // cells (a scroll view clips its content).
         if self.list.as_ref().is_some_and(|l| l.parent) {
@@ -888,6 +891,7 @@ impl Node {
             overlay_watched: 0,
             elevation: Points::ZERO,
             backdrop_material: crate::BackdropMaterial::default(),
+            macos_backdrop: None,
             dirty: 0,
             queued: false,
             text_queued: false,
@@ -1528,6 +1532,12 @@ impl<M: TextEngine> Core<M> {
     /// Sets what the app may reach: remote images, canvas images, video
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
+        // `open_window` checks windows as `Window.open` does.
+        {
+            let _entered = self.components.runtime.enter();
+            crate::element::global::<crate::element::desktop::WindowAccess>()
+                .set(crate::element::desktop::WindowAccess(Some(access.clone())));
+        }
         self.access = access;
     }
 
@@ -4755,6 +4765,12 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW;
                 }
             }
+            Prop::MacOsBackdrop(value) => {
+                if node.macos_backdrop != value {
+                    node.macos_backdrop = value;
+                    flags |= dirty::VIEW;
+                }
+            }
             Prop::ActiveStyle(patch) => {
                 self.set_part_style(key, classes::Part::Active, patch);
                 return Ok(());
@@ -5876,6 +5892,7 @@ impl<M: TextEngine> Core<M> {
         if node.view_style != ViewStyle::default()
             || node.elevation != Points::ZERO
             || node.backdrop_material != crate::BackdropMaterial::default()
+            || node.macos_backdrop.is_some()
             || parent_list
             || node.spare
         {

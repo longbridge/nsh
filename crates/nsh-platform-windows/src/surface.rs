@@ -58,7 +58,7 @@ const LATE: f64 = 0.05;
 const TEST_FRAME: f64 = 1.0 / 60.0;
 
 thread_local! {
-    /// The surfaces of this (main) thread, by key.
+    /// The surfaces of this thread, by key.
     static SURFACES: RefCell<FxHashMap<u64, Weak<Surface>>> = RefCell::default();
 }
 
@@ -142,6 +142,9 @@ pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 /// One engine and its views.
 pub(crate) struct Surface {
     key: u64,
+    /// The UI thread the surface was made on: where work that finishes
+    /// elsewhere returns to.
+    ui_thread: crate::window::UiThread,
     /// The root view (node [`ROOT_ID`]): fills the window.
     pub(crate) root: NshView,
     /// Views by node id, and what mounting needs between items.
@@ -266,6 +269,7 @@ impl Surface {
         let mounter = Mounter::new(root.clone());
         let surface = Rc::new(Surface {
             key,
+            ui_thread: crate::window::UiThread::current(),
             root: root.clone(),
             views: mounter.views.clone(),
             mounter: RefCell::new(mounter),
@@ -351,6 +355,11 @@ impl Surface {
     /// The surface with `key`, if it is alive.
     pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
+    }
+
+    /// The UI thread it lives on ([`crate::window::UiThread::invoke`] runs closures there).
+    pub(crate) fn ui_thread(&self) -> crate::window::UiThread {
+        self.ui_thread
     }
 
     /// Its key ([`Surface::by_key`]).

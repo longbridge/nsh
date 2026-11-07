@@ -271,6 +271,10 @@ pub(crate) struct Surface {
     /// The surface fills the standalone runner's window ([`crate::run_app`]),
     /// not a view of a host app.
     pub(crate) standalone: Cell<bool>,
+    /// An embedded AppView opts out of painting a surface background
+    /// ([`crate::AppOptions::transparent`]). Standalone windows instead
+    /// track their live transparency in `main_window`.
+    pub(crate) transparent: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
@@ -365,6 +369,7 @@ impl Surface {
             resized: RefCell::default(),
             background: Cell::new(None),
             standalone: Cell::new(false),
+            transparent: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),

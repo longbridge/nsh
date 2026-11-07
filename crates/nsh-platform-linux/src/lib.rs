@@ -56,6 +56,8 @@ mod transition;
 mod tray;
 mod view;
 mod window;
+#[cfg(feature = "dev")]
+mod xtest;
 
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};

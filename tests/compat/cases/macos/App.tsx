@@ -10,6 +10,7 @@ import DesktopProps from "./desktop-props";
 import ModStandardSystem from "./mod-standard-system";
 import ModStandardFiles from "./mod-standard-files";
 import WebSendInput from "./web-send-input";
+import MaterialComposition from "./material-composition";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-dock": BaseDock,
@@ -19,6 +20,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-access-denied": ModAccessDenied,
   "mod-keymap-pass": ModKeymapPass,
   "web-send-input": WebSendInput,
+  "material-composition": MaterialComposition,
 };
 const shown = signal("");
 

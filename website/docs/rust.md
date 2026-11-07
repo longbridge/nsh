@@ -46,6 +46,10 @@ nsh run                        # this machine's backend; --target ios, android, 
 nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows
 ```
 
+Build with [huacnlee/cargo](https://github.com/huacnlee/cargo), the Cargo NSH is developed with: a drop-in fork that builds each dependency once for all your
+projects and Git worktrees and keeps its build directory under a size limit on its own, with nothing to configure
+([Installation](./installation.md#building-from-a-checkout)).
+
 `src/lib.rs` holds the app: components, state, handlers, tasks.
 
 ```rust
@@ -178,7 +182,7 @@ fn window_bar() -> impl IntoElement {
 A title bar with `TitleBarStyle::Default` restores the system's. A view with
 `.window_control(..)` is the window's minimize, maximize or close button: the
 platform carries out its press, and a close goes through the window's
-`close_on_press`. The `WindowHandle` has the window's other requests
+`close_on_press`. The `WindowRef` has the window's other requests
 (`set_mode`, `minimize`, `set_bounds`, `close`, ...), `window()` opens windows of
 the app's own, and the module has the menus (`set_application_menu`,
 `popup_menu`) too: [nsh/desktop](../modules/nsh-desktop.md).
