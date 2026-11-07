@@ -2,7 +2,7 @@ import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, 
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { fpsEnabled, platform, setColorScheme, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
-import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
+import { titleBar } from "nsh/desktop";
 import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
@@ -157,6 +157,7 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Notifications", detail: "Asking for the permission, a notification shown, replaced and pressed, the badge on the app's icon", icon: "spark", screen: lazy(() => import("./demos/NotificationsDemo").then((m) => m.NotificationsDemo)) },
       { name: "Sound", detail: "A sound for each kind of moment, played with the UI as it changes", icon: "media", screen: lazy(() => import("./demos/SoundDemo").then((m) => m.SoundDemo)) },
       { name: "URL scheme", detail: "UrlScheme: nsh-gallery:// links that open the app", icon: "system", screen: lazy(() => import("./demos/UrlSchemeDemo").then((m) => m.UrlSchemeDemo)) },
+      { name: "Windows", detail: "A writing app's windows: a floating inspector, preferences, a command palette, the document on its own", icon: "layers", screen: lazy(() => import("./demos/WindowsDemo").then((m) => m.WindowsDemo)) },
       { name: "Tray", detail: "nsh/desktop: an icon in the system tray with its tooltip, click and menu", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
       { name: "Global shortcut", detail: "nsh/desktop: a keystroke heard whichever app has the keyboard", icon: "system", screen: lazy(() => import("./demos/ShortcutDemo").then((m) => m.ShortcutDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
@@ -765,10 +766,6 @@ function rememberDemo() {
 }
 
 function App() {
-  if (hasWindow) {
-    Window.setTitle("Gallery");
-    Window.setTitleBar({ style: "hidden", height: 44 });
-  }
   rememberDemo();
   // Every scroll view and list draws the gallery's bar.
   Scrollbar.setTheme(scrollbarTheme);

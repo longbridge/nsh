@@ -314,6 +314,9 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
         boxShadow: props.outline ? undefined : finish.chip.boxShadow,
         borderWidth: 1,
         borderColor: props.outline ? toneColor(tone()) : alpha(tone() === "neutral" ? colors.text : toneColor(tone()), 0.1),
+        // A change of tone (a window turning active) crosses over.
+        transitionProperty: "colors",
+        transitionDuration: 160,
       }}
     >
       <Text style={{ fontSize: 12, fontWeight: "500", color: tone() === "neutral" ? colors.text : toneColor(tone()) }}>{props.label}</Text>
@@ -321,9 +324,37 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   );
 }
 
+/** A state in a list row or a header, quieter than a `Badge`: a round dot
+ * and a word, tinted only for a tone that matters (an active window); the
+ * dot's color crosses over as the state changes. The word alone in the
+ * terminal. */
+export function Status(props: { label: string; tone?: Tone }) {
+  const tinted = () => props.tone != null && props.tone !== "neutral";
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <If when={!terminal}>
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 3.5,
+            backgroundColor: tinted() ? toneColor(props.tone!) : colors.faint,
+            transitionProperty: "colors",
+            transitionDuration: 160,
+          }}
+        />
+      </If>
+      <Text style={{ fontSize: 12, fontWeight: tinted() ? "500" : "400", color: tinted() ? toneColor(props.tone!) : colors.muted, numberOfLines: 1 }}>
+        {props.label}
+      </Text>
+    </View>
+  );
+}
+
 /** A label above a value, for grids of figures; on one row in the terminal,
- * the value right-aligned. */
-export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
+ * the value right-aligned. `truncate` keeps a value that may run long (a
+ * display's name) on its one line, ending in an ellipsis. */
+export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%`; truncate?: boolean }) {
   // The label above its value in the terminal too: two rows, so stats set
   // side by side keep apart and each value stays under its label.
   return (
@@ -335,7 +366,15 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
       }
     >
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
-      <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
+      <Text
+        style={{
+          fontSize: 15,
+          color: props.tone ? toneColor(props.tone) : colors.text,
+          fontVariant: ["tabular-nums"],
+          numberOfLines: props.truncate ? 1 : undefined,
+          paddingRight: props.truncate && !terminal ? 8 : undefined,
+        }}
+      >
         {props.value}
       </Text>
     </View>

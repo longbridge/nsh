@@ -1580,15 +1580,20 @@ pub(crate) fn blur(view: &NshView) {
     }
 }
 
-/// Unfocuses whatever input of the surface has focus.
+/// Unfocuses whatever input of the surface has focus, in any of its
+/// windows (the main one and the app's own).
 pub(crate) fn blur_all(surface: &Rc<Surface>) {
-    let root = surface.root.upcast_ref::<gtk::Widget>();
-    if let Some(window) = root.root()
-        && let Some(focus) = window.focus()
-        && (focus.is::<gtk::Text>() || focus.is::<gtk::TextView>())
-        && focus.is_ancestor(root)
-    {
-        window.set_focus(None::<&gtk::Widget>);
+    let mut roots = vec![surface.root.clone()];
+    roots.extend(crate::window::roots(surface).into_iter().map(|(_, r)| r));
+    for root in roots {
+        let root = root.upcast_ref::<gtk::Widget>();
+        if let Some(window) = root.root()
+            && let Some(focus) = window.focus()
+            && (focus.is::<gtk::Text>() || focus.is::<gtk::TextView>())
+            && focus.is_ancestor(root)
+        {
+            window.set_focus(None::<&gtk::Widget>);
+        }
     }
 }
 

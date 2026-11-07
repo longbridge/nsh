@@ -376,6 +376,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             capabilities,
             app_id,
             limits,
+            window,
         } => {
             hide_status(ui);
             let mut bundle = match format {
@@ -400,6 +401,10 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
+            // nsh.json `window`: the engine sends its attributes to the
+            // window with the first frame; its size, position and mode are
+            // taken the first time a session loads.
+            bundle = bundle.with_main_window(window.as_deref());
             bundle = match bundle
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())
@@ -423,6 +428,11 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             let Some(view) = view else { return };
             log::info!("loading build {version}");
             hide_error(ui);
+            if running.is_none_or(|(s, _)| s != session)
+                && let Some(window) = &bundle.main_window
+            {
+                view.place_main_window(window, None);
+            }
             view.set_limits(limits);
             view.load(App::Js(bundle));
         }

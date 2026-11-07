@@ -136,6 +136,17 @@ impl App {
         }
     }
 
+    /// The main window's launch options (`nsh.json` `"window"`): a JS app's
+    /// bundle's ([`Bundle::main_window`]), a Rust app's root's
+    /// ([`nsh_core::element::Root::main_window`]). Runners open the main
+    /// window by them.
+    pub fn main_window(&self) -> Option<&nsh_core::desktop::MainWindowOptions> {
+        match self {
+            App::Rust(root) => root.main_window_ref(),
+            App::Js(bundle) => bundle.main_window.as_ref(),
+        }
+    }
+
     /// The URL schemes the app claims (`nsh.json` `schemes`):
     /// the links the core lets through (`nsh_core::url_scheme`).
     pub fn url_schemes(&self) -> &[String] {
@@ -184,6 +195,11 @@ pub struct Bundle {
     /// The signed package the bundle came from ([`Bundle::from_package`]),
     /// named in the app's errors ([`AppError::package`]).
     pub package: Option<Arc<PackageInfo>>,
+    /// The main window's launch-time options (`nsh.json` `"window"`, an
+    /// app's `app.json`, the dev server's app info): runners read them
+    /// before they make the window; the engine sends their attributes to
+    /// the main window with the first frame.
+    pub main_window: Option<nsh_core::desktop::MainWindowOptions>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -309,6 +325,7 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            main_window: None,
         }
     }
 
@@ -324,6 +341,7 @@ impl Bundle {
             url_schemes: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
+            main_window: None,
         }
     }
 
@@ -342,6 +360,19 @@ impl Bundle {
     /// gives it.
     pub fn with_app_id(mut self, id: Option<&str>) -> Self {
         self.app_id = id.map(str::to_owned);
+        self
+    }
+
+    /// The main window's launch-time options from their JSON (`nsh.json`
+    /// `"window"`, as the dev server's app info carries it); a wrong one is
+    /// logged and left out.
+    pub fn with_main_window(mut self, json: Option<&str>) -> Self {
+        self.main_window = json.and_then(|json| {
+            let parsed = serde_json::from_str(json)
+                .map_err(|e| e.to_string())
+                .and_then(|v| nsh_core::desktop::MainWindowOptions::from_json(&v));
+            parsed.map_err(|e| log::warn!("nsh.json window: {e}")).ok()
+        });
         self
     }
 
@@ -420,6 +451,12 @@ impl Bundle {
         bundle.app_id = info
             .as_ref()
             .and_then(|info| info.get("id")?.as_str().map(str::to_owned));
+        if let Some(window) = info.as_ref().and_then(|info| info.get("window")) {
+            bundle.main_window = Some(
+                nsh_core::desktop::MainWindowOptions::from_json(window)
+                    .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
+            );
+        }
         if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
             // A newer NSH's: what this runtime cannot claim is left out.
             let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(url_schemes);
@@ -870,6 +907,12 @@ pub struct EngineConfig {
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
     /// has one (`Environment::audio`).
     pub audio: Option<Arc<dyn nsh_core::audio::AudioBackend>>,
+    /// Opens and applies the app's windows of its own (`<Window>`,
+    /// `Window.open`) instead of the platform: the embedding app's own
+    /// windows, or a test's fake. `None` (the default): the platform's
+    /// built-in backend, which every desktop backend has, embedded or
+    /// standalone. The main window's commands always go to the platform.
+    pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -996,7 +1039,24 @@ impl EngineConfig {
             picker: None,
             speech: None,
             audio: None,
+            windows: None,
         }
+    }
+
+    /// Where a runner opens the main window of an app with nsh.json
+    /// `window.restoreBounds`: the placement its last run kept in its
+    /// storage ([`EngineConfig::storage`], or the file in its directory of
+    /// [`EngineConfig::data_dir`]), fitted on `displays`, the ones there
+    /// are now. Read before making the window; `None` without
+    /// `restoreBounds` or a kept placement. The engine keeps it as the
+    /// window changes (the environment's window state).
+    pub fn main_window_placement(
+        &self,
+        displays: &[nsh_core::desktop::Display],
+    ) -> Option<nsh_core::desktop::WindowPlacement> {
+        let options = self.app.main_window()?;
+        let storage = app_storage(self)?;
+        options.kept_placement(&*storage, displays)
     }
 }
 
@@ -1053,6 +1113,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
+            .field("windows", &self.windows.is_some())
             .finish()
     }
 }
@@ -1694,6 +1755,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
         core.set_audio(config.audio.clone());
+        core.set_window_backend(config.windows.clone());
+        if let Some(window) = config.app.main_window() {
+            core.set_main_window(window);
+        }
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
@@ -3142,15 +3207,18 @@ impl WindowStateReport {
 
 /// Whether `next` differs from `shown` by where the window is or its size
 /// alone (a move or a resize, which settles before it is reported), not by
-/// its mode, display or being minimized or hidden.
+/// its mode, display, focus, scale or being minimized or visible.
 fn moved_only(
     shown: &nsh_core::desktop::WindowState,
     next: &nsh_core::desktop::WindowState,
 ) -> bool {
-    std::mem::discriminant(&shown.window_bounds) == std::mem::discriminant(&next.window_bounds)
+    shown.mode == next.mode
+        && shown.placement.mode == next.placement.mode
         && shown.minimized == next.minimized
-        && shown.hidden == next.hidden
-        && shown.display.map(|d| d.id) == next.display.map(|d| d.id)
+        && shown.visible == next.visible
+        && shown.focused == next.focused
+        && shown.display == next.display
+        && shown.scale_factor == next.scale_factor
 }
 
 /// Gives the core and JS the environment `env`.
@@ -3452,26 +3520,30 @@ mod tests {
     #[test]
     fn moves_settle_and_changes_of_mode_do_not() {
         use nsh_core::{
-            desktop::{Display, DisplayId, WindowBounds, WindowState},
+            desktop::{DisplayId, WindowMode, WindowPlacement, WindowState},
             geometry::{Bounds, point, px, size},
         };
         let rect = |x: f32| Bounds::new(point(px(x), px(0.0)), size(px(800.0), px(600.0)));
-        let a = WindowState::new(rect(0.0), WindowBounds::Windowed(rect(0.0)));
+        let a = WindowState::new(
+            rect(0.0),
+            WindowPlacement::new(WindowMode::Normal, rect(0.0)),
+        );
         let mut moved = a;
         moved.bounds = rect(10.0);
-        moved.window_bounds = WindowBounds::Windowed(rect(10.0));
+        moved.placement = WindowPlacement::new(WindowMode::Normal, rect(10.0));
         assert!(super::moved_only(&a, &moved));
         let mut maximized = a;
-        maximized.window_bounds = WindowBounds::Maximized(rect(0.0));
+        maximized.mode = WindowMode::Maximized;
+        maximized.placement = WindowPlacement::new(WindowMode::Maximized, rect(0.0));
         assert!(!super::moved_only(&a, &maximized));
         let mut minimized = a;
         minimized.minimized = true;
         assert!(!super::moved_only(&a, &minimized));
         let mut hidden = a;
-        hidden.hidden = true;
+        hidden.visible = false;
         assert!(!super::moved_only(&a, &hidden));
         let mut elsewhere = a;
-        elsewhere.display = Some(Display::new(DisplayId(2), rect(0.0), rect(0.0), false));
+        elsewhere.display = Some(DisplayId(2));
         assert!(!super::moved_only(&a, &elsewhere));
     }
 
