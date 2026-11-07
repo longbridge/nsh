@@ -5129,9 +5129,15 @@ impl<M: TextEngine> Core<M> {
                 {
                     let changed = match &prop {
                         NativeProp::Incognito(on) => Some(("`incognito` is", *on != p.incognito)),
-                        NativeProp::UrlSchemes(schemes) => {
-                            Some(("URL schemes are", *schemes != p.url_schemes))
-                        }
+                        // A re-render builds new handlers: only a change
+                        // of the schemes served is worth a warning.
+                        NativeProp::UrlSchemes(schemes) => Some((
+                            "URL schemes are",
+                            !schemes
+                                .iter()
+                                .map(|s| s.scheme())
+                                .eq(p.url_schemes.iter().map(|s| s.scheme())),
+                        )),
                         _ => None,
                     };
                     if let Some((what, changed)) = changed {

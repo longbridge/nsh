@@ -38,7 +38,9 @@ type Handler = dyn Fn(WebResourceRequest) + Send + Sync;
 type Respond = Box<dyn FnOnce(Option<WebResource>) + Send>;
 
 /// A URL scheme a web view serves from the app: its name and the handler
-/// that answers its requests.
+/// that answers its requests. Platform plumbing: apps use
+/// [`WebView::url_scheme`](crate::element::WebView::url_scheme).
+#[doc(hidden)]
 #[derive(Clone)]
 pub struct WebUrlScheme {
     scheme: Arc<str>,
@@ -108,6 +110,7 @@ impl WebResource {
 
     /// The MIME type the platform answers with:
     /// `application/octet-stream` when none is set.
+    #[doc(hidden)]
     pub fn mime_type_or_default(&self) -> &str {
         if self.mime_type.is_empty() {
             "application/octet-stream"
@@ -132,6 +135,7 @@ impl WebResourceRequest {
     /// platforms: `respond` takes its answer (from whichever thread the app
     /// answers on; `None` when it failed), and the [`WebResourceCancel`]
     /// cancels it when the page no longer needs it.
+    #[doc(hidden)]
     pub fn new(
         url: impl Into<String>,
         method: impl Into<String>,
@@ -199,7 +203,9 @@ impl fmt::Debug for WebResourceRequest {
     }
 }
 
-/// Cancels a [`WebResourceRequest`] (the platform's side of it).
+/// Cancels a [`WebResourceRequest`] (the platform's side of it). Platform
+/// plumbing, not for apps.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct WebResourceCancel(Arc<AtomicBool>);
 
