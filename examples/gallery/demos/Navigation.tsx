@@ -395,6 +395,9 @@ function Addressed() {
   });
   // The address without the app's part, then the open message's.
   const addressOf = (top: string) => `${(UrlScheme.url() ?? "").split("#")[0]}${top === "Inbox" ? "" : prefix + encodeURIComponent(top)}`;
+  // The app's part of an address: the same on the web (the page's address
+  // before it) and elsewhere.
+  const shown = (url: string) => (url.includes("#") ? `#${url.split("#")[1]}` : "");
   return (
     <View style={{ gap: 8 }}>
       <View style={{ height: 200, borderRadius: radius.inset, overflow: "hidden", borderWidth: 1, borderColor: colors.line }}>
@@ -423,7 +426,7 @@ function Addressed() {
         </NavStack>
       </View>
       <Text style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
-        {`${changes()} changes, ${opens()} opens: ${address() || "no address"}`}
+        {`${changes()} changes, ${opens()} opens: ${shown(address()) || "no address"}`}
       </Text>
     </View>
   );
