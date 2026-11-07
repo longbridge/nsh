@@ -3336,6 +3336,7 @@
 	const PLATFORM_PROPS = /* @__PURE__ */ new Set([
 		"ios",
 		"android",
+		"macos",
 		"desktop",
 		"web"
 	]);
@@ -4844,7 +4845,7 @@
 //#endregion
 //#region ../nsh-platform-web/web/browser/navigation.js
 	function createNavigation(reactive, dom, environment, animation) {
-		const { signal, computed, untracked, split, batch } = reactive;
+		const { signal, computed, effect, untracked, split, batch } = reactive;
 		const rt = dom.rt, pages = /* @__PURE__ */ new WeakSet(), popped = /* @__PURE__ */ new WeakMap();
 		const except = (props, keys) => split(props, keys)[1];
 		function createNavStack(routes) {
@@ -4951,7 +4952,20 @@
 		}
 		function NavStack(props) {
 			const node = rt.element("stack");
-			rt.spread(node, except(props, ["state", "children"]));
+			rt.spread(node, except(props, [
+				"state",
+				"children",
+				"onChange"
+			]));
+			let started = false;
+			effect(() => {
+				const routes = props.state.routes();
+				if (!started) {
+					started = true;
+					return;
+				}
+				untracked(() => props.onChange?.({ routes }));
+			});
 			const entries = props.state.__nshEntries;
 			const rows = rt.each(entries, (read, index) => {
 				const entry = untracked(read);
@@ -5227,6 +5241,10 @@
 				token(name) {
 					tokens();
 					return invoke(402, [name, fields.colorScheme() === "dark"]);
+				},
+				setTheme(theme) {
+					invoke(406, [theme]);
+					tokens.update((value) => value + 1);
 				}
 			},
 			insets,
@@ -5923,10 +5941,39 @@
 	}
 
 //#endregion
+//#region ../nsh-platform-web/web/browser/address.js
+/** `nsh_core::url_scheme::MAX_URL_LEN`, in UTF-8 bytes. */
+	const MAX_ADDRESS_BYTES = 16384;
+	/** What `nsh_core::url_scheme::check_address` refuses: Rust's
+	* `char::is_whitespace` (White_Space) and `char::is_control` (Cc). */
+	const NOT_IN_AN_ADDRESS = /[\p{White_Space}\p{Cc}]/u;
+	/**
+	* Makes `urlScheme`'s `setUrl` (`nsh`'s `UrlScheme`) the page's. `page`:
+	* `base()`, what `history.replaceState` resolves against (the page's
+	* `document.baseURI`); `origin`, the page's. `url()` reads the core's
+	* address as it is, which has the page's from before the app's code runs.
+	*/
+	function configureAddress(urlScheme, page) {
+		const { setUrl } = urlScheme;
+		urlScheme.setUrl = (to) => {
+			if (typeof to !== "string" || NOT_IN_AN_ADDRESS.test(to) || new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES) return setUrl(to);
+			let resolved;
+			try {
+				resolved = new URL(to, page.base());
+			} catch {
+				throw new TypeError(`UrlScheme.setUrl: not a URL: ${to}`);
+			}
+			if (resolved.origin !== page.origin) throw new TypeError(`UrlScheme.setUrl: ${resolved.href} is not of the page's origin`);
+			setUrl(resolved.href);
+		};
+	}
+
+//#endregion
 //#region ../nsh-platform-web/web/browser/scope.js
 	var scope_exports = /* @__PURE__ */ __exportAll({
 		Values: () => Values,
 		configureAPIs: () => configureAPIs,
+		configureAddress: () => configureAddress,
 		createAnimation: () => createAnimation,
 		createCanvas: () => createCanvas,
 		createComponents: () => createComponents,
