@@ -32,6 +32,16 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     /** The events it listens to, kinds below 64 ({@link Mounter#wants} has all). */
     long events;
     final Decor decor = new Decor();
+
+    /** An outer box shadow draws outside the bounds, and compositing the
+     * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
+     * it; such a view reports no overlapping rendering, so the alpha
+     * applies per draw op and the shadow fades with the content. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !decor.hasOuterShadows();
+    }
+
     boolean clip;
     /** 0 auto, 1 none, 2 box-none, 3 box-only. */
     int pointerEvents;

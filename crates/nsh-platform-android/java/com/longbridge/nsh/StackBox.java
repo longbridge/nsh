@@ -31,6 +31,16 @@ final class StackBox extends FrameLayout implements Node {
     final Mounter mounter;
     final int id;
     final Decor decor = new Decor();
+
+    /** An outer box shadow draws outside the bounds, and compositing the
+     * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
+     * it; such a view reports no overlapping rendering, so the alpha
+     * applies per draw op and the shadow fades with the content. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !decor.hasOuterShadows();
+    }
+
     /** The app's screens, bottom to top. */
     final List<Integer> screens = new ArrayList<>();
     /** Screens the user popped natively, until the app removes them. */
