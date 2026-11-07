@@ -1,6 +1,6 @@
 import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { fpsEnabled, platform, setColorScheme, setFpsEnabled, token, windowSize } from "nsh";
+import { fpsEnabled, platform, setColorScheme, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
 import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, PopIn, popupSurface, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -575,18 +575,16 @@ function Sidebar() {
 
 /** One setting of the sidebar's menu, checked while it is on. */
 function SettingItem(props: { label: string; icon: JSX.Element; checked: boolean; onSelect: () => void }) {
+  const look = menuItemLook({ style: terminal ? { height: TERMINAL_ROW, gap: TERMINAL_GAP } : { height: 32, gap: 10 } });
   return (
     <MenuItem
       checked={props.checked}
       closeOnSelect={false}
       onSelect={props.onSelect}
-      hoverStyle={{ backgroundColor: token("accent") }}
-      focusStyle={{ backgroundColor: token("accent") }}
-      activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
-      style={terminal ? { flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP } : { flexDirection: "row", alignItems: "center", gap: 10, height: 32, paddingHorizontal: 8, borderRadius: radius.control }}
+      {...look}
     >
       {!terminal && props.icon}
-      <Text style={{ numberOfLines: 1, flexGrow: 1, fontSize: 13, color: colors.text }}>{props.label}</Text>
+      <Text style={menuItemLabel()}>{props.label}</Text>
       {!terminal && (
         <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
           <If when={props.checked}><Icon name="check" size={14} tint={colors.text} /></If>
@@ -616,11 +614,11 @@ function SettingsMenu() {
   );
   return (
     <Menu placement="top" align="end" offset={6} margin={8} trigger={trigger}>
-      <PopIn side="top" style={terminal ? undefined : { ...popupSurface(), minWidth: 210, padding: 4 }}>
+      <MenuPanel side="top" minWidth={210}>
         <SettingItem label="Performance monitor" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
         <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
         <SettingItem label="Dark appearance" icon={<LucideIcon name="moon" size={16} tint={colors.muted} />} checked={isDark()} onSelect={() => setColorScheme(isDark() ? "light" : "dark")} />
-      </PopIn>
+      </MenuPanel>
     </Menu>
   );
 }
