@@ -247,10 +247,7 @@ pub(crate) fn settings_changed(surface: &Rc<Surface>) {
 pub(crate) fn environment_applied(surface: &Surface) {
     let hwnd = surface.hwnd();
     if !hwnd.is_invalid() {
-        // The window's own scheme, else the app's.
-        let scheme =
-            crate::window::shell(hwnd).map_or(Appearance::System, |s| s.attrs().color_scheme);
-        crate::shell::set_color_scheme(surface, hwnd, scheme);
+        crate::shell::set_color_scheme(surface, hwnd, Appearance::System);
     }
     crate::app_window::appearance_changed(surface);
     // Menus follow the scheme; the caption buttons are drawn again.

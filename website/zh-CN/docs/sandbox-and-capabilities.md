@@ -205,10 +205,8 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
 | `max` | `number` | 同时可以打开的自己的窗口数。缺省：不限。 |
 | `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
-| `contentProtected` | `boolean` | 不出现在截图和屏幕共享中的窗口。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
-`overlay` 和 `contentProtected` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面，
-而受保护的窗口会让用户的录屏看不到它显示的内容。主窗口不需要授权。
+`overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。主窗口不需要授权。
 
 ### 存储
 
