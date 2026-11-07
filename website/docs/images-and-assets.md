@@ -56,7 +56,7 @@ Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` (
 In Rust, a missing or broken file fails the build, and a changed one builds the crate again. In TSX, assets are resolved relative to the importing module, and their `url` is relative to the app's root (the entry's directory). `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
 
 > [!TIP]
-> In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server, which serves the whole app directory, and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
+> In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server for images, fonts, audio and video in the app's directory (outside hidden directories), and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
 
 ### Pixel densities
 
