@@ -1,6 +1,7 @@
 //! The executable of a packaged nsh app (`nsh package --target macos`):
 //! runs the bundle in its app bundle's resources (`nsh/bundle.nshc`, assets
-//! in `nsh/assets`, the app's name and appearance in `nsh/app.json`).
+//! in `nsh/assets`, the app's name and appearance in `nsh/app.json`), or a
+//! newer signed package of its code it downloaded (`nsh_engine::updates`).
 //!
 //! A library so that an app with Rust components of its own (`nsh.json`
 //! `"rust"`) builds the release runner with them: its `main` calls
@@ -11,9 +12,9 @@
 /// Runs the release runner (until its window closes).
 #[cfg(all(target_os = "macos", feature = "js"))]
 pub fn main() -> std::process::ExitCode {
-    use nsh_platform_macos::{AppSource, Bundle, run_app};
+    use nsh_platform_macos::{AppSource, AssetBase, Bundle, run_app};
 
-    let (dir, options) = setup();
+    let (dir, mut options) = setup();
     // SAFETY: the bytecode is a resource of this app's own bundle (which
     // the code signature covers).
     let bundle = match unsafe { Bundle::read_trusted(&dir.join("bundle.nshc")) } {
@@ -23,7 +24,10 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    run_app(AppSource::Bundle(bundle), options)
+    let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
+    let launch = nsh_engine::updates::launch(bundle, &dir, data_dir.as_deref());
+    options.asset_base = Some(AssetBase::Directory(launch.assets));
+    run_app(AppSource::Bundle(launch.bundle), options)
 }
 
 /// Runs the Rust app whose root is `root` (until its window closes), with

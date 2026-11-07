@@ -72,22 +72,41 @@ pub fn check_scheme(scheme: &str) -> Result<(), String> {
 }
 
 /// The schemes of `nsh.json`'s `"schemes"` (`["myapp"]`), checked
-/// ([`check_scheme`]), in lower case, each once.
-pub fn schemes_from_json(value: &crate::JsonValue) -> Result<Vec<String>, String> {
-    let list = value
-        .as_array()
-        .ok_or("schemes: an array of URL schemes, `[\"myapp\"]`")?;
+/// ([`check_scheme`]), in lower case, each once. What it cannot claim (a
+/// scheme of the system or of other apps, a value of a form it does not
+/// know, a newer NSH's) is left out: an app claims less, never more.
+pub fn schemes_from_json(value: &crate::JsonValue) -> Vec<String> {
+    schemes_from_json_lenient(value).0
+}
+
+/// [`schemes_from_json`], with what it left out, which the toolchain warns
+/// of (a newer NSH's, or a typo).
+pub fn schemes_from_json_lenient(value: &crate::JsonValue) -> (Vec<String>, Vec<String>) {
+    let mut ignored = Vec::new();
+    let Some(list) = value.as_array() else {
+        ignored.push(format!(
+            "schemes: {value} is not an array of URL schemes (`[\"myapp\"]`)"
+        ));
+        return (Vec::new(), ignored);
+    };
     let mut schemes = Vec::with_capacity(list.len());
     for scheme in list {
-        let scheme = scheme.as_str().ok_or("schemes: an array of strings")?;
-        check_scheme(scheme).map_err(|e| format!("schemes: {e}"))?;
+        let Some(scheme) = scheme.as_str() else {
+            ignored.push(format!("schemes: {scheme} is not a string"));
+            continue;
+        };
+        if let Err(e) = check_scheme(scheme) {
+            ignored.push(format!("schemes: {e}"));
+            continue;
+        }
         let scheme = scheme.to_ascii_lowercase();
         if schemes.contains(&scheme) {
-            return Err(format!("schemes: `{scheme}` is listed twice"));
+            ignored.push(format!("schemes: `{scheme}` is listed twice"));
+            continue;
         }
         schemes.push(scheme);
     }
-    Ok(schemes)
+    (schemes, ignored)
 }
 
 /// Checks a URL the system handed the app: at most [`MAX_URL_LEN`] bytes,
@@ -119,8 +138,11 @@ pub fn check_url(url: &str, schemes: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn schemes(json: &str) -> Result<Vec<String>, String> {
-        schemes_from_json(&serde_json::from_str(json).unwrap())
+    fn schemes(json: &str) -> Result<Vec<String>, Vec<String>> {
+        match schemes_from_json_lenient(&serde_json::from_str(json).unwrap()) {
+            (schemes, ignored) if ignored.is_empty() => Ok(schemes),
+            (_, ignored) => Err(ignored),
+        }
     }
 
     #[test]
@@ -152,6 +174,11 @@ mod tests {
         ] {
             assert!(schemes(json).is_err(), "{json}");
         }
+        // Left out alone: the others are claimed.
+        assert_eq!(
+            schemes_from_json(&serde_json::json!(["https", "MyApp", 1, "myapp"])),
+            ["myapp"]
+        );
     }
 
     #[test]

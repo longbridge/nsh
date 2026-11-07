@@ -33,7 +33,7 @@
 //! pushed again). Without a composition, `realize` is one test of an
 //! `Option`: the frame is the one swap chain, as before.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use nsh_core::{
     BlendMode, Bounds, Color, Points, ViewKind,
@@ -1607,19 +1607,48 @@ struct Drawn {
     layers: Vec<usize>,
 }
 
-/// Draws `root`, the root view of a window of the app's own
-/// ([`crate::app_window`]), into `swap`, the swap chain of its window
-/// `hwnd` of `size` pixels at `scale` (`target_scale`: the scale of the
-/// chain's target): whole, then presents it.
-pub(crate) fn window_frame(
-    surface: &Rc<Surface>,
-    root: &NshView,
-    hwnd: windows::Win32::Foundation::HWND,
-    swap: &mut Option<gfx::SwapChain>,
-    target_scale: &std::cell::Cell<f32>,
-    size: (u32, u32),
-    scale: f32,
-) -> bool {
+/// A window of the app's own as its frame draws it
+/// ([`crate::app_window`]).
+pub(crate) struct WindowFrame<'a> {
+    /// Its root view.
+    pub(crate) root: &'a NshView,
+    /// Its native window.
+    pub(crate) hwnd: windows::Win32::Foundation::HWND,
+    /// A see-through window's composition, its swap chain at the bottom.
+    pub(crate) base: Option<&'a Composition>,
+    /// The composition its web views are in (the base one, or one over
+    /// its own swap chain).
+    pub(crate) composition: Option<&'a Composition>,
+    /// Its swap chain, and the scale of the chain's target.
+    pub(crate) swap: &'a mut Option<gfx::SwapChain>,
+    pub(crate) target_scale: &'a std::cell::Cell<f32>,
+    /// Its client area in pixels, and its pixels per point.
+    pub(crate) size: (u32, u32),
+    pub(crate) scale: f32,
+    /// The hosted items and the composed items its last frame drew.
+    pub(crate) placed: &'a RefCell<Vec<(Rc<dyn Hosted>, RECT)>>,
+    pub(crate) composed: &'a RefCell<Vec<Rc<dyn Hosted>>>,
+}
+
+/// Draws a window of the app's own whole, then presents it: its web
+/// views between the layers of its composition, its hosted items' own
+/// windows placed where their views were drawn.
+///
+/// Returns true when the frame is deferred, as the main window's
+/// ([`frame`]).
+pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> bool {
+    let WindowFrame {
+        root,
+        hwnd,
+        base,
+        composition,
+        swap,
+        target_scale,
+        size,
+        scale,
+        placed,
+        composed,
+    } = frame;
     let Ok(gfx) = gfx::get() else { return false };
     if size.0 == 0 || size.1 == 0 {
         return false;
@@ -1628,7 +1657,7 @@ pub(crate) fn window_frame(
         *swap = None;
     }
     if swap.is_none() {
-        match gfx::SwapChain::new(&gfx, hwnd, size, None) {
+        match gfx::SwapChain::new(&gfx, hwnd, size, base) {
             Ok(s) => *swap = Some(s),
             Err(err) => {
                 log::error!("cannot create a window's swap chain: {err}");
@@ -1639,7 +1668,8 @@ pub(crate) fn window_frame(
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    chain.set_background(crate::system::window_background(surface));
+    // Its own background (its scheme, see-through or not).
+    chain.set_background(crate::app_window::background(surface, root.id()));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");
@@ -1661,13 +1691,34 @@ pub(crate) fn window_frame(
             return false;
         }
     };
-    match draw_into(surface, &gfx, &target, scale, false, None, None, Some(root)) {
-        Ok(_) => {
+    let window = Some((root, size));
+    match draw_into(
+        surface,
+        &gfx,
+        &target,
+        scale,
+        false,
+        composition,
+        None,
+        window,
+    ) {
+        Ok(drawn) => {
+            if let Some(c) = composition
+                && let Err(err) = c.present(drawn.layers.len())
+            {
+                log::warn!("present failed: {err}");
+                *swap = None;
+                device_lost(surface);
+                return false;
+            }
             if let Err(err) = chain.present(None) {
                 log::warn!("present failed: {err}");
                 *swap = None;
                 device_lost(surface);
+                return false;
             }
+            crate::surface::items_placed(placed, drawn.items, None);
+            crate::surface::composed_placed(composed, composition, drawn.composed, &drawn.layers);
         }
         Err(err) if err.code() == D2DERR_RECREATE_TARGET => {
             *swap = None;
@@ -1689,10 +1740,22 @@ fn draw_into(
     offscreen: bool,
     composition: Option<&Composition>,
     areas: Option<&[D2D_RECT_F]>,
-    window: Option<&NshView>,
+    window: Option<(&NshView, (u32, u32))>,
 ) -> windows::core::Result<Drawn> {
+    let (window, pixels) = match window {
+        Some((root, pixels)) => (Some(root), pixels),
+        None => (None, surface.pixel_size()),
+    };
     let dc = &gfx.dc;
-    let background = color_f(crate::system::window_background(surface));
+    let background = color_f(match window {
+        Some(root) => crate::app_window::background(surface, root.id()),
+        None => crate::system::window_background(surface),
+    });
+    // The window drawn into, for its caption buttons.
+    let hwnd = match window {
+        Some(root) => crate::app_window::hwnd_of(surface, root.id()).unwrap_or_default(),
+        None => surface.hwnd(),
+    };
     // SAFETY: COM calls on the live context and target; `EndDraw` always
     // follows `BeginDraw`.
     unsafe {
@@ -1726,7 +1789,7 @@ fn draw_into(
     cx.window = Some(rect_f(0.0, 0.0, w, h));
     cx.split = composition.map(|composition| Split {
         composition,
-        size: surface.pixel_size(),
+        size: pixels,
         layers: Vec::new(),
         pending: false,
         error: None,
@@ -1737,9 +1800,7 @@ fn draw_into(
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             // The caption buttons, last: in the topmost layer, above web
             // views.
-            if window.is_none() {
-                crate::chrome::draw(surface, dc, scale);
-            }
+            crate::chrome::draw(surface, hwnd, dc, scale, w);
         }
         // A partial frame: each area cleared and drawn again, the rest of
         // the back buffer kept.
@@ -1765,7 +1826,7 @@ fn draw_into(
             unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
-            crate::chrome::draw(surface, dc, scale);
+            crate::chrome::draw(surface, hwnd, dc, scale, w);
             cx.damage = None;
             cx.clip_skip = 0;
             cx.set_transform(Mat4::new());
@@ -1809,16 +1870,29 @@ pub(crate) struct Pixels {
 /// Draws the surface offscreen at `scale` and reads the pixels back,
 /// whatever covers the window.
 #[cfg_attr(not(feature = "dev"), allow(dead_code))]
-pub(crate) fn snapshot(surface: &Rc<Surface>, scale: f32) -> windows::core::Result<Pixels> {
+/// `window`: the root view of a window of the app's own to draw instead of
+/// the main window's.
+pub(crate) fn snapshot(
+    surface: &Rc<Surface>,
+    scale: f32,
+    window: Option<&NshView>,
+) -> windows::core::Result<Pixels> {
     let gfx = gfx::get()?;
-    let (w, h) = surface.size();
+    let (w, h) = match window {
+        Some(root) => {
+            let size = root.state().frame.size;
+            (size.width.0, size.height.0)
+        }
+        None => surface.size(),
+    };
     let px = (
         (w * scale).round().max(1.0) as u32,
         (h * scale).round().max(1.0) as u32,
     );
     let target = target_bitmap(&gfx.dc, px, scale)?;
     // Web views are not in it: their pages are composed by the system.
-    let drawn = draw_into(surface, &gfx, &target, scale, true, None, None, None)?;
+    let window = window.map(|root| (root, px));
+    let drawn = draw_into(surface, &gfx, &target, scale, true, None, None, window)?;
     drop(drawn);
     read_back(
         &gfx.dc,

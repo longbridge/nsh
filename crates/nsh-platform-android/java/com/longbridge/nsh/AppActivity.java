@@ -22,7 +22,8 @@ public final class AppActivity extends Activity {
         // A recreated activity's intent was handed in already.
         if (state == null) view.handleUrlSchemeIntent(getIntent());
         if (rustApp()) view.runRustApp("nsh");
-        else view.loadAssetBundle("nsh");
+        // A newer signed package of the app's code it downloaded runs instead.
+        else view.loadAssetBundle("nsh", true);
     }
 
     /** A Rust app (`nsh package --rust` sets the manifest's `com.longbridge.nsh.RUST`). */

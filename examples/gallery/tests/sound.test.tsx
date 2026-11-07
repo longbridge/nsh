@@ -44,13 +44,17 @@ test("a toast sounds by its kind", async () => {
   expect(plays()).toEqual(["success.wav 0.6 1", "error.wav 0.6 1", "attention.wav 0.6 1"]);
 });
 
-test("on a desktop, a demo picked in the sidebar sounds; the switch beside the theme mutes it", async () => {
+test("on a desktop, a demo picked in the sidebar sounds; the settings menu mutes it", async () => {
   await app.setViewport(1200, 900);
-  await app.waitFor("label:Mute sounds");
+  await app.waitFor("label:Settings menu");
   await app.press("role:button[Text]");
   await app.press("role:button[Text]");
-  await app.press("label:Mute sounds");
+  await app.press("label:Settings menu");
+  await app.press("role:menuitemcheckbox[Sounds]");
+  await app.keyboard.press("escape");
   await app.press("role:button[Image]");
-  await app.press("label:Turn sounds on");
+  await app.press("label:Settings menu");
+  await app.press("role:menuitemcheckbox[Sounds]");
+  await app.keyboard.press("escape");
   expect(plays()).toEqual(["select.wav 0.4 1", "toggle.wav 0.6 0.9", "toggle.wav 0.6 1"]);
 });

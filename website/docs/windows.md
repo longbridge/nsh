@@ -56,8 +56,9 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 
 ### Performance monitor
 
-`--fps` (`nsh run App.tsx --target windows --fps`, `nsh test --target windows --fps`, the host's `--fps`, or
-`AppOptions { fps: true, .. }` in a Rust app's `run_app`) logs the performance monitor's readings once a second
+`--fps` (`nsh run App.tsx --target windows --fps`, `nsh test --target windows --fps`, the host's `--fps`,
+`AppOptions { fps: true, .. }` in a Rust app's `run_app`, the environment variable `NSH_FPS=1`, or the app's own
+`setFpsEnabled(true)`) logs the performance monitor's readings once a second
 (target `nsh::perf`): frames shown over the display's rate, the main thread's time per frame and its phases (`tick`,
 `drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, in the shape the other desktops log
 (milliseconds as mean/p50/p95/max). `nsh test --fps -v` shows them and `examples/gallery/tools/perf.py` reads them
@@ -172,9 +173,10 @@ The `cursor` style follows updates while the mouse rests over a view. When a bat
 Windows applies the new shape or `"none"` after the whole batch, using the view under the pointer.
 The title bar and resize borders keep their system cursors.
 
-A TSX app opens windows of its own with [`Window.open`](../modules/nsh-desktop.md#windowopen): each is a top-level
-window with its own taskbar button, drawn by the app's engine and running in its one JS runtime, so it shares the
-app's signals and modules directly. Closing the main window closes them and ends the app.
+An app opens windows of its own with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): each is a
+top-level window drawn by the app's engine and running in its one JS runtime, so it shares the app's signals and
+modules directly. A normal window has its own taskbar button; dialogs, panels and popups are owned by their parent
+window. Closing the main window closes them and ends the app.
 
 ### Keyboard
 
