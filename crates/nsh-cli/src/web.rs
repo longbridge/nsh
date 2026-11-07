@@ -552,7 +552,8 @@ pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String>
 
 /// Why [`linked_gates`] keeps every gate for code that uses `uses`, when
 /// the bundler read it: what the code does that it cannot tell apart.
-/// `None` when it keeps only what the code uses.
+/// `None` when it keeps only what the code uses. [`linked_gates_of`]
+/// keeps everything by this, so the warning and the pruning agree.
 fn whole_because(uses: &nsh_bundler::NativeUse) -> Option<&'static str> {
     if uses.computed_import {
         return Some("it loads a module whose name is worked out as it runs, `import(name)`");
@@ -610,7 +611,7 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
         gates
     };
     let Some(uses) = uses else { return all() };
-    if uses.computed_import {
+    if whole_because(uses).is_some() {
         return all();
     }
     let mut gates = vec!["nsh_part_core".to_owned()];
@@ -635,16 +636,16 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
                 }
             },
             "nsh/base/plot" => add("nsh_part_plot".into()),
-            nsh_base::SPECIFIER => match imported {
-                nsh_bundler::Imported::All => return all(),
-                nsh_bundler::Imported::Names(names) => {
+            // Taken whole, it kept everything above ([`whole_because`]).
+            nsh_base::SPECIFIER => {
+                if let nsh_bundler::Imported::Names(names) = imported {
                     for name in names {
                         if let Some(part) = part_of(name) {
                             add(format!("nsh_part_{part}"));
                         }
                     }
                 }
-            },
+            }
             module if app_sets.iter().any(|s| s == module) => add(ui_set_gate(module)),
             _ => {}
         }
