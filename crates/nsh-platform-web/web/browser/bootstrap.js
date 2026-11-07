@@ -5209,7 +5209,8 @@
 			locale: () => fields.locale(),
 			localeSettings: () => fields.localeSettings(),
 			lifecycle: () => fields.lifecycle(),
-			platform
+			platform,
+			fpsEnabled: () => false
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
@@ -5956,9 +5957,43 @@
 			if (process.default) process.default.nextTick = nsh.nextTick;
 		}
 		const desktop = modules.exports.get("nsh/desktop");
+		const main = Object.freeze({
+			id: "main",
+			main: true,
+			parent: null,
+			state: () => null,
+			titleBar: env.titleBar,
+			set() {},
+			show() {},
+			hide() {},
+			focus() {},
+			close() {},
+			minimize() {},
+			restore() {},
+			setMode() {},
+			setBounds() {},
+			setPlacement() {},
+			center() {},
+			requestAttention() {},
+			on: () => () => {}
+		});
+		const Window = Object.assign(() => null, {
+			open() {
+				const error = /* @__PURE__ */ new Error("Window.open: windows of the app's own open on the desktops (`isAvailable`)");
+				error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+				throw error;
+			},
+			get: (id) => id === "main" ? main : null
+		});
 		if (desktop) Object.assign(desktop, {
 			isAvailable: false,
 			titleBar: env.titleBar,
+			Window,
+			currentWindow: () => main,
+			windows: () => [main],
+			focusedWindow: () => null,
+			windowState: () => null,
+			displays: () => [],
 			Menu: {
 				setApplicationMenu() {},
 				popup: () => Promise.resolve()
