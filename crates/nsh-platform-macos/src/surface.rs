@@ -179,6 +179,9 @@ define_class!(
 /// Called when the app reports a fatal error (development hosts show it).
 pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
+/// Turns the performance monitor on or off.
+type PerfToggle = Box<dyn Fn(bool)>;
+
 /// One engine and its views.
 pub(crate) struct Surface {
     key: u64,
@@ -249,7 +252,7 @@ pub(crate) struct Surface {
     /// Shows or hides the view's performance monitor
     /// (`setFpsEnabled`): set by its [`crate::AppView`],
     /// which owns the panel.
-    pub(crate) perf_toggle: RefCell<Option<Box<dyn Fn(bool)>>>,
+    pub(crate) perf_toggle: RefCell<Option<PerfToggle>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
