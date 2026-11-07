@@ -1,0 +1,14 @@
+.hvigor/
+.idea/
+.clangd
+.clang-tidy
+oh_modules/
+node_modules/
+**/build/
+**/libs/
+**/Index.d.ts
+**/rawfile/
+oh-package-lock.json5
+entry/oh-package-lock.json5
+local.properties
+*.hap

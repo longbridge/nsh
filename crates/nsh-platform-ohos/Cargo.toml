@@ -1,0 +1,79 @@
+[package]
+name = "nsh-platform-ohos"
+description = "OHOS backend: ArkUI native views and an embeddable engine per surface."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+dev = ["dep:nsh-dev", "dep:url"]
+# Linked enhancements raise the minimum supported runtime API.
+api-23 = [
+  "ohos-arkui-binding/accessibility",
+  "ohos-arkui-binding/api-23",
+  "dep:ohos-accessibility-binding",
+  "ohos-accessibility-binding/api-23",
+]
+api-26 = ["api-23", "ohos-arkui-binding/api-26"]
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+nsh-core = { workspace = true, features = ["svg"] }
+getrandom = { workspace = true, features = ["std"] }
+nsh-package.workspace = true
+nsh-dev = { workspace = true, features = ["client"], optional = true }
+url = { workspace = true, optional = true }
+nsh-engine = { workspace = true, features = ["js"] }
+# Shader views: wgpu (GLES on OHOS) drawing into XComponent windows.
+wgpu.workspace = true
+pollster.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
+napi-ohos.workspace = true
+napi-derive-ohos.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+ohos-arkui-binding = { workspace = true, features = ["image"] }
+ohos-accessibility-binding = { workspace = true, optional = true }
+ohos-device-binding.workspace = true
+ohos-display-binding.workspace = true
+ohos-drawing-binding.workspace = true
+ohos-native-image-binding.workspace = true
+ohos-resource-manager-binding.workspace = true
+ohos-vsync-binding.workspace = true
+ohos-web-binding.workspace = true
+ohos-window-manager-binding.workspace = true
+ohos-image-native-binding.workspace = true
+ohos-pasteboard-binding.workspace = true
+ohos-udmf-binding.workspace = true
+ohos-native-window-binding.workspace = true
+ohos-xcomponent-binding.workspace = true
+ohos-avplayer-binding.workspace = true
+glow.workspace = true
+khronos-egl.workspace = true
+ohos-hilog-binding.workspace = true
+ohos-net-connection-binding.workspace = true
+log.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+ttf-parser.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+unicode-segmentation.workspace = true
+rustc-hash.workspace = true
+
+[build-dependencies]
+napi-build-ohos.workspace = true
+
+[dev-dependencies]
+getrandom = { workspace = true, features = ["std"] }
+log.workspace = true
+nsh-core.workspace = true
+unicode-segmentation.workspace = true

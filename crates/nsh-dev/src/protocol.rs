@@ -107,6 +107,8 @@ pub enum HostPlatform {
     Ios,
     /// A host on an Android device or emulator.
     Android,
+    /// A host on an OHOS device or emulator.
+    Ohos,
     /// The Linux (GTK) host.
     Linux,
     /// The macOS (AppKit) host.

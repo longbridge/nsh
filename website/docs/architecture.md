@@ -109,7 +109,7 @@ Text is often the most expensive part of a UI. NSH lays it out on the engine thr
 engine, so it looks exactly like native text:
 
 1. **prepare**: a `<Text>` and its nested spans become one attributed string (CoreText on Apple platforms,
-   `PrecomputedText` / `StaticLayout` on Android);
+   `PrecomputedText` / `StaticLayout` on Android, native typography on OHOS);
 2. **measure** at the widths layout asks for; measurements are cached by content and width, so a color-only change does
    not measure again;
 3. **layout** at the final size.
@@ -162,6 +162,7 @@ the names show up in logs and docs:
 | `nsh-dev` | The dev server and its client. |
 | `nsh-platform-ios` | The UIKit backend (iOS, simulator, Mac Catalyst): view mounting, the CoreText text engine, input; the embedding SDK. |
 | `nsh-platform-android` | The Android backend: `libnsh.so` and the Java runtime (`NshView`, the views, images, networking). |
+| `nsh-platform-ohos` | The OHOS backend: ArkUI custom nodes, native typography, NativeVSync and the ArkTS `NshSurface` embedding SDK. |
 | `nsh-cli` | The `nsh` command. |
 
 The dependency direction is `nsh-core` ← `nsh-js` ← `nsh-engine` ← platforms; `nsh-base` builds on `nsh-core`. The core depends on no platform and no JS

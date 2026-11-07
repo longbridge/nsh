@@ -36,7 +36,7 @@ webview = ["nsh-platform-linux/webview"]
 [dependencies]
 log.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 nsh-platform-linux.workspace = true
 # Over-the-air packages of the app's code (`nsh_engine::updates`).
 nsh-engine.workspace = true

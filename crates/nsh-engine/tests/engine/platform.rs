@@ -21,10 +21,11 @@ mount(
     <View
       ios={{ accessibilityLabel: "ios" }}
       android={{ accessibilityLabel: "android" }}
+      ohos={{ accessibilityLabel: "ohos" }}
       desktop={{ accessibilityLabel: "desktop" }}
       web={{ accessibilityHint: "web" }}
     >
-      <Text>{`${platform.os} ${platform.idiom} ${platform.desktop} ${platform.catalyst} ${platform.select({ ios: "i", mobile: "m", desktop: "d" })} ${platform.select({ native: "n", default: "-" })}`}</Text>
+      <Text>{`${platform.os} ${platform.idiom} ${platform.desktop} ${platform.catalyst} ${platform.select({ ios: "i", ohos: "o", mobile: "m", desktop: "d" })} ${platform.select({ native: "n", default: "-" })}`}</Text>
     </View>
   ),
 );
@@ -116,6 +117,12 @@ fn platform_props_and_select_follow_the_os() {
         Idiom::Phone,
         "android phone false false m n",
         &["android"],
+    );
+    frame(
+        Os::Ohos,
+        Idiom::Phone,
+        "ohos phone false false o n",
+        &["ohos"],
     );
     frame(
         Os::MacOs,

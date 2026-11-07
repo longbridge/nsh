@@ -8,9 +8,8 @@ demo: el-video
 
 # Video
 
-A video view plays a video file or stream with the platform's player: AVPlayer on iOS and Mac Catalyst, MediaPlayer on
-Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so the player follows your state like any
-other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
+A video view plays a video file or stream with the platform's player: AVPlayer on iOS, Mac Catalyst and OHOS, MediaPlayer on
+Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so the player follows your state like any other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
 
 ```rust tabs
 use nsh_core::prelude::*;

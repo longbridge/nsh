@@ -388,6 +388,7 @@ try app.loadBundle(at: bundledURL)
 
 - [用 Rust 开发](./rust.md)
 - [嵌入 Android 应用](./android.md)
+- [嵌入 OHOS 应用](./ohos.md)
 - [原生组件](./native-components.md)
 - [签名包](./signed-packages.md)
 - [沙箱与能力](./sandbox-and-capabilities.md)

@@ -1,0 +1,5 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "Native Shell OHOS embedding example",
+  "dependencies": {}
+}

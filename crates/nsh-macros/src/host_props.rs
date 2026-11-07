@@ -37,6 +37,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
     let platform = |p: &str| match p {
         "ios" => quote!(::nsh_core::js::host::Platform::Ios),
         "android" => quote!(::nsh_core::js::host::Platform::Android),
+        "ohos" => quote!(::nsh_core::js::host::Platform::Ohos),
         "desktop" => quote!(::nsh_core::js::host::Platform::Desktop),
         "web" => quote!(::nsh_core::js::host::Platform::Web),
         _ => quote!(::nsh_core::js::host::Platform::All),
@@ -52,7 +53,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
                 .map(|i| i.to_string())
                 .unwrap_or_default();
             match key.as_str() {
-                "js" | "ios" | "android" | "desktop" | "web" => out.names.push(Name {
+                "js" | "ios" | "android" | "ohos" | "desktop" | "web" => out.names.push(Name {
                     name: meta.value()?.parse::<LitStr>()?.value(),
                     platform: platform(&key),
                 }),
@@ -70,7 +71,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
                 "shared" => out.shared = true,
                 _ => {
                     return Err(meta.error(
-                        "expected `js`, `ios`, `android`, `desktop`, `web`, `default`, `min`, `max`, `on`, `ts`, \
+                        "expected `js`, `ios`, `android`, `ohos`, `desktop`, `web`, `default`, `min`, `max`, `on`, `ts`, \
                          `with`, `reset`, `required`, `nested`, `internal`, `once` or `shared`",
                     ));
                 }
