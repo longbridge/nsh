@@ -95,14 +95,30 @@ import -window root -display :170 whole.png        # the display, if the window'
 ```
 
 - With `DISPLAY` set, `nsh test` starts the host without `WAYLAND_DISPLAY`, which makes GPUI use X11: screenshots
-  read the window back from the X server (`GetImage`), and web views only embed in X11 windows.
+  read a redirected window pixmap from the X server (X Composite 0.2 or later), and web views only embed in X11 windows.
+  Automatic redirection starts before requesting a fresh GPUI frame; after it is presented, capture names the current
+  backing pixmap and reads that with `GetImage`. A covering window cannot replace the captured pixels. The screenshot
+  connection releases the pixmap and its redirection on drop, including on errors. Resizing is safe because each shot
+  names the pixmap after drawing.
+- Linux's GPUI Fast 0.1.13 window does not implement `render_to_image`; its renderer and scene are private, so NSH
+  cannot use the macOS / Windows offscreen path. Pure Wayland screenshots remain unsupported; use an isolated Xvfb
+  or Xwayland `-shm` display. The X server must support Composite; capture reports an error otherwise. This captures
+  X11 child windows (including embedded web views), rather than only GPUI's scene.
 - `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a screenshot waits for the blanks the last frame
   waits for (about 3 s each); with `-shm` frames are copied in as GPUI presents them.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: where WebKit cannot allocate GBM buffers ("Failed to create GBM buffer" in the
   log, common under Xwayland), pages stay black without it.
 - A tiling window manager tiles the rootful Xwayland window and its root shrinks with it: make it float at its full
   size (Hyprland: `hyprctl dispatch` float, resize and move it to a special workspace).
+- The covered-window and resize regression test runs on a real X server:
+  `xvfb-run -a cargo test --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-platform-gpui --features dev screenshot_keeps_obscured_pixels_and_follows_resize -- --ignored`.
 - GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
+
+The gallery below is unchanged by a fully covering window: left is `noop visual shot`, middle is the covered display,
+and right is `app.screenshot` while covered (byte-identical to its unobscured capture). The real-window crop differs
+only at the X server cursor, which is not part of the app screenshot.
+
+![Real window, covered display, and the captured gallery](images/gpui-linux-capture.png)
 
 ## Architecture
 
