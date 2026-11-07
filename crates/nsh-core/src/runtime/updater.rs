@@ -176,8 +176,8 @@ impl Updater {
     /// than the running build, for this runtime. It then runs from the
     /// app's next start (`restartToPackage`). Calls `onProgress` as bytes
     /// arrive. Rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the
-    /// check found none, and when the download fails or is refused, which
-    /// leaves nothing behind.
+    /// check found none, and with an error saying why when the download
+    /// fails or the package is refused, which leaves nothing behind.
     pub(crate) fn download_package(
         #[args(progress)] on_progress: Option<Callback<UpdateProgress>>,
         sys: System,

@@ -66,7 +66,7 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   `accept_package`. A refused package throws; the running app stays. To try a package on a simulator / emulator: `nsh-ios-host --package <file> --root <root.pub>`, or
   `DevActivity` with the `package` (path on the device) and `root` (base64) extras; their trust state persists in
   the temporary / cache directory, so older builds are refused there too.
-- **Packaged apps' own code over the air** (`nsh_engine::updates`, `docs/dev/updater.md` "Packages"): a packaged
+- **OTA updates of packaged apps' own code** (`nsh_engine::updates`, `docs/dev/updater.md` "OTA updates"): a packaged
   app whose `nsh.json` trusts roots (`"updater": { "packages": { "roots" } }`) downloads packages of its own code
   from its update source (`nsh/updater`'s `checkForPackage` / `downloadPackage`), and its launcher runs the newest
   verified one on trial, accepting it once healthy. Embedding apps still decide where their packages come from.

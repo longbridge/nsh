@@ -19,10 +19,12 @@ HTTP is the platform's `Network`, as `fetch`'s, through `UpdaterHost`, which the
 or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These requests are not subject to the app's
 `capabilities.network`: the app's code cannot choose where they go.
 
-## Packages
+## OTA updates
 
-A release that only changes the app's TSX reaches installed apps, iOS and Android included, as a signed package
-(`docs/dev/signed-packages.md`) instead of a new app; only a change to the runtime needs a new app build.
+OTA (over-the-air) updates: a release that only changes the app's TSX reaches installed apps, iOS and Android
+included, as a signed package (`docs/dev/signed-packages.md`) instead of a new app; only a change to the runtime
+needs a new app build. The user guide is `website/docs/ota-updates.md`. "OTA" is the docs' name for this; "hot
+update" means the dev server's reload on save (`nsh run`) and is not used for it.
 
 1. `nsh.json` `"updater": { "packages": { "roots": [<root.pub>] } }`: `nsh package` writes the roots and the shipped
    bundle's `build` into `nsh-updater.json` (`Config::packages`, `Config::build`).
@@ -95,7 +97,7 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`.
 ## Limits
 
 - iOS and Android only check and report a link (`--link`): stores do not allow replacing the binary, and installing an
-  APK needs a permission an SDK must not declare for its hosts. Packages of the app's code update there.
+  APK needs a permission an SDK must not declare for its hosts. OTA packages of the app's code update there.
 - No in-process reload into a downloaded package: it runs from the next start (`restartToPackage` on the desktop).
 - Downgrades are refused by the version check; a signed manifest of an older version is therefore harmless.
 - `nsh#914`: desktop TLS uses the webpki roots, so a custom host on a certificate chain they lack fails to connect.
