@@ -4,28 +4,35 @@
 //! - **Language data**: what `Intl` formats a language's numbers and dates
 //!   with (separators, digits, compact units, date patterns, month and day
 //!   names), one file per language in `data/`. The runtime has English
-//!   only; an app ships the languages its `nsh.json` `locales` lists, or,
-//!   without that key, the languages of its translations. A new language is
-//!   a new file here.
-//! - **Translations**: the app's `locales/` files in rust-i18n's formats
-//!   (`_version: 1`, a file per language, or `_version: 2`, one file with
-//!   every language; YAML, JSON or TOML), read with rust-i18n.
+//!   ([`ENGLISH`]); an app ships the other languages its `nsh.json`
+//!   `locales` lists, or, without that key, the languages of its
+//!   translations. A new language is a new file here.
+//! - **Translations** (feature `build`, the toolchain's): the app's
+//!   `locales/` files in rust-i18n's formats (`_version: 1`, a file per
+//!   language, or `_version: 2`, one file with every language; YAML, JSON
+//!   or TOML), read with rust-i18n.
 //!
 //! [`bundle_json`] writes both as the JSON the runtime takes
 //! (`nsh_core::i18n`, `nsh:rt`'s `i18n`).
 
+#[cfg(feature = "build")]
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
 /// The app's translations: keys and their text, by language.
+#[cfg(feature = "build")]
 pub type Translations = BTreeMap<String, BTreeMap<String, String>>;
 
 /// The directory of an app's translations, beside its `nsh.json`.
 pub const LOCALES_DIR: &str = "locales";
 
-/// The languages with data here (English is the runtime's own).
+/// English's data, which the runtime has built in.
+pub const ENGLISH: &str = include_str!("../data/en.json");
+
+/// The languages with data here an app ships (English is the runtime's
+/// own: [`ENGLISH`]).
 pub const LANGUAGES: &[&str] = &[
     "de", "es", "fr", "hi", "id", "it", "ja", "ko", "nl", "pl", "pt", "ru", "sv", "th", "tr", "vi",
     "zh",
@@ -66,6 +73,7 @@ pub fn language_of(locale: &str) -> String {
         .to_ascii_lowercase()
 }
 
+#[cfg(feature = "build")]
 /// The translation files in `app_dir`'s `locales/` (what a development
 /// session watches).
 pub fn locale_files(app_dir: &Path) -> Vec<PathBuf> {
@@ -75,6 +83,7 @@ pub fn locale_files(app_dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+#[cfg(feature = "build")]
 fn collect(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -92,6 +101,7 @@ fn collect(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(feature = "build")]
 /// The translations in `app_dir`'s `locales/`, read as rust-i18n reads
 /// them; empty without the directory.
 pub fn read_translations(app_dir: &Path) -> Result<Translations, String> {
@@ -104,12 +114,14 @@ pub fn read_translations(app_dir: &Path) -> Result<Translations, String> {
         .map_err(|e| format!("{LOCALES_DIR}/: {e}"))
 }
 
+#[cfg(feature = "build")]
 /// The JSON of the translations alone (a Rust app's root:
 /// `Root::translations_json`).
 pub fn translations_json(translations: &Translations) -> String {
     serde_json::to_string(translations).unwrap_or_default()
 }
 
+#[cfg(feature = "build")]
 /// What the bundle hands the runtime (`nsh:rt`'s `i18n`):
 /// `{"translations": {...}, "languages": {...}}`, the data of the languages
 /// `locales` lists (`nsh.json`), or, where it is `None`, of the
@@ -164,8 +176,11 @@ mod tests {
             assert!(value.get("dates").is_some(), "{language}");
         }
         assert!(language_data("en").is_none());
+        let english: serde_json::Value = serde_json::from_str(ENGLISH).unwrap();
+        assert!(english.get("numbers").is_some() && english.get("dates").is_some());
     }
 
+    #[cfg(feature = "build")]
     #[test]
     fn the_bundle_carries_the_listed_languages() {
         let mut translations = Translations::new();
@@ -187,6 +202,7 @@ mod tests {
         assert!(bundle_json(&Translations::new(), None, |_| {}).is_none());
     }
 
+    #[cfg(feature = "build")]
     #[test]
     fn translations_are_read_as_rust_i18n_reads_them() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/app");

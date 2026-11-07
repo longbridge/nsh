@@ -720,7 +720,7 @@ fn digits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::intl::locale::resolve;
+    use crate::web::format::locale::resolve;
 
     fn fmt(tag: &str, x: f64, f: &Format) -> String {
         let locale = resolve(&[tag.to_owned()], "en-US");

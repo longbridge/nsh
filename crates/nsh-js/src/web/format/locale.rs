@@ -1,8 +1,8 @@
 //! The language data: what a language (and its region) formats numbers
 //! and dates with (the symbols, grouping and patterns CLDR gives them, as
-//! browsers format), not CLDR itself. English is built in (`en.json`);
-//! other languages are JSON files of the same shape the app ships
-//! (`nsh-i18n`'s `data/`, the languages nsh.json `locales` lists), which
+//! browsers format), not CLDR itself: one JSON file per language in
+//! `nsh-i18n`'s `data/`. English is built in (`nsh_i18n::ENGLISH`); the
+//! others are the ones the app ships (nsh.json `locales`), which
 //! [`Languages::add`] registers per VM. A language without data resolves
 //! to the next requested one, then the device's, then `en-US`.
 //!
@@ -106,14 +106,14 @@ pub(crate) struct Locale {
 /// English's data, built into the runtime.
 fn english() -> &'static Value {
     static ENGLISH: OnceLock<Value> = OnceLock::new();
-    ENGLISH.get_or_init(|| serde_json::from_str(include_str!("en.json")).expect("en.json"))
+    ENGLISH.get_or_init(|| serde_json::from_str(nsh_i18n::ENGLISH).expect("English data"))
 }
 
 /// English's month and weekday names, which languages without names of
 /// their own use.
 pub(crate) fn english_names() -> &'static Names {
     static NAMES: OnceLock<Names> = OnceLock::new();
-    NAMES.get_or_init(|| Names::deserialize(&english()["dates"]["names"]).expect("en.json"))
+    NAMES.get_or_init(|| Names::deserialize(&english()["dates"]["names"]).expect("English data"))
 }
 
 /// A VM's language data: English and the languages the app registered.
@@ -188,7 +188,7 @@ impl Languages {
         // runtime's own.
         let (numbers, dates) = read(value, &region)
             .or_else(|_| read(english(), &region))
-            .expect("en.json");
+            .expect("English data");
         let locale = Locale {
             tag,
             numbers: Rc::new(numbers),

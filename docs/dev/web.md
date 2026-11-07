@@ -416,7 +416,7 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+  (`nsh.time_zone`: `timeZoneName`, `format/mod.rs` `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser

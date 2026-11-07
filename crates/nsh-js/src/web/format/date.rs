@@ -391,7 +391,7 @@ fn time_parts(c: &Civil, f: &Format, dates: &Dates, zone: Zone, offset: i32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::intl::locale::resolve;
+    use crate::web::format::locale::resolve;
 
     /// 2026-10-16 (a Friday) 15:04:05.678 UTC.
     const T: f64 = 1_792_163_045_678.0;

@@ -59,4 +59,4 @@ nsh-js = { workspace = true, optional = true, features = ["zlib", "crypto"] }
 serde_json.workspace = true
 log.workspace = true
 # The app's translations and the language data it ships (nsh.json `locales`).
-nsh-i18n = { workspace = true, optional = true }
+nsh-i18n = { workspace = true, features = ["build"], optional = true }

@@ -1191,28 +1191,28 @@ pub(crate) fn install(cx: Ctx) -> R<()> {
 
 /// The `Intl` object: the namespace of the two classes.
 pub(crate) fn namespace(cx: Ctx) -> R<V> {
-    let intl = js::new_object(cx)?;
+    let global = js::new_object(cx)?;
     for (name, class) in [
         ("NumberFormat", Class::NumberFormat),
         ("DateTimeFormat", Class::DateTimeFormat),
     ] {
         let ctor = super::constructor(cx, class)?;
-        js::define(cx, intl.raw(), name, ctor, false)?;
+        js::define(cx, global.raw(), name, ctor, false)?;
     }
     let f = js::function(cx, c"getCanonicalLocales", get_canonical_locales, 1)?;
-    js::define(cx, intl.raw(), "getCanonicalLocales", f, false)?;
+    js::define(cx, global.raw(), "getCanonicalLocales", f, false)?;
     let tag = js::string(cx, "Intl")?;
     // SAFETY: the property takes the string.
     unsafe {
         qjs::JS_DefinePropertyValue(
             cx,
-            intl.raw(),
+            global.raw(),
             qjs::JS_ATOM_Symbol_toStringTag as _,
             tag.take(),
             qjs::JS_PROP_CONFIGURABLE as c_int,
         );
     }
-    Ok(intl)
+    Ok(global)
 }
 
 pub(crate) const SPECS: &[Spec] = &[

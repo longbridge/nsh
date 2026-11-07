@@ -2294,7 +2294,7 @@ const report = (v) => text(String(v));
     /// `CET-1CEST,M3.5.0,M10.5.0/3`, whose summer instant shows a zone
     /// named by one offset.
     #[test]
-    fn intl_names_the_zone_it_formats_local_time_in() {
+    fn names_the_zone_it_formats_local_time_in() {
         let host = Host::new().unwrap();
         let script = format!(
             r#"{REPORT}
@@ -2323,7 +2323,7 @@ const report = (v) => text(String(v));
     /// `Intl` and the `toLocaleString`s format natively, in the device's
     /// locale by default.
     #[test]
-    fn intl_formats_numbers_and_dates() {
+    fn formats_numbers_and_dates() {
         let host = Host::new().unwrap();
         // What a bundle listing these languages registers (`nsh:rt`'s
         // `i18n`): the runtime has English only.
