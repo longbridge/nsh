@@ -361,4 +361,5 @@ adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity 
 
 - [沙箱与能力](./sandbox-and-capabilities.md)
 - [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)
+- [应用更新](./app-updates.md#更新应用代码)：以签名包发布打包应用自己的代码
 - [CLI](./cli.md)

@@ -14,6 +14,7 @@ group: delivery
 | macOS、Windows、Linux | 检查、下载、替换应用并重启 |
 | iOS、Android | 只检查，并给出引导用户前往的链接 |
 | Web | 无需处理，部署即更新，`checkForUpdate` 返回 `null` |
+| 所有原生平台 | 运行应用代码更新的签名包（见[下文](#更新应用代码)） |
 
 ## 设置来源
 
@@ -73,6 +74,42 @@ nsh update-manifest *.tar.gz *.zip \
 
 把压缩包、`latest.json` 和 `latest.json.sig`（使用 `--key` 时）上传为 GitHub Release 的附件，或放到自己服务器的同一目录。GitHub 上标记为 draft 或 prerelease 的版本不会被推送。
 
+## 更新应用代码
+
+只改了 TSX 的版本，可以作为应用代码的[签名包](/zh-CN/docs/signed-packages)送到已安装的应用上，所有原生平台（包括 iOS 和 Android）都适用，无需构建新应用。NSH 运行时本身的改动仍需要新应用。先信任为发布密钥签发证书的根密钥（`nsh keygen keys/root`，然后 `nsh certify`）：
+
+```json
+{
+  "version": "1.2.0",
+  "build": 12,
+  "updater": {
+    "github": "owner/repo",
+    "packages": { "roots": ["<keys/root.pub 的内容>"] }
+  }
+}
+```
+
+发布一个 `build` 更高的包，并把它写进清单：
+
+```sh
+nsh publish --key keys/release.secret --cert keys/release.cert --build 13
+nsh update-manifest --package .nsh/out/com.example.app-13.nshpkg --key keys/update.secret
+```
+
+在应用中：
+
+```tsx
+import { checkForPackage, downloadPackage, restartToPackage } from "nsh/updater";
+
+const found = await checkForPackage(); // { version, build, notes, size } 或 null
+if (found) {
+  await downloadPackage();
+  await restartToPackage().catch(() => {}); // 桌面端：立即；iOS 和 Android：下次启动
+}
+```
+
+应用从下次启动开始运行通过验证的最新包。它的第一次运行是试运行：如果启动失败，或应用在 10 秒内崩溃，应用会回到之前运行的版本。`runningPackage()` 返回正在运行的包。详见 [nsh/updater 参考](../modules/nsh-updater.md#包)。
+
 ## 校验内容
 
 - 清单签名（配了 `publicKey` 时）。
@@ -82,6 +119,7 @@ nsh update-manifest *.tar.gz *.zip \
 - 压缩包的大小和 SHA-256。
 - 新应用的 id 和可执行文件，macOS 上还有代码签名。
 - 当前进程就是这个包本身：运行在其他应用内的 NSH 模块无法替换宿主。
+- 应用代码的包：按 `packages.roots` 校验签名、应用 id、比当前运行及之前运行过的都新的构建号、所需运行时、大小和 SHA-256。
 
 macOS 上 `nsh package` 用的是 ad hoc 签名，可用于测试，但在其他 Mac 上可能被 Gatekeeper 拦截。正式分发时，请用 Developer ID 给 `.app` 签名并公证，再以同样的文件名重新打包（`tar -czf <压缩包> <Name>.app`），然后运行 `nsh update-manifest`。
 

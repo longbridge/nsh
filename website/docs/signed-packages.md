@@ -384,4 +384,5 @@ refused there too.
 
 - [Sandbox and capabilities](./sandbox-and-capabilities.md)
 - [Embedding in iOS apps](./ios.md), [Embedding in Android apps](./android.md)
+- [App Updates](./app-updates.md#update-the-apps-code): ship a packaged app's own code as a signed package
 - [CLI](./cli.md)
