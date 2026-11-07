@@ -4007,6 +4007,34 @@ impl<M: TextEngine> Core<M> {
                 no_webviews(self);
                 Prop::Native(NativeProp::Source(crate::WebSource::None))
             }
+            // Inline HTML with a base URL runs at that URL's origin (WebKit's
+            // `loadHTMLString:baseURL:`, Android's `loadDataWithBaseURL`,
+            // Windows answering the base URL's request with it): the base
+            // URL takes the grant a page there would, and without it the
+            // HTML loads with no base. Without web views at all, the arms
+            // above refuse the HTML itself, and that is the one error.
+            Prop::Native(NativeProp::BaseUrl(Some(url)))
+                if kind == Kind::WebView
+                    && !url.is_empty()
+                    && self.access.allows_webviews()
+                    && !self.access.allows_webview(&url) =>
+            {
+                refuse(self, "the base URL", &url, "webview.hosts");
+                Prop::Native(NativeProp::BaseUrl(None))
+            }
+            Prop::Native(NativeProp::Source(crate::WebSource::Html {
+                html,
+                base_url: Some(url),
+            })) if kind == Kind::WebView
+                && !url.is_empty()
+                && !self.access.allows_webview(&url) =>
+            {
+                refuse(self, "the base URL", &url, "webview.hosts");
+                Prop::Native(NativeProp::Source(crate::WebSource::Html {
+                    html,
+                    base_url: None,
+                }))
+            }
             prop => prop,
         }
     }
@@ -8967,8 +8995,8 @@ fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
 
 /// The message for a refused URL.
 fn not_granted(what: &str, uri: &str, capability: &str) -> String {
-    let host = crate::access::parse_url(uri).map_or_else(|| uri.to_owned(), |u| u.host);
-    format!("{what} {uri} is not granted: add `{host}` to capabilities.{capability} in nsh.json")
+    let advice = crate::access::grant_advice(uri, capability);
+    format!("{what} {uri} is not granted: {advice}")
 }
 
 /// Applies one property to a control.
