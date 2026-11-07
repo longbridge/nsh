@@ -1166,6 +1166,13 @@ impl Host {
         self.guarded(Phase::Call, || {
             self.scheduler
                 .ready(self.rt.borrow().as_ref().expect("live VM").run_gc());
+            // What the collection released: the graph gives back the slots
+            // of nodes that are gone.
+            self.cx.with(|cx| {
+                // SAFETY: the state of this host's context; no other borrow
+                // of the graph is live between calls into JS.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.compact();
+            });
             self.run_jobs();
         });
     }
@@ -2872,6 +2879,36 @@ const report = (v) => text(String(v));
         assert!(err.message.contains("top level"), "{}", err.message);
         assert!(rejections(&logs::take()).is_empty());
         assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn collecting_gives_back_the_graph_slots_of_a_tree_that_is_gone() {
+        let host = Host::new().unwrap();
+        let slots = |host: &Host| {
+            host.cx.with(|cx| {
+                // SAFETY: the host's state; no JS runs meanwhile.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.slots()
+            })
+        };
+        host.collect_garbage();
+        let (_, before) = slots(&host);
+        host.eval_source(
+            r#"import { cond } from "nsh:rt";
+            import { computed, signal } from "nsh";
+            const shown = signal(true);
+            const branch = cond(() => shown(), () => {
+                for (let i = 0; i < 20000; i++) computed(() => i)();
+                return null;
+            });
+            branch();
+            globalThis.hide = () => { shown.set(false); branch(); };"#,
+        )
+        .unwrap();
+        assert!(slots(&host).1 >= before + 20000);
+        host.eval_script("hide.js", "hide();").unwrap();
+        host.collect_garbage();
+        let (_, after) = slots(&host);
+        assert!(after < before + 100, "{before} → {after} slots");
     }
 
     #[test]
