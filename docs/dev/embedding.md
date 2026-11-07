@@ -46,6 +46,7 @@
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
   while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule
   keeps the whole package rather than a list that a new JNI lookup would have to extend.
+- Fonts the host ships: `NshView.registerFont(byte[])` and `NshAppView.registerFont(_:)` register a TrueType, OpenType, WOFF or WOFF2 file with the view, before a load or while an app runs. Apps then set `fontFamily` to the family name in the file and do not import it, so the file is not packed into each bundle. The same file registered again is kept once.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform

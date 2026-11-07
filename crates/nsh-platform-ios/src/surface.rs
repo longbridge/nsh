@@ -136,6 +136,8 @@ pub(crate) struct RootViewIvars {
     host: Cell<nsh_engine::HostEnvironment>,
     /// The embedding app's theme overrides ([`Surface::set_host_tokens`]).
     host_tokens: RefCell<Option<nsh_engine::Tokens>>,
+    /// Font files the embedding app registers ([`Surface::add_font`]).
+    fonts: RefCell<Vec<Vec<u8>>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
     /// Links that came before the engine started ([`Surface::url_scheme`]).
@@ -309,6 +311,7 @@ impl RootView {
             environment: Cell::new(None),
             host: Cell::default(),
             host_tokens: RefCell::new(None),
+            fonts: RefCell::new(Vec::new()),
             observers: RefCell::new(Vec::new()),
             url_schemes: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
@@ -781,9 +784,13 @@ impl RootView {
         };
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.ivars().host_tokens.borrow().clone();
+        let fonts = self.ivars().fonts.borrow().clone();
         let engine = match Engine::start_with(config, CoreTextEngine::default, sink, |control| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            for font in fonts {
+                control.register_font(font);
             }
         }) {
             Ok(engine) => engine,
@@ -1033,6 +1040,21 @@ impl Surface {
         *self.view.ivars().host_tokens.borrow_mut() = tokens.clone();
         if let Some(running) = &*self.view.ivars().running.borrow() {
             running.engine.control().set_tokens(tokens);
+        }
+    }
+
+    /// Replaces the fonts registered before the app starts. The engine reads
+    /// them when it starts.
+    pub fn set_host_fonts(&self, fonts: Vec<Vec<u8>>) {
+        *self.view.ivars().fonts.borrow_mut() = fonts;
+    }
+
+    /// Registers one more font file for the running app and every app
+    /// started later.
+    pub fn add_font(&self, data: Vec<u8>) {
+        self.view.ivars().fonts.borrow_mut().push(data.clone());
+        if let Some(running) = &*self.view.ivars().running.borrow() {
+            running.engine.control().register_font(data);
         }
     }
 

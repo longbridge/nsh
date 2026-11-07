@@ -141,6 +141,10 @@ import "./fonts/Inter-Bold.ttf";
 
 An arbitrary family works without a theme entry: `font-[Pacifico]`. Weight classes (`font-light`, `font-semibold`, `font-bold`, ...) select faces as `fontWeight` does. Text styles on a view pass down to the texts inside it, so `.font_family(INTER.family)` on a view, or `<View class="font-body">`, sets the family for a whole screen.
 
+## Fonts the embedding app registers
+
+An embedding app can register the same files itself, once, for every bundle it loads: `NshView.registerFont` on Android and `NshAppView.registerFont` on iOS take the file's bytes. The app then sets `fontFamily` to the family name in the file (the name an import of that file would evaluate to) and does not import it, so the file is not packed into each bundle. A font registered before a load is in that app's first frame.
+
 ## A default font for the app
 
 The theme's `font-sans` is the app's font: every text that sets no family of its own is drawn with it, in Rust components and TSX alike, as a web page is with Tailwind's `--font-sans`. `font-mono` is the monospaced font, of the `font-mono` class and of code in `TextView`. Set them in the app's theme (`"theme"` in `nsh.json`, [Rust](./rust.md#theme)) and ship the font files as above:

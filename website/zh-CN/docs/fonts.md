@@ -141,6 +141,10 @@ import "./fonts/Inter-Bold.ttf";
 
 不在主题中登记也可以使用任意字体族：`font-[Pacifico]`。字重类（`font-light`、`font-semibold`、`font-bold` 等）与 `fontWeight` 一样选择字形。视图上的文字样式会传给其内部的文字，因此视图上的 `.font_family(INTER.family)` 或 `<View class="font-body">` 可以为整个页面设置字体族。
 
+## 宿主注册的字体
+
+嵌入 NSH 的应用也可以自己注册这些文件，一次即可供它加载的每个 bundle 使用：Android 的 `NshView.registerFont` 和 iOS 的 `NshAppView.registerFont` 接收字体文件的字节。应用在 `fontFamily` 里写文件里的字体族名（即导入该文件时得到的名字），不再导入文件，因此文件不会打进每个 bundle。加载前注册的字体在该应用的第一帧就可用。
+
 ## 应用的默认字体
 
 主题的 `font-sans` 是应用的字体：没有设置自己字体族的文字都用它绘制，Rust 组件和 TSX 都一样，就像网页使用 Tailwind 的 `--font-sans`。`font-mono` 是等宽字体，用于 `font-mono` 类和 `TextView` 中的代码。在应用的主题（`nsh.json` 的 `"theme"`，[用 Rust 开发](./rust.md#主题)）中设置它们，并像上文那样发布字体文件：
