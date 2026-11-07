@@ -617,13 +617,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Web, browsers
 
-- **WebKit takes an import map only before the document's first module script**: one added after it is ignored,
-  and the app's `import "nsh"` failed with "Module name, 'nsh' does not resolve to a valid URL" (iOS 18.3 Safari; a
-  `document.open()` in between does not reset it, a dynamic `import()` from a classic script counts as a module
-  script, and navigating the frame gives it a new realm; iOS 26.5 Safari and Chrome 152 merge the later map). The realm's import map
-  goes in before the bootstrap module, with the native modules' facades made from `nativeExports` (`runtime.js`);
-  a module the app imports whole is mapped only once the namespaces exist, which needs a browser that merges
-  import maps (Chrome 133 and later).
+- **Firefox and older WebKit ignore an import map added after the first module script**: Firefox 153 rejected
+  the development host's bare `nsh` import, and iOS 18.3 Safari reported "Module name, 'nsh' does not resolve to a
+  valid URL". A `document.open()` does not reset this state; a dynamic `import()` from a classic script also
+  starts module loading. The realm bootstrap is therefore a self-contained generated classic script: it builds
+  the namespaces before `runtime.js` installs one complete map and loads `realm.js`, the first module. This also
+  covers namespace imports without relying on multiple import maps. Regenerate `bootstrap.js` with the command
+  in `docs/dev/web.md`; a module-mode minifier removes its strict directive, so the publisher restores the
+  directive before loading the result as a classic script.
 - **WebKit does not hand a `<link rel=preload as=fetch>` still in flight to the `fetch` of the same URL**: the
   `fetch` downloads the file again, and only once the preload has finished does it come from the HTTP cache (iOS 26.5
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
