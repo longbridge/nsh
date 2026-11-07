@@ -427,6 +427,9 @@ impl Surface {
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
                 }
+                if self.stats.borrow().is_some() {
+                    engine.control().set_perf_monitor(Some(Default::default()));
+                }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
             }
@@ -460,6 +463,14 @@ impl Surface {
     }
 
     /// Calls `f` with the engine's control, if an app runs.
+    /// Logs frame statistics once a second, or stops
+    /// ([`crate::AppView::set_fps_monitor`]). The engine measures its
+    /// commits meanwhile, which `fpsEnabled()` follows.
+    pub(crate) fn set_stats(&self, on: bool) {
+        *self.stats.borrow_mut() = on.then(Default::default);
+        self.control(|c| c.set_perf_monitor(on.then(Default::default)));
+    }
+
     pub(crate) fn control(&self, f: impl FnOnce(&EngineControl)) {
         if let Some(control) = &*self.control.borrow() {
             f(control);

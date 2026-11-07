@@ -50,9 +50,10 @@ enum Part {
     LocaleSettings,
     WindowState,
     Displays,
+    Fps,
 }
 
-const PARTS: usize = 14;
+const PARTS: usize = 15;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -122,6 +123,9 @@ pub(crate) fn init(cx: *mut JsContext) {
         let initial = if i == Part::Displays as usize {
             // SAFETY: a new array, borrowed by the signal and freed after.
             unsafe { qjs::JS_NewArray(cx) }
+        } else if i == Part::Fps as usize {
+            // No performance monitor until the platform installs one.
+            boolean(false)
         } else {
             UNDEFINED
         };
@@ -460,6 +464,23 @@ pub(crate) fn set_displays(cx: *mut JsContext, displays: &[Display]) -> Result<(
     }
 }
 
+/// Takes in whether the platform's performance monitor measures
+/// (`fpsEnabled()`).
+pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), ()> {
+    reactive::set_signal(
+        cx,
+        env(cx).signals[Part::Fps as usize].get(),
+        boolean(enabled),
+    );
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
 /// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
 /// when it fails (it does not for the environment's plain objects).
 fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
@@ -701,6 +722,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::function(
             "Shows the app in `scheme` whatever the system's appearance, at once:\n`colorScheme()`, `dark:` classes, the components' theme and the\nplatform's controls (alerts, the status bar's default style) follow it;\n`\"system\"` follows the system again. `nsh.json` `\"appearance\"` sets it\nfrom the start.",
             &["(scheme: \"light\" | \"dark\" | \"system\"): void"],
+        ),
+    ),
+    (
+        "fpsEnabled",
+        Export::Value(|cx| accessor(cx, Part::Fps)),
+        Ts::value(
+            "Whether the performance monitor measures (reactive): on with `--fps`,\n`NSH_FPS=1` or `setFpsEnabled(true)` where the platform has one.",
+            "Accessor<boolean>",
         ),
     ),
     (

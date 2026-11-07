@@ -408,6 +408,13 @@ impl Surface {
         self.ensure_ticking();
     }
 
+    /// Stops measuring ([`Surface::enable_fps`]).
+    pub(crate) fn disable_fps(&self) {
+        if self.fps.take().is_some() {
+            self.control(|c| c.set_perf_monitor(None));
+        }
+    }
+
     /// The performance monitor, while one measures.
     pub(crate) fn fps(&self) -> Option<Rc<crate::fps::Fps>> {
         self.fps.borrow().clone()
