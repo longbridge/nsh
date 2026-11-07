@@ -543,6 +543,8 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
             .map(|(name, _)| format!("nsh_part_{name}"))
             .collect();
         gates.push("nsh_std_zlib".into());
+        gates.push("nsh_std_crypto".into());
+        gates.push("nsh_std_url".into());
         gates.push("nsh_feature_shader".into());
         gates.extend(app_sets.iter().map(|s| ui_set_gate(s)));
         gates
@@ -551,7 +553,13 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
     if uses.computed_import {
         return all();
     }
-    let mut gates = vec!["nsh_part_core".to_owned()];
+    let mut gates = Vec::new();
+    if needs_base_core(uses, app_sets) {
+        gates.push("nsh_part_core".to_owned());
+    }
+    if uses.global_crypto {
+        gates.push("nsh_std_crypto".into());
+    }
     if uses.shader {
         gates.push("nsh_feature_shader".into());
     }
@@ -562,7 +570,10 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
     };
     for (module, imported) in &uses.imports {
         match module.as_str() {
-            "zlib" => add("nsh_std_zlib".into()),
+            "zlib" | "node:zlib" => add("nsh_std_zlib".into()),
+            "crypto" | "node:crypto" => add("nsh_std_crypto".into()),
+            // `domainToASCII` and `domainToUnicode`; `URL` is the browser's.
+            "url" | "node:url" => add("nsh_std_url".into()),
             // Shaders are `nsh`'s shader elements.
             "nsh" => match imported {
                 nsh_bundler::Imported::All => add("nsh_feature_shader".into()),
@@ -588,6 +599,21 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
         }
     }
     gates
+}
+
+/// Whether an app that uses `uses` needs `nsh/base`'s core part: it
+/// imports `nsh/base` or one of its parts, one of its own UI sets (whose
+/// Rust components may build on the core's controls), or may give a view
+/// a scroll bar theme of its own (the core draws built-in bars). An app
+/// that only imports `nsh` gets the platform's scroll indicators either
+/// way, and `AlertDialog` and `Toast` are `nsh/base`'s.
+fn needs_base_core(uses: &nsh_bundler::NativeUse, app_sets: &[String]) -> bool {
+    uses.scrollbar_theme
+        || uses.imports.keys().any(|module| {
+            module == nsh_base::SPECIFIER
+                || module.starts_with(&format!("{}/", nsh_base::SPECIFIER))
+                || app_sets.iter().any(|s| s == module)
+        })
 }
 
 /// `nsh`'s exports whose views a shader draws: an import of one keeps the
@@ -1501,19 +1527,26 @@ mod tests {
             gates
         };
         let core: &[&str] = &["Button", "Switch", "Tabs", "Tab", "NavStack", "AlertDialog"];
-        assert_eq!(
-            gates(&[("nsh", Some(&["mount", "View"]))]),
-            ["nsh_part_core"]
-        );
+        // Only `nsh`: no core part, no standard modules.
+        assert!(gates(&[("nsh", Some(&["mount", "View"]))]).is_empty());
         assert_eq!(
             gates(&[
                 ("nsh", Some(&["mount"])),
                 ("nsh/base", Some(core)),
                 ("buffer", None),
                 ("crypto", Some(&["createHash"])),
+                ("url", Some(&["domainToASCII"])),
             ]),
-            ["nsh_part_core"]
+            ["nsh_part_core", "nsh_std_crypto", "nsh_std_url"]
         );
+        // A scroll bar theme of a view's own is drawn by the core part.
+        let mut themed = uses(&[("nsh", Some(&["ScrollView"]))]);
+        themed.scrollbar_theme = true;
+        assert_eq!(linked_gates(Some(&themed)), ["nsh_part_core"]);
+        // The globals of `crypto` need its operations.
+        let mut global = uses(&[("nsh", Some(&["View"]))]);
+        global.global_crypto = true;
+        assert_eq!(linked_gates(Some(&global)), ["nsh_std_crypto"]);
         assert_eq!(
             gates(&[("nsh/base", Some(&["Button", "Editor"]))]),
             ["nsh_part_core", "nsh_part_editor"]
@@ -1531,9 +1564,9 @@ mod tests {
         );
         assert_eq!(
             gates(&[("nsh", Some(&["mount", "Shader"]))]),
-            ["nsh_feature_shader", "nsh_part_core"]
+            ["nsh_feature_shader"]
         );
-        let every = nsh_base::parts::ALL.len() + 2;
+        let every = nsh_base::parts::ALL.len() + 4;
         assert_eq!(gates(&[("nsh/base", None)]).len(), every);
         let mut computed = uses(&[]);
         computed.computed_import = true;
