@@ -936,7 +936,10 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). GPUI builds run in
+`crates/gpui`, their own workspace, and the CLI resolves their output through `cargo metadata`'s
+`target_directory`, honoring Cargo's configuration and `CARGO_TARGET_DIR` (or that Cargo implementation's own
+output policy), rather than assuming the main workspace's `target`. On macOS it runs the hosts
 built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug

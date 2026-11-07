@@ -2569,9 +2569,8 @@ fn install_stripped(
     Ok(())
 }
 
-/// The cargo to run.
 /// The target directory Cargo reports for the workspace at `workspace`.
-fn cargo_target_directory(workspace: &Path) -> Option<PathBuf> {
+pub(crate) fn cargo_target_directory(workspace: &Path) -> Option<PathBuf> {
     let out = Command::new(cargo())
         .args([
             "metadata",
@@ -2581,6 +2580,7 @@ fn cargo_target_directory(workspace: &Path) -> Option<PathBuf> {
             "--manifest-path",
         ])
         .arg(workspace.join("Cargo.toml"))
+        .current_dir(workspace)
         .output()
         .ok()
         .filter(|out| out.status.success())?;
