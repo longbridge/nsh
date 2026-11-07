@@ -297,4 +297,4 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 ## 生成的目录
 
 - **`.nsh/`**：NSH 生成的一切：类型声明（`.nsh/types`）、Rust 应用运行器的源码（`.nsh/rust`）、`nsh run` 安装到模拟器和设备上的内容（Catalyst 宿主应用、Android 开发 APK），以及 `.nsh/out`，即 `nsh build` 的默认输出（`bundle.js`、`bundle.js.map`、`bundle.nshc`、`capabilities.json`、`assets/`；Rust 应用是 `app.json` 和 `assets/`）和 `nsh package` 的输出（`.app`、`.ipa`、`.apk`、网站）；用 `-o` 写到别处。可以放心删除，会被重新生成。
-- **`target/`**：应用的 crate 和运行器的 Cargo 构建目录（或 `CARGO_TARGET_DIR`）。
+- **`target/`**：应用的 crate 和运行器的 Cargo 构建目录（或 `CARGO_TARGET_DIR`）。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，这里只放可执行文件，构建产物放在 `~/.cargo/targets/` 下。

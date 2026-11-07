@@ -154,7 +154,7 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <
 | `--foreground` | 配合 `--target macos`：让应用成为当前活跃的应用，和用户使用时一样。默认应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，测试的点击、按键和快捷键直接发给这些窗口。依赖应用处于活跃状态的测试（`lifecycle()` 随应用是否活跃而变），或 `examples/gallery/tools/perf.py` 这类性能测量（它会传入该选项），应带上它运行。 |
 | `--web-host <JS>` | headless 运行时测试打开的应用所用的 Web 页面宿主模块（默认：`nsh.json` 的 `web.host`；它导出 `createHost(player)`）：它应答应用的 [`host`](../modules/nsh.md#host) 调用，它的 `player.hostEvent` 会送到 `host.on`（[测试](./testing-and-trace.md#页面的宿主)）。只用于 headless 运行；`--target web` 运行 `nsh.json` 的 `web.host`。 |
 
-NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。
+NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，构建产物放在 `~/.cargo/targets/` 下，可执行文件仍在 `target/`。
 
 ## nsh check
 

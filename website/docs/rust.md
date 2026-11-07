@@ -46,6 +46,10 @@ nsh run                        # this machine's backend; --target ios, android, 
 nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows
 ```
 
+Build with [huacnlee/cargo](https://github.com/huacnlee/cargo), the Cargo NSH is developed with: a drop-in fork that builds each dependency once for all your
+projects and Git worktrees and keeps its build directory under a size limit on its own, with nothing to configure
+([Installation](./installation.md#building-from-a-checkout)).
+
 `src/lib.rs` holds the app: components, state, handlers, tasks.
 
 ```rust

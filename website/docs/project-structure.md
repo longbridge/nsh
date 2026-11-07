@@ -300,4 +300,4 @@ See [Images and assets](./images-and-assets.md) and [Fonts](./fonts.md).
 ## Generated directories
 
 - **`.nsh/`**: everything NSH generates: the type declarations (`.nsh/types`), the sources of a Rust app's runners (`.nsh/rust`), what `nsh run` installs on simulators and devices (the Catalyst host app, the Android development APK), and `.nsh/out`, the default output of `nsh build` (`bundle.js`, `bundle.js.map`, `bundle.nshc`, `capabilities.json`, `assets/`; for a Rust app, `app.json` and `assets/`) and `nsh package` (`.app`, `.ipa`, `.apk`, a site); `-o` writes elsewhere. Safe to delete; it is recreated.
-- **`target/`**: Cargo's build directory for an app's crates and runners (or `CARGO_TARGET_DIR`).
+- **`target/`**: Cargo's build directory for an app's crates and runners (or `CARGO_TARGET_DIR`). With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we recommend, it holds only the binaries, and the builds live under `~/.cargo/targets/`.
