@@ -1238,6 +1238,9 @@ enum Message {
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// The embedding app's design tokens.
     Tokens(Option<Box<Tokens>>),
+    /// A font file the embedding app registers (TrueType, OpenType, WOFF or
+    /// WOFF2), before the first frame and whenever it registers another.
+    HostFont(Vec<u8>),
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
@@ -1460,6 +1463,14 @@ impl EngineControl {
     /// [`Engine::start_with`]'s `setup`, they are in the first frame.
     pub fn set_tokens(&self, tokens: Option<Tokens>) {
         let _ = self.tx.send(Message::Tokens(tokens.map(Box::new)));
+    }
+
+    /// Registers a font file the embedding app ships (TrueType, OpenType,
+    /// WOFF or WOFF2) so every app this engine runs can name its family.
+    /// Sent from [`Engine::start_with`]'s `setup`, it is registered before
+    /// the first frame; sent later, text measured already is measured again.
+    pub fn register_font(&self, data: Vec<u8>) {
+        let _ = self.tx.send(Message::HostFont(data));
     }
 }
 
@@ -1942,6 +1953,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         while let Ok(message) = rx.try_recv() {
             match message {
                 Message::Tokens(tokens) => core.set_host_tokens(tokens.map(|t| *t)),
+                Message::HostFont(data) => {
+                    if let Err(err) = core.register_font(&data) {
+                        log::error!("font failed: {err}");
+                    }
+                }
                 Message::Displays(list) => {
                     core.set_displays(list.clone());
                     displays = list;
@@ -3514,6 +3530,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.core.set_host_tokens(tokens.map(|t| *t));
             if let Some(script) = script {
                 script.set_theme_tokens(state.core.theme_tokens());
+            }
+        }
+        Message::HostFont(data) => {
+            if let Err(err) = state.core.register_font(&data) {
+                log::error!("font failed: {err}");
             }
         }
         // A Rust app has no `nsh/host`: what the host sends it goes.
