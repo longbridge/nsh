@@ -213,7 +213,9 @@ Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggle
 `unsetStrike`, `toggleHeading({ level })`, `setParagraph`, `toggleBlockquote`, `toggleBulletList`,
 `toggleOrderedList`, `toggleTaskList`, `toggleCodeBlock({ language })`, `setHardBreak`, `setHorizontalRule`,
 `setImage({ src })`, `toggleHighlight({ color })`, `setTextAlign("center")`, `unsetTextAlign`, and the link,
-character count and suggestion commands below.
+character count and suggestion commands below. An image's `src` is what `Image` takes (a URL, a file path or
+`file:` URL, a `data:` URI); without `width` and `height` it shows at its natural size, and with one of them at that
+side and its aspect ratio.
 
 The list toggles work on whole lists, as a word processor's list buttons do: `toggleOrderedList` in a bulleted list
 numbers it at every level, nested lists included, and a list's own toggle takes the selected blocks out of every
