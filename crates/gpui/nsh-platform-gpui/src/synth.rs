@@ -84,10 +84,15 @@ pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) -> boo
             let ch = match vk {
                 0x20 => Some(' '),
                 0x30..=0x39 => char::from_u32(vk as u32),
-                0x41..=0x5A => char::from_u32(if modifiers.shift { vk } else { vk + 32 } as u32),
+                0x41..=0x5A => char::from_u32((vk + 32) as u32),
                 _ => None,
             };
             if let Some(ch) = ch {
+                let ch = if modifiers.shift {
+                    nsh_core::keymap::shifted(ch)
+                } else {
+                    ch
+                };
                 crate::text_input::char_input(surface, &ch.to_string());
             }
         }

@@ -264,6 +264,8 @@ the mouse's back button (it goes back from wherever the focus is), a dialog's an
 middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
+Synthesized letters and digits use `nsh_core::keymap::shifted` with Shift (`shift+8` types `*`, `shift+2` types `@`),
+matching the other test hosts. Production text still arrives through GPUI's input handler.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
