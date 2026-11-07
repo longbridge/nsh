@@ -764,8 +764,15 @@ impl<M: TextEngine> Core<M> {
 
     /// Replaces the theme: every class is resolved again.
     pub(super) fn set_tailwind_theme(&mut self, json: &str) {
-        let theme = match Theme::from_json(json) {
-            Ok(t) => t,
+        // A newer NSH's theme: what this one cannot read is left out, the
+        // rest applies.
+        let theme = match Theme::from_json_lenient(json) {
+            Ok((theme, ignored)) => {
+                for what in ignored {
+                    log::warn!("tailwind theme: {what}, ignored");
+                }
+                theme
+            }
             Err(e) => {
                 log::warn!("tailwind theme: {e}");
                 return;

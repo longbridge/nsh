@@ -17,7 +17,7 @@ use crate::{package::AppConfig, ui};
 
 /// `nsh.json`'s `"updater"`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct UpdaterConfig {
     /// `owner/repo`: updates from its GitHub Releases.
     pub(crate) github: Option<String>,
