@@ -1160,6 +1160,15 @@ impl Host {
             .map_or(0, |rt| self.scheduler.ready(rt.memory_usage()).obj_count)
     }
 
+    /// The JS heap's size in bytes and its live objects (diagnostics: a
+    /// walk of the heap, so not for every frame).
+    pub fn heap_usage(&self) -> (u64, u64) {
+        self.rt.borrow().as_ref().map_or((0, 0), |rt| {
+            let m = self.scheduler.ready(rt.memory_usage());
+            (m.malloc_size.max(0) as u64, m.obj_count.max(0) as u64)
+        })
+    }
+
     /// Runs the cycle collector. Call when idle so released nodes are
     /// reported promptly.
     pub fn collect_garbage(&self) {
