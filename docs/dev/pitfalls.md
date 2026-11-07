@@ -180,6 +180,11 @@ Things that were found the hard way. Read the section of the area you change bef
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
 - **Property changes on standalone `CALayer`s animate implicitly for 0.25s** (a UIView's own layer does not): wrap changes to shape / image
   layers in `CATransaction.setDisableActions(true)`.
+- **Box-shadow geometry needs explicit animations of its own**: iOS transitions animate the view's `cornerRadius`, but the
+  shadow layer's `shadowPath`, the mask's `path` and the content clip layer's corners have no implicit action: set beside an
+  animating radius they jump to the new shape and the shadow's edge detaches from the background for the whole transition.
+  Set them through `interaction::animate_geometry`, which animates from the presented (mid-animation) value; quiet
+  decoration updates still apply at once.
 - **Core Animation always draws `border` above sublayers**, while CSS borders are below children: non-clipping views use a stroke layer below
   the children; when clipping both look the same, so the layer's own border is used.
 - **A UIScrollView's sublayers scroll with its content** (`bounds.origin` is the scroll offset), so scroll views cannot use shape layers / masks.
