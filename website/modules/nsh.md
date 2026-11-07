@@ -2170,7 +2170,8 @@ type AudioErrorCode =
 
 ### Sound.load
 
-Loads a sound from a bundled asset's path (`"sounds/click.wav"`), a `file:` URL, a `data:` URI or an `http(s)` URL
+Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
+`asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
 the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
 components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
 component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
@@ -2185,8 +2186,9 @@ that is silence. A value out of range throws a `RangeError`. `stop()` stops ever
 
 ```tsx
 import { Sound, View } from "nsh";
+import tapFile from "./sounds/tap.wav";
 
-const tap = await Sound.load("sounds/tap.wav");
+const tap = await Sound.load(tapFile);
 
 function Key(props: { label: string }) {
   return <View onPress={() => tap.play({ volume: 0.6 })}>{props.label}</View>;

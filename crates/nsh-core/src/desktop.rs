@@ -825,6 +825,11 @@ pub enum DesktopCommand {
     /// (a window kept hidden, a tray icon). A view embedded in another app
     /// leaves the app's lifecycle to that app.
     Quit,
+    /// Quits the app as [`DesktopCommand::Quit`] does, then starts it again
+    /// with the same arguments once this process has exited
+    /// ([`crate::restart`]). A view embedded in another app leaves the
+    /// app's lifecycle to that app: nothing happens there.
+    Restart,
     /// Hides the window; [`DesktopCommand::OrderFront`] shows it again.
     Hide,
     /// Shows the dialog root the command is addressed to in a window of its

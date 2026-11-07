@@ -96,7 +96,7 @@ impl Sdk {
             .env(
                 format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"),
                 format!(
-                    "--sysroot=\"{}\"",
+                    "--target={clang_target}{MIN_SDK} --sysroot=\"{}\"",
                     toolchain
                         .join("sysroot")
                         .display()
@@ -249,14 +249,19 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     // Resources: only the launcher icon.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
-        let res = work.join("res/mipmap-xxxhdpi");
+        // aapt2 parses the file's path itself: the components joined in one
+        // go (`join("res/mipmap-xxxhdpi")`) leave a mix of `/` and `\` on
+        // Windows, which it calls no valid file path. Joined by component
+        // the path comes out uniform.
+        let res = work.join("res").join("mipmap-xxxhdpi");
         fs::create_dir_all(&res)?;
-        resize_png(icon, &res.join("ic_launcher.png"), 192)?;
+        let icon_path = res.join("ic_launcher.png");
+        resize_png(icon, &icon_path, 192)?;
         let compiled = work.join("compiled");
         fs::create_dir_all(&compiled)?;
         run(Command::new(sdk.tool("aapt2"))
             .arg("compile")
-            .arg(res.join("ic_launcher.png"))
+            .arg(&icon_path)
             .arg("-o")
             .arg(&compiled))?;
         for entry in fs::read_dir(&compiled)? {
@@ -366,6 +371,13 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
+        <!-- Serves the app's own files to the apps that open them
+            (`SystemUi.openPath`): the authority matches what
+            `FilesProvider.uriFor` builds. -->
+        <provider android:name="com.longbridge.nsh.FilesProvider"
+            android:authorities="{package}.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity android:name="{activity}" android:exported="true"{launch_mode}
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
@@ -793,6 +805,28 @@ mod tests {
         let at = manifest.find(flag).unwrap();
         assert!(application < at && at < activity, "{manifest}");
         assert!(!super::manifest_xml(&apk(false, false)).contains("com.longbridge.nsh.RUST"));
+    }
+
+    #[test]
+    fn a_packaged_app_declares_the_files_provider() {
+        // `SystemUi.openPath` hands the system's viewer a `content:` URI
+        // of this authority; without the declaration the provider is not
+        // resolved and the file cannot be opened.
+        let manifest = super::manifest_xml(&apk(false, false));
+        let provider = "<provider android:name=\"com.longbridge.nsh.FilesProvider\"";
+        assert!(manifest.contains(provider), "{manifest}");
+        assert!(
+            manifest.contains("android:exported=\"false\""),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains("android:grantUriPermissions=\"true\""),
+            "{manifest}"
+        );
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find(provider).unwrap();
+        assert!(application < at && at < activity, "{manifest}");
     }
 
     #[test]

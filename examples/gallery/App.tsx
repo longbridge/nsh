@@ -9,9 +9,34 @@ import { Storage } from "nsh";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
+import { loadSounds, play } from "../nsh-gallery-ui/sound";
+import attentionSound from "./sounds/attention.wav";
+import closeSound from "./sounds/close.wav";
+import errorSound from "./sounds/error.wav";
+import openSound from "./sounds/open.wav";
+import readySound from "./sounds/ready.wav";
+import selectSound from "./sounds/select.wav";
+import successSound from "./sounds/success.wav";
+import tapSound from "./sounds/tap.wav";
+import toggleSound from "./sounds/toggle.wav";
+import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
+import { Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
+
+// Loaded once, ahead of the first press: a sound plays within a frame then.
+loadSounds({
+  tap: tapSound,
+  select: selectSound,
+  toggle: toggleSound,
+  open: openSound,
+  close: closeSound,
+  success: successSound,
+  warning: warningSound,
+  error: errorSound,
+  ready: readySound,
+  attention: attentionSound,
+});
 
 /** `nsh`'s primitives, from the simplest, in the website's order. */
 const primitives: DemoEntry[] = [
@@ -130,8 +155,10 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
       { name: "Updater", detail: "nsh/updater: ask for a newer version, download it, replace the app", icon: "system", screen: lazy(() => import("./demos/Updater").then((m) => m.UpdaterDemo)) },
       { name: "Notifications", detail: "Asking for the permission, a notification shown, replaced and pressed, the badge on the app's icon", icon: "spark", screen: lazy(() => import("./demos/NotificationsDemo").then((m) => m.NotificationsDemo)) },
+      { name: "Sound", detail: "A sound for each kind of moment, played with the UI as it changes", icon: "media", screen: lazy(() => import("./demos/SoundDemo").then((m) => m.SoundDemo)) },
       { name: "URL scheme", detail: "UrlScheme: nsh-gallery:// links that open the app", icon: "system", screen: lazy(() => import("./demos/UrlSchemeDemo").then((m) => m.UrlSchemeDemo)) },
-      { name: "Tray & shortcuts", detail: "nsh/desktop: an icon in the system tray with its menu, a global shortcut", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
+      { name: "Tray", detail: "nsh/desktop: an icon in the system tray with its tooltip, click and menu", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
+      { name: "Global shortcut", detail: "nsh/desktop: a keystroke heard whichever app has the keyboard", icon: "system", screen: lazy(() => import("./demos/ShortcutDemo").then((m) => m.ShortcutDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },
@@ -176,7 +203,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 
 function Home() {
   return (
-    <NavPage title="Gallery" {...header} headerLargeTitle headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
+    <NavPage title="Gallery" {...header} headerLargeTitle headerRight={<Toggles bar />} header={<PageHeader title="Gallery" root right={<Toggles />} />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ paddingTop: 12, paddingBottom: 40, gap: 28 }}>
           <Banner />
@@ -259,11 +286,23 @@ const selected = signal<DemoEntry>(groups[0].demos[0]);
 /** Whether the desktop layout has been shown (for the switch back). */
 const wasDesktop = signal(false);
 
-/** Shows a demo in the desktop layout, closing what it had pushed. */
+/** Shows a demo in the desktop layout, closing what it had pushed; a
+ * different demo ticks, quietly. */
 const select = (demo: DemoEntry) => {
   if (nav.routes().length > 1) nav.popToRoot();
+  if (demo !== untracked(selected)) play("select", { volume: 0.4 });
   selected.set(demo);
 };
+
+/** The sound and theme switches, side by side. */
+function Toggles(props: { bar?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: props.bar ? 0 : 2 }}>
+      <SoundToggle bar={props.bar} />
+      <ThemeToggle bar={props.bar} />
+    </View>
+  );
+}
 
 /** What the sidebar's search field holds. */
 const query = signal("");
@@ -532,7 +571,7 @@ function Sidebar() {
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
             <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
           </View>
-          <ThemeToggle />
+          <Toggles />
         </View>
       </View>
     </View>

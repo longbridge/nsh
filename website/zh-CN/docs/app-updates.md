@@ -54,7 +54,7 @@ if (update?.canInstall) {
 
 `update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
 
-`installAndRestart` 会结束当前进程，需要保存的内容请先保存。如果失败，应用保持原样。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
+`installAndRestart` 像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。如果失败，应用保持原样。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
 
 ## 发布新版本
 
@@ -89,9 +89,9 @@ macOS 上 `nsh package` 用的是 ad hoc 签名，可用于测试，但在其他
 
 原生 Rust 应用直接使用 `nsh-updater`，并提供自己的 HTTP 传输。
 用 `Config::check` 验证清单，用 `Download` 验证更新包；之后调用
-`Installation::install_and_launch`，仅在成功后退出旧进程。它会保留旧安装，
-直到新进程能够启动；启动失败时回滚。分别调用 `install` 和 `launch` 不提供
-这项回滚保证。这里检测的是启动错误，无法检测进程已经启动后发生的崩溃。
+`Installation::install`，成功后调用 `nsh_core::element::desktop::restart()`：
+应用像 `Application.restart()` 那样退出，进程结束后新版本启动。`install`
+失败时，应用保持原样。
 
 `Config`、`Manifest`、`Asset` 和 `Available` 均为非穷尽结构体。
 使用 `Default::default()` 创建，再给所需字段赋值。

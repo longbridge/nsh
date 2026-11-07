@@ -3,9 +3,11 @@
 // sound: `available()` resolves false, `Sound.load` rejects with
 // ERR_FEATURE_UNAVAILABLE_ON_PLATFORM, and a player's `play()` rejects as
 // its `error` listener hears `unavailable`. Values out of range throw a
-// `RangeError` in the call. Its script checks each.
+// `RangeError` in the call. An imported audio file is its `asset:/` URL.
+// Its script checks each.
 import { Text, View, signal } from "nsh";
 import { AudioPlayer, Sound } from "nsh";
+import click from "./sounds/click.wav";
 
 function App() {
   const available = signal("unknown");
@@ -19,6 +21,7 @@ function App() {
       <Text>{`Sound: ${loaded()}`}</Text>
       <Text>{`Player: ${played()}`}</Text>
       <Text>{`Refused: ${refused()}`}</Text>
+      <Text>{`Imported: ${click}`}</Text>
       <View
         testID="play"
         onPress={() => {
@@ -27,7 +30,7 @@ function App() {
           } catch (e) {
             refused.set(`threw ${(e as Error).name}`);
           }
-          Sound.load("click.wav").then(
+          Sound.load(click).then(
             (sound: Sound) => loaded.set(`loaded ${sound.duration}`),
             (e: Error & { code?: string }) => loaded.set(`rejected ${e.code}`),
           );

@@ -7,6 +7,7 @@
 import { cleanup, computed, createMotion, Overlay, signal, Text, View } from "nsh";
 import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
 import { safeArea } from "nsh";
+import { play, type SoundName } from "../nsh-gallery-ui/sound";
 import { LucideIcon, type LucideIconName } from "./icons";
 import { alpha, colors, desktop, finish, hovered, radius, TERMINAL_COLUMN, terminal } from "./ui";
 
@@ -51,6 +52,10 @@ const chosen = new Map<string, string>();
 const lingering = new Map<string, number>();
 let ticking: ReturnType<typeof setInterval> | undefined;
 let count = 0;
+
+/** The sound a toast of a kind makes as it shows: none while it loads, none
+ * without a kind. */
+const voices: Partial<Record<ToastKind, SoundName>> = { success: "success", error: "error", warning: "warning", info: "attention" };
 
 function sync() {
   shown.set(manager.visible(LIMIT));
@@ -99,6 +104,8 @@ export function toast(content: ToastContent): Promise<string | null> {
   // The manager holds the id alone: the content stays in `contents`, where
   // `updateToast` changes it.
   manager.push(id, id, { timeout: content.duration ?? 5000 });
+  const voice = content.kind && voices[content.kind];
+  if (voice) play(voice);
   run();
   return new Promise((resolve) => answers.set(id, resolve));
 }
@@ -112,6 +119,9 @@ export function updateToast(id: string, change: Partial<ToastContent>): boolean 
   const content = contents()[id];
   if (!content) return false;
   contents.set({ ...contents(), [id]: { ...content, ...change } });
+  // A loading toast becoming its result sounds as a new one would.
+  const voice = change.kind && change.kind !== content.kind && voices[change.kind];
+  if (voice) play(voice);
   if (change.duration !== undefined) {
     if (Number.isFinite(change.duration)) lingering.set(id, change.duration);
     else lingering.delete(id);

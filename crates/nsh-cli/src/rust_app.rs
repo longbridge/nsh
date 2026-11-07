@@ -1911,12 +1911,7 @@ opt-level = \"s\"
         extra: &[&str],
         what: &str,
     ) -> anyhow::Result<PathBuf> {
-        let suffix = if triple.is_none() {
-            env::consts::EXE_SUFFIX
-        } else {
-            ""
-        };
-        let artifact = format!("{package}{suffix}");
+        let artifact = format!("{package}{}", crate::runtime::exe_suffix(triple));
         let build = Build {
             workspace,
             package,
@@ -1941,6 +1936,7 @@ opt-level = \"s\"
             artifact,
             what,
         } = *build;
+        crate::runtime::cross_build(&mut cmd, triple)?;
         cmd.arg("build")
             .arg("--manifest-path")
             .arg(workspace.join("Cargo.toml"))

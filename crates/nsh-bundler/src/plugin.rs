@@ -68,6 +68,10 @@ pub(crate) struct ThemeSetup {
 /// File types imported as image assets.
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"];
 
+/// File types imported as audio: the formats `Sound` and `AudioPlayer`
+/// play on every platform (`docs/dev/audio-design.md`).
+pub(crate) const AUDIO_EXTENSIONS: &[&str] = &["wav", "m4a", "aac", "mp3"];
+
 /// File types imported as fonts.
 pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
@@ -436,6 +440,20 @@ impl Plugin for NshPlugin {
                 ..Default::default()
             }));
         }
+        if has_extension(path, AUDIO_EXTENSIONS) {
+            // An audio import is its URL, for `Sound.load` and `AudioPlayer`;
+            // the file ships with the app.
+            self.assets
+                .lock()
+                .expect("assets lock")
+                .push(path.to_path_buf());
+            let code = format!("export default {:?};", format!("asset:/{rel}"));
+            return Ok(Some(HookLoadOutput {
+                code: code.into(),
+                module_type: Some(ModuleType::Js),
+                ..Default::default()
+            }));
+        }
         if !has_extension(path, IMAGE_EXTENSIONS) {
             return Ok(None);
         }
@@ -604,6 +622,28 @@ mod tests {
     fn svg(body: &str) -> Vec<u8> {
         format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{body}</svg>"#)
             .into_bytes()
+    }
+
+    /// An audio import is its `asset:/` URL, and the file ships.
+    #[test]
+    fn an_audio_import_is_its_url_and_ships() {
+        let dir = std::env::temp_dir().join(format!("nsh-audio-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        std::fs::write(dir.join("sounds/tap.wav"), b"RIFF").unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { Sound, mount, View } from \"nsh\";\nimport tap from \"./sounds/tap.wav\";\nSound.load(tap);\nmount(() => <View />);\n",
+        )
+        .unwrap();
+        let bundle = bundled(&dir);
+        assert!(
+            bundle.code.contains("\"asset:/sounds/tap.wav\""),
+            "{}",
+            bundle.code
+        );
+        assert_eq!(assets(&bundle), ["sounds/tap.wav"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
