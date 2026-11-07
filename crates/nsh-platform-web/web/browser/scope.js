@@ -14,6 +14,7 @@ export { createNavigation } from "./navigation.js";
 export { createKeymap } from "./keymap.js";
 export { createEnvironment } from "./environment.js";
 export { installTesting } from "./testing.js";
+export { installFetch } from "./fetch.js";
 export { createHot } from "./hot.js";
 
 
