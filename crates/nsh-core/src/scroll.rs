@@ -1554,14 +1554,19 @@ const REVEAL_MARGIN: f32 = 16.0;
 
 /// How far a scroll view must move along an axis so that the span
 /// `[start, end)` (viewport coordinates) shows in `[0, viewport)`, with
-/// a margin; the start wins when the span does not fit.
+/// a margin; the start wins when the span does not fit. A span that does
+/// not fit and shows already stays: it could only show in part anyway, and
+/// moving it would move what the pointer is on (a web view the height of
+/// its page, focused by a click near its end or by its context menu).
 pub fn reveal_delta(start: Points, end: Points, viewport: Points) -> Points {
     Points(reveal_by(start.0, end.0, viewport.0))
 }
 
 fn reveal_by(start: f32, end: f32, viewport: f32) -> f32 {
     let margin = REVEAL_MARGIN.min(viewport / 4.0);
-    if start < margin {
+    if end - start > viewport - 2.0 * margin && end > 0.0 && start < viewport {
+        0.0
+    } else if start < margin {
         start - margin
     } else if end > viewport - margin {
         (end - (viewport - margin)).min(start - margin)
@@ -1974,8 +1979,13 @@ mod tests {
         assert_eq!(reveal_by(100.0, 140.0, 400.0), 0.0);
         assert_eq!(reveal_by(-30.0, 10.0, 400.0), -46.0);
         assert_eq!(reveal_by(380.0, 420.0, 400.0), 36.0);
-        // Taller than the viewport: its start shows.
-        assert_eq!(reveal_by(200.0, 900.0, 400.0), 184.0);
+        // Taller than the viewport: its start shows, unless some of it
+        // shows already.
+        assert_eq!(reveal_by(500.0, 1200.0, 400.0), 484.0);
+        assert_eq!(reveal_by(-1200.0, -500.0, 400.0), -1216.0);
+        assert_eq!(reveal_by(200.0, 900.0, 400.0), 0.0);
+        assert_eq!(reveal_by(-2000.0, 300.0, 400.0), 0.0);
+        assert_eq!(reveal_by(-2000.0, 900.0, 400.0), 0.0);
         assert_eq!(
             reveal_delta(Points(-30.0), Points(10.0), Points(400.0)),
             Points(-46.0)
