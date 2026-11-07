@@ -75,7 +75,7 @@ WORKFLOWS = {
     },
 }
 
-ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml"]
+ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml", ".github/actions/cargo/**"]
 
 
 def crates():

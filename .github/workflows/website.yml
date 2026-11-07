@@ -21,6 +21,7 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/website.yml"
+      - ".github/actions/cargo/**"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -33,6 +34,7 @@ on:
       - "crates/nsh-platform-web/**"
       - "examples/gallery/**"
       - ".github/workflows/website.yml"
+      - ".github/actions/cargo/**"
   merge_group:
     types: [checks_requested]
   # A release puts its documentation at the root. (The release the Release
@@ -91,11 +93,12 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      # Dependencies only: main's runs save it, pull requests restore it.
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # huacnlee/cargo, and the dependencies' builds: main's runs save
+      # them, pull requests restore them.
+      - name: Cargo
+        uses: ./.github/actions/cargo
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: website
 
       - name: Test browser scroll indicator behavior
         run: node --test crates/nsh-platform-web/web/scroll.test.mjs

@@ -125,7 +125,14 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
         let package = "nsh-gpui-host";
         // The GPUI backend is a workspace of its own (`crates/gpui`), built
-        // into the same `target/`.
+        // into the same `target/`; huacnlee/cargo ignores `--target-dir`
+        // and puts it in the GPUI workspace's own `target/`. The host is
+        // taken from whichever of the two the build wrote.
+        let built = [release.clone(), root.join("crates/gpui/target")]
+            .map(|dir| dir.join("release").join(exe(package)));
+        for file in &built {
+            remove(file)?;
+        }
         cargo(
             &[
                 "build",
@@ -139,10 +146,11 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ],
             "the development host for GPUI",
         )?;
-        copy(
-            &release.join("release").join(exe(package)),
-            &out.join("runtime/gpui").join(exe(package)),
-        )?;
+        let host = built
+            .iter()
+            .find(|file| file.exists())
+            .context("the GPUI build wrote no development host")?;
+        copy(host, &out.join("runtime/gpui").join(exe(package)))?;
     }
 
     // The web runtimes, the same files on every machine, all running TSX on
@@ -508,6 +516,17 @@ fn package_dir(root: &Path, name: &str) -> anyhow::Result<std::path::PathBuf> {
         .parent()
         .context("a manifest without directory")?
         .to_path_buf())
+}
+
+/// Removes `file` if it is there, so that a build that writes it again
+/// shows where it went.
+pub(crate) fn remove(file: &Path) -> anyhow::Result<()> {
+    match fs::remove_file(file) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).with_context(|| format!("remove {}", file.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
