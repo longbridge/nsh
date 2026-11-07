@@ -46,6 +46,7 @@ export type IconName =
   | "undo"
   | "volume-low"
   | "volume-high"
+  | "volume-off"
   | "code"
   | "sliders"
   | "stepper"
@@ -90,7 +91,8 @@ export type IconName =
   | "folder"
   | "folder-open"
   | "file"
-  | "tree";
+  | "tree"
+  | "hamburger";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -236,6 +238,12 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [2.5, 8, 17.5, 8]);
     line(c, [2.5, 12.5, 17.5, 12.5]);
     line(c, [8, 3.5, 8, 16.5]);
+  },
+  // Three bars: a menu of the app's own settings.
+  hamburger: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [3.5, 10, 16.5, 10]);
+    line(c, [3.5, 14.5, 16.5, 14.5]);
   },
   menu: (c) => {
     rect(c, 3.5, 2.5, 13, 15, 2.5);
@@ -587,6 +595,11 @@ const glyphs: Record<IconName, Draw> = {
     speaker(c);
     wave(c, 3.2);
     wave(c, 6.2);
+  },
+  "volume-off": (c) => {
+    speaker(c);
+    line(c, [13, 7.5, 18, 12.5]);
+    line(c, [18, 7.5, 13, 12.5]);
   },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.

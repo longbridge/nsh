@@ -11,6 +11,12 @@
 //!   desktop that lets the user bind it shows, and what Hyprland's
 //!   `bind = …, global, <app id>:<id>` names. Its keystroke is only the
 //!   preferred trigger: the desktop may ask the user, or bind another.
+//! - The portal binds shortcuts for an app it knows the id of: an app
+//!   outside a sandbox says it with `org.freedesktop.host.portal.Registry`'s
+//!   `Register` (xdg-desktop-portal 1.19+, which refuses `CreateSession`
+//!   with "An app id is required" otherwise), the connection's first portal
+//!   call. GTK may have used the shared session connection for portals
+//!   already, so the shortcuts have a connection of their own.
 //! - Without a portal, or when it refuses, a registration answers
 //!   `registered: false`.
 
@@ -29,6 +35,7 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
 const REQUEST: &str = "org.freedesktop.portal.Request";
 const SESSION: &str = "org.freedesktop.portal.Session";
+const REGISTRY: &str = "org.freedesktop.host.portal.Registry";
 
 /// A shortcut the app registered.
 struct Global {
@@ -54,6 +61,8 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::default();
+    /// The shortcuts' own connection, with the app's id registered.
+    static BUS: RefCell<Option<gio::DBusConnection>> = const { RefCell::new(None) };
     static TOKEN: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -181,22 +190,82 @@ fn bind() {
         s.generation += 1;
         (s.session.take(), s.generation, s.globals.is_empty())
     });
-    let bus = match gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
+    connect(move |bus| {
+        let Some(bus) = bus else {
+            return answer(|_| false);
+        };
+        if let Some(old) = old {
+            close_session(&bus, &old);
+        }
+        if empty || !current(generation) {
+            return;
+        }
+        create_session(&bus, generation);
+    });
+}
+
+/// Hands `done` the shortcuts' connection, opening it and registering the
+/// app's id with the portal the first time (`None`: no session bus).
+fn connect(done: impl FnOnce(Option<gio::DBusConnection>) + 'static) {
+    if let Some(bus) = BUS.with(|b| b.borrow().clone()) {
+        return done(Some(bus));
+    }
+    let bus = gio::dbus_address_get_for_bus_sync(gio::BusType::Session, gio::Cancellable::NONE)
+        .and_then(|address| {
+            gio::DBusConnection::for_address_sync(
+                &address,
+                gio::DBusConnectionFlags::AUTHENTICATION_CLIENT
+                    | gio::DBusConnectionFlags::MESSAGE_BUS_CONNECTION,
+                None,
+                gio::Cancellable::NONE,
+            )
+        });
+    let bus = match bus {
         Ok(bus) => bus,
-        Err(_) => return answer(|_| false),
+        Err(e) => {
+            log::warn!("nsh: no session bus for global shortcuts: {e}");
+            return done(None);
+        }
     };
-    if let Some(old) = old {
-        close_session(&bus, &old);
+    let (app_id, _) = crate::notifications::app();
+    if app_id.is_empty() {
+        BUS.with(|b| *b.borrow_mut() = Some(bus.clone()));
+        return done(Some(bus));
     }
-    if empty {
-        return;
-    }
-    subscribe(&bus);
+    let registered = bus.clone();
+    bus.call(
+        Some(PORTAL),
+        PORTAL_PATH,
+        REGISTRY,
+        "Register",
+        Some(&glib::Variant::tuple_from_iter([
+            app_id.to_variant(),
+            glib::VariantDict::new(None).end(),
+        ])),
+        None,
+        gio::DBusCallFlags::NONE,
+        -1,
+        gio::Cancellable::NONE,
+        move |result| {
+            // An older portal, or a sandboxed app (whose id the sandbox
+            // gives), has nothing to register: the session may still work.
+            if let Err(e) = result {
+                log::debug!("nsh: the desktop portal did not register the app: {e}");
+            }
+            BUS.with(|b| *b.borrow_mut() = Some(registered.clone()));
+            done(Some(registered));
+        },
+    );
+}
+
+/// Creates the session binding the set (`bind`'s second half).
+fn create_session(bus: &gio::DBusConnection, generation: u64) {
+    subscribe(bus);
     let session_token = token();
     let options = glib::VariantDict::new(None);
     options.insert("session_handle_token", session_token.as_str());
     request(
-        &bus,
+        bus,
         "CreateSession",
         session_args,
         options,
@@ -298,13 +367,16 @@ fn bind_shortcuts(bus: &gio::DBusConnection, session: &str, generation: u64) {
     );
 }
 
-/// Subscribes to the portal's `Activated`, once.
+/// Subscribes to the portal's `Activated`, once. By any sender: matched by
+/// the portal's well-known name, GDBus never hands the signal on (seen with
+/// xdg-desktop-portal 1.22 and GLib 2.90); [`pressed`] takes only the
+/// session this connection created, whose handle the portal alone knows.
 fn subscribe(bus: &gio::DBusConnection) {
     if STATE.with(|s| s.borrow().activated.is_some()) {
         return;
     }
     let subscription = bus.subscribe_to_signal(
-        Some(PORTAL),
+        None,
         Some(INTERFACE),
         Some("Activated"),
         Some(PORTAL_PATH),

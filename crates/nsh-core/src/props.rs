@@ -355,6 +355,12 @@ pub struct ViewProps {
     /// `windowDrag` (desktops): pressing the view drags the window; `None`
     /// leaves it to the views around it.
     pub window_drag: Option<bool>,
+    /// `windowControl` (desktops): the system window button the view acts
+    /// as.
+    pub window_control: Option<crate::desktop::WindowControl>,
+    /// `windowResize` (desktops): the edge or corner of a frameless window
+    /// pressing the view resizes it by.
+    pub window_resize: Option<crate::desktop::ResizeEdge>,
     /// `focusable`: whether the view is a stop of the keyboard focus (Tab):
     /// `Some(true)` makes any view one, whether or not it takes presses (a
     /// chart, a slider, a list that moves its selection with the arrow

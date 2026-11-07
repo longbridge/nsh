@@ -162,9 +162,25 @@ fn Workspace(props: WorkspaceProps) -> impl IntoElement {
                         })
                         .render_panel(move |panel: &DockPanel| {
                             let id = panel.id.to_string();
+                            // A compact drawer covers the buttons below, as
+                            // it would a finger: the files panel has the
+                            // docks' buttons of its own, pressed in it.
+                            let files_buttons = (id == "files").then(|| {
+                                view()
+                                    .flex_row()
+                                    .child(button(
+                                        "files-toggle-left",
+                                        Box::new(|a| a.toggle_dock(DockPlacement::Left)),
+                                    ))
+                                    .child(button(
+                                        "files-toggle-bottom",
+                                        Box::new(|a| a.toggle_dock(DockPlacement::Bottom)),
+                                    ))
+                            });
                             view()
                                 .flex_1()
                                 .child(text(format!("Panel {id}")))
+                                .children(files_buttons)
                                 .on_layout(move |f: &nsh_core::Bounds<Points>| {
                                     let size = (f.size.width.0.round(), f.size.height.0.round());
                                     sizes.update(|m| {
@@ -451,7 +467,7 @@ fn at_compact_width_the_center_shows_one_group_with_every_tab() {
     app.wait_for("Docks Left- Left+").unwrap();
     // The layout as the app wrote it (no size given): nothing reported.
     assert!(app.shows("Layout h([*a b]:400 [*c]) left [*files] open 0"));
-    app.press("id:toggle-left").unwrap();
+    app.press("id:files-toggle-left").unwrap();
     app.wait_for_gone("Panel files", std::time::Duration::from_secs(5))
         .unwrap();
     app.wait_for("Docks Left- Left+ Left-").unwrap();
@@ -471,7 +487,7 @@ fn at_compact_width_one_dock_is_presented_at_a_time() {
     app.press("id:toggle-left").unwrap();
     app.wait_for("Panel files").unwrap();
     // Presenting the bottom dock dismisses the drawer.
-    app.press("id:toggle-bottom").unwrap();
+    app.press("id:files-toggle-bottom").unwrap();
     app.wait_for("Panel terminal").unwrap();
     app.wait_for_gone("Panel files", std::time::Duration::from_secs(5))
         .unwrap();
@@ -627,7 +643,7 @@ fn a_compact_drawer_is_dismissed_on_a_manual_clock() {
     let mut app = start_manual(with_files(), 400.0);
     app.press("id:toggle-left").unwrap();
     app.wait_for("Panel files").unwrap();
-    app.press("id:toggle-left").unwrap();
+    app.press("id:files-toggle-left").unwrap();
     app.wait_for_gone("Panel files", std::time::Duration::from_secs(5))
         .unwrap();
     app.wait_for("Docks Left- Left+ Left-").unwrap();

@@ -185,6 +185,12 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
+`base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
+one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
+named …"). The macro checks at compile time that it lists every part, so a new part of `nsh/base` adds its line
+there.
+
 ### Historical QuickJS package sizes
 
 The web ran QuickJS in WebAssembly until 2026-10; those measurements do not apply to the current runtimes.
@@ -440,7 +446,9 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
-the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
+the content the core placed. A view of no size (`display: none` lays it out at none) is `nsh-empty`: it draws no border,
+outline or shadow of its own, as on the native backends, which draw inside a view's bounds (a CSS border-box is never
+smaller than its borders); its children still show. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
@@ -454,7 +462,8 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame.
+  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
@@ -536,6 +545,12 @@ snapping, fits, hidden states, the press cursor `nsh-pointer`, `nsh-inert` for `
 the same way from the CSS it makes (`cssClass`: a blur, an image's tint and mask, the latter over the
 view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
 apart: the later one then gets a view's own rule.
+
+`borderCurve: "continuous"` is a tripled class of `border-radius` and `corner-shape` that `nsh.js` makes from the
+frame (`placeCorners`). A view that clips with such corners is marked `nsh-curve-clip`, a view whose style has a
+backdrop filter `nsh-backdrop` (`op_s`, from its class's rule), and `.nsh-curve-clip:has(.nsh-backdrop)` takes
+circular corners of the radius (`--nsh-round`): Chromium shows no backdrop filter inside a clip with `corner-shape`
+corners (`pitfalls.md`, "Web, browsers").
 
 A view whose styles keep changing (a style animated from JS: a new text each frame) would grow the sheet by a rule a
 frame. After 16 classes defined for one view (`OWN_RULES_AFTER`) its new styles go to rules of its own (`i<id>`,
@@ -624,10 +639,14 @@ browsers' touches into what phones report:
   the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
   modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
   `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
-  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
+  cancel button); a focused field (Escape leaves it); a custom context menu (Shift+F10 or the Menu key);
+  selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
+  Context-menu keys are handled explicitly because Chromium on macOS does not emit `contextmenu` for them.
+  A handled key prevents the browser default to avoid duplicate openings; native fields and selectable text
+  retain their own menus, and keyboard requests carry no pointer and use the trigger's bottom-start corner.
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a
@@ -689,6 +708,11 @@ browsers' touches into what phones report:
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
   which going back passes over (`history.back()` again) as if the app had been left from its first page. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
+  Only shown stacks count, for the entries and for what going back acts on (`stackShown`: in the tree, visible, and
+  laid out with a size, since `display: none`, a tab not selected, is laid out by the core at zero size, which
+  `checkVisibility` does not see: the rule of `nsh_core::navigation::shown_in_layout`, which every backend asks); a
+  stack's frame becoming empty or not (`op_f`) syncs the entries again (a view around a stack of its own size
+  becoming empty does not: the entries follow at the next push, pop or back).
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
@@ -822,7 +846,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the
   runtime and runs its `createHost(player)` once the player exists, before `run`, and its `host` option forwards to
   what that returns (no callable `call`: the page's "could not be loaded" error). The host module shares the page's
-  CSP: an app restricting `network` gets a `connect-src` of `'self'`, its `capabilities.network` and `web.connect`
+  CSP: an app restricting `network` gets a `connect-src` of `'self'`, the origin of `--asset-url`, its `capabilities.network` and `web.connect`
   (`package::WebConfig::connect`, host patterns checked as `HostPattern`s, which keeps any CSP syntax out:
   `web::page_connect`). `web.connect` is the page's alone: the core checks the app's requests against its
   capabilities before `fetch` sees them, so only the redirect hops CSP guards widen with it. The module is copied as it

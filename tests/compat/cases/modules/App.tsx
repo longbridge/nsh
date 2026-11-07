@@ -8,6 +8,7 @@ import ModAccessibility from "./mod-accessibility";
 import ModAndroid from "./mod-android";
 import ModAudio from "./mod-audio";
 import ModClipboard from "./mod-clipboard";
+import ModFps from "./mod-fps";
 import ModUrlScheme from "./mod-url-scheme";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
@@ -21,6 +22,7 @@ import ModNotifications from "./mod-notifications";
 import ModSpeech from "./mod-speech";
 import ModStorage from "./mod-storage";
 import ModWeb from "./mod-web";
+import ModUpdater from "./mod-updater";
 
 const cases: Record<string, () => JSX.Element> = {
   "mod-standard-access": ModStandardAccess,
@@ -28,6 +30,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-android": ModAndroid,
   "mod-audio": ModAudio,
   "mod-clipboard": ModClipboard,
+  "mod-fps": ModFps,
   "mod-url-scheme": ModUrlScheme,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,
@@ -41,6 +44,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-speech": ModSpeech,
   "mod-storage": ModStorage,
   "mod-web": ModWeb,
+  "mod-updater": ModUpdater,
 };
 const shown = signal("");
 

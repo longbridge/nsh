@@ -6,7 +6,13 @@
       "radius-card": "12px",
       "radius-control": "7px",
       "brand-fill": "#c6ef6a",
-      "on-brand": "#13160c"
+      "on-brand": "#13160c",
+      "scrim": "rgba(0,0,0,0.45)",
+      "window-close": "#ff5f57",
+      "window-minimize": "#febc2e",
+      "window-zoom": "#28c840",
+      "window-control-ink": "color-mix(in srgb, #000000 50%, transparent)",
+      "window-control-edge": "color-mix(in srgb, #000000 12%, transparent)"
     },
     "light": {
       "background": "#f6f6f9",
@@ -62,7 +68,8 @@
       "destructive-tint": "color-mix(in srgb, var(--destructive) 10%, transparent)",
       "up-tint": "color-mix(in srgb, var(--up) 10%, transparent)",
       "down-tint": "color-mix(in srgb, var(--down) 10%, transparent)",
-      "violet": "#6e56c4"
+      "violet": "#6e56c4",
+      "window-control-off": "#dcdcdf"
     },
     "dark": {
       "background": "#16191f",
@@ -118,7 +125,8 @@
       "sidebar-primary": "var(--primary)",
       "sidebar-primary-foreground": "var(--primary-foreground)",
       "sidebar-ring": "var(--ring)",
-      "down": "var(--destructive)"
+      "down": "var(--destructive)",
+      "window-control-off": "#45484e"
     }
   }
 }

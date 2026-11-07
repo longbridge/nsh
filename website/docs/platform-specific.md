@@ -96,6 +96,8 @@ What exists today:
 | `.header_left_symbol(..)` | `ios={{ headerLeftSymbol }}` | `NavPage` | UIKit's own bar button showing an SF Symbol at the start of the header, pressing `headerLeft`. |
 | `.back_forward_gestures(..)` | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `.window_drag(..)` | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
+| `.window_control(..)` | `desktop={{ windowControl }}` | every element | The view is the window's minimize, maximize or close button, drawn by the app. |
+| `.window_resize(..)` | `desktop={{ windowResize }}` | every element | Pressing it resizes a frameless window by an edge or a corner. |
 
 In TSX, `desktop={{…}}` and `web={{…}}` are accepted everywhere. The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
 
@@ -103,7 +105,7 @@ What an element means on every platform is a top-level prop (in Rust a method of
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (the window: `set_title`, `set_title_bar`, `title_bar`, `minimize`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `set_level`, `order_front`, `close_window`, `window_state`, `displays`; the app: `quit`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (windows: `window`, `current_window` and its `WindowHandle`, `title_bar`, `displays`; the app: `quit`, `restart`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
@@ -165,9 +167,10 @@ Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building
 
 | Export | Description |
 |---|---|
-| `Window` | The window: `setTitle`, `setTitleBar({ style: "hidden" })` for a title bar of the app's own, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setBounds` to open it as the user left it, `close`. |
+| `Window` | Windows of the app's own: `<Window>` in the tree, `Window.open` imperatively, of five kinds (`normal`, `dialog`, `panel`, `popup`, `overlay`), rendered from the app's one engine. |
+| `currentWindow`, `windows`, `focusedWindow` | The `WindowRef`s of the main window and the app's own: `set({ title, titleBar, level, … })`, `setMode`, `setBounds`, `setPlacement` to open a window as the user left it, `close`, and events. |
 | `titleBar` | The hidden title bar's height and the room the system's window controls take (reactive). |
-| `windowState`, `displays` | The window's bounds, mode and display, and the displays (reactive). |
+| `windowState`, `displays` | The current window's bounds, mode and display, and the displays (reactive). |
 | `Menu` | `setApplicationMenu(items)` (the menu bar, with shortcuts) and `popup(items, at?)` (context menus). An item's `icon` is an image as `<Image>`'s `src` takes it, so menus show the app's own icon set: an SVG takes the color of the menu's text, a bitmap keeps its colors. macOS and Windows show it; GTK's menus show no icon beside a label. |
 | `isAvailable` | `true` where the window and menu APIs work: macOS, Windows and Linux. Desktop browsers have `platform.desktop` and keep the browser's window and menus. |
 

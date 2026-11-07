@@ -203,6 +203,8 @@ const files = signal<string[]>([]);
 
 最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
 
+文本输入框属于包住它的拖放目标：文件放到输入框的文字上，和放到目标其他位置一样由该目标接收，拖入、离开事件也相同，输入框里的文字保持不变。拖进输入框的文字，以及放到不在任何拖放目标内的输入框上的文件，按平台文本框的方式处理。
+
 ## ref 方法
 
 普通 view 的 ref 是 `ViewRef`：`focus()`、`blur()` 和 `measure()`。`ref`（Rust 中为 `.element_ref(&handle)`）拿到它的节点，例如可以传给 `setAccessibilityFocus`（[`nsh` 的无障碍 API](../modules/nsh.md#accessibility)），或者测量它（Rust 中为 `handle.measure()`）。
