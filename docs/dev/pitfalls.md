@@ -492,6 +492,13 @@ Things that were found the hard way. Read the section of the area you change bef
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
   current frame and style (including any later title bar change in the same batch).
 
+- **From macOS 26 a window with a toolbar has larger corners than one with only a title bar** (seen on 26.6), even an
+  empty `NSToolbar` in `UnifiedCompact`; the radius is the system's and no API sets it. A hidden title bar of the app's
+  height therefore centers the traffic lights itself instead of selecting a toolbar style (`chrome::TrafficLights`).
+  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, a screen change, leaving full
+  screen), so they are placed again from their `NSViewFrameDidChangeNotification`s, which arrive inside that layout,
+  before anything is drawn.
+
 - **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
