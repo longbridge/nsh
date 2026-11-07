@@ -65,7 +65,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

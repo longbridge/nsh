@@ -29,7 +29,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: compat-${{ github.ref }}
+  group: compat-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

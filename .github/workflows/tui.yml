@@ -54,7 +54,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: tui-${{ github.ref }}
+  group: tui-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
