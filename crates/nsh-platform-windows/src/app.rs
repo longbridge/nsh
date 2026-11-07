@@ -325,7 +325,14 @@ impl AppView {
     /// Shows a top-level view's window (in the mode nsh.json `window`
     /// opens it in).
     pub fn show(&self) {
+        // Composite the window only once its background is drawn: DWM
+        // otherwise shows and animates the default light client surface,
+        // which flashes white on a dark appearance until the first frame.
+        crate::window::set_cloaked(self.hwnd, true);
+        crate::window::fill_background(&self.surface, self.hwnd);
+        self.surface.paint();
         crate::window::show(self.hwnd);
+        crate::window::set_cloaked(self.hwnd, false);
         if let Some(mode) = self.opening_mode.take() {
             crate::window_state::set_mode(self.hwnd, mode);
         }

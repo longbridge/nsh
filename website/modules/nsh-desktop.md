@@ -478,7 +478,7 @@ The hidden title bar's area of the current window, in points (reactive): its `he
 | Windows | `height`, else 32 | 0 | The three caption buttons (138) |
 | Linux | `height`, else the header bar's | The window buttons at the start (the desktop's button layout) | The window buttons at the end |
 
-On macOS, `height` selects compact chrome up to 44 points and regular chrome above; size your bar with the height `titleBar()` reports. On Windows the caption buttons are drawn by NSH in Windows 11's style and follow the app's appearance; hovering the maximize button shows Windows 11's snap layouts. The window keeps its resize borders, shadow and rounded corners on every platform. An embedding app's existing toolbar keeps its own style and height.
+On macOS the traffic lights are centered in `height` and the window keeps the corners of a window with a plain title bar. On Windows the caption buttons are drawn by NSH in Windows 11's style and follow the app's appearance; hovering the maximize button shows Windows 11's snap layouts. The window keeps its resize borders, shadow and rounded corners on every platform. An embedding app's existing toolbar keeps its own height, which `titleBar()` reports.
 
 ## The window's state and the displays
 

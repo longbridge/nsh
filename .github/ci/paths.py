@@ -24,6 +24,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # What each workflow builds and tests (its `-p` packages), and the files
 # outside those crates it reads (tests' fixtures, `include_bytes!`).
 WORKFLOWS = {
+    "website.yml": {
+        "packages": ["nsh-platform-web", "nsh-bundler", "nsh-cli", "xtask"],
+        "files": [
+            "website/**", "skills/**", "examples/tasks/**", "examples/tasks-rs/**",
+            "examples/gallery/**",
+        ],
+    },
     "tui.yml": {
         "packages": ["nsh-platform-tui", "nsh-base"],
         "files": ["examples/counter/**"],
@@ -75,7 +82,7 @@ WORKFLOWS = {
     },
 }
 
-ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml"]
+ALWAYS = ["Cargo.toml", "Cargo.lock", ".cargo/**", "rust-toolchain.toml", ".github/actions/cargo/**"]
 
 
 def crates():
