@@ -463,3 +463,10 @@ taken only when what they show changed:
   that animates or a scroll pictures every frame that runs;
 - a page's or a dialog's overlay pictures both sides once, the live side on the next three frames and after a view
   under its host changed. Before, it pictured the whole stack on every frame of the run.
+
+## File drag metadata
+
+`file_drop.rs` retains the pasteboard file URLs from entry through target changes and
+sends them with `onFileDragEnter`. Finder file references are resolved with `filePathURL`
+so apps can preview filenames. Drop reads the pasteboard again; clearing the drag releases
+the offered list. This reads URL metadata, not file contents.

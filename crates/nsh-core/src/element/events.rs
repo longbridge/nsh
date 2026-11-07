@@ -10,7 +10,8 @@ use crate::{
     geometry::{DevicePixels, Radians},
 };
 
-/// Local files or directories dropped on an element (`on_file_drop`).
+/// Local files or directories offered to an element (`on_file_drag_enter`)
+/// or dropped on it (`on_file_drop`).
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct FileDropEvent {

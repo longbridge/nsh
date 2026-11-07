@@ -197,10 +197,10 @@ expect Hover: move -2,0 page 18,121 left down
 event id:hover onMouseLeave position.x=-2 position.y=0
 expect Hover: move -2,0 page 18,121 left down out -2,0
 # Files dragged over, away, back and dropped.
-event id:drop onFileDragEnter
-expect Drop: enter
+event id:drop onFileDragEnter uris=file:///tmp/a.txt uris="file:///tmp/b%20c.png"
+expect Drop: enter 2: file:///tmp/a.txt file:///tmp/b%20c.png
 event id:drop onFileDragLeave
-expect Drop: enter leave
+expect Drop: enter 2: file:///tmp/a.txt file:///tmp/b%20c.png leave
 event id:drop onFileDrop uris=file:///tmp/a.txt uris="file:///tmp/b c.png"
 expect Drop: dropped 2: file:///tmp/a.txt file:///tmp/b c.png
 # An assistive technology performs an action.

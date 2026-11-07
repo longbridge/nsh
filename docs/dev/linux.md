@@ -112,7 +112,10 @@ works and its runner only needs GTK.
 Views listening to `onFileDrop` install a root `GtkDropTarget` for `GdkFileList`
 while at least one enabled destination is mounted. The controller negotiates
 Copy, uses NSH hit testing to choose the closest destination within its modal,
-and emits entry/leave as that destination changes. Dropped `GFile`s with absolute
+and emits entry/leave as that destination changes. Entry carries the preloaded file URLs;
+`notify::value` finishes a pending entry even while the pointer is stationary. Leave and
+reset discard the pending position, and notifications from a removed controller are ignored.
+Dropped `GFile`s with absolute
 local paths are delivered as file URLs, preserving filename escaping, with the
 drop point in the window's coordinates (`pagePosition`, `EventPayload::FileDropAt`). Removing
 the last destination removes the controller; disabling or deleting the current

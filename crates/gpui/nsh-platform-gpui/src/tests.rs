@@ -775,13 +775,13 @@ const log = signal<string[]>([]);
 const add = (entry: string) => log.set([...log(), entry]);
 mount(() => <View style={{ flex: 1 }}>
   <View
-    onFileDragEnter={() => add("enter outer")}
+    onFileDragEnter={(e) => add("enter outer " + e.uris.join(";"))}
     onFileDragLeave={() => add("leave outer")}
     onFileDrop={(e) => add("drop outer " + e.uris.join(";"))}
     style={{ height: 100 }}
   >
     <View
-      onFileDragEnter={() => add("enter inner")}
+      onFileDragEnter={(e) => add("enter inner " + e.uris.join(";"))}
       onFileDragLeave={() => add("leave inner")}
       onFileDrop={(e) => add("drop inner " + e.uris.join(";"))}
       style={{ height: 40 }}
@@ -822,19 +822,27 @@ mount(() => <View style={{ flex: 1 }}>
     // leaves it for the next one, and the drop goes there, without the
     // relative path.
     let dropped = crate::file_drop::test_url("a%20b.txt");
+    let second = crate::file_drop::test_url("c.txt");
+    let final_file = crate::file_drop::test_url("e.txt");
     enter(
         cx,
         20.0,
         &[crate::file_drop::test_path("a b.txt"), "b.txt".into()],
     );
-    wait_for(&view, cx, "enter inner");
+    wait_for(&view, cx, &format!("enter inner {dropped}"));
     send(cx, gpui::FileDropEvent::Pending { position: at(70.0) });
-    wait_for(&view, cx, "enter inner, leave inner, enter outer");
+    wait_for(
+        &view,
+        cx,
+        &format!("enter inner {dropped}, leave inner, enter outer {dropped}"),
+    );
     send(cx, gpui::FileDropEvent::Submit { position: at(70.0) });
     wait_for(
         &view,
         cx,
-        &format!("enter inner, leave inner, enter outer, drop outer {dropped}, leave outer"),
+        &format!(
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer"
+        ),
     );
     // Leaving the window leaves the destination.
     enter(cx, 20.0, &[crate::file_drop::test_path("c.txt")]);
@@ -843,8 +851,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner"
         ),
     );
     // Where no view listens, the drop goes nowhere.
@@ -859,8 +867,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner"
         ),
     );
     // A drag that ended schedules one clear of its destination, however
@@ -870,8 +878,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner, enter inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner, enter inner {final_file}"
         ),
     );
     view.update(cx, |view, cx| {
@@ -887,8 +895,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner, enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner, enter inner {final_file}, leave inner"
         ),
     );
 }

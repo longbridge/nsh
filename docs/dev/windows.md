@@ -370,7 +370,8 @@ window. The embedding UI thread must initialize OLE, as for other embedded COM
 features (`OleInitialize`); the standalone runner already does so. Registration
 ends when the last destination disappears or the surface stops.
 
-`DragEnter` checks for `CF_HDROP` without retrieving the file list. Enter and
+`DragEnter` reads and retains the `CF_HDROP` filename list (not file contents)
+for `onFileDragEnter`. Moves between destinations reuse it. Enter and
 over callbacks convert screen pixels to client points and use retained view hit
 testing, stopping at a modal root. Eligible targets advertise Copy. Drop reads
 the local file list in native order and converts absolute paths to escaped file
