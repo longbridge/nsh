@@ -16,11 +16,13 @@ use crate::{
     keymap::{self, Keystroke, Modifiers, When},
 };
 
+mod host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
 pub mod window;
 mod window_state;
 
+pub use host::HostWindowError;
 pub use window::{
     Backdrop, CloseReason, MainWindowOptions, OpenWindow, ProgressState, ResizeEdge, SizeToContent,
     TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause, WindowControl, WindowEvent,
@@ -158,6 +160,7 @@ impl JsValue for WindowFrame {
 }
 
 /// How high a window floats (its `level`).
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PropEnum)]
 pub enum WindowLevel {
     /// The normal level.

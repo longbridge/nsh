@@ -769,7 +769,72 @@ fn name_app(name: &str) {
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
 /// The caller can finish cleanup or restart after this function returns.
-pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+///
+/// [`run_app_with`] is the same, with a setup hook: it is handed the app's
+/// [`AppContext`] once the app's window is up, before the event loop takes
+/// the thread.
+pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    run_app_with(source, options, |_| {})
+}
+
+/// The app's thread, as handed to [`run_app_with`]'s setup hook: host
+/// windows are opened on it, and [`AppContext::run`] brings work back to it
+/// later. It names no state of its own, and it is [`Copy`]: the host may
+/// keep it past the hook (for a shortcut that opens a host window, say).
+///
+/// The thread is the one that runs AppKit's message loop, where the app's
+/// windows live — which is the only thread a host window (a window of its
+/// own) may be opened on.
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    /// Nothing, and private: the field keeps the context from being made
+    /// anywhere but where `run_app_with` hands it over, on the main thread.
+    _private: (),
+}
+
+impl AppContext {
+    /// Opens a host window: a second window beside the app's own, running
+    /// `source` with an engine of its own (see [`crate::HostWindow`]).
+    ///
+    /// # Errors
+    ///
+    /// [`HostWindowError::WrongThread`] off the app's thread (the one that
+    /// runs AppKit's message loop, handed to the setup hook of
+    /// [`run_app_with`]); [`HostWindowError::Invalid`] when `options` asks
+    /// for the impossible (a size that is not positive, say).
+    pub fn open_host_window(
+        &self,
+        options: nsh_core::desktop::WindowOptions,
+        app: AppOptions,
+        source: AppSource,
+    ) -> Result<crate::host::HostWindow, crate::host::HostWindowError> {
+        crate::host::HostWindow::open(options, app, source)
+    }
+
+    /// Runs `f` on the app's thread, where the app's windows live: queued
+    /// to the main dispatch queue, it returns at once. An app's call or
+    /// post comes in on the engine thread, so this brings the work it asks
+    /// for (opening a host window, say) back to the main thread.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) {
+        crate::image::on_main_queue(f);
+    }
+}
+
+/// Runs `source` in a window until it is closed, handing `setup` the app's
+/// [`AppContext`] once the window is up. The hook runs once, on the main
+/// thread, before the event loop takes the thread: it opens the app's host
+/// windows ([`AppContext::open_host_window`]), which the host keeps — the
+/// hook hands nothing back. Must be called on the main thread.
+///
+/// # Panics
+///
+/// Panics off the main thread: AppKit runs on one thread, and every window
+/// of the app's is made on it.
+pub fn run_app_with(
+    source: AppSource,
+    mut options: AppOptions,
+    setup: impl FnOnce(&AppContext) + Send + 'static,
+) -> std::process::ExitCode {
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
@@ -886,6 +951,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
         url_scheme(url);
     }
+    // The setup hook runs on the main thread, with AppKit initialized and
+    // the app's window in place, before the event loop takes the thread.
+    setup(&AppContext { _private: () });
     app.run();
     stop_running();
     app.setDelegate(None);

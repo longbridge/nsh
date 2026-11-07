@@ -32,6 +32,7 @@ mod fps;
 mod global_shortcut;
 #[cfg(test)]
 mod gtk_test;
+mod host;
 mod image;
 mod input;
 mod key_focus;
@@ -66,7 +67,11 @@ pub use nsh_engine::{
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, run_app, set_components, set_ui_sets},
+    app::{
+        AppContext, AppOptions, AppSource, AppView, run_app, run_app_with, set_components,
+        set_ui_sets,
+    },
+    host::{HostWindow, HostWindowError},
     image::AssetBase,
     links::set_exec_args,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},

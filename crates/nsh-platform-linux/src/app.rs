@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
+    thread,
 };
 
 use gtk4::{self as gtk, glib, prelude::*};
@@ -473,9 +474,61 @@ fn quit_application(app: &gtk::Application) {
     app.quit();
 }
 
+/// The app's thread, as handed to [`run_app_with`]'s setup hook: host
+/// windows are opened on it, and [`run`](Self::run) brings work back to
+/// it later.
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    /// Nothing: the type stands for the app's thread, and only this crate
+    /// makes one.
+    _private: (),
+}
+
+impl AppContext {
+    /// Opens a host window on the app's thread
+    /// ([`crate::HostWindowError::WrongThread`] elsewhere).
+    pub fn open_host_window(
+        &self,
+        options: nsh_core::desktop::WindowOptions,
+        app: AppOptions,
+        source: AppSource,
+    ) -> Result<crate::host::HostWindow, crate::host::HostWindowError> {
+        crate::host::HostWindow::open(options, app, source)
+    }
+
+    /// Runs `f` on the app's thread: queued to its loop, returns at once.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) {
+        glib::MainContext::default().invoke(f);
+    }
+}
+
 /// Runs `source` in a window until it is closed.
-pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
+///
+/// The app has no host windows: [`run_app_with`] is the same with a
+/// setup hook that opens them on the app's thread.
+pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
+    run_app_with(source, options, |_| {})
+}
+
+/// [`run_app`], with `setup` run on the app's thread once the main
+/// window is shown and before the GTK loop runs.
+///
+/// `setup` opens the app's host windows
+/// ([`AppContext::open_host_window`]): they belong to the app's thread
+/// — the one the GTK loop runs on — and its loop, as the main window
+/// does. The host keeps them: a host window lives until the host drops
+/// it, which closes its window and stops its app, and
+/// [`AppContext::run`] brings later work (a window to open on a
+/// shortcut, say) back to that thread. Opening a host window on another
+/// thread fails with [`crate::HostWindowError::WrongThread`].
+pub fn run_app_with(
+    source: AppSource,
+    mut options: AppOptions,
+    setup: impl FnOnce(&AppContext) + Send + 'static,
+) -> glib::ExitCode {
     options.notifications = true;
+    // The app's thread: a host window is opened on it, and only on it.
+    let _ = crate::host::APP_THREAD.set(thread::current().id());
     prefer_gl_on_nvidia();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
@@ -513,8 +566,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         }
     });
     let source = RefCell::new(Some(source));
+    let setup = RefCell::new(Some(setup));
     app.connect_activate(move |app| {
-        let Some(source) = source.borrow_mut().take() else {
+        let Some(setup) = setup.borrow_mut().take() else {
             if let Some((window, _)) = &*shown.borrow() {
                 window.present();
             }
@@ -584,6 +638,10 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
+        // The setup hook: the host opens its host windows here, on this
+        // thread, as the main window is, and keeps them itself (a host
+        // window lives until the host drops it).
+        setup(&AppContext { _private: () });
         window.present();
     });
     // GTK must not parse the host's own arguments: only the URL the app

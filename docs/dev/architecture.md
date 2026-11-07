@@ -29,6 +29,13 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 - One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so NSH can be embedded in
   existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
+- **Host windows** (`embedding.md`): a host app's second window is a `HostWindow` with an app of its own — its own
+  `AppSource` on its own engine, sharing nothing with the main app. It is opened on the thread that runs the app's
+  message loop, inside `run_app_with`'s setup hook (the hook's `AppContext` also runs closures there later, since
+  the host's own code runs elsewhere); the main thread on macOS and Linux, the `nsh-ui` thread `run_app` spawns on
+  Windows (`windows.md`). `HostWindow::open` elsewhere fails with `HostWindowError::WrongThread`. The host keeps its
+  windows: dropping one closes its window and stops its engine, and a close button the user presses does the same
+  once.
 - Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
   order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
   nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.

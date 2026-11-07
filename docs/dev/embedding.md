@@ -57,6 +57,16 @@
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+- **Host windows**: a desktop app's second window runs an app of its own — `run_app_with` in the platform crate
+  takes a setup hook that runs on the thread of the app's message loop (the main thread on macOS and Linux, the
+  `nsh-ui` thread on Windows) with an `AppContext`: `context.open_host_window(window_options, app_options, source)`
+  opens a `HostWindow` there (`WindowOptions` carries the geometry — the kind, the size, the position, the
+  attributes — and `AppOptions` the app's own metadata, as for the main window), and `context.run` brings a closure
+  back to that thread later, the host's own code running on its own threads. The host keeps the window: dropping it
+  closes its window and stops its engine, and a close button the user presses does the same; the window is not
+  transferred anywhere (a `hides_on_focus_loss` window the host holds can be shown again). Each backend honors what
+  its window system offers and says so in its module docs (`macos.md`, `windows.md`, `linux.md`); `HostWindow::open`
+  on another thread fails with `HostWindowError::WrongThread`. See `examples/host-window`.
 - **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`

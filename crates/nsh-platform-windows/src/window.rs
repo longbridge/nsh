@@ -126,6 +126,14 @@ struct WindowData {
     /// The dialog root a window of the app's own shows
     /// ([`crate::app_window`]); none for the surface's window.
     window: Option<NodeId>,
+    /// A host window's ([`crate::host`]): its close button closes its
+    /// own app, not the app the surface runs.
+    host: Cell<bool>,
+    /// `close_on_blur` of a host window: the keyboard leaving hides it.
+    hides_on_focus_loss: Cell<bool>,
+    /// The window that was in front when a host window was shown, given
+    /// the focus back when it hides.
+    previous: Cell<Option<HWND>>,
 }
 
 thread_local! {
@@ -217,6 +225,9 @@ pub(crate) fn create(
         shell: crate::shell::Shell::new(nsh_core::desktop::WindowKind::Normal),
         root: Cell::new(None),
         window: None,
+        host: Cell::new(false),
+        hides_on_focus_loss: Cell::new(false),
+        previous: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -316,6 +327,9 @@ pub(crate) fn create_app_window(
         shell,
         root: Cell::new(None),
         window: Some(id),
+        host: Cell::new(false),
+        hides_on_focus_loss: Cell::new(false),
+        previous: Cell::new(None),
     });
     let title = attributes.title.clone().unwrap_or_default();
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
@@ -393,6 +407,36 @@ pub(crate) fn shell(hwnd: HWND) -> Option<&'static crate::shell::Shell> {
 /// surface's window).
 pub(crate) fn app_window_root(hwnd: HWND) -> Option<NodeId> {
     data(hwnd).and_then(|d| d.window)
+}
+
+/// Marks `hwnd` as a host window's ([`crate::host`]): its close button
+/// closes its own app, and it can hide on focus loss.
+pub(crate) fn set_host(hwnd: HWND, host: bool) {
+    if let Some(data) = data(hwnd) {
+        data.host.set(host);
+    }
+}
+
+/// Tells a host window's `hwnd` to hide when the keyboard leaves it for
+/// a window outside it ([`HostWindow`](crate::host::HostWindow)'s
+/// `close_on_blur`).
+pub(crate) fn set_hides_on_focus_loss(hwnd: HWND, hides: bool) {
+    if let Some(data) = data(hwnd) {
+        data.hides_on_focus_loss.set(hides);
+    }
+}
+
+/// The window that was in front when a host window's `hwnd` was shown;
+/// it is given the focus back when the window hides.
+pub(crate) fn set_previous(hwnd: HWND, previous: HWND) {
+    if let Some(data) = data(hwnd) {
+        data.previous.set(Some(previous));
+    }
+}
+
+/// Takes the window [`set_previous`] kept, for a host window's `hwnd`.
+pub(crate) fn take_previous(hwnd: HWND) -> Option<HWND> {
+    data(hwnd).and_then(|d| d.previous.take())
 }
 
 /// The window's frame style bits before it went full screen, for a window
@@ -1175,8 +1219,26 @@ fn handle(
         | WM_IME_REQUEST => {
             return crate::text_input::ime(surface, hwnd, msg, wparam, lparam);
         }
-        WM_SETFOCUS => crate::text_input::window_focus(surface, true),
-        WM_KILLFOCUS => crate::text_input::window_focus(surface, false),
+        WM_SETFOCUS => {
+            crate::text_input::window_focus(surface, true);
+        }
+        WM_KILLFOCUS => {
+            crate::text_input::window_focus(surface, false);
+            // A host window that hides on focus loss does so only when
+            // the keyboard leaves it for a window outside it: `wParam`
+            // names the window that takes the focus (its own children,
+            // a web view's included, keep it).
+            let next = HWND(wparam.0 as *mut _);
+            // SAFETY: a plain query.
+            let is_child = unsafe { IsChild(hwnd, next) }.as_bool();
+            if data.hides_on_focus_loss.get() && leaves_focus(hwnd, next, is_child) {
+                // The window hides itself: the one it was given the
+                // focus for is not one to give it back to.
+                data.previous.set(None);
+                // SAFETY: hiding the window of this thread.
+                let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+            }
+        }
         WM_GETOBJECT => return crate::access::get_object(surface, ROOT_ID, hwnd, wparam, lparam),
         // `WM_TIMECHANGE`: the time zone changed (`localeSettings()`).
         WM_SETTINGCHANGE
@@ -1323,6 +1385,7 @@ fn window_api(
             let reason = shell.take_close_reason();
             match data.window {
                 Some(id) => crate::app_window::close_press(surface, id, reason),
+                None if data.host.get() => crate::host::close_press(hwnd),
                 None => crate::window_close::close_press(surface, reason),
             }
             Some(Some(LRESULT(0)))
@@ -1350,6 +1413,14 @@ fn window_api(
         }
         _ => None,
     }
+}
+
+/// Whether the keyboard leaves `focus` for `next`: nowhere (a window
+/// gave the focus away as it went), itself, or a child of it — a web
+/// view the app embeds, say — keep it; any other window takes it. The
+/// caller says whether `next` is a child of `focus` (`IsChild`).
+fn leaves_focus(focus: HWND, next: HWND, is_child: bool) -> bool {
+    next != focus && (next.is_invalid() || !is_child)
 }
 
 /// Where the `SC_CLOSE` with `lparam` (the pointer, in screen pixels, or
@@ -1707,6 +1778,18 @@ pub(crate) fn keep<T: 'static>(value: T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keyboard_leaves_a_host_window_only_for_a_window_outside_it() {
+        let host = HWND(std::ptr::dangling_mut());
+        let other = HWND(std::ptr::dangling_mut::<std::ffi::c_void>().wrapping_byte_add(1));
+        // Itself, or a child of it (a web view the app embeds): kept.
+        assert!(!leaves_focus(host, host, false));
+        assert!(!leaves_focus(host, other, true));
+        // Any other window, or none: gone.
+        assert!(leaves_focus(host, other, false));
+        assert!(leaves_focus(host, HWND::default(), false));
+    }
 
     thread_local! {
         /// What the test's windows heard: window, message, `wparam` and

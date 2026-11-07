@@ -1,0 +1,7 @@
+{
+  "name": "Host Window",
+  "id": "com.example.host-window",
+  "appearance": "system",
+  "rust": ".",
+  "root": "App"
+}

@@ -540,25 +540,63 @@ fn initial_environment() -> Environment {
 /// thread-local destructors instead, they would run inside `ExitProcess`,
 /// after the graphics DLLs and their driver threads are gone, and the
 /// process would end with a stray exit code.
-pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
+/// Runs `source` in a window until it is closed.
+///
+/// The window and its message loop run on a thread of their own, which this
+/// one joins: when it ends, its thread-locals (the graphics devices, font
+/// faces, bitmaps and the other device resources cached per thread) are
+/// released at a plain thread exit. Released by the main thread's
+/// thread-local destructors instead, they would run inside `ExitProcess`,
+/// after the graphics DLLs and their driver threads are gone, and the
+/// process would end with a stray exit code.
+///
+/// The app has no host windows: [`run_app_with`] is the same with a setup
+/// hook that opens them on that thread.
+pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    run_app_with(source, options, |_| {})
+}
+
+/// [`run_app`], with `setup` run on the app's thread once the main window
+/// is shown and before its message loop runs.
+///
+/// `setup` opens the app's host windows
+/// ([`AppContext::open_host_window`]): they belong to the app's thread
+/// (the `nsh-ui` thread `run_app` spawns) and its message loop, as the
+/// main window does. The host keeps them: a host window lives until the
+/// host drops it, which closes its window and stops its app, and
+/// [`AppContext::run`] brings later work (a window to open on a
+/// shortcut, say) back to that thread. Opening a host window on another
+/// thread fails with [`crate::HostWindowError::WrongThread`].
+pub fn run_app_with(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppContext) + Send + 'static,
+) -> std::process::ExitCode {
     wait_for_replaced_process();
+    let mut options = options;
     options.notifications = true;
     /// The app, moved to the UI thread.
-    struct Job(AppSource, AppOptions);
+    struct Job<F>(AppSource, AppOptions, F);
     // SAFETY: the options hold `Rc`s (the native components), so they are
     // not `Send`. They move to the UI thread whole while this thread waits
     // in `join` and never touches them; clones the caller kept are only
     // used again after `join` returns, once the UI thread has ended, so
-    // the reference counts are never changed from two threads at once.
-    unsafe impl Send for Job {}
-    let job = Job(source, options);
+    // the reference counts are never changed from two threads at once. The
+    // setup hook runs on the UI thread too, and a host window it opens is
+    // made there.
+    unsafe impl<F: Send> Send for Job<F> {}
+    let job = Job(source, options, setup);
     let ui = std::thread::Builder::new()
         .name("nsh-ui".into())
         // Deep view trees recurse in drawing and hit testing.
         .stack_size(8 << 20)
         .spawn(move || {
+            // Move the whole job, not its fields: `Job` is the type that
+            // is `Send` (the options are not), as the thread boundary
+            // needs.
             let job = job;
-            run_on_this_thread(job.0, job.1)
+            let Job(source, options, setup) = job;
+            run_on_this_thread(source, options, setup)
         });
     match ui.map(std::thread::JoinHandle::join) {
         Ok(Ok(code)) => code,
@@ -570,11 +608,50 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     }
 }
 
+/// The app's thread, as handed to [`run_app_with`]'s setup hook: host
+/// windows are opened on it, and [`run`](Self::run) brings work back to
+/// it later.
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    /// Nothing: the type stands for the app's thread, and only this crate
+    /// makes one.
+    _private: (),
+}
+
+impl AppContext {
+    /// Opens a host window on the app's thread
+    /// ([`crate::HostWindowError::WrongThread`] elsewhere).
+    pub fn open_host_window(
+        &self,
+        options: nsh_core::desktop::WindowOptions,
+        app: AppOptions,
+        source: AppSource,
+    ) -> Result<crate::host::HostWindow, crate::host::HostWindowError> {
+        crate::host::HostWindow::open(options, app, source)
+    }
+
+    /// Runs `f` on the app's thread: queued to its loop, returns at once.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) {
+        crate::window::invoke(f);
+    }
+}
+
 thread_local! {
     /// The standalone app's UI thread ([`run_app`]): what may restart.
     static STANDALONE: Cell<bool> = const { Cell::new(false) };
     /// The app asked to start again when its run ends.
     static RESTART: Cell<bool> = const { Cell::new(false) };
+    /// Whether this thread runs [`run_app_with`]'s message loop: the
+    /// thread the app's windows, host windows included, belong to.
+    static APP_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether this thread runs the app's message loop
+/// ([`run_app_with`]), where host windows are opened and dropped. A
+/// host window opened elsewhere fails with
+/// [`crate::HostWindowError::WrongThread`].
+pub(crate) fn in_app_thread() -> bool {
+    APP_THREAD.with(Cell::get)
 }
 
 /// Marks the standalone app ([`run_app`]) to start again once its run has
@@ -614,8 +691,12 @@ fn wait_for_replaced_process() {
     }
 }
 
-/// [`run_app`] on the calling thread.
-fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+/// [`run_app_with`] on the calling thread.
+fn run_on_this_thread(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppContext),
+) -> std::process::ExitCode {
     STANDALONE.set(true);
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
@@ -627,8 +708,10 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     if let crate::linking::Start::Forwarded =
         crate::linking::start(&options.app_id, &options.title, &options.schemes)
     {
+        APP_THREAD.with(|app| app.set(false));
         return std::process::ExitCode::SUCCESS;
     }
+    APP_THREAD.with(|app| app.set(true));
     // The app to run, when it is known now (a dev server's comes later).
     let app = match &source {
         AppSource::Rust(root) => Some(App::Rust(root.clone())),
@@ -667,6 +750,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     let view = match AppView::make(None, options.clone(), composed) {
         Ok(view) => view,
         Err(err) => {
+            APP_THREAD.with(|app| app.set(false));
             fatal_error(&format!("Cannot open a window: {err}"));
             return std::process::ExitCode::FAILURE;
         }
@@ -682,7 +766,12 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     install_shortcuts(&view);
     view.place_main_window(&launch, kept);
     view.show();
+    // The setup hook: the host opens its host windows here, on this
+    // thread, as the main window is, and keeps them itself (a host
+    // window lives until the host drops it).
+    setup(&AppContext { _private: () });
     let code = crate::window::run_loop();
+    APP_THREAD.with(|app| app.set(false));
     view.stop();
     drop(view);
     // SAFETY: pairs the `OleInitialize` above; nothing on this thread uses
