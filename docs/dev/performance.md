@@ -74,6 +74,13 @@ collection walks the whole VM, 30–90 ms with the demo's language server holdin
 between the turns of pastes and of the server's slices (21 collections in the run), now only after 0.3 s without a
 message or a due timer (7, none between pastes).
 
+`pointer-events-none` regions (2026-11-08, a mounted TSX `Editor` of 200 000 lines, release CLI, headless,
+`--trace`): the commit that shows the first syntax colors 11.5 → 1.2 ms (75 mount items). Each view inserted under the
+rows' `pointer-events-none` walked the whole region, twice (1600 spans into 2500 views); the core notes the regions a
+round changes and works each out once before its mount items (`classes.rs` `flush_pointer_events`). The first frame
+sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one commit); a typed character commits in
+0.37 ms, 14 items (was 0.40 ms, 15).
+
 - counter, headless (debug): first frame ~0.5–0.65ms (58 ops / 49 mount items), one tap ~0.15ms (12 ops / 8 items).
 - counter, Catalyst (release): first frame ~1.05–1.15ms (of which ~0.7ms is cold CoreText layout of 10 texts), one tap ~0.12ms.
 - Hot reload: ~120ms from saving a file to the device running the new version (file event latency and ~60ms of development

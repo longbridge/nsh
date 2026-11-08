@@ -5825,6 +5825,97 @@ fn pointer_events_classes_inherit_as_in_css() {
 }
 
 #[test]
+fn pointer_events_regions_are_worked_out_once_a_round_with_the_tree_it_left() {
+    use crate::props::PointerEvents as P;
+    let mut c = core();
+    // 2 none { 3, 4 auto }, 5 beside it.
+    view_with_classes(&mut c, 2, "pointer-events-none");
+    view_with_classes(&mut c, 5, "p-1");
+    for (id, classes) in [(3, "p-1"), (4, "pointer-events-auto")] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create { id, tag: Tag::View },
+                class_op(id, classes),
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let batch = c.commit().unwrap();
+    let pointer = |batch: &MountBatch, id| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id: i, props } if *i == id => Some(props.pointer_events),
+            _ => None,
+        })
+    };
+    assert_eq!(pointer(&batch, 2), Some(P::BoxNone));
+    assert_eq!(pointer(&batch, 3), Some(P::None));
+    // In one round: 3 moves out of the region, its `auto` (4) is
+    // released, and many views come into the region (worked out with the
+    // region once).
+    let mut ops = vec![
+        Op::Remove {
+            parent: 2,
+            child: 3,
+        },
+        Op::Insert {
+            parent: 5,
+            child: 3,
+            before: None,
+        },
+        Op::Remove {
+            parent: 2,
+            child: 4,
+        },
+        Op::Release { id: 4 },
+    ];
+    for id in (100..400).step_by(2) {
+        ops.extend([
+            Op::Create { id, tag: Tag::View },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    // Out of the region, 3 takes touches again; without its `auto` the
+    // region blocks them all.
+    assert_eq!(pointer(&batch, 3), Some(P::Auto));
+    assert_eq!(pointer(&batch, 2), Some(P::None));
+    // A view moved within the region (out and back in, as a caret moves)
+    // stays blocked by it: nothing to mount, never a `none` of its own.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 100,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 100,
+                before: None,
+            },
+        ],
+    );
+    if let Some(batch) = c.commit() {
+        assert_eq!(pointer(&batch, 100), None);
+        assert_eq!(pointer(&batch, 2), None);
+    }
+    // An `auto` in a newcomer lets touches through the region to it.
+    c.apply(class_op(398, "pointer-events-auto")).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(pointer(&batch, 2), Some(P::BoxNone));
+}
+
+#[test]
 fn sibling_positions() {
     let mut c = core();
     view_with_classes(&mut c, 2, "flex-row");
