@@ -7892,6 +7892,33 @@ fn node_quota_and_dense_ids() {
 }
 
 #[test]
+fn the_id_table_follows_the_nodes_alive_not_every_id_made() {
+    let mut c = core();
+    // A stream of short-lived nodes with ever higher ids, as an app that
+    // re-renders for hours makes them.
+    let mut last = None;
+    for id in (2..2_000_000).step_by(2) {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        if let Some(old) = last.replace(id) {
+            c.apply(Op::Release { id: old }).unwrap();
+        }
+        if id % 20_000 == 0 {
+            c.commit();
+        }
+    }
+    c.commit();
+    assert!(
+        c.slots.pages() <= 2,
+        "{} pages for {} nodes",
+        c.slots.pages(),
+        c.slots.len()
+    );
+    // The newest node and the root are still known.
+    assert!(c.key(1_999_998).is_ok());
+    assert!(c.key(ROOT_ID).is_ok());
+}
+
+#[test]
 fn refused_urls_fail_and_send_nothing() {
     let mut c = core();
     c.set_access(Arc::new(crate::access::Access {

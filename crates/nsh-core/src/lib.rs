@@ -29,6 +29,7 @@ pub mod geometry;
 mod grid;
 pub mod host_channel;
 pub mod i18n;
+pub mod id_table;
 pub mod image;
 pub mod input;
 pub mod js;
