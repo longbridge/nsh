@@ -19,7 +19,7 @@ use nsh_dev::{
 };
 use nsh_testing::{Host, HostOptions, StartHost};
 
-use crate::run::{BUNDLE_ID, simctl};
+use crate::run::{BUNDLE_ID, simctl, simctl_with_env};
 
 /// How long the host may take to launch and connect.
 const CONNECT: Duration = Duration::from_secs(90);
@@ -120,7 +120,9 @@ fn start(
     if fps {
         launch.push("--fps");
     }
-    simctl(&launch).map_err(|e| format!("cannot launch the development host: {e:#}"))?;
+    let config = crate::package::read_config(entry).map_err(|e| format!("{e:#}"))?;
+    simctl_with_env(&launch, &crate::run::simctl_app_env(&config))
+        .map_err(|e| format!("cannot launch the development host: {e:#}"))?;
     let deadline = Instant::now() + CONNECT;
     while !server.has_tester() {
         if Instant::now() >= deadline {

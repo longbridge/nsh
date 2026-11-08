@@ -313,8 +313,9 @@ pub(crate) fn run(
             step.finish();
             let mut launch = vec!["launch", "--terminate-running-process", &udid, BUNDLE_ID];
             launch.extend(args.iter().map(String::as_str));
+            let env = simctl_app_env(&crate::package::read_config(entry)?);
             let step = ui::Step::start("launching the development host");
-            simctl(&launch)?;
+            simctl_with_env(&launch, &env)?;
             step.finish();
             // The simulator shares the Mac's network: 127.0.0.1 is the dev
             // server, so a host left running would join the next session
@@ -425,6 +426,7 @@ fn run_rust_app(
         }
         Target::Ios => {
             let udid = simulator(device)?;
+            let env = simctl_app_env(&config);
             let out = run.join("ios");
             package_for_run(
                 &entry,
@@ -447,6 +449,7 @@ fn run_rust_app(
                     "--terminate-running-process",
                 ])
                 .args([&udid, &id])
+                .envs(env)
                 .env("SIMCTL_CHILD_NSH_DEVELOPMENT", "1");
             let result = run_rust_local(&app, &mut command);
             let _ = simctl(&["terminate", &udid, &id]);
@@ -950,9 +953,19 @@ fn is_stale(src: &Path, dest: &Path) -> anyhow::Result<bool> {
 }
 
 pub(crate) fn simctl(args: &[&str]) -> anyhow::Result<String> {
+    simctl_with_env(args, &[])
+}
+
+/// [`simctl`] with variables in its environment: `launch` passes those
+/// named `SIMCTL_CHILD_<name>` to the app as `<name>` ([`simctl_app_env`]).
+pub(crate) fn simctl_with_env(
+    args: &[&str],
+    env: &[(String, std::ffi::OsString)],
+) -> anyhow::Result<String> {
     let output = Command::new("xcrun")
         .arg("simctl")
         .args(args)
+        .envs(env.iter().map(|(name, value)| (name, value)))
         .output()
         .context("run xcrun simctl (is Xcode installed?)")?;
     if !output.status.success() {
@@ -963,6 +976,52 @@ pub(crate) fn simctl(args: &[&str]) -> anyhow::Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The variables of this environment that the app's `nsh.json` declares in
+/// `capabilities.process.env`, named for `xcrun simctl launch`, which
+/// passes the app only its caller's `SIMCTL_CHILD_<name>` variables: the
+/// app in the simulator reads them in `process.env` as the desktops' hosts,
+/// the CLI's children, do. Only declared names, never the whole
+/// environment: the declaration is what the app may read.
+pub(crate) fn simctl_app_env(
+    config: &crate::package::AppConfig,
+) -> Vec<(String, std::ffi::OsString)> {
+    let declared = config
+        .capabilities
+        .as_ref()
+        .and_then(|c| nsh_core::access::Capabilities::from_json_lenient(c).ok())
+        .map(|(caps, _)| caps.process.env)
+        .unwrap_or_default();
+    simctl_child_env(&declared, |name| std::env::var_os(name))
+}
+
+/// What the simulator sets for each app it launches: its container's paths
+/// and the simulated runtime's. The app reads the simulator's values; the
+/// Mac's would point it outside its container.
+const SIMULATOR_ENV: [&str; 4] = ["HOME", "CFFIXED_USER_HOME", "TMPDIR", "PATH"];
+
+/// [`simctl_app_env`] over the environment `var` reads. Each name is looked
+/// up as the OS matches names, as the runtime's `process.env` does
+/// (exactly on macOS, where the simulator runs).
+fn simctl_child_env(
+    declared: &[String],
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Vec<(String, std::ffi::OsString)> {
+    let mut env: Vec<(String, std::ffi::OsString)> = Vec::new();
+    for name in declared {
+        let child = format!("SIMCTL_CHILD_{name}");
+        let simulators = SIMULATOR_ENV.contains(&name.as_str())
+            || name.starts_with("DYLD_")
+            || name.starts_with("SIMULATOR_");
+        if simulators || env.iter().any(|(n, _)| *n == child) {
+            continue;
+        }
+        if let Some(value) = var(name) {
+            env.push((child, value));
+        }
+    }
+    env
 }
 
 #[derive(Deserialize)]
@@ -1104,7 +1163,63 @@ fn info_plist(target: Target) -> String {
 mod tests {
     use clap::ValueEnum as _;
 
-    use super::{HostWindow, Target};
+    use super::{HostWindow, Target, simctl_app_env, simctl_child_env};
+
+    /// The simulator's app gets the declared variables this environment
+    /// has, prefixed for simctl, each once; undeclared ones stay behind,
+    /// and so do those the simulator sets for its apps (`HOME`).
+    #[test]
+    fn simctl_passes_only_declared_variables() {
+        let vars = |name: &str| {
+            ["NSH_GALLERY_DEMO", "API_TOKEN", "HOME", "DYLD_LIBRARY_PATH"]
+                .contains(&name)
+                .then(|| format!("{name} value").into())
+        };
+        let declared = [
+            "NSH_GALLERY_DEMO",
+            "NSH_GALLERY_SECTION",
+            "NSH_GALLERY_DEMO",
+            "API_TOKEN",
+            "HOME",
+            "DYLD_LIBRARY_PATH",
+        ]
+        .map(String::from);
+        assert_eq!(
+            simctl_child_env(&declared, vars),
+            [
+                (
+                    "SIMCTL_CHILD_NSH_GALLERY_DEMO".to_owned(),
+                    "NSH_GALLERY_DEMO value".into()
+                ),
+                (
+                    "SIMCTL_CHILD_API_TOKEN".to_owned(),
+                    "API_TOKEN value".into()
+                ),
+            ]
+        );
+        assert!(simctl_child_env(&[], vars).is_empty());
+    }
+
+    /// An app without a declaration of `process.env`, or none at all, gets
+    /// nothing from this environment; one that declares a name gets it
+    /// (`cargo test` sets `CARGO_PKG_NAME`).
+    #[test]
+    fn simctl_passes_nothing_undeclared() {
+        let config = |json: &str| {
+            let mut config = crate::package::AppConfig::default();
+            config.capabilities = Some(serde_json::from_str(json).unwrap());
+            config
+        };
+        assert!(simctl_app_env(&crate::package::AppConfig::default()).is_empty());
+        assert!(simctl_app_env(&config(r#"{ "clipboard": true }"#)).is_empty());
+        assert_eq!(
+            simctl_app_env(&config(r#"{ "process": { "env": ["CARGO_PKG_NAME"] } }"#))
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>(),
+            ["SIMCTL_CHILD_CARGO_PKG_NAME"]
+        );
+    }
 
     /// Only phones and browsers that may be on the network get a dev
     /// server listening on every interface; hosts on this machine get
