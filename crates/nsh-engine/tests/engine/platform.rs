@@ -52,6 +52,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,

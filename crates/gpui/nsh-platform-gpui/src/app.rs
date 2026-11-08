@@ -955,6 +955,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         app,
         viewport: nsh_core::Size::default(),
         trace: options.trace,
+        content_culling: true,
         network: Some(nsh_engine::net::network()),
         websocket: None,
         refuse_connections: None,

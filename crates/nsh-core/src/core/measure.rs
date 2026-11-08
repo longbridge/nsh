@@ -53,7 +53,7 @@ impl<M: TextEngine> Core<M> {
     pub fn measure(&self, id: NodeId) -> Option<Measurement> {
         let key = self.key(id).ok()?;
         let node = &self.nodes[key as usize];
-        if !node.created || node.layout.is_none() || !valid(&node.frame) {
+        if !(node.created || node.culled) || node.layout.is_none() || !valid(&node.frame) {
             return None;
         }
         // Detached (not in the tree): no position.
