@@ -225,6 +225,7 @@ base_parts!(
     toast => nsh_part_toast,
     pickers => nsh_part_pickers,
     color_picker => nsh_part_color_picker,
+    emoji_picker => nsh_part_emoji_picker,
     carousel => nsh_part_carousel,
     tree => nsh_part_tree,
     fields => nsh_part_fields,

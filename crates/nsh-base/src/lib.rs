@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), an emoji picker (`EmojiPicker`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -36,6 +36,7 @@ mod diff;
 pub mod dock;
 #[cfg(feature = "editor")]
 pub mod editor;
+mod emoji_picker;
 mod hover_card;
 mod keys;
 mod link;
@@ -70,6 +71,13 @@ mod tabs;
 mod term;
 pub mod terminal;
 pub mod text_view;
+
+/// `EmojiPicker`'s emoji (`emoji_picker/emoji.tsv`): the native runtimes
+/// embed them; `nsh` publishes them next to a web runtime, which fetches
+/// them for its first picker.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use crate::emoji_picker::EMOJI_DATA;
 
 /// The KaTeX fonts `TextView` draws formulas with, in one file,
 /// zstd-compressed (about 230 kB of 500 kB; license in
@@ -157,6 +165,11 @@ pub use crate::{
         DateRangePreset, DateTime, PickedDate, date_picker,
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
+    emoji_picker::{
+        EmojiAnnotation, EmojiEntry, EmojiGroup, EmojiGroupId, EmojiGroupLabels, EmojiPicker,
+        EmojiPickerApi, EmojiPickerElement, EmojiPickerEvent, EmojiPickerProps, EmojiSkinTone,
+        emoji_picker,
+    },
     hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
@@ -304,10 +317,10 @@ pub mod parts {
         Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
         CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
         Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
-        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, HoverCard, Link, Menu,
-        MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
-        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
-        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, EmojiPicker, HoverCard,
+        Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress,
+        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
+        Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
         TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
         Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
@@ -328,6 +341,7 @@ pub mod parts {
         ("toast", toast),
         ("pickers", pickers),
         ("color_picker", color_picker),
+        ("emoji_picker", emoji_picker),
         ("carousel", carousel),
         ("tree", tree),
         ("fields", fields),
@@ -445,6 +459,12 @@ pub mod parts {
             .register::<ColorField>()
             .register::<ColorSwatch>()
             .register::<ColorEyeDropper>();
+    }
+
+    /// `EmojiPicker`: a search field over every emoji, with the emoji's
+    /// data (fetched by the web runtime the first time a picker shows).
+    pub fn emoji_picker(registry: &mut Registry) {
+        registry.register::<EmojiPicker>();
     }
 
     /// `Carousel` and its parts.
@@ -587,6 +607,7 @@ mod tests {
                 "DiffView",
                 "DockArea",
                 "Editor",
+                "EmojiPicker",
                 "HoverCard",
                 "Link",
                 "Menu",

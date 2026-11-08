@@ -2114,6 +2114,79 @@ covers [props] accessibilityLabel
 covers [events] Command.onSelect
 covers [events] Command.onHighlightChange
 covers [events] Command.onQueryChange
+# base-emoji-picker
+tap id:case-base-emoji-picker
+# The app's header, search bar (its prefix beside the field) and footer;
+# the groups under the app's headers, the app's recent emoji first with
+# the app's skin tone: a list box of the emoji by name.
+expect PickerHeader
+expect PickerFooter
+expect Find:
+expect [Recent]
+expect [Smileys]
+prop scroll:label:"grinning face" role listbox
+prop scroll:label:"grinning face" accessibilityLabel Emoji
+style scroll:label:"grinning face" backgroundColor #0000ffff
+prop label:"grinning face" role option
+prop label:SearchEmoji placeholder FindEmoji
+expect 👍🏿
+# The app's name for an emoji.
+prop label:LaughCry role option
+# The group at the top; browsing highlights nothing.
+expect Group: recent
+expect Lit: none
+absent NoEmoji
+# A press chooses, with the skin tone.
+tap label:"grinning face"
+expect Chosen: 😀 😀 dark grinning face
+# The ref scrolls to a group, which is reported, and looks an emoji up.
+tap text:ToPeople
+expect Group: peopleBody
+expect [People]
+tap text:LookUp
+expect Looked: LaughCry/smileysEmotion/0.6
+# The app's query: typing is reported, the app's words match, headers
+# go, and the first match is highlighted (`focus:`).
+type label:SearchEmoji xiaoku
+expect Query: xiaoku
+absent [Smileys]
+expect Lit: 😂
+style label:LaughCry backgroundColor #00ff00ff
+tap label:LaughCry
+expect Chosen: 😂 😂 dark LaughCry
+# Nothing matches: the app's `empty`.
+type label:SearchEmoji zz
+expect Query: xiaokuzz
+expect NoEmoji
+expect Lit: none
+# Without a search field: the app's cells (`renderItem`).
+expect <chequered flag>
+absent text:FindEmoji
+covers [nsh/base] EmojiPicker
+covers [props] EmojiPicker.query
+covers [props] EmojiPicker.groups
+covers [props] EmojiPicker.recent
+covers [props] EmojiPicker.groupLabels
+covers [props] EmojiPicker.annotations
+covers [props] EmojiPicker.skinTone
+covers [props] EmojiPicker.maxVersion
+covers [props] EmojiPicker.columns
+covers [props] EmojiPicker.searchable
+covers [props] EmojiPicker.searchAccessibilityLabel
+covers [props] EmojiPicker.listClass
+covers [props] EmojiPicker.itemClass
+covers [props] EmojiPicker.header
+covers [props] EmojiPicker.footer
+covers [props] EmojiPicker.empty
+covers [props] EmojiPicker.searchPrefix
+covers [props] EmojiPicker.renderItem
+covers [props] EmojiPicker.renderGroup
+covers [props] placeholder
+covers [props] accessibilityLabel
+covers [events] EmojiPicker.onSelect
+covers [events] EmojiPicker.onHighlightChange
+covers [events] EmojiPicker.onQueryChange
+covers [events] EmojiPicker.onGroupChange
 # base-scrollbar
 tap id:case-base-scrollbar
 # Always shown, where the app places its track; a press in its middle
