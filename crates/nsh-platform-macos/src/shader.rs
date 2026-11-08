@@ -137,7 +137,7 @@ impl ShaderState {
         layer.setZPosition(crate::decor::BEHIND + 0.75);
         ShaderState {
             surface,
-            view: ShaderView::default(),
+            view: surface_view(),
             layer,
             ticking: false,
             hidden: false,
@@ -522,19 +522,21 @@ pub(crate) fn start_transition(
     let host = host(surface, view, role);
     let scale = host.ns().window().map_or(2.0, |w| w.backingScaleFactor());
     let size = host.state().frame.size;
-    // From what shows: the running transition's frame, or the children.
-    let (frame, mut canvas) = {
+    // From what shows: the running transition's frame (copied on the
+    // GPU), or the children.
+    let (from_frame, mut canvas) = {
         let mut state = view.state_mut();
         let shader = state.shader.as_mut().expect("a shader");
-        let frame = (shader.masked && shader.view.frame().width > 0).then(|| {
-            let frame = shader.view.frame();
-            (frame.tight().to_vec(), frame.width, frame.height)
-        });
-        (frame, shader.canvas.take())
+        let from_frame = shader.masked
+            && shader
+                .view
+                .set_input_from_frame(renderer, ShaderInput::From);
+        (from_frame, shader.canvas.take())
     };
-    let from = match &frame {
-        Some((rgba, w, h)) => Some((&rgba[..], *w, *h, *w * 4)),
-        None => children_picture(&mut canvas, &host, size, overflow.0, scale, is_screen(role)),
+    let from = if from_frame {
+        None
+    } else {
+        children_picture(&mut canvas, &host, size, overflow.0, scale, is_screen(role))
     };
     let now = Instant::now();
     {
@@ -1503,10 +1505,7 @@ fn show_frame(
     }
     let showed = shader.view.render(renderer, now);
     if showed {
-        let image = frame_image(shader.view.frame());
-        let contents = image.as_deref().map(crate::decor::image_object);
-        // SAFETY: a CGImage is a valid `contents` object (none clears it).
-        crate::surface::quiet(|| unsafe { shader.layer.setContents(contents.as_deref()) });
+        display_frame(&shader.layer, &shader.view);
     }
     // A transition that ended: its children show as they are (unless a
     // screen effect still hides the root's).
@@ -1523,6 +1522,37 @@ fn show_frame(
     }
     let more = shader.view.wants_frame() || shader.stale || shader.backdrop_stale;
     (more, showed)
+}
+
+/// A shader view whose frames go to IOSurfaces ([`display_frame`]).
+fn surface_view() -> ShaderView {
+    let mut view = ShaderView::default();
+    view.show_on_surfaces();
+    view
+}
+
+/// Shows `view`'s last frame in `layer`: its IOSurface, which the window
+/// server shows as it is and matches from sRGB to the display on the GPU;
+/// else (no Metal device) the pixels read back, as a CGImage, whose colours
+/// Core Animation matches on the main thread.
+fn display_frame(layer: &CALayer, view: &ShaderView) {
+    let contents = match view.surface() {
+        Some(surface) => Some(surface_object(surface)),
+        None => frame_image(view.frame())
+            .as_deref()
+            .map(crate::decor::image_object),
+    };
+    // SAFETY: an IOSurface and a CGImage are valid `contents` objects (none
+    // clears it).
+    crate::surface::quiet(|| unsafe { layer.setContents(contents.as_deref()) });
+}
+
+/// An IOSurface as an object (a `contents` value).
+fn surface_object(surface: &objc2_io_surface::IOSurfaceRef) -> Retained<objc2::runtime::AnyObject> {
+    let ptr = surface as *const objc2_io_surface::IOSurfaceRef as *mut objc2::runtime::AnyObject;
+    // SAFETY: an IOSurfaceRef is an Objective-C object (`IOSurface`, toll-free
+    // bridged); retained for the result.
+    unsafe { Retained::retain(ptr) }.expect("surface")
 }
 
 /// A frame's premultiplied sRGB RGBA pixels as a CGImage (`None` when it is
@@ -1632,7 +1662,7 @@ impl NavOverlay {
         let scale = host.ns().window().map_or(2.0, |w| w.backingScaleFactor());
         let size = host.state().frame.size;
         let picture = picture_size(size, 0.0, scale)?;
-        let mut view = ShaderView::default();
+        let mut view = surface_view();
         view.set_layer(Some(shader.layer.clone()));
         view.set_size(size, picture.2 as f32);
         let mark = Rc::new(Mark {
@@ -1761,10 +1791,7 @@ impl NavOverlay {
         let now = Instant::now();
         if !first && !view.transitioning(now) {
             if view.collect_frame(renderer) {
-                let image = frame_image(view.frame());
-                let contents = image.as_deref().map(crate::decor::image_object);
-                // SAFETY: a CGImage is a valid `contents` object.
-                crate::surface::quiet(|| unsafe { self.layer.setContents(contents.as_deref()) });
+                display_frame(&self.layer, &view);
             }
             return;
         }
@@ -1784,10 +1811,7 @@ impl NavOverlay {
             }
         }
         if view.render(renderer, now) {
-            let image = frame_image(view.frame());
-            let contents = image.as_deref().map(crate::decor::image_object);
-            // SAFETY: a CGImage is a valid `contents` object.
-            crate::surface::quiet(|| unsafe { self.layer.setContents(contents.as_deref()) });
+            display_frame(&self.layer, &view);
         }
     }
 }
@@ -2319,6 +2343,50 @@ mod tests {
             let culled = hide[listed..].iter().any(|h| same(h, row));
             assert_eq!(culled, !(6..9).contains(&i), "row {i}, scrolled");
         }
+    }
+
+    #[test]
+    fn a_picture_draws_a_shader_frame_shown_on_a_surface() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let shader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }")
+                .expect("a shader");
+        let mut view = surface_view();
+        view.set_layer(Some(Arc::new(ShaderLayer::new(
+            shader,
+            &[],
+            &mut Vec::new(),
+        ))));
+        view.set_size(
+            nsh_core::Size::new(nsh_core::Points(10.0), nsh_core::Points(10.0)),
+            2.0,
+        );
+        let start = Instant::now();
+        while !view.render(&renderer, Instant::now()) {
+            assert!(start.elapsed() < Duration::from_secs(5), "no frame");
+        }
+        assert!(view.surface().is_some(), "on a surface");
+        let layer = CALayer::new();
+        layer.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(10.0, 10.0)));
+        // SAFETY: an immutable Core Animation constant.
+        layer.setContentsGravity(unsafe { kCAGravityResize });
+        display_frame(&layer, &view);
+        let picture = picture_size(
+            nsh_core::Size::new(nsh_core::Points(10.0), nsh_core::Points(10.0)),
+            0.0,
+            2.0,
+        )
+        .unwrap();
+        let mut slot = None;
+        let pixels = Canvas::of(&mut slot, picture)
+            .unwrap()
+            .render(&layer, (0.0, 0.0), |context| layer.renderInContext(context))
+            .0
+            .to_vec();
+        assert_eq!(pixels[..4], [255, 0, 0, 255], "the frame is in the picture");
     }
 
     #[test]
