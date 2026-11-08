@@ -2804,24 +2804,33 @@ fn spare_list_cells_are_hidden_until_placed_again() {
 
     // Far down, the window takes all 17 cells and 8 more; back at the
     // top, the 8 it no longer needs stay where the window left them,
-    // showing their own rows there.
+    // showing their own rows there, out of sight. Screen readers skip the
+    // cells the window left behind (the rows there may have moved since
+    // they were laid out) until their new rows are bound: nothing else is
+    // mounted before.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
     c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
-    assert!(
-        c.commit().is_none(),
-        "nothing to mount before the rows are bound"
-    );
+    let left = c.commit().expect("the cells left behind");
+    for &cell in &cells {
+        assert_eq!(hidden_in(&left, cell), (None, Some(true)), "cell {cell}");
+        assert_eq!(frame_of(&left, cell), None, "cell {cell}");
+    }
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
     let placed = c.commit().unwrap();
     let mut spare = Vec::new();
     for &cell in &cells {
-        assert_eq!(hidden_in(&placed, cell), (None, None), "cell {cell}");
         match frame_of(&placed, cell) {
-            Some(frame) => assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}"),
-            None => spare.push(cell),
+            Some(frame) => {
+                assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}");
+                assert_eq!(hidden_in(&placed, cell), (None, Some(false)), "cell {cell}");
+            }
+            None => {
+                assert_eq!(hidden_in(&placed, cell), (None, None), "cell {cell}");
+                spare.push(cell);
+            }
         }
     }
     assert_eq!(spare.len(), 8);
