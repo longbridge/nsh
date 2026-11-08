@@ -1331,7 +1331,10 @@ impl ListState {
             let distance = was - (self.offset - kept);
             // Rows above the viewport shrinking while visible ones grow can
             // leave the end where it was and the offset short of it.
-            let settle = bottom && distance <= PIN_SLACK;
+            // A negative distance is native overscroll, not a row falling
+            // short of the end. Let the platform finish its drag and bounce
+            // instead of sending a competing ScrollBy on every report.
+            let settle = bottom && (0.0..=PIN_SLACK).contains(&distance);
             if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
             }
@@ -2008,6 +2011,24 @@ mod tests {
         // the estimate, or the row would never be measured.
         l.splice(l.count, 0, 100);
         assert_eq!(l.anchor_end(0.0), 5000.0);
+    }
+
+    #[test]
+    fn bottom_aligned_list_preserves_native_bottom_bounce() {
+        let mut l = list(20, 50.0, 400.0);
+        l.set_alignment(ListAlignment::Bottom);
+        l.follow_end = Some(80.0);
+        for i in 0..20 {
+            l.measured(i, 50.0);
+        }
+        l.anchor_end(0.0);
+        // UIKit reports offsets beyond the end during a drag and spring back.
+        // Layout must not send a competing scroll back to the content edge.
+        for overshoot in [0.25, 10.0, 30.0, 60.0, 30.0, 10.0, 0.25, 0.0] {
+            l.reported(600.0 + overshoot, 0);
+            assert_eq!(l.anchor_end(0.0), 0.0, "overshoot {overshoot}");
+            assert_eq!(l.offset, 600.0 + overshoot);
+        }
     }
 
     #[test]
