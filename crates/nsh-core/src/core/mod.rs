@@ -292,16 +292,12 @@ impl Kind {
         }
     }
 
+    /// Whether its layout node's style is derived from the one JS set,
+    /// which the node then keeps too ([`Node::base_layout`]).
     fn derives_layout(self) -> bool {
         matches!(
             self,
-            Kind::Text
-                | Kind::Scroll
-                | Kind::List
-                | Kind::Cell
-                | Kind::Screen
-                | Kind::Modal
-                | Kind::Overlay
+            Kind::Scroll | Kind::List | Kind::Cell | Kind::Screen | Kind::Modal | Kind::Overlay
         )
     }
 }
@@ -501,7 +497,9 @@ struct Node {
     /// Layout node. Present exactly for nodes that render a native view.
     /// Raw text and spans have none.
     layout: Option<LayoutId>,
-    /// The style JS set, for kinds whose taffy style is derived from it.
+    /// The style JS set, for kinds whose taffy style is derived from it
+    /// and views made overlays by `position: fixed`; for a span, which has
+    /// no layout node, what a layout node takes when it is a block again.
     base_layout: Option<Box<taffy::Style>>,
     view_style: ViewStyle,
     text_style: TextStyle,
@@ -3690,6 +3688,9 @@ impl<M: TextEngine> Core<M> {
         } else if let Some(l) = node.layout {
             self.layout.set_style(l, layout);
             self.needs_layout = true;
+        } else if node.kind == Kind::Text {
+            // A span: kept for when it is a block again.
+            node.base_layout = Some(Box::new(layout));
         }
         let mut flags = 0;
         if view_changed {
@@ -5826,8 +5827,12 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         if inline {
-            // Block -> span: spans have no layout node or native view.
+            // Block -> span: spans have no layout node or native view; the
+            // span keeps the style for when it is a block again.
             if let Some(l) = node.layout.take() {
+                if node.base_layout.is_none() {
+                    node.base_layout = Some(Box::new(self.layout.style(l).clone()));
+                }
                 self.layout.remove(l);
             }
             if node.created {
@@ -5835,7 +5840,14 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Delete { id: node.id });
             }
         } else {
-            let style = node.base_layout.as_deref().cloned().unwrap_or_default();
+            // A fixed text keeps its style: the layout node takes it with
+            // the position it is fixed at ([`Self::sync_layout_style`]).
+            let style = if node.fixed_view {
+                node.base_layout.as_deref().cloned()
+            } else {
+                node.base_layout.take().map(|b| *b)
+            }
+            .unwrap_or_default();
             let cx = LeafContext::Text(TextContext::new(Arc::default()));
             let layout = self.layout.new_leaf_with_context(style, cx);
             self.layout.set_tag(layout, key);

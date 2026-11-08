@@ -25178,6 +25178,40 @@ fn a_fixed_text_span_can_return_to_its_inline_parent() {
     assert!(node.layout.is_none());
 }
 
+#[test]
+fn a_span_moved_out_of_its_text_is_laid_out_with_its_style() {
+    let mut c = core();
+    add(&mut c, 2, Tag::Text, ROOT_ID, &[]);
+    add(
+        &mut c,
+        3,
+        Tag::Text,
+        2,
+        &[("width", StyleValue::Number(40.0))],
+    );
+    c.commit();
+    assert!(c.nodes[c.key(3).unwrap() as usize].layout.is_none());
+    // Styled while a span, then a block of its own.
+    c.apply(style_op(3, &[("width", StyleValue::Number(60.0))]))
+        .unwrap();
+    let insert = |c: &mut Core<FakeEngine>, parent| {
+        c.apply(Op::Insert {
+            parent,
+            child: 3,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+    };
+    insert(&mut c, ROOT_ID);
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(60.0));
+    // A span again, and a block again, with the style it had as a block.
+    insert(&mut c, 2);
+    assert!(c.nodes[c.key(3).unwrap() as usize].layout.is_none());
+    insert(&mut c, ROOT_ID);
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(60.0));
+}
+
 /// A view of `height` in `parent`, with `style` on top.
 fn child_view(
     id: NodeId,
