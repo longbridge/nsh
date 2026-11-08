@@ -25,6 +25,7 @@ mod error;
 mod host;
 mod host_channel;
 mod hot;
+mod i18n;
 mod keymap;
 mod list;
 mod modules;

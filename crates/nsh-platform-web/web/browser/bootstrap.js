@@ -3336,6 +3336,7 @@
 	const PLATFORM_PROPS = /* @__PURE__ */ new Set([
 		"ios",
 		"android",
+		"macos",
 		"desktop",
 		"web"
 	]);
@@ -5227,6 +5228,10 @@
 				token(name) {
 					tokens();
 					return invoke(402, [name, fields.colorScheme() === "dark"]);
+				},
+				setTheme(theme) {
+					invoke(406, [theme]);
+					tokens.update((value) => value + 1);
 				}
 			},
 			insets,
@@ -5254,6 +5259,16 @@
 			changedTokens() {
 				tokens.update((value) => value + 1);
 			},
+			showLocale(tag) {
+				reactive.batch(() => {
+					const settings = reactive.untracked(fields.localeSettings);
+					fields.localeSettings.set({
+						...settings,
+						languages: [tag, ...settings.languages.filter((l) => l !== tag)]
+					});
+					fields.locale.set(tag);
+				});
+			},
 			setup(tailwind, theme, scheme, statusBar) {
 				if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
 				if (typeof theme === "string") {
@@ -5272,21 +5287,76 @@
 	}
 
 //#endregion
+//#region ../nsh-platform-web/web/browser/i18n.js
+/** `nsh/i18n` in the browser, as nsh-js's (`src/i18n.rs`): the bundle's
+	* translations (`nsh:rt`'s `i18n`, run before the app's modules), `t`
+	* looking a key up as rust-i18n does in the first of the user's languages
+	* the app has, and `setLocale`. The engine gets
+	* both too (ops 407 and 408), for the core's components and the language
+	* it reports. The browser's own `Intl` formats every language, so the
+	* bundle's language data stays unused here. */
+	function createI18n(reactive, invoke, env) {
+		let translations = {};
+		const version = reactive.signal(0);
+		/** `key`'s text in `locale`, each shorter tag, then English. */
+		const lookup = (locale, key) => {
+			for (let tag = locale; tag; tag = tag.includes("-") ? tag.slice(0, tag.lastIndexOf("-")) : "") {
+				const text = translations[tag]?.[key];
+				if (typeof text === "string") return text;
+			}
+			return locale === "en" ? void 0 : translations.en?.[key];
+		};
+		/** Whether the translations have `tag` or a shorter tag of it. */
+		const has = (tag) => {
+			for (; tag; tag = tag.includes("-") ? tag.slice(0, tag.lastIndexOf("-")) : "") if (Object.hasOwn(translations, tag)) return true;
+			return false;
+		};
+		/** The first of the user's preferred languages the app has, else the locale. */
+		const shown = () => env.api.localeSettings().languages.find(has) ?? env.api.locale();
+		return {
+			api: {
+				t(key, options) {
+					key = String(key);
+					version();
+					const { locale = shown(), ...args } = options && typeof options === "object" ? options : {};
+					const text = lookup(String(locale), key);
+					if (text === void 0) return `${locale}.${key}`;
+					return text.replace(/%\{(\w+)\}/g, (pattern, name) => Object.hasOwn(args, name) ? String(args[name]) : pattern);
+				},
+				setLocale(locale) {
+					if (locale == null) {
+						invoke(408, [null]);
+						return;
+					}
+					let tag;
+					try {
+						[tag] = Intl.getCanonicalLocales(locale);
+					} catch {
+						tag = void 0;
+					}
+					if (typeof locale !== "string" || !tag) throw new RangeError("setLocale: expected a BCP 47 language tag (\"zh-CN\") or null");
+					env.showLocale(tag);
+					invoke(408, [tag]);
+				},
+				availableLocales: () => {
+					version();
+					return Object.keys(translations).sort();
+				}
+			},
+			setup(json) {
+				try {
+					translations = JSON.parse(json).translations ?? {};
+				} catch {
+					return;
+				}
+				version.update((value) => value + 1);
+				invoke(407, [json]);
+			}
+		};
+	}
+
+//#endregion
 //#region ../nsh-platform-web/web/browser/testing.js
-	const REDIRECTS = /* @__PURE__ */ new Set([
-		301,
-		302,
-		303,
-		307,
-		308
-	]);
-	const NULL_BODY = /* @__PURE__ */ new Set([
-		101,
-		103,
-		204,
-		205,
-		304
-	]);
 	const define = (target, name, value) => Object.defineProperty(target, name, {
 		value,
 		writable: true,
@@ -5369,151 +5439,6 @@
 		});
 		define(target, "cancelAnimationFrame", function cancelAnimationFrame(id) {
 			if (typeof id === "number") call(1006, [id]);
-		});
-	}
-	function installFetch(target, call, active, wake, network) {
-		const { Request, Response, ReadableStream, TypeError: RealmTypeError } = target;
-		const nativeFetch = target.fetch;
-		const failure = (message) => new RealmTypeError(`Network request failed: ${message}`);
-		const inflight = /* @__PURE__ */ new Map();
-		const finish = (id) => {
-			const entry = inflight.get(id);
-			if (!entry) return void 0;
-			inflight.delete(id);
-			entry.signal.removeEventListener("abort", entry.abort);
-			return entry;
-		};
-		const head = (id, entry, [status, statusText, url, redirected, headers]) => {
-			if (entry.redirectError && REDIRECTS.has(status)) {
-				finish(id);
-				call(1009, [id]);
-				entry.reject(failure("the response was a redirect and redirect is \"error\""));
-				return;
-			}
-			let body = null;
-			if (!entry.nullBody && !NULL_BODY.has(status)) body = new ReadableStream({
-				start(controller) {
-					entry.controller = controller;
-				},
-				cancel() {
-					if (finish(id)) call(1009, [id]);
-				}
-			});
-			let response;
-			try {
-				response = new Response(body, {
-					status,
-					statusText,
-					headers
-				});
-			} catch (error) {
-				finish(id);
-				call(1009, [id]);
-				entry.reject(error);
-				return;
-			}
-			Object.defineProperties(response, {
-				url: {
-					value: url,
-					configurable: true
-				},
-				redirected: {
-					value: redirected,
-					configurable: true
-				},
-				type: {
-					value: "basic",
-					configurable: true
-				}
-			});
-			entry.resolve(response);
-			entry.resolve = entry.reject = null;
-		};
-		call(1007, [(id, kind, ...data) => {
-			const entry = inflight.get(id);
-			if (!entry || !active()) return;
-			try {
-				switch (kind) {
-					case 0:
-						if (entry.resolve) head(id, entry, data);
-						break;
-					case 1:
-						entry.controller?.enqueue(data[0]);
-						break;
-					case 2:
-						finish(id);
-						if (entry.reject) entry.reject(failure("the response ended before its head"));
-						else entry.controller?.close();
-						break;
-					case 3: {
-						finish(id);
-						const error = failure(data[0]);
-						if (entry.reject) entry.reject(error);
-						else entry.controller?.error(error);
-						break;
-					}
-					case 4: {
-						finish(id);
-						const error = Object.assign(failure(data[0]), {
-							code: "ERR_ACCESS_DENIED",
-							permission: "network",
-							resource: data[1]
-						});
-						if (entry.reject) entry.reject(error);
-						else entry.controller?.error(error);
-						break;
-					}
-				}
-			} finally {
-				wake();
-			}
-		}]);
-		const schemeOf = (input) => {
-			try {
-				return new URL(input instanceof Request ? input.url : String(input), target.location?.href).protocol;
-			} catch {
-				return "";
-			}
-		};
-		define(target, "fetch", async function fetch(input, init) {
-			const protocol = schemeOf(input);
-			if (protocol !== "asset:" && !(network && (protocol === "http:" || protocol === "https:"))) return nativeFetch.call(target, input, init);
-			const request = new Request(input, init);
-			const { signal } = request;
-			if (signal.aborted) throw signal.reason;
-			const body = request.body ? new Uint8Array(await request.arrayBuffer()) : void 0;
-			if (signal.aborted) throw signal.reason;
-			const headers = [...request.headers];
-			if (!request.headers.has("accept")) headers.push(["accept", "*/*"]);
-			const url = request.url.split("#")[0];
-			return new Promise((resolve, reject) => {
-				const id = call(1008, [
-					request.method,
-					url,
-					headers,
-					body,
-					request.redirect === "follow"
-				]);
-				const entry = {
-					resolve,
-					reject,
-					signal,
-					controller: null,
-					nullBody: request.method === "HEAD",
-					redirectError: request.redirect === "error",
-					abort() {
-						if (!finish(id)) return;
-						call(1009, [id]);
-						const reason = signal.reason;
-						if (entry.reject) entry.reject(reason);
-						else entry.controller?.error(reason);
-						wake();
-					}
-				};
-				inflight.set(id, entry);
-				signal.addEventListener("abort", entry.abort);
-				wake();
-			});
 		});
 	}
 	const WEBSOCKET_SCHEMES = {
@@ -5621,21 +5546,193 @@
 		define(target, "WebSocket", WebSocket);
 	}
 	/**
-	* Puts the engine's clock and network in `target`'s place (the app realm's
+	* Puts the engine's clock and sockets in `target`'s place (the app realm's
 	* global object) where the session needs them: the clock when the
-	* engine's is manual, `fetch` for the app's files always, and for HTTP with
-	* `WebSocket` when `network` (a test session). `call` is the host's
-	* operation call; callbacks end with `wake` (a pump).
+	* engine's is manual, `WebSocket` when `network` (a test session). `call`
+	* is the host's operation call; callbacks end with `wake` (a pump).
 	*/
 	function installTesting(target, call, { active = () => true, wake = () => {}, network = false } = {}) {
 		const clock = call(1e3, []) === true;
 		if (clock) installClock(target, call, active, wake);
-		installFetch(target, call, active, wake, network);
 		if (network) installWebSocket(target, call, active, wake);
 		return {
 			clock,
 			network
 		};
+	}
+
+//#endregion
+//#region ../nsh-platform-web/web/browser/fetch.js
+	const REDIRECTS = /* @__PURE__ */ new Set([
+		301,
+		302,
+		303,
+		307,
+		308
+	]);
+	const NULL_BODY = /* @__PURE__ */ new Set([
+		101,
+		103,
+		204,
+		205,
+		304
+	]);
+	/**
+	* Puts the engine's network in the place of `target`'s `fetch` (the app
+	* realm's global object) for the requests that need it: the app's files
+	* always, HTTP when `network` (a test session). `call` is the host's
+	* operation call; callbacks end with `wake` (a pump).
+	*/
+	function installFetch(target, call, { active = () => true, wake = () => {}, network = false } = {}) {
+		const { Request, Response, ReadableStream, TypeError: RealmTypeError } = target;
+		const nativeFetch = target.fetch;
+		const failure = (message) => new RealmTypeError(`Network request failed: ${message}`);
+		const inflight = /* @__PURE__ */ new Map();
+		const finish = (id) => {
+			const entry = inflight.get(id);
+			if (!entry) return void 0;
+			inflight.delete(id);
+			entry.signal.removeEventListener("abort", entry.abort);
+			return entry;
+		};
+		const head = (id, entry, [status, statusText, url, redirected, headers]) => {
+			if (entry.redirectError && REDIRECTS.has(status)) {
+				finish(id);
+				call(1009, [id]);
+				entry.reject(failure("the response was a redirect and redirect is \"error\""));
+				return;
+			}
+			let body = null;
+			if (!entry.nullBody && !NULL_BODY.has(status)) body = new ReadableStream({
+				start(controller) {
+					entry.controller = controller;
+				},
+				cancel() {
+					if (finish(id)) call(1009, [id]);
+				}
+			});
+			let response;
+			try {
+				response = new Response(body, {
+					status,
+					statusText,
+					headers
+				});
+			} catch (error) {
+				finish(id);
+				call(1009, [id]);
+				entry.reject(error);
+				return;
+			}
+			Object.defineProperties(response, {
+				url: {
+					value: url,
+					configurable: true
+				},
+				redirected: {
+					value: redirected,
+					configurable: true
+				},
+				type: {
+					value: "basic",
+					configurable: true
+				}
+			});
+			entry.resolve(response);
+			entry.resolve = entry.reject = null;
+		};
+		call(1007, [(id, kind, ...data) => {
+			const entry = inflight.get(id);
+			if (!entry || !active()) return;
+			try {
+				switch (kind) {
+					case 0:
+						if (entry.resolve) head(id, entry, data);
+						break;
+					case 1:
+						entry.controller?.enqueue(data[0]);
+						break;
+					case 2:
+						finish(id);
+						if (entry.reject) entry.reject(failure("the response ended before its head"));
+						else entry.controller?.close();
+						break;
+					case 3: {
+						finish(id);
+						const error = failure(data[0]);
+						if (entry.reject) entry.reject(error);
+						else entry.controller?.error(error);
+						break;
+					}
+					case 4: {
+						finish(id);
+						const error = Object.assign(failure(data[0]), {
+							code: "ERR_ACCESS_DENIED",
+							permission: "network",
+							resource: data[1]
+						});
+						if (entry.reject) entry.reject(error);
+						else entry.controller?.error(error);
+						break;
+					}
+				}
+			} finally {
+				wake();
+			}
+		}]);
+		const schemeOf = (input) => {
+			try {
+				return new URL(input instanceof Request ? input.url : String(input), target.location?.href).protocol;
+			} catch {
+				return "";
+			}
+		};
+		async function fetch(input, init) {
+			const protocol = schemeOf(input);
+			if (protocol !== "asset:" && !(network && (protocol === "http:" || protocol === "https:"))) return nativeFetch.call(target, input, init);
+			const request = new Request(input, init);
+			const { signal } = request;
+			if (signal.aborted) throw signal.reason;
+			const body = request.body ? new Uint8Array(await request.arrayBuffer()) : void 0;
+			if (signal.aborted) throw signal.reason;
+			const headers = [...request.headers];
+			if (!request.headers.has("accept")) headers.push(["accept", "*/*"]);
+			const url = request.url.split("#")[0];
+			return new Promise((resolve, reject) => {
+				const id = call(1008, [
+					request.method,
+					url,
+					headers,
+					body,
+					request.redirect === "follow"
+				]);
+				const entry = {
+					resolve,
+					reject,
+					signal,
+					controller: null,
+					nullBody: request.method === "HEAD",
+					redirectError: request.redirect === "error",
+					abort() {
+						if (!finish(id)) return;
+						call(1009, [id]);
+						const reason = signal.reason;
+						if (entry.reject) entry.reject(reason);
+						else entry.controller?.error(reason);
+						wake();
+					}
+				};
+				inflight.set(id, entry);
+				signal.addEventListener("abort", entry.abort);
+				wake();
+			});
+		}
+		Object.defineProperty(target, "fetch", {
+			value: fetch,
+			writable: true,
+			configurable: true,
+			enumerable: false
+		});
 	}
 
 //#endregion
@@ -5935,6 +6032,7 @@
 		createGestures: () => createGestures,
 		createHost: () => createHost,
 		createHot: () => createHot,
+		createI18n: () => createI18n,
 		createKeymap: () => createKeymap,
 		createLists: () => createLists,
 		createModules: () => createModules,
@@ -5942,6 +6040,7 @@
 		createReactive: () => createReactive,
 		createResource: () => createResource,
 		createStandard: () => createStandard,
+		installFetch: () => installFetch,
 		installTesting: () => installTesting
 	});
 	function configureAPIs(nsh, modules, dom, active, env) {

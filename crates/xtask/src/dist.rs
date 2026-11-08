@@ -9,6 +9,7 @@
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
+//! dist/nsh/runtime/tui/nsh-tui-host[.exe]                     development host (the terminal, `nsh run --target tui`)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
 //!                                                              symbols/<abi>/libnsh.so (with symbols)
 //! dist/nsh/runtime/web/{nsh-browser.wasm,nsh-dev.wasm,nsh.js,browser/}  the web runtimes (published apps' to link from, the dev host's)
@@ -23,8 +24,8 @@
 //! GTK 4, Pango and, for web views, WebKitGTK 6.0 must be installed;
 //! without WebKitGTK's development files it is built with placeholders for
 //! web views and needs only GTK); the Windows runtime likewise, on
-//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI development host
-//! is built for this machine on each of the three. The web runtime is built
+//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI and terminal
+//! development hosts are built for this machine on each of the three. The web runtime is built
 //! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
 //! (`docs/dev/web.md`).
 
@@ -151,6 +152,17 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             .find(|file| file.exists())
             .context("the GPUI build wrote no development host")?;
         copy(host, &out.join("runtime/gpui").join(exe(package)))?;
+
+        // The terminal's development host (`nsh run --target tui`).
+        let package = "nsh-tui-host";
+        cargo(
+            &["build", "--release", "-p", package],
+            "the development host for the terminal",
+        )?;
+        copy(
+            &release.join("release").join(exe(package)),
+            &out.join("runtime/tui").join(exe(package)),
+        )?;
     }
 
     // The web runtimes, the same files on every machine, all running TSX on

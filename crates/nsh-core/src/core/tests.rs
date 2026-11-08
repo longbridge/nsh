@@ -2442,6 +2442,37 @@ fn scrolled(batch: &MountBatch, start: f32) -> f32 {
 }
 
 #[test]
+fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListAlignment(crate::ListAlignment::Bottom),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::FollowEnd(Some(px(80.0))),
+            },
+        ],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    for _ in 0..3 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        c.commit();
+    }
+    for offset in [4610.0, 4630.0, 4660.0, 4630.0, 4610.0, 4600.0] {
+        c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+        if let Some(batch) = c.commit() {
+            assert_eq!(scrolled(&batch, offset), offset, "native offset {offset}");
+        }
+    }
+}
+
+#[test]
 fn scroll_commands_follow_their_target_as_rows_are_measured() {
     let mut c = core();
     estimated_list(&mut c);
@@ -5794,6 +5825,97 @@ fn pointer_events_classes_inherit_as_in_css() {
 }
 
 #[test]
+fn pointer_events_regions_are_worked_out_once_a_round_with_the_tree_it_left() {
+    use crate::props::PointerEvents as P;
+    let mut c = core();
+    // 2 none { 3, 4 auto }, 5 beside it.
+    view_with_classes(&mut c, 2, "pointer-events-none");
+    view_with_classes(&mut c, 5, "p-1");
+    for (id, classes) in [(3, "p-1"), (4, "pointer-events-auto")] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create { id, tag: Tag::View },
+                class_op(id, classes),
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let batch = c.commit().unwrap();
+    let pointer = |batch: &MountBatch, id| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id: i, props } if *i == id => Some(props.pointer_events),
+            _ => None,
+        })
+    };
+    assert_eq!(pointer(&batch, 2), Some(P::BoxNone));
+    assert_eq!(pointer(&batch, 3), Some(P::None));
+    // In one round: 3 moves out of the region, its `auto` (4) is
+    // released, and many views come into the region (worked out with the
+    // region once).
+    let mut ops = vec![
+        Op::Remove {
+            parent: 2,
+            child: 3,
+        },
+        Op::Insert {
+            parent: 5,
+            child: 3,
+            before: None,
+        },
+        Op::Remove {
+            parent: 2,
+            child: 4,
+        },
+        Op::Release { id: 4 },
+    ];
+    for id in (100..400).step_by(2) {
+        ops.extend([
+            Op::Create { id, tag: Tag::View },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    // Out of the region, 3 takes touches again; without its `auto` the
+    // region blocks them all.
+    assert_eq!(pointer(&batch, 3), Some(P::Auto));
+    assert_eq!(pointer(&batch, 2), Some(P::None));
+    // A view moved within the region (out and back in, as a caret moves)
+    // stays blocked by it: nothing to mount, never a `none` of its own.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 100,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 100,
+                before: None,
+            },
+        ],
+    );
+    if let Some(batch) = c.commit() {
+        assert_eq!(pointer(&batch, 100), None);
+        assert_eq!(pointer(&batch, 2), None);
+    }
+    // An `auto` in a newcomer lets touches through the region to it.
+    c.apply(class_op(398, "pointer-events-auto")).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(pointer(&batch, 2), Some(P::BoxNone));
+}
+
+#[test]
 fn sibling_positions() {
     let mut c = core();
     view_with_classes(&mut c, 2, "flex-row");
@@ -7770,6 +7892,33 @@ fn node_quota_and_dense_ids() {
 }
 
 #[test]
+fn the_id_table_follows_the_nodes_alive_not_every_id_made() {
+    let mut c = core();
+    // A stream of short-lived nodes with ever higher ids, as an app that
+    // re-renders for hours makes them.
+    let mut last = None;
+    for id in (2..2_000_000).step_by(2) {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        if let Some(old) = last.replace(id) {
+            c.apply(Op::Release { id: old }).unwrap();
+        }
+        if id % 20_000 == 0 {
+            c.commit();
+        }
+    }
+    c.commit();
+    assert!(
+        c.slots.pages() <= 2,
+        "{} pages for {} nodes",
+        c.slots.pages(),
+        c.slots.len()
+    );
+    // The newest node and the root are still known.
+    assert!(c.key(1_999_998).is_ok());
+    assert!(c.key(ROOT_ID).is_ok());
+}
+
+#[test]
 fn refused_urls_fail_and_send_nothing() {
     let mut c = core();
     c.set_access(Arc::new(crate::access::Access {
@@ -7851,6 +8000,21 @@ fn refused_urls_fail_and_send_nothing() {
     );
 }
 
+/// A refusal names the host to grant, or, for a URL no host grant can
+/// cover, how to write it: adding the URL itself would never grant it.
+#[test]
+fn refusals_name_the_host_to_grant_or_how_to_write_the_url() {
+    let refusal = |uri| super::not_granted("the web page", uri, "webview.hosts");
+    assert!(
+        refusal("https://docs.example.com/a").contains("add `docs.example.com` to capabilities")
+    );
+    for uri in ["https://bank.example\\@docs.example.com/", "not a url"] {
+        let message = refusal(uri);
+        assert!(!message.contains("add `"), "{message}");
+        assert!(message.contains("%5C"), "{message}");
+    }
+}
+
 #[test]
 fn refused_web_view_html_fails() {
     let mut c = core();
@@ -7890,6 +8054,141 @@ fn refused_web_view_html_fails() {
         fields.iter().any(
             |(k, v)| *k == "code" && *v == crate::PayloadValue::Str("ERR_ACCESS_DENIED".into())
         )
+    );
+}
+
+/// The source a web view's mount items last gave.
+fn web_source(batch: &MountBatch, view: NodeId) -> Option<crate::WebSource> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id,
+            props: crate::NativeProps::WebView(p),
+        } if *id == view => Some(p.source.clone()),
+        _ => None,
+    })
+}
+
+/// Inline HTML loaded with a base URL runs at the base URL's origin
+/// (WebKit, Android, Windows), so the base URL takes the grant a page there
+/// would.
+#[test]
+fn web_view_base_urls_need_the_hosts_grant() {
+    let run_with = |capabilities: serde_json::Value, props: Vec<Prop>| {
+        let mut c = core();
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+            granted: None,
+        }));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::Error,
+                enabled: true,
+            },
+        ];
+        ops.extend(props.into_iter().map(|prop| Op::SetProp { id: 2, prop }));
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        // The messages of the access errors reported.
+        let denied: Vec<String> = js_events(&mut c)
+            .into_iter()
+            .filter_map(|e| match e {
+                (2, EventKind::Error, EventPayload::Map(fields))
+                    if fields.iter().any(|(k, v)| {
+                        *k == "code" && *v == crate::PayloadValue::Str("ERR_ACCESS_DENIED".into())
+                    }) =>
+                {
+                    fields.into_iter().find_map(|(k, v)| match (k, v) {
+                        ("message", crate::PayloadValue::Str(m)) => Some(m.to_string()),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        (web_source(&batch, 2), denied)
+    };
+    let run = |props| {
+        run_with(
+            serde_json::json!({ "webview": { "hosts": ["docs.example.com"] } }),
+            props,
+        )
+    };
+    let html = |base: Option<&str>| crate::WebSource::Html {
+        html: "<b>hi</b>".into(),
+        base_url: base.map(Into::into),
+    };
+    let base_refused = |denied: &[String]| matches!(denied, [m] if m.contains("the base URL"));
+    for base in ["https://docs.example.com/a/", "about:blank", ""] {
+        // Granted: kept.
+        let (source, denied) = run(vec![
+            Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ]);
+        assert_eq!(source, Some(html(Some(base))), "{base}");
+        assert!(denied.is_empty(), "{base}: {denied:?}");
+    }
+    for base in [
+        "https://bank.example/",
+        "file:///etc/",
+        "not a url",
+        // WHATWG reads bank.example: the backslash ends the host.
+        "https://bank.example\\@docs.example.com/",
+    ] {
+        // `html` with `baseUrl`, either order, and Rust's
+        // `.html(html, Some(base))`: the page loads without the base URL.
+        for props in [
+            vec![
+                Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+                Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+            ],
+            vec![
+                Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+                Prop::Native(NativeProp::BaseUrl(Some(base.into()))),
+            ],
+            vec![Prop::Native(NativeProp::Source(html(Some(base))))],
+        ] {
+            let (source, denied) = run(props);
+            assert_eq!(source, Some(html(None)), "{base}");
+            assert!(base_refused(&denied), "{base}: {denied:?}");
+        }
+    }
+    // A subdomain grant: WHATWG reads bank.example here too.
+    let (source, denied) = run_with(
+        serde_json::json!({ "webview": { "hosts": ["*.docs.example.com"] } }),
+        vec![
+            Prop::Native(NativeProp::BaseUrl(Some(
+                "https://bank.example\\.docs.example.com/".into(),
+            ))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ],
+    );
+    assert_eq!(source, Some(html(None)));
+    assert!(base_refused(&denied), "{denied:?}");
+    // Without web views at all, the HTML itself is refused, once.
+    let (source, denied) = run_with(
+        serde_json::json!({}),
+        vec![
+            Prop::Native(NativeProp::BaseUrl(Some("https://bank.example/".into()))),
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+        ],
+    );
+    assert!(
+        !matches!(source, Some(crate::WebSource::Html { .. })),
+        "{source:?}"
+    );
+    assert!(
+        matches!(&denied[..], [m] if m.contains("web views are not granted")),
+        "{denied:?}"
     );
 }
 
@@ -7947,6 +8246,52 @@ fn web_view_incognito_is_read_when_it_is_made() {
         }],
     );
     assert_eq!(web(&c.commit().unwrap()), Some(true));
+}
+
+#[test]
+fn web_view_url_schemes_are_read_when_it_is_made() {
+    use crate::web_resource::WebUrlScheme;
+    let scheme = WebUrlScheme::new("app-image", |request| request.fail()).unwrap();
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::UrlSchemes(vec![scheme.clone()])),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let schemes = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::WebView(p),
+            } => Some(p.url_schemes.clone()),
+            _ => None,
+        })
+    };
+    // The platform makes the web view with its first props.
+    assert_eq!(schemes(&c.commit().unwrap()), Some(vec![scheme.clone()]));
+    // Made: another handler is ignored, and nothing is sent for it.
+    let other = WebUrlScheme::new("app-image", |request| request.fail()).unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::UrlSchemes(vec![other])),
+        }],
+    );
+    assert_eq!(c.commit().as_ref().and_then(schemes), None);
 }
 
 mod components {
@@ -18918,6 +19263,149 @@ mod rust_windows {
         );
     }
 
+    #[component]
+    fn Empty() -> impl IntoElement {
+        view()
+    }
+
+    #[test]
+    fn rust_open_window_opens_one_window_per_id_until_it_closes() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let closed = Rc::new(RefCell::new(Vec::new()));
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            let closed = closed.clone();
+            open_window(
+                window()
+                    .id("doc:1")
+                    .title("Doc 1")
+                    .on_open_change(move |e| closed.borrow_mut().push(e.reason))
+                    .content(|| {
+                        INSIDE.with(|i| *i.borrow_mut() = Some(current_window().id().to_owned()));
+                        text("Doc 1")
+                    }),
+            )
+            .expect("opens on a desktop")
+        };
+        assert_eq!(doc.id(), "doc:1");
+        let batch = c.commit().unwrap();
+        let commands = desktop_commands(&batch);
+        let [(id, DesktopCommand::OpenWindow(open))] = &commands[..] else {
+            panic!("one window opens: {commands:?}");
+        };
+        assert_eq!(open.options.id, "doc:1");
+        assert_eq!(
+            INSIDE.with(|i| i.borrow().clone()).as_deref(),
+            Some("doc:1")
+        );
+        // The same id again: the open window, focused, not a second one.
+        let again = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc:1").content(|| text("Other")))
+        };
+        assert!(again.as_ref() == Some(&doc));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            desktop_commands(&batch),
+            [(*id, DesktopCommand::Request(WindowRequest::Focus))]
+        );
+        // Its ref closes it: the app hears it and the window's root goes.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(*closed.borrow(), [WindowCloseCause::Close]);
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Remove { id: removed } | MountItem::Delete { id: removed } if removed == id)),
+            "{:?}",
+            batch.items
+        );
+        // A closed ref's signals are gone; reading it is safe.
+        {
+            let _entered = c.components.runtime.enter();
+            assert_eq!(doc.state(), None);
+            assert_eq!(doc.title_bar(), Edges::default());
+        }
+        // Closed, the id opens a new window.
+        {
+            let _entered = c.components.runtime.enter();
+            assert!(open_window(window().id("doc:1").content(|| text("Doc 1"))).is_some());
+        }
+        let batch = c.commit().unwrap();
+        assert!(matches!(
+            &desktop_commands(&batch)[..],
+            [(_, DesktopCommand::OpenWindow(_))]
+        ));
+    }
+
+    #[component]
+    fn WithNotes() -> impl IntoElement {
+        view().child(window().id("notes").content(|| text("Notes")))
+    }
+
+    #[test]
+    fn rust_open_window_finds_declared_windows_and_follows_capabilities() {
+        use crate::element::desktop::open_window;
+        // Off the desktops: nothing opens.
+        let mut c = core();
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            assert!(open_window(window().id("doc")).is_none());
+        }
+        // A `window()` in the tree with the id: focused, not a second one.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<WithNotes>());
+        let batch = c.commit().unwrap();
+        let [(notes, DesktopCommand::OpenWindow(_))] = &desktop_commands(&batch)[..] else {
+            panic!("the declared window opens");
+        };
+        let notes = *notes;
+        {
+            let _entered = c.components.runtime.enter();
+            let found = open_window(window().id("notes").content(|| text("Other")));
+            assert_eq!(found.as_ref().map(|w| w.id()), Some("notes"));
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            desktop_commands(&batch),
+            [(notes, DesktopCommand::Request(WindowRequest::Focus))]
+        );
+        // Not granted by the capabilities: nothing opens, as `Window.open`
+        // throws.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        let mut access = crate::access::Access::all();
+        access.declared.windows = None;
+        c.set_access(std::sync::Arc::new(access));
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            assert!(open_window(window().id("doc")).is_none());
+        }
+        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
+    }
+
     thread_local! {
         static PRESSES: RefCell<Vec<(String, crate::desktop::CloseReason)>> =
             const { RefCell::new(Vec::new()) };
@@ -18975,7 +19463,7 @@ mod rust_windows {
     }
 
     thread_local! {
-        static FITTED: RefCell<Option<crate::element::desktop::WindowHandle>> =
+        static FITTED: RefCell<Option<crate::element::desktop::WindowRef>> =
             const { RefCell::new(None) };
     }
 
@@ -31949,4 +32437,67 @@ fn only_greedy_lines_without_a_limit_share_measurements() {
     measure_text(&greedy, &mut cache, &mut cx, Some(100.0));
     measure_text(&greedy, &mut cache, &mut cx, Some(90.0));
     assert_eq!(greedy.measures.get(), 2);
+}
+
+#[test]
+fn overlays_with_a_cover_follow_its_size_changing() {
+    use StyleValue::Number;
+    let mut c = Core::new(FakeEngine::default(), size_pt(1920.0, 1080.0));
+    c.set_tokens(crate::element::tokens::sample());
+    // A slot 1904 × 464 at (8, 608), under a pane 600 tall.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(600.0))]);
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[("flexGrow", Number(1.0)), ("padding", Number(8.0))],
+    );
+    add(&mut c, 6, Tag::View, 4, &[("flexGrow", Number(1.0))]);
+    // A view over it whose size the app sets once the slot's is known.
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(0.0)), ("height", Number(0.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(6)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Cover(Some(10))),
+        ],
+    );
+    c.commit();
+    let resize = |c: &mut Core<FakeEngine>, w: f32, h: f32| {
+        apply(
+            c,
+            vec![style_op(10, &[("width", Number(w)), ("height", Number(h))])],
+        );
+        c.commit();
+        c.measure(10).map(|m| Bounds {
+            origin: m.page,
+            size: m.frame.size,
+        })
+    };
+    // As large as the slot: on it, not where its former 0 × 0 frame put it.
+    assert_eq!(
+        resize(&mut c, 1904.0, 464.0),
+        Some(rect(8.0, 608.0, 1904.0, 464.0))
+    );
+    // Taller: its middle on the slot's, kept inside the window.
+    assert_eq!(
+        resize(&mut c, 1888.0, 720.0),
+        Some(rect(8.0, 360.0, 1888.0, 720.0))
+    );
+    // Back: on the slot again, not where its former height put it.
+    assert_eq!(
+        resize(&mut c, 1904.0, 464.0),
+        Some(rect(8.0, 608.0, 1904.0, 464.0))
+    );
 }

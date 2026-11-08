@@ -23,16 +23,13 @@ fn on<T: Clone>(value: &Option<T>, f: impl FnOnce(T)) {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use nsh_core::{
-        desktop::{WindowLevel, Workspaces},
-        platform::Appearance,
-    };
+    use nsh_core::desktop::{WindowLevel, Workspaces};
     use objc2::{MainThreadMarker, rc::Retained};
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
         NSApplication, NSRequestUserAttentionType, NSScreen, NSView, NSWindow, NSWindowButton,
-        NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode, NSWindowSharingType,
-        NSWindowStyleMask, NSWindowTitleVisibility,
+        NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode, NSWindowStyleMask,
+        NSWindowTitleVisibility,
     };
     use objc2_foundation::{NSPoint, NSSize};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -98,13 +95,6 @@ mod mac {
             w.setCollectionBehavior(b);
         });
         on(&a.shadow, |s| w.setHasShadow(s));
-        on(&a.content_protected, |p| {
-            w.setSharingType(if p {
-                NSWindowSharingType::None
-            } else {
-                NSWindowSharingType::ReadOnly
-            })
-        });
         on(&a.taskbar, |t| w.setExcludedFromWindowsMenu(!t));
         on(&a.movable, |m| w.setMovable(m));
         on(&a.resizable, |r| {
@@ -133,27 +123,21 @@ mod mac {
                 .unwrap_or(NSSize::new(NO_LIMIT, NO_LIMIT));
             w.setContentMaxSize(s);
         });
-        on(&a.aspect_ratio, |r| {
-            match r.filter(|r| r.is_finite() && *r > 0.0) {
-                Some(r) => w.setContentAspectRatio(NSSize::new(r.into(), 1.0)),
-                // No ratio: AppKit clears one by setting resize increments. A
-                // (0, 0) ratio is not "none" but 0 / 0: zooming and resizing
-                // make a NaN height of it.
-                None => w.setContentResizeIncrements(NSSize::new(1.0, 1.0)),
+    }
+
+    /// Its frame drawn dark or light (`None`: the system's).
+    pub(crate) fn set_scheme(window: &Window, dark: Option<bool>) {
+        let Some(w) = ns_window(window) else { return };
+        // SAFETY: AppKit's constant appearance names.
+        let name = unsafe {
+            match dark {
+                Some(false) => Some(NSAppearanceNameAqua),
+                Some(true) => Some(NSAppearanceNameDarkAqua),
+                None => None,
             }
-        });
-        on(&a.color_scheme, |scheme| {
-            // SAFETY: AppKit's constant appearance names.
-            let name = unsafe {
-                match scheme {
-                    Appearance::Light => Some(NSAppearanceNameAqua),
-                    Appearance::Dark => Some(NSAppearanceNameDarkAqua),
-                    _ => None,
-                }
-            };
-            let appearance = name.and_then(NSAppearance::appearanceNamed);
-            w.setAppearance(appearance.as_deref());
-        });
+        };
+        let appearance = name.and_then(NSAppearance::appearanceNamed);
+        w.setAppearance(appearance.as_deref());
     }
 
     /// The title bar shown, hidden (the content under it, the traffic
@@ -271,7 +255,7 @@ mod mac {
 
 #[cfg(windows)]
 mod win {
-    use nsh_core::{desktop::WindowLevel, platform::Appearance};
+    use nsh_core::desktop::WindowLevel;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::{
         Foundation::HWND,
@@ -283,8 +267,6 @@ mod win {
 
     /// `DWMWA_USE_IMMERSIVE_DARK_MODE`.
     const DARK_MODE: u32 = 20;
-    /// `WDA_EXCLUDEFROMCAPTURE`.
-    const EXCLUDE_FROM_CAPTURE: u32 = 0x11;
 
     fn hwnd(window: &Window) -> Option<HWND> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
@@ -361,26 +343,22 @@ mod win {
                 }
             }
         });
-        on(&a.content_protected, |p| {
-            // SAFETY: a plain call on a live window.
-            unsafe { SetWindowDisplayAffinity(hwnd, if p { EXCLUDE_FROM_CAPTURE } else { 0 }) };
-        });
-        on(&a.color_scheme, |scheme| {
-            let dark: i32 = match scheme {
-                Appearance::Dark => 1,
-                Appearance::Light => 0,
-                _ => return,
-            };
-            // SAFETY: a plain call with a local value of the size given.
-            unsafe {
-                DwmSetWindowAttribute(
-                    hwnd,
-                    DARK_MODE,
-                    (&dark as *const i32).cast(),
-                    std::mem::size_of::<i32>() as u32,
-                )
-            };
-        });
+    }
+
+    /// Its frame drawn dark or light (`None`: left as it is).
+    pub(crate) fn set_scheme(window: &Window, dark: Option<bool>) {
+        let Some(hwnd) = hwnd(window) else { return };
+        let Some(dark) = dark else { return };
+        let dark = i32::from(dark);
+        // SAFETY: a plain call with a local value of the size given.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DARK_MODE,
+                (&dark as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
     }
 
     /// GPUI keeps the title bar it opened the window with.
@@ -500,6 +478,9 @@ mod linux {
     /// X11 and Wayland leave levels, workspaces, shadows and the rest to
     /// the window manager.
     pub(crate) fn apply(_window: &Window, _a: &WindowAttributes) {}
+
+    /// The window manager draws the frame.
+    pub(crate) fn set_scheme(_window: &Window, _dark: Option<bool>) {}
 
     /// Client-side decorations for a hidden title bar or no frame.
     pub(crate) fn set_title_bar(window: &mut Window, style: TitleBarStyle, frameless: bool) {

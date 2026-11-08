@@ -66,6 +66,16 @@ size, release CLI, headless): the commit taking 50 006 diagnostics and 50 002 de
 resolving them (before: 145 ms, 53 and 52 ms, four rope lookups per position; the gutter's severities and the
 diagnostics at a point scanned every mark).
 
+Editor highlighting at 200 000 lines (2026-11-08, Linux x86_64, release; `bench_highlight_200k`, ignored, in
+`crates/nsh-base/src/editor/bench.rs`: the repository's Rust and TSX repeated, the controller's passes played as they
+run): the first screen's colors 25 → 2.4 ms in Rust and 259 → 13 ms in TSX (the language's regexes cold: Oniguruma's
+compile about 20 times faster than fancy-regex's, and the job stops at the last line in view), the parse 21 000 →
+62 000 lines/s in Rust and 4 900 → 20 000 in TSX (a jump to the end shows a guess in 0.8 / 4.8 ms, was 5 / 19 ms; the
+parse from the top reaches it in 3.2 / 9.9 s off the engine thread, was 9.5 / 41 s; 52 MB of tokens and states), a
+typed character's colors 0.6–1.4 ms off the engine thread (0.3 ms on it), typing far past the parse guessed again
+(before: the colors it continued until the parse came). The gallery's Editor demo, debug, headless: its first colors
+505 → 35 ms after it asks for them (the first job now runs while the turn that mounts it goes on).
+
 The gallery's Editor demo at 200 000 lines (its TypeScript sample pasted 3449 times, a macOS window of 1440×900,
 release CLI, `--target macos --trace`): the paste's commit 21 → 13.5 ms; a sample pasted into that file 8.4 → 5.7 ms
 (1832 items: the gutter measured its digit once per row, an element made again per row for each number); the commit
@@ -73,6 +83,13 @@ taking the 6900 problems 12.4 → 7.4 ms (fields read by atom, not through a C s
 collection walks the whole VM, 30–90 ms with the demo's language server holding the file's model: it ran every second
 between the turns of pastes and of the server's slices (21 collections in the run), now only after 0.3 s without a
 message or a due timer (7, none between pastes).
+
+`pointer-events-none` regions (2026-11-08, a mounted TSX `Editor` of 200 000 lines, release CLI, headless,
+`--trace`): the commit that shows the first syntax colors 11.5 → 1.2 ms (75 mount items). Each view inserted under the
+rows' `pointer-events-none` walked the whole region, twice (1600 spans into 2500 views); the core notes the regions a
+round changes and works each out once before its mount items (`classes.rs` `flush_pointer_events`). The first frame
+sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one commit); a typed character commits in
+0.37 ms, 14 items (was 0.40 ms, 15).
 
 - counter, headless (debug): first frame ~0.5–0.65ms (58 ops / 49 mount items), one tap ~0.15ms (12 ops / 8 items).
 - counter, Catalyst (release): first frame ~1.05–1.15ms (of which ~0.7ms is cold CoreText layout of 10 texts), one tap ~0.12ms.

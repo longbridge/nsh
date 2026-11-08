@@ -1376,11 +1376,38 @@ impl<M: TextEngine> Core<M> {
         top
     }
 
-    /// `parent` gained or lost a child: the region it is in follows.
+    /// `parent` gained or lost a child: the region it is in follows, at
+    /// the round's end ([`Self::flush_pointer_events`]).
     pub(super) fn pointer_events_moved(&mut self, parent: Key) {
         if let Some(top) = self.pointer_region(parent) {
+            self.pointer_pending.push(top);
+        }
+    }
+
+    /// Works out the regions views joined, left or changed in this round
+    /// ([`Self::update_pointer_events`]), each once, with the tree as the
+    /// round left it: each view noted is taken to the top of the region it
+    /// is in now (a view taken out of a region and put into another is
+    /// worked out from that one's top, as the views above it block). A
+    /// view released since is skipped; a key reused by another view is
+    /// worked out where that view is.
+    pub(super) fn flush_pointer_events(&mut self) {
+        if self.pointer_pending.is_empty() {
+            return;
+        }
+        let mut pending = std::mem::take(&mut self.pointer_pending);
+        pending.retain(|&k| self.nodes.contains(k as usize));
+        for k in &mut pending {
+            *k = self.pointer_region(*k).unwrap_or(*k);
+        }
+        pending.sort_unstable();
+        pending.dedup();
+        for &top in &pending {
             self.update_pointer_events(top);
         }
+        // The buffer, for the next round.
+        pending.clear();
+        self.pointer_pending = pending;
     }
 
     /// What the views of `top`'s subtree mount for the `pointer-events-*`
@@ -1506,7 +1533,7 @@ impl<M: TextEngine> Core<M> {
         }
         if pointer {
             let top = self.pointer_region(key).unwrap_or(key);
-            self.update_pointer_events(top);
+            self.pointer_pending.push(top);
         }
         if selection && kind == Kind::Text {
             self.mark_text_block(key);

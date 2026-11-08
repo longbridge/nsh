@@ -237,6 +237,15 @@ nsh package my-app --target web
 
 See [Packaging](./packaging.md).
 
+## nsh update
+
+Updates an installed `nsh` to the latest build of its channel; naming one, as `rustup update nightly`
+does, switches channels ([Installation](./installation.md#updating)).
+
+```sh
+nsh update [stable|nightly]
+```
+
 ## Signing commands
 
 These commands make and check signed packages (`.nshpkg`): app bundles that apps embedding NSH download and verify before running them. [Signed packages](./signed-packages.md) explains the model (an offline root key certifies release keys for some app ids).

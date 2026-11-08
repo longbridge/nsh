@@ -1484,6 +1484,47 @@ impl WebView {
         self.set(Prop::Native(NativeProp::Incognito(incognito)))
     }
 
+    /// Serves the page the URLs of `scheme` (`"app-image"` for
+    /// `<img src="app-image:1">`) from the app: `handler` answers each
+    /// request with bytes and a MIME type
+    /// ([`WebResourceRequest::respond`](crate::web_resource::WebResourceRequest::respond)),
+    /// now or later and from any thread, and the web engine loads them as
+    /// it loads any subresource, with no `data:` URL or script in between
+    /// (iOS and macOS, Linux). The platform calls `handler` on its main
+    /// thread, so it returns at once and leaves slow work to a thread of
+    /// its own. Several schemes are several calls; one called again
+    /// replaces its handler. `scheme` is a letter followed by letters,
+    /// digits, `+`, `-` or `.`, none of the web's or the system's (`http`,
+    /// `file`, `data`, ...): another is ignored with a warning. Read when
+    /// the web view is made, as [`incognito`](Self::incognito)
+    /// ([`crate::web_resource`]).
+    pub fn url_scheme(
+        self,
+        scheme: &str,
+        handler: impl Fn(crate::web_resource::WebResourceRequest) + Send + Sync + 'static,
+    ) -> Self {
+        let scheme = match crate::web_resource::WebUrlScheme::new(scheme, handler) {
+            Ok(scheme) => scheme,
+            Err(e) => {
+                log::warn!(target: "js", "web view: {e}");
+                return self;
+            }
+        };
+        let mut schemes = self
+            .0
+            .attrs
+            .props
+            .iter()
+            .find_map(|p| match p {
+                Prop::Native(NativeProp::UrlSchemes(list)) => Some(list.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        schemes.retain(|s| s.scheme() != scheme.scheme());
+        schemes.push(scheme);
+        self.set(Prop::Native(NativeProp::UrlSchemes(schemes)))
+    }
+
     /// A page started loading.
     pub fn on_load_start<M>(self, listener: impl IntoListener<WebNavigation, M>) -> Self {
         self.listen(
@@ -2550,5 +2591,29 @@ mod tests {
         let set = uniforms(&view.0.attrs);
         assert_eq!(set.0.len(), 1);
         assert_eq!(value(&set, "speed"), Some(UniformValue::Number(3.0)));
+    }
+
+    #[test]
+    fn web_view_url_scheme_builder_collects_schemes() {
+        let web = web_view_html("<img src=\"a:1\">", None)
+            .url_scheme("a", |request| request.fail())
+            .url_scheme("b", |request| request.fail())
+            // Replaces `a`'s handler.
+            .url_scheme("A", |request| request.fail())
+            // Not a scheme the app may serve: ignored.
+            .url_scheme("https", |request| request.fail());
+        let schemes: Vec<String> = web
+            .0
+            .attrs
+            .props
+            .iter()
+            .find_map(|p| match p {
+                Prop::Native(NativeProp::UrlSchemes(list)) => {
+                    Some(list.iter().map(|s| s.scheme().to_owned()).collect())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(schemes, ["b", "a"]);
     }
 }

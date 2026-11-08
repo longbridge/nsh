@@ -517,10 +517,10 @@ impl Languages {
         (languages.len > 0).then_some(languages)
     }
 
-    /// These with `locale` first (an embedding app's own language): it
-    /// moves there if it is listed, else comes before them (the last one
-    /// then left out when they are eight).
-    pub(crate) fn preferring(&self, locale: Locale) -> Languages {
+    /// These with `locale` first (an embedding app's own language, the
+    /// app's `set_locale`): it moves there if it is listed, else comes
+    /// before them (the last one then left out when they are eight).
+    pub fn preferring(&self, locale: Locale) -> Languages {
         let mut languages = Languages::one(locale);
         for &other in self.as_slice() {
             if usize::from(languages.len) == Self::CAPACITY {

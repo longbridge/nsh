@@ -274,6 +274,22 @@ public final class NshAppView: UIView {
         try check(nsh_app_set_theme_overrides(app, json))
     }
 
+    /// Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host
+    /// ships, so every app this view loads can name its family in
+    /// `fontFamily` without bundling the file. Call it before or after
+    /// loading: a font registered before a load is in that app's first
+    /// frame, and one registered while an app runs is used from the next
+    /// layout. Throws when `data` is not a font.
+    public func registerFont(_ data: Data) throws {
+        try data.withUnsafeBytes { raw in
+            try check(nsh_app_register_font(
+                app,
+                raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                data.count
+            ))
+        }
+    }
+
     /// Grants the apps loaded from now on at most these capabilities: JSON in
     /// the form of `nsh.json`'s `capabilities` (`nil`: what each app
     /// declares). A request must be allowed by both.

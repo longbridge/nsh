@@ -124,16 +124,18 @@ pub(crate) struct ViewState {
     pub(crate) shift: (f32, f32),
     /// Extra opacity (screen and modal transitions).
     pub(crate) fade: f32,
-    /// Scroll state (scroll views).
-    pub(crate) scroll: Option<ScrollState>,
+    /// Scroll state (scroll views). Boxed, as the image, canvas and
+    /// shader states: few views have one, and every view's state is
+    /// allocated with its AppKit view.
+    pub(crate) scroll: Option<Box<ScrollState>>,
     /// Text content (text views).
     pub(crate) text: Option<crate::text::DrawnText>,
     /// Image content (image views).
-    pub(crate) image: Option<crate::image::ImageState>,
+    pub(crate) image: Option<Box<crate::image::ImageState>>,
     /// Canvas content.
-    pub(crate) canvas: Option<crate::canvas::CanvasState>,
+    pub(crate) canvas: Option<Box<crate::canvas::CanvasState>>,
     /// What a shader draws under the children ([`crate::shader`]).
-    pub(crate) shader: Option<crate::shader::ShaderState>,
+    pub(crate) shader: Option<Box<crate::shader::ShaderState>>,
     /// Text field (input views).
     pub(crate) input: Option<std::rc::Rc<crate::text_input::InputState>>,
     /// Hosted AppKit views.
@@ -163,7 +165,7 @@ impl ViewState {
             states: 0,
             shift: (0.0, 0.0),
             fade: 1.0,
-            scroll: matches!(kind, ViewKind::Scroll).then(ScrollState::default),
+            scroll: matches!(kind, ViewKind::Scroll).then(Box::default),
             text: None,
             image: None,
             canvas: None,

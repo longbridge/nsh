@@ -853,7 +853,14 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable
         | NSWindowStyleMask::Resizable;
-    let window = crate::window::new_window(mtm, frame, style, true, options.keep_size);
+    let window = crate::window::new_window(
+        mtm,
+        frame,
+        style,
+        true,
+        options.keep_size,
+        options.background,
+    );
     // SAFETY: the window is kept in `RUNNING` until it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&options.title));

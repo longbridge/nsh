@@ -456,7 +456,9 @@ impl Visual {
             let spread = s.spread.0 as CGFloat;
             let shape = grow(local, spread);
             l.setFrame(local);
-            l.setShadowPath(Some(&rounded(shape, grown(radii, s.spread))));
+            crate::interaction::animate_geometry(l, ns_string!("shadowPath"), || {
+                l.setShadowPath(Some(&rounded(shape, grown(radii, s.spread))));
+            });
             l.setShadowColor(cg_color(Color(s.color.0 | 0xff)).as_deref());
             l.setShadowOpacity((s.color.0 & 0xff) as f32 / 255.0);
             l.setShadowOffset(CGSize::new(
@@ -480,7 +482,9 @@ impl Visual {
                 CGMutablePath::add_path(Some(&path), std::ptr::null(), Some(&box_path));
             }
             mask.setFrame(local);
-            mask.setPath(Some(&path));
+            crate::interaction::animate_geometry(&mask, ns_string!("path"), || {
+                mask.setPath(Some(&path));
+            });
         }
     }
 

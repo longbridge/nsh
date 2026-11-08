@@ -15,26 +15,28 @@ pub(crate) struct State {
 
 #[derive(Default)]
 struct Destinations {
-    enabled: Vec<bool>,
-    count: usize,
+    /// The views that take drops, by id (a table that follows the views
+    /// alive, not every id made).
+    enabled: nsh_core::id_table::IdTable<()>,
 }
 impl Destinations {
     fn set(&mut self, id: NodeId, enabled: bool) -> Option<bool> {
         let index = id as usize;
-        if self.enabled.get(index).copied().unwrap_or(false) == enabled {
+        if self.enabled.contains(index) == enabled {
             return None;
         }
-        let before = self.count != 0;
+        let before = self.count() != 0;
         if enabled {
-            self.enabled
-                .resize(self.enabled.len().max(index + 1), false);
-            self.count += 1;
+            self.enabled.insert(index, ());
         } else {
-            self.count -= 1;
+            self.enabled.remove(index);
         }
-        self.enabled[index] = enabled;
-        let after = self.count != 0;
+        let after = self.count() != 0;
         (before != after).then_some(after)
+    }
+
+    fn count(&self) -> usize {
+        self.enabled.len()
     }
 }
 

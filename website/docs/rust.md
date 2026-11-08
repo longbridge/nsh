@@ -48,7 +48,7 @@ nsh package --target web       # or ios, ios-simulator, android, macos, linux, w
 
 Build with [huacnlee/cargo](https://github.com/huacnlee/cargo), the Cargo NSH is developed with: a drop-in fork that builds each dependency once for all your
 projects and Git worktrees and keeps its build directory under a size limit on its own, with nothing to configure
-([Installation](./installation.md#building-from-a-checkout)).
+([Installation](./installation.md#for-apps-written-in-rust)).
 
 `src/lib.rs` holds the app: components, state, handlers, tasks.
 
@@ -182,7 +182,7 @@ fn window_bar() -> impl IntoElement {
 A title bar with `TitleBarStyle::Default` restores the system's. A view with
 `.window_control(..)` is the window's minimize, maximize or close button: the
 platform carries out its press, and a close goes through the window's
-`close_on_press`. The `WindowHandle` has the window's other requests
+`close_on_press`. The `WindowRef` has the window's other requests
 (`set_mode`, `minimize`, `set_bounds`, `close`, ...), `window()` opens windows of
 the app's own, and the module has the menus (`set_application_menu`,
 `popup_menu`) too: [nsh/desktop](../modules/nsh-desktop.md).
@@ -490,6 +490,15 @@ test("a tap counts", async () => {
   expect(app.texts()).toContain("Count: 1");
 });
 ```
+
+Text is laid out with an estimate of its width (every character `0.55 ×` the font size) unless the test starts the
+app with `Headless::start_with_text_engine`, which takes a function making the platform's text engine on the engine's
+thread (`nsh_platform_macos::CoreTextEngine`, `nsh_platform_windows::DWriteTextEngine`), so text measures as it does on
+screen. `app.screen().layout_nodes()` returns the views on screen in tree order as layout placed them (`LayoutNode`:
+kind, test id, parent, bounds in the root's points before transforms, whether it is hidden or clips, a scroll view's
+axis and content size in `scroll`, a text view's text and the box it was laid out in in `text`), so a test can check
+that nothing passes its parent, is cut by a view that clips, or is too wide for its text. Both are Rust API of
+`nsh_testing`, for `cargo test`.
 
 A TSX entry is built with `nsh-testing`'s feature `bundle` as `nsh run` builds it, against the UI sets its hosts
 serve: NSH's, and each crate's `registry()`, which `#[native_module]` makes:

@@ -53,7 +53,7 @@ pub(crate) struct Ambient {
     /// it.
     perf_monitor: Option<Signal<bool>>,
     /// The main window's close presses: how many, and the last one's
-    /// reason ([`crate::element::desktop::WindowHandle::on_close_press`]).
+    /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
 }
 
@@ -961,6 +961,11 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     answer
 }
 
+/// Asks for the app to show in `locale` ([`crate::i18n::set_locale`]).
+pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
+    act(Action::Locale(locale));
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
@@ -1175,14 +1180,23 @@ pub fn after_answer(f: impl FnOnce() + 'static) {
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
-/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
-/// that should also run on the web uses the engine's services instead
-/// ([`fetch`], [`timer`]).
+/// its result; `tokio::task::spawn_blocking`), starting at once, whether
+/// called from a task, a render, an effect or a handler. Not in
+/// WebAssembly: code that should also run on the web uses the engine's
+/// services instead ([`fetch`], [`timer`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,
 ) -> tokio::task::JoinHandle<R> {
-    tokio::task::spawn_blocking(f)
+    // Tasks are polled in the runtime's context; outside a task the
+    // surface's runtime is the one they would be.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => runtime.spawn_blocking(f),
+        Err(_) => match executor().runtime() {
+            Some(runtime) => runtime.spawn_blocking(f),
+            None => tokio::task::spawn_blocking(f),
+        },
+    }
 }
 
 /// Runs `future` on the runtime's threads (in a task: await its result;

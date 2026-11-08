@@ -6,7 +6,7 @@
 
 use super::{
     Part,
-    locale::{Dates, EN, Field},
+    locale::{Dates, Field, english_names},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,7 +162,7 @@ pub(crate) fn format(ms: f64, offset: i32, zone: Zone, f: &Format, dates: &Dates
     let has_date = !date.is_empty();
     parts.extend(date);
     if has_date && !time.is_empty() {
-        literal(&mut parts, dates.date_time_sep);
+        literal(&mut parts, &dates.date_time_sep);
     }
     parts.extend(time);
     parts
@@ -198,15 +198,15 @@ fn narrow(name: &str) -> String {
 
 fn date_parts(c: &Civil, f: &Format, dates: &Dates) -> Vec<Part> {
     // Languages without names here borrow English ones.
-    let names = dates.names.unwrap_or(&EN);
+    let names = dates.names.as_ref().unwrap_or_else(|| english_names());
     let mut parts = Vec::new();
     let text_month = matches!(f.month, Some(Month::Text(_)));
-    let template = match (text_month, dates.text) {
-        (true, Some(text)) => match (f.month, dates.text_long) {
+    let template = match (text_month, &dates.text) {
+        (true, Some(text)) => match (f.month, &dates.text_long) {
             (Some(Month::Text(Text::Long)), Some(long)) => long,
             _ => text,
         },
-        _ => dates.numeric,
+        _ => &dates.numeric,
     };
     // Chinese, Japanese and Korean separators are units (`年`): kept after
     // the last field too.
@@ -218,7 +218,7 @@ fn date_parts(c: &Civil, f: &Format, dates: &Dates) -> Vec<Part> {
             Field::Month => f.month.is_some(),
             Field::Day => f.day.is_some(),
         })
-        .copied()
+        .map(|(field, sep)| (*field, sep.as_str()))
         .collect();
     for (i, (kind, sep)) in fields.iter().enumerate() {
         match kind {
@@ -236,7 +236,7 @@ fn date_parts(c: &Civil, f: &Format, dates: &Dates) -> Vec<Part> {
                         names.months_short[c.month as usize - 1].to_owned()
                     }
                     Some(Month::Text(Text::Narrow)) => {
-                        narrow(names.months_short[c.month as usize - 1]).to_uppercase()
+                        narrow(&names.months_short[c.month as usize - 1]).to_uppercase()
                     }
                     Some(Month::Num(style)) => num(c.month, style),
                     None => String::new(),
@@ -268,7 +268,7 @@ fn date_parts(c: &Civil, f: &Format, dates: &Dates) -> Vec<Part> {
         let name = match style {
             Text::Long => names.weekdays[i].to_owned(),
             Text::Short => names.weekdays_short[i].to_owned(),
-            Text::Narrow => narrow(names.weekdays_short[i]),
+            Text::Narrow => narrow(&names.weekdays_short[i]),
         };
         // A short weekday standing alone loses the parentheses it has in a
         // date (`金`, `(金)`).
@@ -285,11 +285,11 @@ fn date_parts(c: &Civil, f: &Format, dates: &Dates) -> Vec<Part> {
             parts.push(weekday);
         } else if dates.weekday_first {
             let mut out = vec![weekday];
-            literal(&mut out, dates.weekday_sep);
+            literal(&mut out, &dates.weekday_sep);
             out.append(&mut parts);
             parts = out;
         } else {
-            literal(&mut parts, dates.weekday_sep);
+            literal(&mut parts, &dates.weekday_sep);
             parts.push(weekday);
         }
     }
@@ -361,24 +361,24 @@ fn time_parts(c: &Civil, f: &Format, dates: &Dates, zone: Zone, offset: i32) -> 
     if twelve && f.hour.is_some() {
         let period = Part {
             kind: "dayPeriod",
-            value: if c.hour < 12 { dates.am } else { dates.pm }.to_owned(),
+            value: if c.hour < 12 { &dates.am } else { &dates.pm }.clone(),
         };
         if dates.period_first {
             parts.push(period);
-            literal(&mut parts, dates.period_space);
+            literal(&mut parts, &dates.period_space);
             parts.extend(clock);
             if alone {
                 literal(&mut parts, dates.hour_suffix.trim_start());
             }
         } else {
             parts.extend(clock);
-            literal(&mut parts, dates.period_space);
+            literal(&mut parts, &dates.period_space);
             parts.push(period);
         }
     } else {
         parts.extend(clock);
         if alone {
-            literal(&mut parts, dates.hour_suffix);
+            literal(&mut parts, &dates.hour_suffix);
         }
     }
     if f.zone_name {
@@ -391,7 +391,7 @@ fn time_parts(c: &Civil, f: &Format, dates: &Dates, zone: Zone, offset: i32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::intl::locale::resolve;
+    use crate::web::format::locale::resolve;
 
     /// 2026-10-16 (a Friday) 15:04:05.678 UTC.
     const T: f64 = 1_792_163_045_678.0;

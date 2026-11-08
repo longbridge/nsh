@@ -143,7 +143,9 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 
 主机模式可以是 `*`（任意主机）、`*.example.com`（`example.com` 的任意子域名，不包括 `example.com` 本身）或一个确切的
 主机名。匹配时忽略大小写和端口。主机取最后一个 `@` 之后的部分，因此 `https://api.example.com@evil.io/` 会按 `evil.io`
-检查。
+检查。各平台可能解析出不同主机或路径的 URL 只有 `hosts` 中的 `*`（或不限定端口和路径的 `*` 规则）能授权：查询之前含反斜杠
+（应写成 `%5C`）、含控制字符，或主机含百分号编码或主机不能包含的字符（空格、`<`、`>`、`^`、`|`，以及 IPv6 地址之外的
+`[`、`]`）。
 
 WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https://` 检查，因此允许以 GET 访问该 URL 的主机和
 `http` 授权也允许这个 WebSocket。原始 socket 不经过任何 HTTP 规则，所以 `sockets` 精确列出每个主机和端口，也只有
@@ -160,7 +162,8 @@ WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
 不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
-允许它们，但不允许任何远程页面。
+允许它们，但不允许任何远程页面。在原生 web view 中，`baseUrl` 让内联 HTML 获得该 URL 的源，
+所以基准 URL 需要与该地址的页面相同的授权：它的主机在 `hosts` 中。
 
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
@@ -205,10 +208,8 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
 | `max` | `number` | 同时可以打开的自己的窗口数。缺省：不限。 |
 | `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
-| `contentProtected` | `boolean` | 不出现在截图和屏幕共享中的窗口。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
-`overlay` 和 `contentProtected` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面，
-而受保护的窗口会让用户的录屏看不到它显示的内容。主窗口不需要授权。
+`overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。主窗口不需要授权。
 
 ### 存储
 

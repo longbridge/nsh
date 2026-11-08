@@ -45,11 +45,11 @@ Callbacks escaping a stopped run become inert; pending module and host calls rej
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
 CORS, secure-context and permission rules; the browser knows no `asset:` scheme, so `fetch` of the app's files
 (`asset:/`) goes through the engine's network in every session, which reads them as on the other platforms
-(`web/browser/testing.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
+(`web/browser/fetch.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
 Buffer and POSIX path use pinned vendored implementations with licenses in `third_party/`. Mobile-only APIs
 retain their off-platform behavior. In a test session on a manual clock (`nsh test --target web`), timers,
 `Date`, `performance.now()`, animation frames and `fetch` go through the engine instead, so the test's clock and
-routes control them (`web/browser/testing.js`).
+routes control them (`web/browser/testing.js`, `web/browser/fetch.js`).
 
 ### Hot module replacement
 
@@ -184,8 +184,11 @@ build to the same file) and takes `nsh.js` from the crate.
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
-  (`document.baseURI`, `nsh_set_base_url`); the page's script resolves its `app` URLs against it as it starts (and
-  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root
+  (`document.baseURI`, `nsh_set_base_url`) as it starts: the page's script resolves its `app` URLs (and the head's
+  requests are keyed the same way), the `Player` its `assets`, `data` and `assetBase` and the app's relative
+  `asset()` URLs against `player.baseURL`, and `browser/runtime.js` the entry, the chunks and the app realm's
+  `<base>`, so nothing loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
+  (`web::page_base`: a path from the root
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
   added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
@@ -415,7 +418,7 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+  (`nsh.time_zone`: `timeZoneName`, `format/mod.rs` `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser
@@ -633,10 +636,13 @@ do not follow (`redirect: "manual"` gives an opaque response without status or `
 `follow_redirects` off fails when it is redirected: JS `redirect: "manual"` / `"error"`, and the hops the engine
 follows itself to check each one against restricted capabilities (`access.rs`).
 
-Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI`, which
-`nsh.js` hands over once with `nsh_set_base_url` (the browser's own `fetch` resolves the app's against the page);
-native hosts have no base and keep rejecting them. `new URL("/x")` without a base throws,
-as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by the browser.
+Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI` as the
+player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url`. The app's `fetch`, the
+browser's own run in the app realm, resolves them against that realm's `<base>`, which is `player.baseURL` too; a
+`fetch` in the page's own realm (the host module's) resolves against the page's address when it runs.
+Native hosts have no base and keep rejecting relative URLs. `new URL("/x")` without a base throws,
+as in browsers. Relative `<Image>` URLs resolve against `player.baseURL` too (`asset()`), so they load after the
+address moved to another directory.
 
 `Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
@@ -824,6 +830,10 @@ between them); the core bounds their travel by the list's end. A cell's animated
 `stickyHeaderOffset` or sticky `top`) comes as the animator's `sticky-offset` output for the cell each frame
 (`op_a`): it is kept on the cell (`_stickyOffset`) and added to the track's inset. Views clip with `overflow: clip`, which, unlike
 `hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
+
+Pixel-mode wheel events follow the device's deltas directly, including its inertia. Line- and page-mode wheels
+and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
+position, so an unfinished target cannot cause a catch-up jump.
 
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
 as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
