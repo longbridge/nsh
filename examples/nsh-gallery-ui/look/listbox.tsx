@@ -12,7 +12,7 @@ import { Icon } from "../icons";
 import { alpha, colors, finish, radius, terminal, TERMINAL_COLUMN, tints } from "../theme";
 import { edgeClass, timeFieldClass } from "./field";
 import { backdrop } from "./overlay";
-import { controlSize } from "./surface";
+import { controlSize, narrowWindow } from "./surface";
 
 const pointer = platform.desktop;
 
@@ -296,6 +296,10 @@ export function listboxSearch() {
 export interface ComboboxLookOptions {
   /** Layout over the look, or a function reading it. */
   style?: Live<ViewStyle>;
+  /** The placeholder sums up the chosen values (`"Layout, iOS"`, `"2
+   * people"`): drawn in the text color, as a value, rather than faint as
+   * an empty field's prompt. */
+  filled?: Live<boolean>;
 }
 
 /**
@@ -304,7 +308,9 @@ export interface ComboboxLookOptions {
  * list is open, the fields' focus edge while its input has the keys; the
  * input types inside it in the label size, the toggle (`ComboToggle`) at
  * its end. As wide as a select's trigger with a pointer, the row's on a
- * touch screen.
+ * touch screen and in a narrow window (`narrowWindow`), where its row
+ * puts it under the label (`plainRow`'s `wide`). A placeholder that sums up the chosen values (`filled`)
+ * reads as a value, in the text color.
  */
 export function comboboxLook(open: Live<boolean>, o?: ComboboxLookOptions) {
   return {
@@ -313,7 +319,7 @@ export function comboboxLook(open: Live<boolean>, o?: ComboboxLookOptions) {
         flexDirection: "row",
         alignItems: "center",
         // Narrower in a narrow window, beside a row's label (`RowLabel` keeps its own least width).
-        ...(pointer ? { width: 260, flexShrink: 1, minWidth: 160 } : { alignSelf: "stretch" }),
+        ...(pointer && !narrowWindow() ? { width: 260, flexShrink: 1, minWidth: 160 } : { alignSelf: "stretch" }),
         minHeight: controlSize.line,
         paddingLeft: 10,
         paddingRight: 4,
@@ -328,7 +334,9 @@ export function comboboxLook(open: Live<boolean>, o?: ComboboxLookOptions) {
     get class(): string {
       return edgeClass({ rest: read(open) ? "border-faint" : "border-input", hover: "border-faint" });
     },
-    inputClass: `${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`,
+    get inputClass(): string {
+      return `${pointer ? "text-sm" : "text-base"} text-foreground ${read(o?.filled) ? "placeholder:text-foreground" : "placeholder:text-faint"}`;
+    },
     get inputStyle(): InputStyle {
       return { flex: 1, minWidth: 40, height: controlSize.line - 2 };
     },

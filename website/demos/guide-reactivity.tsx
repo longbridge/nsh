@@ -6,7 +6,7 @@ type Swatch = "accent" | "info" | "up" | "violet";
 const Accent = context(signal<Swatch>("accent"));
 
 /** A button filled with a palette colour instead of a surface. */
-const filled = (color: () => string) => () => ({ backgroundImage: "none", backgroundColor: color(), borderColor: "rgba(0,0,0,0)", boxShadow: "none" });
+const filled = (color: () => string) => () => ({ backgroundImage: "none", backgroundColor: color(), borderColor: "transparent", boxShadow: "none" });
 
 /** A stopwatch: the effect starts a timer and its cleanup stops it. */
 function Stopwatch() {

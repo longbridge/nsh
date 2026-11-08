@@ -4,7 +4,7 @@ import { platform as __platform, windowSize as __windowSize } from "nsh";
 import { Segmented as GallerySegmented } from "./segmented";
 import { ui, tint } from "./palette";
 import { radius } from "./theme";
-import { insetSurface } from "./look/surface";
+import { controlSize, insetSurface } from "./look/surface";
 import { inputLook, type FieldLookOptions } from "./look/field";
 import { buttonLabel, buttonLook, type ButtonKind, type ButtonLookOptions } from "./look/button";
 export { ui, tint } from "./palette";
@@ -49,11 +49,12 @@ export const wide = () => __windowSize().width >= 700;
  * under it: in the site's Desktop frame the subject keeps the whole width. */
 const sideBySide = () => __windowSize().width >= 900;
 
-/** Heights and type of the idiom (Design Guides, "Density tiers"): compact
- * with a pointer, 44-point targets on a touch screen. */
-export const size = desktop
-  ? { control: 32, controlSm: 28, row: 40, rowSm: 32, label: 14, detail: 12 }
-  : { control: 44, controlSm: 44, row: 52, rowSm: 44, label: 15, detail: 12 };
+/** Heights and type of the idiom (Design Guides, "Density tiers"): a row,
+ * its label's and its detail's type are the controls' (`controlSize`: rows
+ * of 40 points with a pointer, a finger's 44 on a touch screen); `rowSm` a
+ * compact row (a table's, a command's), 32 points with a pointer, 44 on a
+ * touch screen. */
+export const size = { row: controlSize.row, rowSm: desktop ? 32 : controlSize.row, label: controlSize.label, detail: controlSize.detail };
 
 /** Options of `button` and `buttonText` (the same object for both). */
 export interface ButtonOptions {

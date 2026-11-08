@@ -18,7 +18,10 @@ export const tap = pointer ? "Click" : "Tap";
  * a plain view: the popup's trigger slot takes its presses and anchors to
  * it. While what it opens is open (`open`) it shows as selected; pressed
  * it sinks. With `onPress` it is a button of its own (a toolbar's), `tip`
- * its tooltip, `ink` its icon's and label's color. A terminal draws no
+ * its tooltip, `ink` its icon's and label's color. `inline`: a word in a
+ * line of text (a mention): no padding of its own, so the text flows on
+ * past it, its hover fill reaching 4 points out with a pointer and a hit
+ * slop making a finger's target on a touch screen. A terminal draws no
  * icons: an icon-only trigger shows `short` there (its accessibility label
  * when unset), as text.
  */
@@ -32,6 +35,7 @@ export function Trigger(props: {
   short?: string;
   tip?: JSX.Element;
   disabled?: boolean;
+  inline?: boolean;
   onPress?: () => void;
 }) {
   const variant = () => props.variant ?? "secondary";
@@ -56,6 +60,7 @@ export function Trigger(props: {
       hoverStyle={props.open || props.disabled ? undefined : variant() === "primary" ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
       activeStyle={{ ...(variant() === "primary" ? { opacity: 0.88 } : variant() === "ghost" ? { backgroundColor: alpha(colors.text, 0.09) } : finish.pressed), transform: [{ scale: 0.97 }] }}
       focusStyle={focusRing()}
+      hitSlop={props.inline && !pointer && !terminal ? { left: 8, right: 8, top: 2, bottom: 2 } : undefined}
       style={{
         alignSelf: "flex-start",
         flexDirection: "row",
@@ -65,7 +70,8 @@ export function Trigger(props: {
         // The terminal sizes it to its label.
         height: terminal ? undefined : pointer ? 28 : 40,
         minWidth: terminal ? undefined : pointer ? 28 : 40,
-        paddingHorizontal: label() ? (pointer ? 10 : 14) : 0,
+        paddingHorizontal: props.inline ? (pointer && !terminal ? 4 : 0) : label() ? (pointer ? 10 : 14) : 0,
+        marginHorizontal: props.inline && pointer && !terminal ? -4 : 0,
         borderRadius: radius.control,
         borderCurve: "continuous",
         borderWidth: 1,

@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
-import { alpha, colors, finish, focusRing, mono, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
+import { alpha, colors, finish, focusRing, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type ButtonSize, roundButtonGlyph, roundButtonLook } from "./look/button";
 import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
