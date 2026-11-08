@@ -62,6 +62,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
     MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
+    TextEngine,
     geometry::{point, px},
 };
 use nsh_engine::{
@@ -137,7 +138,8 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config, Vec::new(), None).map(|launched| (launched.engine, launched.batches))
+    launch(config, Vec::new(), || ApproxTextEngine, None)
+        .map(|launched| (launched.engine, launched.batches))
 }
 
 /// A started engine and what it sends.
@@ -162,13 +164,19 @@ fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
 }
 
 /// [`start`], the platform reporting `displays` before the app first
-/// renders; `link`: the link that launched it, there before the app's code
-/// runs (as a platform sends it).
-fn launch(
+/// renders, laying text out with the engine `text_engine` makes; `link`:
+/// the link that launched it, there before the app's code runs (as a
+/// platform sends it).
+fn launch<M, F>(
     config: EngineConfig,
     displays: Vec<nsh_core::desktop::Display>,
+    text_engine: F,
     link: Option<&str>,
-) -> std::io::Result<Launched> {
+) -> std::io::Result<Launched>
+where
+    M: TextEngine + 'static,
+    F: FnOnce() -> M + Send + 'static,
+{
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
@@ -179,19 +187,14 @@ fn launch(
         control: control.clone(),
         wanted: wanted.clone(),
     };
-    let engine = Engine::start_with(
-        config,
-        || ApproxTextEngine,
-        sink,
-        |control| {
-            if !displays.is_empty() {
-                control.set_displays(displays);
-            }
-            if let Some(url) = link {
-                send_url_scheme(control, url);
-            }
-        },
-    )?;
+    let engine = Engine::start_with(config, text_engine, sink, |control| {
+        if !displays.is_empty() {
+            control.set_displays(displays);
+        }
+        if let Some(url) = link {
+            send_url_scheme(control, url);
+        }
+    })?;
     let _ = control.set(engine.control());
     Ok(Launched {
         engine,
@@ -351,17 +354,39 @@ pub struct Headless {
 impl Headless {
     /// Starts `config`'s app ([`start`]).
     pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
-        Self::launched_with(config, None)
+        Self::launched_with(config, || ApproxTextEngine, None)
     }
 
     /// Starts `config`'s app as the link `url` launches it: the app's
     /// first `UrlScheme.url()` reads it, and its first `open` listener
     /// gets it.
     pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Headless> {
-        Self::launched_with(config, Some(url))
+        Self::launched_with(config, || ApproxTextEngine, Some(url))
     }
 
-    fn launched_with(mut config: EngineConfig, link: Option<&str>) -> std::io::Result<Headless> {
+    /// Starts `config`'s app laying text out with the engine
+    /// `text_engine` makes (on the engine's thread) instead of
+    /// [`ApproxTextEngine`]: a platform's, for sizes as on screen.
+    pub fn start_with_text_engine<M, F>(
+        config: EngineConfig,
+        text_engine: F,
+    ) -> std::io::Result<Headless>
+    where
+        M: TextEngine + 'static,
+        F: FnOnce() -> M + Send + 'static,
+    {
+        Self::launched_with(config, text_engine, None)
+    }
+
+    fn launched_with<M, F>(
+        mut config: EngineConfig,
+        text_engine: F,
+        link: Option<&str>,
+    ) -> std::io::Result<Headless>
+    where
+        M: TextEngine + 'static,
+        F: FnOnce() -> M + Send + 'static,
+    {
         let speech = config.speech.is_none().then(speech::FakeSpeech::default);
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
@@ -389,7 +414,7 @@ impl Headless {
             batches,
             errors,
             wanted,
-        } = launch(config, displays, link)?;
+        } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         Ok(Headless {
@@ -3034,5 +3059,136 @@ mod tests {
             FileRequest::SaveDialog(save) if save.file_name.as_deref() == Some("Untitled.md")
         ));
         assert_eq!(requests[2], FileRequest::RevealPath("/docs/a.md".into()));
+    }
+
+    /// A clipping box with padding that holds a label, a box wider than it,
+    /// a hidden box and a horizontal scroll view.
+    #[component]
+    fn Laid() -> impl IntoElement {
+        view()
+            .test_id("outer")
+            .w(px(200.0))
+            .h(px(100.0))
+            .p(px(10.0))
+            .overflow_hidden()
+            .child(text("Label").test_id("label"))
+            .child(view().test_id("wide").w(px(300.0)).h(px(20.0)))
+            .child(view().test_id("ghost").w(px(10.0)).h(px(10.0)).invisible())
+            .child(
+                scroll()
+                    .test_id("strip")
+                    .horizontal()
+                    .w(px(100.0))
+                    .h(px(30.0))
+                    .child(view().test_id("long").w(px(400.0)).h(px(30.0))),
+            )
+    }
+
+    fn node<'a>(nodes: &'a [crate::LayoutNode], test_id: &str) -> &'a crate::LayoutNode {
+        nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(test_id))
+            .unwrap_or_else(|| panic!("no {test_id} in {nodes:?}"))
+    }
+
+    #[test]
+    fn layout_nodes_give_each_views_box_parent_clip_and_text_box() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Laid>())).unwrap();
+        app.first_render().unwrap();
+        let nodes = app.screen().layout_nodes();
+
+        // Tree order, the root left out, and every parent is in the list.
+        let ids: Vec<_> = nodes.iter().map(|n| n.id).collect();
+        let outer = node(&nodes, "outer");
+        assert_eq!(outer.parent, ROOT_ID);
+        assert_eq!(outer.kind, nsh_core::ViewKind::View);
+        assert_eq!(ids[0], outer.id);
+        for n in nodes.iter().filter(|n| n.id != outer.id) {
+            assert!(ids.contains(&n.parent), "{n:?}");
+        }
+
+        // Boxes are in the root's points; padding moves the children.
+        assert_eq!(outer.bounds.size, Size::new(px(200.0), px(100.0)));
+        assert!(outer.clips);
+        assert!(outer.scroll.is_none() && outer.text.is_none() && !outer.hidden);
+        let wide = node(&nodes, "wide");
+        assert_eq!(wide.parent, outer.id);
+        assert_eq!(wide.bounds.origin.x, outer.bounds.origin.x + px(10.0));
+        // It is wider than the box that clips it: the audit's evidence.
+        assert!(wide.bounds.right() > outer.bounds.right());
+
+        // A hidden view keeps its box; a scroll view says which way it
+        // scrolls and how large its content is.
+        assert!(node(&nodes, "ghost").hidden);
+        let strip = node(&nodes, "strip");
+        let scrolling = strip.scroll.as_ref().unwrap();
+        assert!(scrolling.horizontal);
+        assert_eq!(scrolling.content_size.map(|s| s.width), Some(px(400.0)));
+        assert_eq!(node(&nodes, "long").parent, strip.id);
+
+        // A text keeps its attributed text and the box it was laid out in,
+        // in the root's points as its own box.
+        let label = node(&nodes, "label");
+        let text = label.text.as_ref().unwrap();
+        assert_eq!(text.text.text, "Label");
+        assert!(text.content.size.width.0 > 0.0);
+        assert!(text.content.origin.x >= label.bounds.origin.x);
+        assert!(text.content.right() <= label.bounds.right());
+    }
+
+    #[test]
+    fn layout_nodes_follow_scroll_offsets() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Rows>())).unwrap();
+        app.first_render().unwrap();
+        let row = |app: &Headless| {
+            let nodes = app.screen().layout_nodes();
+            let text = nodes
+                .iter()
+                .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == "Row 3"))
+                .unwrap()
+                .clone();
+            // The row's box is the text's parent.
+            let parent = nodes.iter().find(|n| n.id == text.parent).unwrap();
+            parent.bounds.origin.y
+        };
+        let before = row(&app);
+        app.scroll("Row 3", px(100.0)).unwrap();
+        app.wait_for("At 100").unwrap();
+        assert_eq!(row(&app), before - px(100.0));
+    }
+
+    /// Counts the texts it prepares, so a test sees which engine laid out.
+    #[derive(Clone, Default)]
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl TextEngine for Counting {
+        type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
+
+        fn prepare(&self, text: &nsh_core::AttributedText) -> Self::Prepared {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            ApproxTextEngine.prepare(text)
+        }
+
+        fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
+            ApproxTextEngine.measure(prepared, max_width)
+        }
+
+        fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> nsh_core::TextLayout {
+            ApproxTextEngine.layout(prepared, size)
+        }
+    }
+
+    #[test]
+    fn start_with_text_engine_lays_text_out_with_the_given_engine() {
+        let counting = Counting::default();
+        let seen = counting.0.clone();
+        let mut app =
+            Headless::start_with_text_engine(EngineConfig::new(Root::of::<Laid>()), move || {
+                counting
+            })
+            .unwrap();
+        app.first_render().unwrap();
+        assert!(seen.load(Ordering::Relaxed) > 0);
+        assert!(app.shows("Label"));
     }
 }

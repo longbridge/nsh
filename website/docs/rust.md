@@ -491,6 +491,15 @@ test("a tap counts", async () => {
 });
 ```
 
+Text is laid out with an estimate of its width (every character `0.55 ×` the font size) unless the test starts the
+app with `Headless::start_with_text_engine`, which takes a function making the platform's text engine on the engine's
+thread (`nsh_platform_macos::CoreTextEngine`, `nsh_platform_windows::DWriteTextEngine`), so text measures as it does on
+screen. `app.screen().layout_nodes()` returns the views on screen in tree order as layout placed them (`LayoutNode`:
+kind, test id, parent, bounds in the root's points before transforms, whether it is hidden or clips, a scroll view's
+axis and content size in `scroll`, a text view's text and the box it was laid out in in `text`), so a test can check
+that nothing passes its parent, is cut by a view that clips, or is too wide for its text. Both are Rust API of
+`nsh_testing`, for `cargo test`.
+
 A TSX entry is built with `nsh-testing`'s feature `bundle` as `nsh run` builds it, against the UI sets its hosts
 serve: NSH's, and each crate's `registry()`, which `#[native_module]` makes:
 
