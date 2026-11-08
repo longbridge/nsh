@@ -441,7 +441,8 @@ impl<C> LayoutTree<C> {
     }
 
     /// Whether what changes inside `node` cannot change what its parent's
-    /// layout takes from it, so that layout stands: it has a size of fixed
+    /// layout takes from it, so that layout stands: it is placed absolutely
+    /// at a size of fixed points both ways, or it has a size of fixed
     /// points both ways in a flex container, and everything the flex
     /// algorithm takes from an item follows from that size alone. Its flex
     /// basis is `auto`, its main size (a percentage basis against a parent
@@ -464,6 +465,17 @@ impl<C> LayoutTree<C> {
         };
         let fixed = |d: taffy::Dimension| d.into_raw().tag() == taffy::CompactLength::LENGTH_TAG;
         let (style, parent) = (&n.style, &self.nodes[key(parent)].style);
+        // Placed out of flow at a size of fixed points: its parent takes
+        // nothing from its content, whatever its parent's layout (the
+        // cells of a table, rows of a list placed by their offsets).
+        if n.last.is_some()
+            && style.position == taffy::Position::Absolute
+            && style.display != Display::None
+            && fixed(style.size.width)
+            && fixed(style.size.height)
+        {
+            return true;
+        }
         let baseline = |a: taffy::AlignItems| a.keyword() == taffy::AlignItemsKeyword::Baseline;
         n.last.is_some()
             && parent.display == Display::Flex
@@ -483,6 +495,28 @@ impl<C> LayoutTree<C> {
     /// was asked too much to tell, the caller marks it dirty
     /// ([`LayoutTree::mark_dirty`]). A leaf never asked (new, or dirty
     /// already) measures as before: nothing was computed from it.
+    /// Whether `node`'s size follows from its style alone both ways: fixed
+    /// points, or a percentage of a parent sized in fixed points that way.
+    /// What it contains, such as its text, then never changes its size.
+    pub(crate) fn sized_by_style(&self, node: NodeId) -> bool {
+        let n = &self.nodes[key(node)];
+        let Some(parent) = n.parent else {
+            return false;
+        };
+        let parent = &self.nodes[key(parent)].style;
+        let style = &n.style;
+        let tag = |d: taffy::Dimension| d.into_raw().tag();
+        let axis = |own: taffy::Dimension, of: taffy::Dimension| {
+            tag(own) == taffy::CompactLength::LENGTH_TAG
+                || (tag(own) == taffy::CompactLength::PERCENT_TAG
+                    && tag(of) == taffy::CompactLength::LENGTH_TAG)
+        };
+        n.last.is_some()
+            && style.display != Display::None
+            && axis(style.size.width, parent.size.width)
+            && axis(style.size.height, parent.size.height)
+    }
+
     pub(crate) fn measures_as_before<M>(&mut self, node: NodeId, mut measure: M) -> bool
     where
         M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,

@@ -335,7 +335,7 @@ fn row(
         let cursor = emu.cursor()?;
         (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
     });
-    let backgrounds = line.clone();
+    let backgrounds = line;
     view()
         .h(move || Length::from(props.line_height.get()))
         .justify_center()

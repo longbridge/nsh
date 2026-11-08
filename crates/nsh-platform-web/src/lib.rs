@@ -150,9 +150,18 @@ thread_local! {
 
 /// Exports one `nsh_part_<name>` per part of `nsh/base`: the page calls
 /// those of the parts its app uses, and a runtime linked for the app keeps
-/// only the parts it exports.
+/// only the parts it exports. The list must name every part of
+/// [`nsh_base::parts::ALL`] (checked at compile time): a part without its
+/// gate is never registered, and an app importing one of its exports fails
+/// to link ("does not provide an export named …").
 macro_rules! base_parts {
-    ($($name:ident => $export:ident),* $(,)?) => {$(
+    ($($name:ident => $export:ident),* $(,)?) => {
+        #[cfg(feature = "base-full")]
+        const _: () = assert!(
+            covers_every_part(&[$(stringify!($name)),*]),
+            "base_parts! must list every part of nsh_base::parts::ALL",
+        );
+        $(
         /// Adds this part of `nsh/base` to the apps started from now on.
         #[cfg(feature = "base-full")]
         #[unsafe(no_mangle)]
@@ -165,11 +174,55 @@ macro_rules! base_parts {
                 }
             });
         }
-    )*};
+        )*
+    };
+}
+
+/// Whether `names` are exactly the parts of [`nsh_base::parts::ALL`].
+#[cfg(feature = "base-full")]
+const fn covers_every_part(names: &[&str]) -> bool {
+    const fn same(a: &str, b: &str) -> bool {
+        let (a, b) = (a.as_bytes(), b.as_bytes());
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i < a.len() {
+            if a[i] != b[i] {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    let all = nsh_base::parts::ALL;
+    if names.len() != all.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < all.len() {
+        let mut j = 0;
+        let mut found = false;
+        while j < names.len() {
+            found |= same(all[i].0, names[j]);
+            j += 1;
+        }
+        if !found {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 base_parts!(
     core => nsh_part_core,
+    menu => nsh_part_menu,
+    overlays => nsh_part_overlays,
+    select => nsh_part_select,
+    command => nsh_part_command,
+    combobox => nsh_part_combobox,
+    toast => nsh_part_toast,
     pickers => nsh_part_pickers,
     color_picker => nsh_part_color_picker,
     carousel => nsh_part_carousel,
@@ -184,6 +237,7 @@ base_parts!(
     dock => nsh_part_dock,
     resizable => nsh_part_resizable,
     plot => nsh_part_plot,
+    term => nsh_part_term,
 );
 
 /// Makes `TextView`'s formulas typeset: no app imports this. A published
@@ -202,6 +256,12 @@ fn base_set() -> Registry {
     use nsh_base::parts::{self, Part};
     nsh_base::registry_of([
         parts::core as Part,
+        parts::menu,
+        parts::overlays,
+        parts::select,
+        parts::command,
+        parts::combobox,
+        parts::toast,
         parts::pickers,
         parts::color_picker,
         parts::carousel,
@@ -649,6 +709,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]

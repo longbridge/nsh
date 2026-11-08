@@ -44,6 +44,7 @@ mod menus;
 mod net;
 mod pointer;
 mod speech;
+mod windows;
 
 pub use audio::AudioCall;
 mod stub;
@@ -61,6 +62,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
     MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
+    TextEngine,
     geometry::{point, px},
 };
 use nsh_engine::{
@@ -136,7 +138,8 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config).map(|launched| (launched.engine, launched.batches))
+    launch(config, Vec::new(), || ApproxTextEngine)
+        .map(|launched| (launched.engine, launched.batches))
 }
 
 /// A started engine and what it sends.
@@ -148,7 +151,17 @@ struct Launched {
     wanted: Option<Arc<AtomicBool>>,
 }
 
-fn launch(config: EngineConfig) -> std::io::Result<Launched> {
+/// [`start`], the platform reporting `displays` before the app first
+/// renders.
+fn launch<M, F>(
+    config: EngineConfig,
+    displays: Vec<nsh_core::desktop::Display>,
+    text_engine: F,
+) -> std::io::Result<Launched>
+where
+    M: TextEngine + 'static,
+    F: FnOnce() -> M + Send + 'static,
+{
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
@@ -159,7 +172,11 @@ fn launch(config: EngineConfig) -> std::io::Result<Launched> {
         control: control.clone(),
         wanted: wanted.clone(),
     };
-    let engine = Engine::start(config, || ApproxTextEngine, sink)?;
+    let engine = Engine::start_with(config, text_engine, sink, |control| {
+        if !displays.is_empty() {
+            control.set_displays(displays);
+        }
+    })?;
     let _ = control.set(engine.control());
     Ok(Launched {
         engine,
@@ -311,11 +328,28 @@ pub struct Headless {
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
+    /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
+    /// when the config gives its own windows (`EngineConfig::windows`).
+    windows: Option<windows::Windows>,
 }
 
 impl Headless {
     /// Starts `config`'s app ([`start`]).
-    pub fn start(mut config: EngineConfig) -> std::io::Result<Headless> {
+    pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
+        Self::start_with_text_engine(config, || ApproxTextEngine)
+    }
+
+    /// Starts `config`'s app laying text out with the engine
+    /// `text_engine` makes (on the engine's thread) instead of
+    /// [`ApproxTextEngine`]: a platform's, for sizes as on screen.
+    pub fn start_with_text_engine<M, F>(
+        mut config: EngineConfig,
+        text_engine: F,
+    ) -> std::io::Result<Headless>
+    where
+        M: TextEngine + 'static,
+        F: FnOnce() -> M + Send + 'static,
+    {
         let speech = config.speech.is_none().then(speech::FakeSpeech::default);
         if let Some(speech) = &speech {
             config.speech = Some(Arc::new(speech.clone()));
@@ -324,6 +358,16 @@ impl Headless {
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
         }
+        // A desktop's windows: the main one, focused, on one display, and
+        // those the app opens.
+        let windows = (config.environment.os.is_desktop() && config.windows.is_none())
+            .then(|| windows::Windows::new(config.viewport));
+        if let Some(windows) = &windows
+            && config.environment.window_state.is_none()
+        {
+            config.environment.window_state = Some(windows.main());
+        }
+        let displays = windows.as_ref().map(|w| w.displays()).unwrap_or_default();
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -333,7 +377,7 @@ impl Headless {
             batches,
             errors,
             wanted,
-        } = launch(config)?;
+        } = launch(config, displays, text_engine)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         Ok(Headless {
@@ -364,6 +408,7 @@ impl Headless {
             last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
+            windows,
         })
     }
 
@@ -535,6 +580,11 @@ impl Headless {
         self.viewport = size;
         self.screen.set_viewport(size);
         self.environment.window = size;
+        if let Some(windows) = &mut self.windows {
+            windows.resize_main(size);
+            self.environment.window_state = Some(windows.main());
+            windows.take_reports();
+        }
         self.engine.control().resize(size);
         self.engine.control().set_environment(self.environment);
         self.done()
@@ -779,6 +829,18 @@ impl Headless {
         for item in &batch.items {
             self.animator.apply(item);
         }
+        if let Some(windows) = &mut self.windows {
+            for item in &batch.items {
+                match item {
+                    MountItem::Command {
+                        id,
+                        command: Command::Desktop(command),
+                    } => windows.command(*id, command),
+                    MountItem::Remove { id } | MountItem::Delete { id } => windows.removed(*id),
+                    _ => {}
+                }
+            }
+        }
         #[cfg(feature = "js")]
         if let Some(calls) = &mut self.host_calls {
             for item in &batch.items {
@@ -868,7 +930,100 @@ impl Headless {
         if self.screen.take_back_asked() {
             self.go_back(false);
         }
+        self.report_windows();
         self.report_finished();
+    }
+
+    /// Reports what changed of the app's windows, as a platform does: a
+    /// window of the app's own on its root, the main window in the
+    /// environment; the views of a window off the screen are not found.
+    fn report_windows(&mut self) {
+        let Some(windows) = &mut self.windows else {
+            return;
+        };
+        let control = self.engine.control();
+        let mut environment = false;
+        for report in windows.take_reports() {
+            match report {
+                windows::Report::Main(state) => {
+                    self.environment.window_state = Some(state);
+                    environment = true;
+                }
+                windows::Report::Window(root, event) => control.dispatch_event(
+                    root,
+                    EventKind::Window,
+                    EventPayload::Window(Box::new(event)),
+                ),
+                windows::Report::Hidden(root, hidden) => {
+                    self.screen.set_window_hidden(root, hidden);
+                }
+                windows::Report::RootSize(root, size) => {
+                    control.set_root_size(root, size, Default::default());
+                }
+            }
+        }
+        if environment {
+            control.set_environment(self.environment);
+        }
+        // `sizeToContent` on the main window: its viewport becomes that size.
+        if let Some(size) = self.windows.as_mut().and_then(|w| w.take_main_resize())
+            && size != self.viewport
+        {
+            self.viewport = size;
+            self.screen.set_viewport(size);
+            self.environment.window = size;
+            if let Some(windows) = &mut self.windows {
+                windows.resize_main(size);
+                self.environment.window_state = Some(windows.main());
+                windows.take_reports();
+            }
+            control.resize(size);
+            control.set_environment(self.environment);
+        }
+    }
+
+    /// A pointer acts in the window view `id` is in: the platform activates
+    /// that window first (the one that had the focus loses it).
+    fn activate_window_of(&mut self, id: NodeId) {
+        let window = self.screen.window_of(id);
+        if let Some(windows) = &mut self.windows {
+            windows.pressed_in(window);
+        }
+        self.report_windows();
+    }
+
+    /// The state of the app's window `id` (`"main"`, or the id it opened
+    /// one with) as the platform reports it; `None` while it is not open
+    /// (`app.window(id).state()`).
+    pub fn window_state(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        self.catch_up();
+        let windows = self.windows.as_ref().ok_or_else(no_windows)?;
+        Ok(self
+            .screen
+            .window_root(id)
+            .and_then(|root| windows.state(root)))
+    }
+
+    /// The step `window(<id>).pressClose()`: the user presses the close
+    /// button of the app's window `id`: the window reports the press
+    /// (`onClosePress`, reason `closeButton`) and closes when its
+    /// `closeOnPress` lets it; then waits until the app is quiet.
+    pub fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        self.step(format!("window({id}).pressClose"));
+        self.catch_up();
+        let root = self
+            .screen
+            .window_root(id)
+            .ok_or_else(|| format!("no window {id:?} is open"))?;
+        let windows = self.windows.as_mut().ok_or_else(no_windows)?;
+        windows
+            .press_close(root)
+            .map_err(|e| format!("cannot press the close button of window {id:?}: {e}"))?;
+        self.report_windows();
+        self.done()
     }
 
     fn report_finished(&mut self) {
@@ -1423,6 +1578,7 @@ impl Headless {
                     .bounds_in_root(canvas)
                     .map(|b| b.origin + center)
             });
+        self.activate_window_of(id);
         // The finger, as platforms report it to the views around it that
         // listen to touches (an overlay's `onPressOutside` among them).
         let path = self.screen.touch_path(id);
@@ -1472,6 +1628,7 @@ impl Headless {
             (Some(page), Some(target)) => page - target.origin,
             _ => at,
         };
+        self.activate_window_of(id);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
@@ -1542,6 +1699,7 @@ impl Headless {
         let pick = self.screen.long_pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
+        self.activate_window_of(id);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
@@ -1879,6 +2037,11 @@ impl Headless {
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
         self.done()
     }
+}
+
+/// Why a step on windows fails off the desktops.
+fn no_windows() -> String {
+    "the app has no windows of its own here: open it as a desktop app (`platform: \"macos\"`, \"windows\" or \"linux\")".into()
 }
 
 /// How a dialog is answered when the test says nothing, as a user backing
@@ -2866,5 +3029,136 @@ mod tests {
             FileRequest::SaveDialog(save) if save.file_name.as_deref() == Some("Untitled.md")
         ));
         assert_eq!(requests[2], FileRequest::RevealPath("/docs/a.md".into()));
+    }
+
+    /// A clipping box with padding that holds a label, a box wider than it,
+    /// a hidden box and a horizontal scroll view.
+    #[component]
+    fn Laid() -> impl IntoElement {
+        view()
+            .test_id("outer")
+            .w(px(200.0))
+            .h(px(100.0))
+            .p(px(10.0))
+            .overflow_hidden()
+            .child(text("Label").test_id("label"))
+            .child(view().test_id("wide").w(px(300.0)).h(px(20.0)))
+            .child(view().test_id("ghost").w(px(10.0)).h(px(10.0)).invisible())
+            .child(
+                scroll()
+                    .test_id("strip")
+                    .horizontal()
+                    .w(px(100.0))
+                    .h(px(30.0))
+                    .child(view().test_id("long").w(px(400.0)).h(px(30.0))),
+            )
+    }
+
+    fn node<'a>(nodes: &'a [crate::LayoutNode], test_id: &str) -> &'a crate::LayoutNode {
+        nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(test_id))
+            .unwrap_or_else(|| panic!("no {test_id} in {nodes:?}"))
+    }
+
+    #[test]
+    fn layout_nodes_give_each_views_box_parent_clip_and_text_box() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Laid>())).unwrap();
+        app.first_render().unwrap();
+        let nodes = app.screen().layout_nodes();
+
+        // Tree order, the root left out, and every parent is in the list.
+        let ids: Vec<_> = nodes.iter().map(|n| n.id).collect();
+        let outer = node(&nodes, "outer");
+        assert_eq!(outer.parent, ROOT_ID);
+        assert_eq!(outer.kind, nsh_core::ViewKind::View);
+        assert_eq!(ids[0], outer.id);
+        for n in nodes.iter().filter(|n| n.id != outer.id) {
+            assert!(ids.contains(&n.parent), "{n:?}");
+        }
+
+        // Boxes are in the root's points; padding moves the children.
+        assert_eq!(outer.bounds.size, Size::new(px(200.0), px(100.0)));
+        assert!(outer.clips);
+        assert!(outer.scroll.is_none() && outer.text.is_none() && !outer.hidden);
+        let wide = node(&nodes, "wide");
+        assert_eq!(wide.parent, outer.id);
+        assert_eq!(wide.bounds.origin.x, outer.bounds.origin.x + px(10.0));
+        // It is wider than the box that clips it: the audit's evidence.
+        assert!(wide.bounds.right() > outer.bounds.right());
+
+        // A hidden view keeps its box; a scroll view says which way it
+        // scrolls and how large its content is.
+        assert!(node(&nodes, "ghost").hidden);
+        let strip = node(&nodes, "strip");
+        let scrolling = strip.scroll.as_ref().unwrap();
+        assert!(scrolling.horizontal);
+        assert_eq!(scrolling.content_size.map(|s| s.width), Some(px(400.0)));
+        assert_eq!(node(&nodes, "long").parent, strip.id);
+
+        // A text keeps its attributed text and the box it was laid out in,
+        // in the root's points as its own box.
+        let label = node(&nodes, "label");
+        let text = label.text.as_ref().unwrap();
+        assert_eq!(text.text.text, "Label");
+        assert!(text.content.size.width.0 > 0.0);
+        assert!(text.content.origin.x >= label.bounds.origin.x);
+        assert!(text.content.right() <= label.bounds.right());
+    }
+
+    #[test]
+    fn layout_nodes_follow_scroll_offsets() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Rows>())).unwrap();
+        app.first_render().unwrap();
+        let row = |app: &Headless| {
+            let nodes = app.screen().layout_nodes();
+            let text = nodes
+                .iter()
+                .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == "Row 3"))
+                .unwrap()
+                .clone();
+            // The row's box is the text's parent.
+            let parent = nodes.iter().find(|n| n.id == text.parent).unwrap();
+            parent.bounds.origin.y
+        };
+        let before = row(&app);
+        app.scroll("Row 3", px(100.0)).unwrap();
+        app.wait_for("At 100").unwrap();
+        assert_eq!(row(&app), before - px(100.0));
+    }
+
+    /// Counts the texts it prepares, so a test sees which engine laid out.
+    #[derive(Clone, Default)]
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl TextEngine for Counting {
+        type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
+
+        fn prepare(&self, text: &nsh_core::AttributedText) -> Self::Prepared {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            ApproxTextEngine.prepare(text)
+        }
+
+        fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
+            ApproxTextEngine.measure(prepared, max_width)
+        }
+
+        fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> nsh_core::TextLayout {
+            ApproxTextEngine.layout(prepared, size)
+        }
+    }
+
+    #[test]
+    fn start_with_text_engine_lays_text_out_with_the_given_engine() {
+        let counting = Counting::default();
+        let seen = counting.0.clone();
+        let mut app =
+            Headless::start_with_text_engine(EngineConfig::new(Root::of::<Laid>()), move || {
+                counting
+            })
+            .unwrap();
+        app.first_render().unwrap();
+        assert!(seen.load(Ordering::Relaxed) > 0);
+        assert!(app.shows("Label"));
     }
 }

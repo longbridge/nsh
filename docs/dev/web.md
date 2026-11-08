@@ -69,13 +69,56 @@ NSH_BROWSER_WASM=target/wasm32-unknown-unknown/web/nsh_platform_web.wasm node --
 python3 crates/nsh-platform-web/web/browser/browser-check.py --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
 ```
 
-The second command requires Python Playwright and Chromium (`--chrome` selects its executable). It checks
-real module realms, host events queued before startup, repeated replacement/disposal, rejected startup, every
-state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab), a
-list's `contentClass` and a scroll view's `contentStyle` / `contentClass` (where its children land, inserted before
-and after the content container is made).
+The second command requires Python Playwright and its browser binaries. The website CI pins Playwright to
+1.62.0; install that version in a virtual environment and run `python -m playwright install chromium firefox
+webkit` (`--with-deps` also installs the engines' system dependencies on Linux).
+
+The default is Chromium's complete suite; `--chrome PATH` overrides only its executable. To run the lifecycle
+checks on each of the other engines with the same Wasm artifact:
+
+```sh
+python3 crates/nsh-platform-web/web/browser/browser-check.py --browser firefox --suite lifecycle --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
+python3 crates/nsh-platform-web/web/browser/browser-check.py --browser webkit --suite lifecycle --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
+```
+
+`--suite lifecycle` checks `runModule`, `runSource`, namespace imports, `nativeExports` and development
+factories using `nsh:hot`: startup must render text and respond to a host event. It verifies that a single
+complete import map precedes the realm's first module script. It also checks queued host events and realm
+identities, repeated start/stop, startup failures, cancellation/replacement during a held request or top-level
+await, facade-loading failures, and cleanup errors with a reentrant reset. A fetched bootstrap with a syntax
+error, a thrown exception or no initialization callback must reject startup, release its realm and allow a
+replacement to start. A second HTTP origin serves the runtime with CORS headers to check CDN bootstrap
+loading, execution errors and recovery. Each case has a fresh browser context and page; repeated
+runs within a case reuse its Player. Request gates and explicit fixture events coordinate cancellation rather
+than fixed delays. Assertions cover public promise outcomes, cleanup and a usable replacement, independently
+of garbage-collection timing or whether a detached realm resumes its JavaScript continuation.
+
+Chromium's `--suite interaction` checks every state style (`hoverStyle` / `activeStyle` under real mouse input,
+`focusStyle` / `focusWithinStyle` under Tab), a list's `contentClass`, a scroll view's `contentStyle` /
+`contentClass` (children inserted before and after its content container is made), platform props and tooltips.
+`--suite all` combines the two suites. Firefox and WebKit select `lifecycle` explicitly. The website CI builds
+Wasm once and runs Chromium `all`, Firefox `lifecycle` and WebKit `lifecycle` serially, reporting all engines
+before failing the step.
+
+Reports go to `.nsh/browser-tests/<browser>/` (`--artifacts DIR` changes the root): an engine summary records its
+version and suite, and per-case JSON records the failing stage, fixture events, promise outcomes, console
+messages, page errors and failed requests. Failed cases also save a screenshot and Playwright trace; CI uploads
+the reports on failure. Unexpected errors fail the case; deliberate failures are matched to their own error
+report and request URL. Engine launch failures remain failures in the summary. Playwright WebKit exercises its
+bundled engine; device Safari testing and published-package testing have their own coverage.
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
+
+The realm's `browser/bootstrap.js` is a generated classic script. Its factories execute inside the app's
+iframe, preserving that realm's `Error`, `Promise` and typed-array identities without loading modules before
+the import map. The source entry is `crates/nsh-bundler/examples/browser-bootstrap.js`, importing `scope.js`
+and its dependencies. After changing those sources, regenerate with
+`cargo run -p nsh-bundler --example browser_bootstrap`; CI runs the same command with `-- --check` to detect
+stale output. Keep the generated file with the runtime sources so the CLI, documentation server and distributed
+hosts share the same asset. Publishing minifies it and restores its strict directive after module-mode
+compression, before hashing the directory. The classic bootstrap loads with anonymous CORS, as module
+scripts do, so a CDN's execution errors retain their filename and thrown value. The CDN must allow the page's
+origin, as for the app's other module and Wasm requests. Application modules remain ES modules.
 
 `browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
 desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's
@@ -100,7 +143,8 @@ animation, press events and editor input. Its report does not claim exhaustive A
 
 `cargo xtask web` writes
 `web/index.html` (the player), `nsh.wasm` (feature `browser`) with `nsh.js` and its `browser/` modules,
-`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches),
+`nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two builds keep their caches;
+huacnlee/cargo ignores the directory, keeps both builds apart itself and writes the file to `target/`),
 compiles each demo with `nsh build --release` into the ES module `website/public/play/demos/<name>.js` (generated,
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it; packaging builds `nsh-browser.wasm`: `--target wasm32-unknown-unknown --profile web`, the release
@@ -138,8 +182,11 @@ build to the same file) and takes `nsh.js` from the crate.
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
   (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
-  (`document.baseURI`, `nsh_set_base_url`); the page's script resolves its `app` URLs against it as it starts (and
-  the head's requests are keyed the same way). `nsh.json` `web.base` (`web::page_base`: a path from the root
+  (`document.baseURI`, `nsh_set_base_url`) as it starts: the page's script resolves its `app` URLs (and the head's
+  requests are keyed the same way), the `Player` its `assets`, `data` and `assetBase` and the app's relative
+  `asset()` URLs against `player.baseURL`, and `browser/runtime.js` the entry, the chunks and the app realm's
+  `<base>`, so nothing loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
+  (`web::page_base`: a path from the root
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
   added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
@@ -182,6 +229,12 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 (`crates/nsh-cli/src/bindgen.rs`) is published whole (`web::link`): wasm-bindgen rewrites the module and keeps the
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
+
+Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
+`base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
+one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
+named …"). The macro checks at compile time that it lists every part, so a new part of `nsh/base` adds its line
+there.
 
 ### Historical QuickJS package sizes
 
@@ -363,7 +416,7 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+  (`nsh.time_zone`: `timeZoneName`, `format/mod.rs` `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser
@@ -438,7 +491,9 @@ the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item, one `op_<name>` method per kind of
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
-the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
+the content the core placed. A view of no size (`display: none` lays it out at none) is `nsh-empty`: it draws no border,
+outline or shadow of its own, as on the native backends, which draw inside a view's bounds (a CSS border-box is never
+smaller than its borders); its children still show. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick (or a frame a deadline runs without one: "Animation" below).
 
 Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
@@ -515,6 +570,11 @@ canvas measures them differently. The CSS of runs (`src/text/css.rs`) and line b
 CJK punctuation's line start and end rules) depend on nothing of the browser and are tested on the host
 (`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws.
 
+Each run is a span placed at its position. The characters a line broke at (the space a soft break ate, a hard
+break's newline: a run's `after`) stand between the spans as text nodes (`Player.lineBreaks`), so a text's
+`textContent` and its `aria-label` read as the text was written ("it now brings", never "it nowbrings"), which is
+what search engines and screen readers get; beside absolutely placed spans that whitespace collapses and shows nothing.
+
 ## Styles as classes
 
 No element has an inline style but its geometry (frames, a field's content box, sticky offsets, a zoomed layer, snap
@@ -530,6 +590,12 @@ snapping, fits, hidden states, the press cursor `nsh-pointer`, `nsh-inert` for `
 the same way from the CSS it makes (`cssClass`: a blur, an image's tint and mask, the latter over the
 view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
 apart: the later one then gets a view's own rule.
+
+`borderCurve: "continuous"` is a tripled class of `border-radius` and `corner-shape` that `nsh.js` makes from the
+frame (`placeCorners`). A view that clips with such corners is marked `nsh-curve-clip`, a view whose style has a
+backdrop filter `nsh-backdrop` (`op_s`, from its class's rule), and `.nsh-curve-clip:has(.nsh-backdrop)` takes
+circular corners of the radius (`--nsh-round`): Chromium shows no backdrop filter inside a clip with `corner-shape`
+corners (`pitfalls.md`, "Web, browsers").
 
 A view whose styles keep changing (a style animated from JS: a new text each frame) would grow the sheet by a rule a
 frame. After 16 classes defined for one view (`OWN_RULES_AFTER`) its new styles go to rules of its own (`i<id>`,
@@ -568,10 +634,13 @@ do not follow (`redirect: "manual"` gives an opaque response without status or `
 `follow_redirects` off fails when it is redirected: JS `redirect: "manual"` / `"error"`, and the hops the engine
 follows itself to check each one against restricted capabilities (`access.rs`).
 
-Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI`, which
-`nsh.js` hands over once with `nsh_set_base_url` (the browser's own `fetch` resolves the app's against the page);
-native hosts have no base and keep rejecting them. `new URL("/x")` without a base throws,
-as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by the browser.
+Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI` as the
+player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url`. The app's `fetch`, the
+browser's own run in the app realm, resolves them against that realm's `<base>`, which is `player.baseURL` too; a
+`fetch` in the page's own realm (the host module's) resolves against the page's address when it runs.
+Native hosts have no base and keep rejecting relative URLs. `new URL("/x")` without a base throws,
+as in browsers. Relative `<Image>` URLs resolve against `player.baseURL` too (`asset()`), so they load after the
+address moved to another directory.
 
 `Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
@@ -618,10 +687,14 @@ browsers' touches into what phones report:
   the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
   modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
   `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
-  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
+  cancel button); a focused field (Escape leaves it); a custom context menu (Shift+F10 or the Menu key);
+  selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
+  Context-menu keys are handled explicitly because Chromium on macOS does not emit `contextmenu` for them.
+  A handled key prevents the browser default to avoid duplicate openings; native fields and selectable text
+  retain their own menus, and keyboard requests carry no pointer and use the trigger's bottom-start corner.
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a

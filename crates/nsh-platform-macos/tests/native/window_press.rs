@@ -169,8 +169,10 @@ fn check(scenario: &str) {
         window.setReleasedWhenClosed(false);
     }
     window.setTitle(&NSString::from_str("NSH held-press regression"));
-    let mut options = platform::AppOptions::default();
-    options.size = (420, 240);
+    let options = platform::AppOptions {
+        size: (420, 240),
+        ..Default::default()
+    };
     let surface = platform::AppView::new(mtm, options);
     window.setContentView(Some(&surface.view()));
     SURFACE.with(|s| *s.borrow_mut() = Some(surface.clone()));

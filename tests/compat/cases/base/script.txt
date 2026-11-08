@@ -1240,6 +1240,16 @@ tap label:Favorite
 expect Favorite: true
 tap label:Favorite
 expect Favorite: false
+# A press going down and ending, as the platform reports them: the app's
+# own press feedback, with no change of value.
+listens id:favorite onPressDown
+listens id:favorite onPressUp
+expect Downs: 0, ups: 0
+event label:Favorite onPressDown
+expect Downs: 1, ups: 0
+event label:Favorite onPressUp
+expect Downs: 1, ups: 1
+expect Favorite: false
 # `disabled`: dimmed for screen readers, `group-disabled:` on the marker
 # (10 wide), presses do nothing; `accessibilityLabel` names it.
 prop id:underline accessibilityLabel Underline text
@@ -1273,6 +1283,8 @@ covers [props] pressedStyle
 covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onChange
+covers [events] onPressDown
+covers [events] onPressUp
 
 # base-toolbar
 tap id:case-base-toolbar
@@ -3457,6 +3469,40 @@ expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
 covers [nsh] token
+
+# base-set-theme
+# Another theme while the app runs, in place of nsh.json's and over
+# shadcn's `neutral`; `null` gives nsh.json's back.
+tap id:case-base-set-theme
+expect theme up #138a5aff
+expect theme radius-card 14
+style id:themed backgroundColor #138a5aff
+# `token()` reads it at once and classes follow. nsh.json's theme is not
+# under it (`radius-card` is gone), the default is (`primary`).
+tap id:set
+expect theme result set #2563ebff
+expect theme up #2563ebff
+expect theme radius-card undefined
+expect theme primary #171717ff
+style id:themed backgroundColor #2563ebff
+# Its dark value in the dark appearance.
+tap id:dark
+expect theme up #93c5fdff
+style id:themed backgroundColor #93c5fdff
+tap id:system
+expect theme up #2563ebff
+# A theme with a value NSH cannot read (no color in the dark appearance):
+# a TypeError, and the theme in force stays.
+tap id:bad
+expect theme result refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:built
+expect theme result built
+expect theme up #138a5aff
+expect theme radius-card 14
+style id:themed backgroundColor #138a5aff
+covers [nsh] setTheme
 
 # base-resizable
 tap id:case-base-resizable

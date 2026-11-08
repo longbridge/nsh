@@ -738,9 +738,94 @@ impl Declaration {
     }
 }
 
-type Entries = Vec<(Variant, Declaration)>;
+/// The static declarations of a [`StyleRefinement`], in order. Shared by
+/// its copies, which a page keeps several of per element (what a view
+/// applied, and the record its bindings patch against), and copied on the
+/// first change to a shared one.
+#[derive(Clone, Default)]
+struct Entries(Option<Rc<Vec<(Variant, Declaration)>>>);
+
+impl Entries {
+    fn with_capacity(capacity: usize) -> Self {
+        Self(Some(Rc::new(Vec::with_capacity(capacity))))
+    }
+
+    fn as_slice(&self) -> &[(Variant, Declaration)] {
+        self.0.as_deref().map_or(&[], Vec::as_slice)
+    }
+
+    fn capacity(&self) -> usize {
+        self.0.as_ref().map_or(0, |v| v.capacity())
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        self.vec().reserve(additional);
+    }
+
+    fn push(&mut self, entry: (Variant, Declaration)) {
+        self.vec().push(entry);
+    }
+
+    fn extend_from_slice(&mut self, entries: &[(Variant, Declaration)]) {
+        self.vec().extend_from_slice(entries);
+    }
+
+    fn vec(&mut self) -> &mut Vec<(Variant, Declaration)> {
+        Rc::make_mut(self.0.get_or_insert_default())
+    }
+
+    fn into_vec(self) -> Vec<(Variant, Declaration)> {
+        self.0.map(Rc::unwrap_or_clone).unwrap_or_default()
+    }
+}
+
+impl std::ops::Deref for Entries {
+    type Target = [(Variant, Declaration)];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl PartialEq for Entries {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Some(a), Some(b)) if Rc::ptr_eq(a, b) => true,
+            _ => self.as_slice() == other.as_slice(),
+        }
+    }
+}
+
+impl Eq for Entries {}
+
+impl Hash for Entries {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+impl fmt::Debug for Entries {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
 
 crate::static_reactive!(AdaptiveColor: AdaptiveColor, Hsla, Rgba, Color);
+
+// Static colors keep the same ergonomics where the native default is also
+// a value. Optional signals and closures use IntoReactive's existing path.
+macro_rules! optional_reactive_colors {
+    ($($source:ty),*) => {$(
+        impl IntoReactive<Option<AdaptiveColor>> for $source {
+            fn into_reactive(self) -> Reactive<Option<AdaptiveColor>> {
+                Reactive::Static(Some(self.into()))
+            }
+        }
+    )*};
+}
+
+optional_reactive_colors!(AdaptiveColor, Hsla, Rgba, Color);
+
 crate::static_reactive!(Length: Length, Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
 crate::static_reactive!(DefiniteLength: Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
 crate::static_reactive!(AbsoluteLength: Points, Rems, AbsoluteLength);
@@ -838,8 +923,18 @@ impl StyleRefinement {
     /// The style now: the static declarations, then the bound parts' (read
     /// in the running computation, which subscribes to them).
     pub(crate) fn resolved(&self) -> StyleRefinement {
+        // Without bound parts it is the static part, shared. With them, a
+        // copy with room for one declaration a part, the usual count: a
+        // style is kept as long as its element.
+        let entries = if self.bound.is_empty() {
+            self.entries.clone()
+        } else {
+            let mut entries = Entries::with_capacity(self.entries.len() + self.bound.len());
+            entries.extend_from_slice(&self.entries);
+            entries
+        };
         let mut out = StyleRefinement {
-            entries: self.entries.clone(),
+            entries,
             names: self.names.clone(),
             bound: Vec::new(),
         };
@@ -918,7 +1013,7 @@ impl StyleRefinement {
     /// `other`'s declarations, applying while in `variant` (and in their
     /// own).
     pub(crate) fn extend_as(&mut self, variant: Variant, other: StyleRefinement) {
-        for (mut v, d) in other.entries {
+        for (mut v, d) in other.entries.into_vec() {
             if v.group != 0 {
                 v.group = self.name(other.names[v.group as usize - 1]);
             }
@@ -976,7 +1071,7 @@ impl StyleRefinement {
     pub(crate) fn lower(&self) -> ClassList {
         let mut variants: Vec<Variant> = Vec::new();
         let mut groups: Vec<Box<str>> = Vec::new();
-        for (v, d) in &self.entries {
+        for (v, d) in self.entries.iter() {
             if let Declaration::Group(name) = d {
                 if !groups.iter().any(|g| **g == **name) {
                     groups.push((*name).into());
@@ -991,7 +1086,7 @@ impl StyleRefinement {
             // Decorations add up within a variant (`.underline()
             // .line_through()` draws both).
             let mut decoration = 0;
-            for (v, d) in &self.entries {
+            for (v, d) in self.entries.iter() {
                 if *v != variant {
                     continue;
                 }
@@ -2922,6 +3017,19 @@ pub trait Styled: Sized {
     fn glass_effect(mut self, glass: crate::GlassEffect) -> Self {
         self.style()
             .value(StyleKey::GlassEffect, PropertyValue::GlassEffect(glass));
+        self
+    }
+
+    /// The tint of the glass material (`glassTintColor`). A color tints the
+    /// native glass; `None` restores its default. Bind an optional adaptive
+    /// color to set and clear the tint; static colors can be passed directly.
+    /// Has no effect without `glassEffect`.
+    fn glass_tint_color(mut self, color: impl IntoReactive<Option<AdaptiveColor>>) -> Self {
+        self.style()
+            .bind_value(color, |s, color: Option<AdaptiveColor>| match color {
+                Some(color) => s.color(&[StyleKey::GlassTintColor], color),
+                None => s.value(StyleKey::GlassTintColor, PropertyValue::Color(None)),
+            });
         self
     }
 

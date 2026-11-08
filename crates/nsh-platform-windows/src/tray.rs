@@ -53,10 +53,9 @@ use windows::{
     core::{PCWSTR, w},
 };
 
-use crate::{image::Load, surface::Surface};
-
 /// The message the icon sends its window.
-pub(crate) const WM_NSH_TRAY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 6;
+pub(crate) use crate::window::WM_NSH_TRAY;
+use crate::{image::Load, surface::Surface};
 /// The icon's id on its window: an app has one.
 const UID: u32 = 1;
 /// `NIN_KEYSELECT`: Enter or Space on the focused icon (`NIN_SELECT |

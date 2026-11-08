@@ -55,6 +55,9 @@
 //! An `incognito` web view has an ephemeral `NetworkSession` of its own
 //! instead, made with it: its data stays in memory and goes with it.
 //!
+//! The URL schemes the app serves (`WebView::url_scheme`) are registered on
+//! the web context and answered per web view (`super::web_scheme`).
+//!
 //! Keys: a focused page gets them first. Escape the page does not use
 //! comes back to the window, where it leaves the page as it leaves a text
 //! field (`crate::navigation`). Alt+Left, the Back key and the mouse's
@@ -123,12 +126,17 @@ pub(super) struct WebHost {
     default_background: gdk::RGBA,
     /// A page to load once the web view is mapped ([`WebHost::load`]).
     pending: Rc<RefCell<Option<WebSource>>>,
+    /// Serves the URL schemes of the first props while the web view is
+    /// here (held for its drop).
+    _schemes: Option<super::web_scheme::SchemeServer>,
 }
 
 impl WebHost {
     /// Makes the page with its first props: `incognito` gives it an
-    /// ephemeral network session of its own.
-    pub(super) fn new(surface: &Rc<Surface>, view: &NshView, incognito: bool) -> Self {
+    /// ephemeral network session of its own, and it serves the app's URL
+    /// schemes.
+    pub(super) fn new(surface: &Rc<Surface>, view: &NshView, p: &WebProps) -> Self {
+        let incognito = p.incognito;
         let shared = Rc::new(Shared {
             emitter: Emitter {
                 surface: Rc::downgrade(surface),
@@ -149,6 +157,7 @@ impl WebHost {
             .network_session(&session)
             .user_content_manager(&content)
             .build();
+        let schemes = super::web_scheme::serve(&web, &p.url_schemes);
         let default_background = web.background_color();
         let message = {
             let shared = shared.clone();
@@ -187,6 +196,7 @@ impl WebHost {
             pending,
             props: None,
             default_background,
+            _schemes: schemes,
         }
     }
 

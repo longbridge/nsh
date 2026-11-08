@@ -5,7 +5,6 @@ import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
-import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
 import { alpha, colors, finish, focusRing, mono, motion, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
@@ -13,12 +12,27 @@ import { buttonGlyph, buttonLabel, buttonLook, type ButtonLookOptions, type Butt
 import { pressSink } from "./look/press";
 import { switchLook } from "./look/switch";
 import { play } from "./sound";
+import { backdrop, sheetGrabber, sheetPanel, tooltipLook, tooltipNote, tooltipText } from "./look/overlay";
+import { density, sectionSurface } from "./look/surface";
+import { progressFill, progressGlide, progressRail, progressRemaining } from "./look/meter";
 
 export * from "./theme";
 export * from "./look/button";
 export * from "./look/press";
 export * from "./look/switch";
 export * from "./look/tool";
+export * from "./look/menu";
+export * from "./look/overlay";
+export * from "./look/surface";
+export * from "./look/choice";
+export * from "./look/tabs";
+export * from "./look/field";
+export * from "./look/listbox";
+export * from "./look/meter";
+export * from "./look/disclosure";
+export * from "./look/nav";
+export * from "./look/plot";
+export * from "./look/workspace";
 export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
@@ -28,15 +42,6 @@ export * from "./scrollbar-theme";
 export * from "./tree";
 export * from "./command";
 export * from "./avatar";
-
-/**
- * The thumb of a resize handle (`handleThumbClass`), as gpui-component
- * draws it: none at rest, so the hairlines stay quiet; a faint pill
- * grows in under the pointer, and a long solid one while pressed or
- * dragged.
- */
-export const handleThumb =
-  "h-11 w-[3px] rounded-full bg-muted-foreground opacity-0 scale-y-0 transition duration-150 ease-out group-hover:opacity-40 group-hover:scale-y-[0.45] group-active:opacity-90 group-active:scale-y-100";
 
 /**
  * Instructions for the device's input: `touch` on phones and tablets,
@@ -152,15 +157,6 @@ export function IconTile(props: { name: IconName; tint?: string; size?: number }
 const pointer = platform.desktop;
 
 /**
- * The page's density: compact with a pointer (desktops), roomier on a touch
- * screen. Section titles, surfaces, rows and their padding take these, so a
- * demo's sections read the same on every page.
- */
-export const density = pointer
-  ? { title: 13, note: 12, body: 13, row: 36, pad: 14, gap: 12, surface: 10 }
-  : { title: 13, note: 13, body: 15, row: 48, pad: 16, gap: 12, surface: 16 };
-
-/**
  * A section's title and what it shows, above its surface: 13 pt semibold on
  * a desktop, 15 on a touch screen, `right` at the trailing
  * edge (a badge, an action).
@@ -205,23 +201,6 @@ function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX
 }
 
 /**
- * The flat surface a section's content sits on: one hairline edge, no
- * shadow. In the terminal a border whose row and column on each side the
- * padding fills out, so the content starts one Cell inside it.
- */
-const surface = (): ViewStyle =>
-  terminal
-    ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
-    : {
-        backgroundColor: colors.surface,
-        borderRadius: density.surface,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: colors.border,
-        overflow: "hidden",
-      };
-
-/**
  * The one section shown, by its title in any case (null: all of them): the
  * gallery sets it from `cargo run -- <demo> --section <title>`, so a check
  * or a screenshot opens straight at a section instead of scrolling to it.
@@ -250,7 +229,8 @@ export function Card(props: {
       <If when={props.title}>
         <SectionHead title={props.title!} subtitle={props.subtitle} right={props.right} />
       </If>
-      <View style={surface()}>
+      {/* The flat surface (`sectionSurface`), clipping what reaches its edges. */}
+      <View style={{ ...sectionSurface(), overflow: terminal ? undefined : "hidden" }}>
         <If when={!props.flush} else={props.children}>
           <Inset>{props.children}</Inset>
         </If>
@@ -312,6 +292,9 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
         boxShadow: props.outline ? undefined : finish.chip.boxShadow,
         borderWidth: 1,
         borderColor: props.outline ? toneColor(tone()) : alpha(tone() === "neutral" ? colors.text : toneColor(tone()), 0.1),
+        // A change of tone (a window turning active) crosses over.
+        transitionProperty: "colors",
+        transitionDuration: 160,
       }}
     >
       <Text style={{ fontSize: 12, fontWeight: "500", color: tone() === "neutral" ? colors.text : toneColor(tone()) }}>{props.label}</Text>
@@ -319,9 +302,37 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   );
 }
 
+/** A state in a list row or a header, quieter than a `Badge`: a round dot
+ * and a word, tinted only for a tone that matters (an active window); the
+ * dot's color crosses over as the state changes. The word alone in the
+ * terminal. */
+export function Status(props: { label: string; tone?: Tone }) {
+  const tinted = () => props.tone != null && props.tone !== "neutral";
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <If when={!terminal}>
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 3.5,
+            backgroundColor: tinted() ? toneColor(props.tone!) : colors.faint,
+            transitionProperty: "colors",
+            transitionDuration: 160,
+          }}
+        />
+      </If>
+      <Text style={{ fontSize: 12, fontWeight: tinted() ? "500" : "400", color: tinted() ? toneColor(props.tone!) : colors.muted, numberOfLines: 1 }}>
+        {props.label}
+      </Text>
+    </View>
+  );
+}
+
 /** A label above a value, for grids of figures; on one row in the terminal,
- * the value right-aligned. */
-export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
+ * the value right-aligned. `truncate` keeps a value that may run long (a
+ * display's name) on its one line, ending in an ellipsis. */
+export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%`; truncate?: boolean }) {
   // The label above its value in the terminal too: two rows, so stats set
   // side by side keep apart and each value stays under its label.
   return (
@@ -333,7 +344,15 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
       }
     >
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
-      <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
+      <Text
+        style={{
+          fontSize: 15,
+          color: props.tone ? toneColor(props.tone) : colors.text,
+          fontVariant: ["tabular-nums"],
+          numberOfLines: props.truncate ? 1 : undefined,
+          paddingRight: props.truncate && !terminal ? 8 : undefined,
+        }}
+      >
         {props.value}
       </Text>
     </View>
@@ -565,20 +584,24 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
   );
 }
 
-/** A horizontal meter with an optional marker (a limit); half a row in the
- * terminal, so its fill is a solid bar rather than a rule. */
+/** A horizontal meter with an optional marker (a limit), `value` from 0
+ * to 1: a progress bar's rail and fill (`look/meter.ts`), the fill gliding
+ * to each new value; half a row in the terminal, so its fill is a solid bar
+ * rather than a rule. */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
-  const height = terminal ? TERMINAL_ROW / 2 : 6;
   return (
-    <View style={{ height: terminal ? height : 6, borderRadius: 3, backgroundColor: colors.track, ...(terminal ? {} : { borderWidth: 1, ...finish.track }) }}>
-      <View
-        style={{
-          width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: terminal ? height : 4,
-          borderRadius: 2,
-          backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill,
-        }}
-      />
+    // The marker stands past the rail, which clips its fill: they sit side
+    // by side in a view of the rail's height.
+    <View style={{ height: terminal ? TERMINAL_ROW / 2 : 6 }}>
+      {terminal ? (
+        <View style={{ height: TERMINAL_ROW / 2, backgroundColor: colors.track }}>
+          <View style={{ width: `${Math.max(0, Math.min(1, props.value)) * 100}%`, height: TERMINAL_ROW / 2, backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill }} />
+        </View>
+      ) : (
+        <View style={progressRail(6)}>
+          <View class={progressGlide} style={{ ...progressFill(6, props.tone), translate: progressRemaining(props.value * 100) }} />
+        </View>
+      )}
       <If when={props.marker !== undefined}>
         <View style={{ position: "absolute", left: `${(props.marker ?? 0) * 100}%`, top: -4, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.text }} />
       </If>
@@ -588,9 +611,10 @@ export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
 
 /**
  * A panel at the bottom over a dimmed backdrop while `open` (`nsh/base`'s
- * `Sheet`, in the gallery's look); a press on the backdrop, Escape or the
- * back button closes it (`onClose`: set `open` to false). It comes in with
- * `open` and goes with `close`, quietly.
+ * `Sheet`, in the gallery's look: `sheetPanel("bottom")` with its
+ * `sheetGrabber`, over `backdrop()`); a press on the backdrop, Escape or
+ * the back button closes it (`onClose`: set `open` to false). It comes in
+ * with `open` and goes with `close`, quietly.
  */
 export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
   let was = props.open;
@@ -600,21 +624,8 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
     was = open;
   });
   return (
-    <BaseSheet
-      open={props.open}
-      onOpenChange={({ open }) => !open && props.onClose()}
-      backdropStyle={{ backgroundColor: "rgba(0,0,0,0.4)" }}
-      popupStyle={{
-        gap: 12,
-        paddingTop: 8,
-        paddingHorizontal: 16,
-        paddingBottom: safeArea().bottom + 16,
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        backgroundColor: colors.surface,
-      }}
-    >
-      <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
+    <BaseSheet open={props.open} onOpenChange={({ open }) => !open && props.onClose()} backdropStyle={backdrop()} popupStyle={sheetPanel("bottom")}>
+      <View style={sheetGrabber()} />
       {props.children}
     </BaseSheet>
   );
@@ -624,7 +635,7 @@ export { Icon, IconLabel, type IconName } from "./icons";
 
 /**
  * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
- * small bubble of the theme's `popover` tokens that comes in with `popIn`
+ * small bubble of the theme's `popover` tokens (`tooltipLook`) that comes in with `popIn`
  * from its side (`placement`, default above), with the keys of a
  * `shortcut` after the text. In the terminal the tooltip is a line of the
  * status line: the text and its keys, no bubble.
@@ -645,10 +656,10 @@ export function Tip(props: { label: string; shortcut?: string; placement?: Popup
   const presence = createPresence(props.placement ?? "top");
   return (
     <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>
-      <View class="flex-row items-center gap-2 rounded-md border border-border bg-popover px-2 py-1" style={presence.style}>
-        <Text class="text-xs text-popover-foreground">{props.label}</Text>
+      <View class={tooltipLook().class} style={presence.style}>
+        <Text class={tooltipText}>{props.label}</Text>
         <If when={props.shortcut}>
-          <Text class="text-xs text-muted-foreground" style={{ fontVariant: ["tabular-nums"] }}>
+          <Text class={tooltipNote} style={{ fontVariant: ["tabular-nums"] }}>
             {props.shortcut}
           </Text>
         </If>

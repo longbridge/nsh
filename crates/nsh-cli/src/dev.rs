@@ -233,6 +233,17 @@ impl DevSession {
         Ok(())
     }
 
+    /// Serves the assets `built` imports by name, whatever their type: the
+    /// app's directory itself serves only its media files.
+    fn serve_assets(&self, built: &build::Built) {
+        self.server.serve_files(
+            built
+                .assets
+                .iter()
+                .map(|asset| (asset.path.clone(), asset.source.clone())),
+        );
+    }
+
     fn rebuild(&self) {
         // A Rust app has no JS: its Rust code's changes restart the session.
         if self.rust_root {
@@ -243,6 +254,7 @@ impl DevSession {
             match build::compile(&self.entry, true) {
                 Ok(built) => {
                     self.watch_files.replace(built.watch_files.clone());
+                    self.serve_assets(&built);
                     let capabilities = built.capabilities_json();
                     let summary = self.summary(&built);
                     self.server.publish(
@@ -252,6 +264,7 @@ impl DevSession {
                         nsh_dev::AppInfo {
                             capabilities,
                             id: crate::package::app_id(&self.entry).ok(),
+                            window: crate::package::window_json(&self.entry),
                         },
                         None,
                         built.ui_sets,
@@ -265,6 +278,7 @@ impl DevSession {
         match build::compile_hot(&self.entry) {
             Ok((built, hot)) => {
                 self.watch_files.replace(built.watch_files.clone());
+                self.serve_assets(&built);
                 let summary = self.summary(&built);
                 // Other capabilities: the app starts again under them.
                 let patch = self
@@ -289,6 +303,7 @@ impl DevSession {
                     nsh_dev::AppInfo {
                         capabilities,
                         id: crate::package::app_id(&self.entry).ok(),
+                        window: crate::package::window_json(&self.entry),
                     },
                     patch,
                     built.ui_sets,

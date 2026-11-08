@@ -229,7 +229,11 @@ fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
     let env_triple = triple.replace('-', "_");
     // New NDKs keep the C standard headers their clang carries (stdbool.h
     // &c.) out of the sysroot: whatever libclang bindgen of the C
-    // dependencies loads, give it that directory to search as well.
+    // dependencies loads, give it that directory to search as well. Last
+    // (`-idirafter`), not first: ahead of the libclang's own headers, the
+    // NDK's `stdint.h` reaches the libclang's through `#include_next`, which
+    // its include guard empties, and the sysroot's `stdint.h` is never read
+    // (NDK 27 with a system libclang: `unknown type name 'uint32_t'`).
     let clang_include = fs::read_dir(toolchain.join("lib/clang"))
         .ok()
         .and_then(|versions| {
@@ -249,7 +253,7 @@ fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
     );
     if let Some(include) = clang_include {
         let include = include.display().to_string().replace('\\', "/");
-        extra.push_str(format!(" -isystem \"{include}\"").as_str());
+        extra.push_str(format!(" -idirafter \"{include}\"").as_str());
     }
     let mut cmd = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cmd.current_dir(root())

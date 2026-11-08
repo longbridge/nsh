@@ -419,6 +419,7 @@ unsafe impl Sync for CoreTextLayout {}
 #[derive(Default)]
 pub struct CoreTextEngine {
     fonts: FontCache,
+    paragraphs: ParagraphStyles,
 }
 
 const WHOLE: CFRange = CFRange {
@@ -519,7 +520,10 @@ impl CoreTextEngine {
             // because span offsets are UTF-16 units, like CFString.
             unsafe { CFMutableAttributedString::set_attribute(s, range, Some(key), Some(value)) }
         };
-        let paragraph = paragraph_style(text, self.tallest_attachment_line(text, alignments));
+        let paragraph = self.paragraphs.get(paragraph_key(
+            text,
+            self.tallest_attachment_line(text, alignments),
+        ));
         // SAFETY: immutable CoreText constants (here and below).
         set(
             CFRange {
@@ -725,9 +729,13 @@ fn line_height(text: &AttributedText) -> CGFloat {
     text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat
 }
 
+/// The paragraph settings of a text: its alignment, writing direction and
+/// fixed line height bounds. The key of [`ParagraphStyles`].
+type ParagraphKey = (u8, i8, u64, u64);
+
 /// `tallest`: the height a line holding an attachment needs (see
 /// `CoreTextEngine::tallest_attachment_line`); lines may grow up to it.
-fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTParagraphStyle> {
+fn paragraph_key(text: &AttributedText, tallest: CGFloat) -> ParagraphKey {
     let alignment = match text.align {
         // React Native: the right side in right-to-left layouts.
         TextAlign::Auto if text.rtl => CTTextAlignment::Right,
@@ -737,17 +745,30 @@ fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTPara
         TextAlign::Right => CTTextAlignment::Right,
         TextAlign::Justify => CTTextAlignment::Justified,
     };
-    let line_height = line_height(text);
-    let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
-        spec,
-        valueSize: size,
-        value: NonNull::new(value.cast_mut()).expect("non-null setting"),
-    };
     // `writingDirection`; natural (from the content) by default.
     let direction = match text.writing_direction {
         None => CTWritingDirection::Natural,
         Some(false) => CTWritingDirection::LeftToRight,
         Some(true) => CTWritingDirection::RightToLeft,
+    };
+    let line_height = line_height(text);
+    (
+        alignment.0,
+        direction.0,
+        line_height.to_bits(),
+        line_height.max(tallest).to_bits(),
+    )
+}
+
+fn paragraph_style(key: ParagraphKey) -> CFRetained<CTParagraphStyle> {
+    let alignment = CTTextAlignment(key.0);
+    let direction = CTWritingDirection(key.1);
+    let line_height = CGFloat::from_bits(key.2);
+    let max_line_height = CGFloat::from_bits(key.3);
+    let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
+        spec,
+        valueSize: size,
+        value: NonNull::new(value.cast_mut()).expect("non-null setting"),
     };
     let mut settings = vec![
         setting(
@@ -761,7 +782,6 @@ fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTPara
             size_of::<CTWritingDirection>(),
         ),
     ];
-    let max_line_height = line_height.max(tallest);
     if line_height > 0.0 {
         settings.push(setting(
             CTParagraphStyleSpecifier::MinimumLineHeight,
@@ -776,6 +796,32 @@ fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTPara
     }
     // SAFETY: every setting points at a live value of the declared size.
     unsafe { CTParagraphStyle::new(settings.as_ptr(), settings.len()) }
+}
+
+/// Paragraph styles by their settings, shared by the texts that have them.
+/// Each attributed string retains its own, and a new one copies CoreText's
+/// default tab stops: about a kilobyte per text a page keeps. Immutable,
+/// so texts on any thread may share one. Bounded like [`FontCache`].
+#[derive(Default)]
+struct ParagraphStyles {
+    styles: RefCell<FxHashMap<ParagraphKey, CFRetained<CTParagraphStyle>>>,
+}
+
+impl ParagraphStyles {
+    const MAX: usize = 64;
+
+    fn get(&self, key: ParagraphKey) -> CFRetained<CTParagraphStyle> {
+        let mut styles = self.styles.borrow_mut();
+        if let Some(style) = styles.get(&key) {
+            return style.clone();
+        }
+        if styles.len() >= Self::MAX {
+            styles.clear();
+        }
+        let style = paragraph_style(key);
+        styles.insert(key, style.clone());
+        style
+    }
 }
 
 impl Prepared {

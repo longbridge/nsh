@@ -77,20 +77,25 @@ vec4 shade(float x, vec2 p, vec2 g, float al){
     float ch=uDark>.5?smoothstep(.38,1.,fold):smoothstep(.16,.96,fold);
     float apex=exp(-pow((al-.02+sin(t0*.09)*.2)*(7.5+i*.3),2.));
     float spec=pow(max(dot(n,L),0.),26.);
-    float groove=smoothstep(1.,.66,abs(t));
     float cit=smoothstep(.56,.74,fbm(lq*.72+vec2(19.,t0*.018)))*smoothstep(.2,1.,fold);
     float lit=0.;
     for(int k=0;k<8;k++){if(float(k)==i)lit=uLit[k];}
+    // The seam's distance in pixels, so its lines stay crisp at any size.
+    float ed=(1.-abs(t))*.039375*R;
     if(uDark>.5){
-      // Dark glass: each ring is near black, with a thin crest line; the light
-      // pools in one streak over the crown and a few narrow folds.
-      col=mix(vec3(.038,.044,.056),vec3(.34,.37,.42),ch*ch);
-      col+=vec3(.86,.89,.93)*apex*h*(.42+.5*ch);
-      col+=vec3(.9)*spec*.42;
-      col=mix(col,CITRUS*(.3+.8*ch),cit*.5);
-      col*=mix(.16,1.,groove);
-      col+=vec3(.66,.70,.76)*smoothstep(.2,.0,abs(t+.5))*(.1+.34*ch);
-      col+=vec3(.5,.53,.58)*smoothstep(.93,1.,abs(t))*.07;
+      // Dark glass: smoky and translucent, as light's is frosted, with the
+      // contrast of polished glass: the light pools in one bright streak over
+      // the crown and a few narrow folds, each tube glints along its crest
+      // and each seam carries a hairline.
+      col=mix(vec3(.10,.115,.14),vec3(.46,.50,.57),ch*ch);
+      col+=vec3(.9,.93,.97)*apex*h*(.55+.6*ch);
+      col+=vec3(1.)*spec*.55;
+      col=mix(col,CITRUS*(.4+.9*ch),cit*.6);
+      col*=mix(.36,1.,smoothstep(1.,.6,abs(t)));
+      col+=vec3(.72,.76,.82)*smoothstep(.2,.0,abs(t+.5))*(.12+.42*ch);
+      col*=mix(.55,1.,smoothstep(.2,2.4,ed));
+      col=mix(col,vec3(.80,.84,.90),smoothstep(1.,0.,abs(ed-2.1))*.38);
+      alpha=mix(.66,.92,h);
     }else{
       col=mix(vec3(.75,.77,.81),vec3(.985,.988,.995),ch);
       col=mix(col,vec3(1.),apex*h*.4);
@@ -98,17 +103,23 @@ vec4 shade(float x, vec2 p, vec2 g, float al){
       col=mix(col,vec3(.56,.80,.08)*(.72+.42*ch),cit*.86);
       // The seam is a narrow shadow with a hairline of light just inside it,
       // sized in pixels so it stays crisp whatever the arch's size.
-      float ed=(1.-abs(t))*.039375*R;
       col*=mix(.8,1.,smoothstep(.2,2.4,ed));
       col=mix(col,vec3(1.),smoothstep(1.,0.,abs(ed-2.1))*.55);
-      alpha=mix(.62,.94,h);
+      alpha=mix(.57,.89,h);
     }
     col=mix(col,(uDark>.5?CITRUS*(.42+.95*h):vec3(.46,.70,.04)*(.72+.42*h)),lit*.92);
     if(lit>.01)alpha=mix(alpha,1.,lit);
   }else if(x>.32){
     float k=(x-.32)/.05;
-    col=uDark>.5?vec3(.012,.014,.018):vec3(.84,.86,.89);
-    col+=CITRUS*exp(-k*3.4)*(uDark>.5?.24:.2);
+    if(uDark>.5){
+      col=vec3(.012,.014,.018)+CITRUS*exp(-k*3.4)*.24;
+    }else{
+      // In light the gap is white, a faint shade at its walls, lit by the
+      // tube's citrus glow.
+      float wall=smoothstep(.3,0.,k)+smoothstep(.7,1.,k);
+      col=mix(vec3(1.),vec3(.9,.91,.93),wall*.5);
+      col=mix(col,vec3(.62,.84,.14),exp(-k*3.4)*.3);
+    }
   }else if(x>.18){
     float t=(x-.25)/.07, h=sqrt(max(0.,1.-t*t));
     vec3 n=normalize(vec3(g*t,h+.05));
@@ -233,14 +244,14 @@ void main(){
       if (width >= 1000) {
         arch.r = Math.min(content * 0.235, height * 0.54);
         arch.x = left + content * 0.8;
-        arch.y = arch.r * 0.2;
+        arch.y = arch.r * 0.34;
         copy = left + content * 0.54;
       } else {
         // The copy above, the arches centered at the hero's foot (the hero
         // leaves them this room: `--arch-room` in Home.astro).
         arch.r = Math.min(width * 0.46, 290);
         arch.x = width / 2;
-        arch.y = arch.r * 0.12;
+        arch.y = arch.r * 0.24;
         copy = 0;
       }
     };

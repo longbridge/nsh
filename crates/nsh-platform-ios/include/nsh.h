@@ -109,6 +109,13 @@ char *_Nullable nsh_app_set_locale(NshApp *app, const char *_Nullable tag);
 /// for Dynamic Type's; 0 follows the system's again.
 void nsh_app_set_font_scale(NshApp *app, float scale);
 
+/// Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host ships,
+/// so every app `app` loads can name its family without bundling the file.
+/// A font registered before a load is in that app's first frame; one
+/// registered while an app runs is used from the next layout. Returns why
+/// `bytes` is not a font, or NULL.
+char *_Nullable nsh_app_register_font(NshApp *app, const uint8_t *_Nullable bytes, size_t len);
+
 /// The embedding app's theme overrides: a theme file of shadcn/ui's
 /// (`{ "cssVars": { "theme": {...}, "light": {...}, "dark": {...} } }`, as
 /// `nsh.json`'s `"theme"`), whose tokens win over the app's of the same

@@ -1,5 +1,5 @@
 import { cleanup, signal } from "nsh";
-import { isAvailable, Tray, Window } from "nsh/desktop";
+import { currentWindow, isAvailable, Tray } from "nsh/desktop";
 import star from "../star.svg";
 import { Button, Caption, Card, DemoPage, Row } from "../ui";
 
@@ -8,6 +8,8 @@ import { Button, Caption, Card, DemoPage, Row } from "../ui";
  * tooltip, a click and a menu.
  */
 export function TrayDemo() {
+  // The window this demo shows in, kept for the menu's handler.
+  const main = currentWindow();
   const shown = signal(false);
   const last = signal("Nothing yet");
   const muted = signal(false);
@@ -18,7 +20,7 @@ export function TrayDemo() {
       tooltip: "NSH Gallery",
       onClick: () => last.set("Clicked the icon"),
       menu: [
-        { label: "Open Gallery", onSelect: () => (Window.orderFront(), last.set("Chose Open Gallery")) },
+        { label: "Open Gallery", onSelect: () => (main.focus(), last.set("Chose Open Gallery")) },
         { label: "Mute", checked: muted(), onSelect: () => (muted.set(!muted()), showTray(), last.set(`Muted: ${muted()}`)) },
         { type: "separator" },
         { label: "More", submenu: [{ label: "About", onSelect: () => last.set("Chose About") }] },
