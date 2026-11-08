@@ -18,8 +18,8 @@
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
 //! ```
 //!
-//! The iOS runtimes and SDK need Xcode: they are built on macOS only, as is
-//! the macOS (AppKit) runtime, built for this machine. The
+//! The iOS runtimes and SDK need Xcode: they are built on Apple silicon Macs
+//! only. The macOS (AppKit) runtime is built on macOS, for this machine. The
 //! Linux runtime is built for this machine, on Linux only (where it runs,
 //! GTK 4, Pango and, for web views, WebKitGTK 6.0 must be installed;
 //! without WebKitGTK's development files it is built with placeholders for
@@ -44,6 +44,11 @@ use crate::{android, term};
 const IOS: &str = "aarch64-apple-ios";
 const IOS_SIM: &str = "aarch64-apple-ios-sim";
 const CATALYST: &str = "aarch64-apple-ios-macabi";
+/// Whether the distribution has the iOS runtimes and SDK: on Apple silicon
+/// only, the `ios` component's one host. They are built for arm64 (devices,
+/// Apple silicon's simulator, Mac Catalyst), which an Intel Mac's simulator
+/// and Mac Catalyst do not run.
+const WITH_IOS: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 pub(crate) fn dist() -> anyhow::Result<()> {
     let root = android::root();
@@ -60,8 +65,10 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         &out.join("bin").join(exe("nsh")),
     )?;
 
-    if cfg!(target_os = "macos") {
+    if WITH_IOS {
         ios_runtimes(&release, &out)?;
+    }
+    if cfg!(target_os = "macos") {
         for (package, what) in [
             ("nsh-macos-host", "the development host for macOS"),
             ("nsh-macos-app", "the release runner for macOS"),
@@ -195,9 +202,13 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     }
 
     // Android runtimes. Windows machines often have no Android SDK: the
-    // distribution is then made without them.
-    let android = !cfg!(windows) || android::Sdk::find().is_ok();
-    if !android {
+    // distribution is then made without them. The NDK has no toolchain that
+    // runs on arm64 Linux: there it never has them.
+    let ndk_host = !cfg!(all(target_os = "linux", not(target_arch = "x86_64")));
+    let android = ndk_host && (!cfg!(windows) || android::Sdk::find().is_ok());
+    if !ndk_host {
+        term::warn("the NDK does not run on this machine: the distribution has no Android runtime");
+    } else if !android {
         term::warn("no Android SDK (ANDROID_HOME): the distribution has no Android runtime");
     }
     let abis: Vec<String> = android::ABIS.iter().map(|a| a.to_string()).collect();
@@ -226,7 +237,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         ));
     }
 
-    if cfg!(target_os = "macos") {
+    if WITH_IOS {
         // iOS embedding: a static framework per platform (Rust + the Swift
         // module) in an XCFramework.
         crate::ios::xcframeworks(
