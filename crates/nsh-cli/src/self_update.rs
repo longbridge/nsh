@@ -10,7 +10,8 @@
 //! `releases/latest` and the nightly's revision from its `nsh-release.json`,
 //! neither of them an API call, so no rate limit applies. The directory is
 //! swapped by `nsh_updater`'s installation, which also handles Windows'
-//! running executable.
+//! running executable; the components installed beside it
+//! (`crate::component`) are added again by the new nsh.
 
 use std::{
     fs,
@@ -97,6 +98,9 @@ pub(crate) fn update(channel: Option<Channel>) -> anyhow::Result<()> {
     }
     let asset = asset()?;
     let agent = agent();
+    // Replacing the directory drops the components: the new nsh adds them
+    // again, from its own release.
+    let components = crate::component::installed(&root);
 
     let step = ui::Step::start(format!("checking the {} channel", channel.name()));
     let offer = match channel {
@@ -113,10 +117,7 @@ pub(crate) fn update(channel: Option<Channel>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let url = format!(
-        "https://github.com/{REPOSITORY}/releases/download/{}/{asset}",
-        offer.tag
-    );
+    let url = asset_url(&offer.tag, &asset);
     let dir = crate::check::cache()?.join("updates");
     fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
     let archive = dir.join(format!("{}-{asset}", std::process::id()));
@@ -142,6 +143,19 @@ pub(crate) fn update(channel: Option<Channel>) -> anyhow::Result<()> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_else(|| format!("nsh {}", offer.label));
     ui::done(format!("updated to {installed}"));
+    if !components.is_empty() {
+        let status = std::process::Command::new(&exe)
+            .args(["component", "add"])
+            .args(&components)
+            .status()
+            .context("add the components again")?;
+        if !status.success() {
+            bail!(
+                "could not add the components again: run `nsh component add {}`",
+                components.join(" ")
+            );
+        }
+    }
     Ok(())
 }
 
@@ -182,18 +196,42 @@ fn distribution(exe: &Path) -> anyhow::Result<PathBuf> {
 }
 
 /// The archive of this machine's platform.
-fn asset() -> anyhow::Result<&'static str> {
+fn asset() -> anyhow::Result<String> {
+    let host = host()?;
+    Ok(if cfg!(windows) {
+        format!("nsh-{host}.zip")
+    } else {
+        format!("nsh-{host}.tar.gz")
+    })
+}
+
+/// This machine's platform as release assets name it (`macos-arm64`).
+pub(crate) fn host() -> anyhow::Result<&'static str> {
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "nsh-macos-arm64.tar.gz",
-        ("linux", "x86_64") => "nsh-linux-x86_64.tar.gz",
-        ("windows", "x86_64") => "nsh-windows-x86_64.zip",
+        ("macos", "aarch64") => "macos-arm64",
+        ("linux", "x86_64") => "linux-x86_64",
+        ("windows", "x86_64") => "windows-x86_64",
         (os, arch) => bail!("no prebuilt nsh for {os} {arch}; build it from source"),
     })
 }
 
+/// The release this build was published as: its tag (`v0.4.0`, `nightly`),
+/// where its components are.
+pub(crate) fn own_tag() -> String {
+    match Channel::current() {
+        Channel::Nightly => NIGHTLY.to_owned(),
+        Channel::Stable => format!("v{}", env!("CARGO_PKG_VERSION")),
+    }
+}
+
+/// The URL of `asset` of the release `tag`.
+pub(crate) fn asset_url(tag: &str, asset: &str) -> String {
+    format!("https://github.com/{REPOSITORY}/releases/download/{tag}/{asset}")
+}
+
 /// Errors as statuses, redirects not followed: `releases/latest` names the
 /// latest release in its `Location`.
-fn agent() -> ureq::Agent {
+pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
@@ -277,7 +315,12 @@ fn nightly(agent: &ureq::Agent, current: Channel) -> anyhow::Result<Offer> {
 }
 
 /// Downloads `url` to `to`, checked against `url.sha256`.
-fn download(agent: &ureq::Agent, url: &str, to: &Path, step: &ui::Step) -> anyhow::Result<()> {
+pub(crate) fn download(
+    agent: &ureq::Agent,
+    url: &str,
+    to: &Path,
+    step: &ui::Step,
+) -> anyhow::Result<()> {
     let sum_url = format!("{url}.sha256");
     let sum = get(agent, &sum_url)?
         .into_body()

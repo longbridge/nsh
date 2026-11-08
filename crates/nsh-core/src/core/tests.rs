@@ -1722,9 +1722,16 @@ fn scroll_reports_content_size() {
         _ => None,
     });
     assert_eq!(content, Some(size_pt(320.0, 500.0)));
-    // Children are not shrunk to the scroll view's height.
+    // Children are not shrunk to the scroll view's height (the last one,
+    // beyond a viewport below it, is laid out but not mounted yet).
     assert_eq!(
-        frame_of(&batch, 14).map(|f| (f.origin.y.0, f.size.height.0)),
+        frame_of(&batch, 13).map(|f| (f.origin.y.0, f.size.height.0)),
+        Some((300.0, 100.0))
+    );
+    assert_eq!(frame_of(&batch, 14), None);
+    assert_eq!(
+        c.measure(14)
+            .map(|m| (m.frame.origin.y.0, m.frame.size.height.0)),
         Some((400.0, 100.0))
     );
     assert!(batch.items.iter().any(|i| matches!(
@@ -23717,8 +23724,9 @@ fn a_page_moves_only_for_rows_wholly_above_its_viewport() {
     render_binds(&mut c, &mut next_id, &mut cells, 80.0);
     let batch = c.commit().unwrap();
     assert!(page_scrolls(&batch).is_empty());
+    // (Laid out far below the viewport: no view there yet.)
     assert_eq!(
-        frame_of(&batch, 9),
+        c.measure(9).map(|m| m.frame),
         Some(rect(0.0, 100.0 + 15.0 * 80.0 + 85.0 * 50.0, 320.0, 10.0))
     );
     // Far down, then back up over rows not measured yet: those wholly
@@ -25198,6 +25206,252 @@ fn child_view(
     ]
 }
 
+/// The ids of the views `batch` makes.
+fn created_in(batch: &MountBatch) -> Vec<NodeId> {
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Create { id, .. } => Some(*id),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_scroll_view_mounts_its_content_near_its_viewport() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Rows of 50 in a wrapper, each with a child: 0..2000.
+    ops.extend(child_view(4, 2, 2000.0, &[]));
+    for i in 0..40u32 {
+        ops.extend(child_view(10 + 4 * i, 4, 50.0, &[]));
+        ops.extend(child_view(12 + 4 * i, 10 + 4 * i, 20.0, &[]));
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    // The viewport (0..100) and a viewport around it: rows 0..3, each with
+    // its child.
+    let made = created_in(&batch);
+    assert_eq!(made[..3], [2, 4, 10]);
+    assert!(made.contains(&12) && made.contains(&22) && made.contains(&24));
+    assert!(!made.contains(&26), "{made:?}");
+    // Far rows are laid out all the same.
+    assert_eq!(
+        c.measure(10 + 4 * 30).unwrap().frame.origin.y,
+        Points(1500.0)
+    );
+    // Scrolled to 1000: rows from 900 to 1200 come.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(1000.0)), 0);
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    let rows: Vec<u32> = made
+        .iter()
+        .filter(|&&id| (id - 10) % 4 == 0)
+        .map(|&id| (id - 10) / 4)
+        .collect();
+    assert_eq!(rows, (18..24).collect::<Vec<_>>());
+    // Each in its place, with its frame.
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Insert {
+            parent: 4,
+            child: 82,
+            before: None
+        }
+    )));
+    assert_eq!(frame_of(&batch, 82), Some(rect(0.0, 900.0, 320.0, 50.0)));
+    // The rows more than three viewports above (before 700) went: out of
+    // their parent, each view destroyed, children first.
+    let deleted: Vec<NodeId> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Delete { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deleted[..2], [12, 10]);
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id: 10 }))
+    );
+    // Rows between stay.
+    assert!(!deleted.contains(&(10 + 4 * 15)));
+    // Back at the top: made again where they were, with their style.
+    c.set_scroll_offset(2, point(Points::ZERO, Points::ZERO), 0);
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    assert!(made.contains(&10) && made.contains(&12), "{made:?}");
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 0.0, 320.0, 50.0)));
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Insert {
+            parent: 4,
+            child: 10,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_far_row_that_keeps_state_in_its_view_is_not_given_up() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // A row holding a field, then plain rows down to 2000.
+    ops.extend(child_view(4, 2, 50.0, &[]));
+    ops.extend([
+        Op::Create {
+            id: 6,
+            tag: Tag::Input,
+        },
+        Op::Insert {
+            parent: 4,
+            child: 6,
+            before: None,
+        },
+    ]);
+    ops.extend(child_view(8, 2, 50.0, &[]));
+    ops.extend(child_view(10, 2, 2000.0, &[]));
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    c.set_scroll_offset(2, point(Points::ZERO, Points(1500.0)), 0);
+    let batch = c.commit().unwrap();
+    let deleted: Vec<NodeId> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Delete { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    // The plain row goes; the field's row stays with what it holds.
+    assert_eq!(deleted, [8]);
+}
+
+#[test]
+fn culled_text_is_estimated_and_measured_once_it_comes_near() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for i in 0..60u32 {
+        let id = 10 + 2 * i;
+        ops.extend([
+            Op::Create { id, tag: Tag::Text },
+            Op::CreateText {
+                id: id + 1,
+                text: format!("Row {i}"),
+            },
+            Op::Insert {
+                parent: id,
+                child: id + 1,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    // Only the texts near the viewport (0..100, a viewport around it) are
+    // measured by the engine; the rest are estimated.
+    let made = created_in(&batch).len() - 1;
+    assert!(made < 30, "{made} texts made");
+    let measured = c.text_engine.measures.get() as usize;
+    assert!(measured < 40, "{measured} of 60 measured");
+    // What is made is laid out at its measured size, 16 a line.
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 0.0, 320.0, 16.0)));
+    assert_eq!(frame_of(&batch, 12), Some(rect(0.0, 16.0, 320.0, 16.0)));
+    // Scrolled to the end: the texts there are measured as they come.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(900.0)), 0);
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&(10 + 2 * 59)));
+    assert_eq!(
+        frame_of(&batch, 10 + 2 * 59).map(|f| f.size.height),
+        Some(Points(16.0))
+    );
+}
+
+#[test]
+fn a_culled_view_reports_its_layout_and_is_made_for_a_command() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    ops.extend(child_view(4, 2, 1000.0, &[]));
+    ops.extend(child_view(6, 2, 50.0, &[]));
+    ops.push(Op::Listen {
+        id: 6,
+        event: EventKind::Layout,
+        enabled: true,
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(!created_in(&batch).contains(&6));
+    assert_eq!(
+        js_events(&mut c),
+        vec![(
+            6,
+            EventKind::Layout,
+            EventPayload::Layout(rect(0.0, 1000.0, 320.0, 50.0))
+        )]
+    );
+    c.apply(Op::Command {
+        id: 6,
+        command: Command::Focus,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&6));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, 1000.0, 320.0, 50.0)));
+}
+
 #[test]
 fn sticky_views_stick_in_the_viewport_of_the_scroll_view_around_them() {
     let mut c = core();
@@ -25247,24 +25501,31 @@ fn sticky_views_stick_in_the_viewport_of_the_scroll_view_around_them() {
     // They draw above their later siblings: made in one go, the views go
     // in in that order.
     let order = |parent: NodeId| -> Vec<NodeId> {
-        batch
-            .items
-            .iter()
-            .filter_map(|i| match i {
-                MountItem::Insert {
-                    parent: p,
-                    child,
-                    before: None,
-                } if *p == parent => Some(*child),
-                _ => None,
-            })
-            .collect()
+        let mut order: Vec<NodeId> = Vec::new();
+        for item in &batch.items {
+            if let MountItem::Insert {
+                parent: p,
+                child,
+                before,
+            } = item
+                && *p == parent
+            {
+                order.retain(|c| c != child);
+                let at = before
+                    .and_then(|b| order.iter().position(|&c| c == b))
+                    .unwrap_or(order.len());
+                order.insert(at, *child);
+            }
+        }
+        order
     };
     assert_eq!(order(2), [3, 6, 5, 4]);
     assert_eq!(order(6), [8, 7]);
     // Its insets say where it sticks: it is laid out in the flow.
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 100.0, 320.0, 40.0)));
-    // A view added later goes below the bar.
+    // A view added later goes below the bar (scrolled to the end, where
+    // it is mounted at once).
+    c.set_scroll_offset(2, point(Points::ZERO, Points(2240.0)), 0);
     apply(&mut c, child_view(9, 2, 10.0, &[]));
     let batch = c.commit().unwrap();
     assert!(batch.items.iter().any(|i| matches!(
@@ -32238,6 +32499,9 @@ fn a_scroll_view_keeps_what_it_shows_through_a_resize() {
         },
         size_pt(200.0, 100.0),
     );
+    // Every text measured, near the viewport or not, as a resize finds
+    // them (culled content is estimated: `cull.rs`).
+    c.set_content_culling(false);
     let text = |id, content, value: &str| {
         vec![
             Op::Create { id, tag: Tag::Text },
@@ -32444,5 +32708,106 @@ fn overlays_with_a_cover_follow_its_size_changing() {
     assert_eq!(
         resize(&mut c, 1904.0, 464.0),
         Some(rect(8.0, 608.0, 1904.0, 464.0))
+    );
+}
+
+/// A backdrop reader (2, holding 6) between a view under it (5) and one
+/// over it (7, holding 8), all children of the root.
+fn backdrop_between() -> Core<FakeEngine> {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_backdrop(uv); }";
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(100.0)),
+                ("height", StyleValue::Number(50.0)),
+            ],
+        )
+    };
+    let mut ops = Vec::new();
+    for (id, tag) in [
+        (5, Tag::View),
+        (2, Tag::ShaderEffect),
+        (6, Tag::View),
+        (7, Tag::View),
+        (8, Tag::View),
+    ] {
+        ops.push(Op::Create { id, tag });
+        ops.push(size(id));
+    }
+    ops.push(Op::SetProp {
+        id: 2,
+        prop: Prop::ShaderSource(Some(source.into())),
+    });
+    for (parent, child) in [(ROOT_ID, 5), (2, 6), (ROOT_ID, 2), (7, 8), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    c
+}
+
+fn pictures_backdrop_again(c: &mut Core<FakeEngine>, id: NodeId, color: &'static str) -> bool {
+    apply(
+        c,
+        vec![style_op(id, &[("backgroundColor", StyleValue::Str(color))])],
+    );
+    let batch = c.commit().unwrap();
+    batch
+        .items
+        .iter()
+        .any(|i| matches!(i, MountItem::ShaderInput { id: 2 }))
+}
+
+#[test]
+fn a_backdrop_is_pictured_again_only_when_what_is_under_it_changes() {
+    let mut c = backdrop_between();
+    // Over it, or in what draws over it: not in its backdrop.
+    assert!(!pictures_backdrop_again(&mut c, 8, "red"));
+    assert!(!pictures_backdrop_again(&mut c, 7, "red"));
+    // Under it, and its ancestor's own box.
+    assert!(pictures_backdrop_again(&mut c, 5, "red"));
+    assert!(pictures_backdrop_again(&mut c, ROOT_ID, "red"));
+}
+
+#[test]
+fn a_backdrop_follows_the_order_views_draw_in() {
+    let mut c = backdrop_between();
+    // Later in order but drawn under it by its `zIndex`.
+    apply(
+        &mut c,
+        vec![style_op(7, &[("zIndex", StyleValue::Number(-1.0))])],
+    );
+    c.commit().unwrap();
+    assert!(pictures_backdrop_again(&mut c, 8, "blue"));
+    // A view leaving what draws over it does not change what is under it.
+    apply(
+        &mut c,
+        vec![style_op(7, &[("zIndex", StyleValue::Number(0.0))])],
+    );
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 7,
+                child: 8,
+            },
+            Op::Release { id: 8 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
     );
 }

@@ -55,6 +55,7 @@ const HOST_PROPS: &[&str] = &[
     "focusWithinStyle",
     "disabledStyle",
     "testID",
+    "tooltip",
     "onLayout",
 ];
 

@@ -60,10 +60,31 @@ scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.jso
 mise use -g github:longbridge/nsh
 ```
 
-The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-x86_64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/nsh/releases/latest/download/<archive>` always fetches the latest. The embedding SDKs are also released alone, for native apps that need no CLI: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
+The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-x86_64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/nsh/releases/latest/download/<archive>` always fetches the latest. Each holds the CLI and the runtime of its own platform; the runtimes of the other platforms are [components](#components), added when they are first needed. The embedding SDKs are released alone, for native apps that embed NSH: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
 
 > [!NOTE]
 > The binaries are not signed yet. macOS quarantines files downloaded by a browser; the install script, Homebrew and mise download with `curl` and are not affected, otherwise run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). There is no Intel Mac or arm64 Linux / Windows build: build those from a checkout.
+
+## Components
+
+The runtimes for platforms other than the one you develop on are components of the release, as `rustup component add` installs a toolchain's parts. The first command that needs one, such as `nsh run --target android` or `nsh package --target web`, downloads it from the release of your `nsh`, checks its SHA-256 and installs it next to the CLI. `nsh component` manages them ahead of time:
+
+```sh
+nsh component list            # the components for this machine, installed or not
+nsh component add android web # install ahead of time, e.g. before going offline
+nsh component remove gpui     # free the space again
+```
+
+| Component | Holds | Published for |
+|---|---|---|
+| `android` | The Android runtime (`--target android`) | Every platform |
+| `android-symbols` | The Android runtime's symbols, for crash reports and `ndk-stack` | Every platform |
+| `ios` | The iOS and Mac Catalyst runtimes (`--target ios`, `catalyst`) | macOS |
+| `web` | The web runtimes (`--target web`) | Every platform |
+| `gpui` | The [GPUI](./gpui.md) development host (`--target gpui`) | Every platform, built for it |
+| `tui` | The terminal development host (`--target tui`) | Every platform, built for it |
+
+A component always comes from the same build as the CLI. `nsh update` adds the installed components again from the release it updates to. A nightly build's components are replaced every night, so a nightly `nsh` from an earlier night asks you to run `nsh update` first.
 
 ## For apps written in Rust
 
@@ -103,7 +124,7 @@ dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS 
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
 ```
 
-Put `dist/nsh/bin` on your `PATH` (or call `dist/nsh/bin/nsh` directly) and keep the directory together: `nsh` finds the runtimes next to itself, in `bin/../runtime` (through a symlink to it, as the installers make, too).
+Put `dist/nsh/bin` on your `PATH` (or call `dist/nsh/bin/nsh` directly) and keep the directory together: `nsh` finds the runtimes next to itself, in `bin/../runtime` (through a symlink to it, as the installers make, too). The release archives are made from it: each platform's archive keeps `bin` and its own runtime, the other runtimes become [components](#components) and `embed` the SDK archives.
 
 ```sh
 export PATH="$PWD/dist/nsh/bin:$PATH"
@@ -133,7 +154,7 @@ nsh update nightly            # to the nightly build of main
 nsh update stable             # back to the latest release
 ```
 
-It downloads the same archive as the install scripts, checks its SHA-256 and replaces the whole distribution directory. Homebrew, Scoop and mise update the `nsh` they installed themselves (`brew upgrade nsh`, `scoop update nsh`, `mise upgrade`).
+It downloads the same archive as the install scripts, checks its SHA-256, replaces the whole distribution directory and adds the components that were installed again. Homebrew, Scoop and mise update the `nsh` they installed themselves (`brew upgrade nsh`, `scoop update nsh`, `mise upgrade`).
 
 ## Building from source
 

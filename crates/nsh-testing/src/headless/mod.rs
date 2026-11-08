@@ -173,6 +173,8 @@ where
         wanted: wanted.clone(),
     };
     let engine = Engine::start_with(config, text_engine, sink, |control| {
+        // Steps reach every view of a page, below its fold too.
+        control.set_content_culling(false);
         if !displays.is_empty() {
             control.set_displays(displays);
         }
