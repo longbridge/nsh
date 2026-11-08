@@ -4,6 +4,31 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Markdown TeX preprocessing (`text_view/markdown/latex.rs`, 2026-11-08, Linux x86_64,
+Ryzen 9 7950X, Rust 1.99.1, release, against `3b4f2abf`): a paragraph of
+``"`a` x ".repeat(k) + "\\(x^2\\)"``, math enabled, streaming off. Eleven alternating
+before / after rounds on one CPU, warmed and batched; medians, input construction excluded:
+
+| Code spans | `latex::inline`, before → after | Complete Markdown parse, before → after |
+|---|---|---|
+| 1,000 | 0.853 → 0.00891 ms | 1.548 → 0.795 ms |
+| 5,000 | 24.366 → 0.0450 ms | 27.794 → 4.444 ms |
+| 10,000 | 96.966 → 0.0914 ms | 100.688 → 8.911 ms |
+
+The ordered code spans are consumed with a cursor instead of searched from the start at
+each byte. With streaming repair enabled, the complete 10,000-span parse takes
+544.17 → 453.83 ms; other scans still contribute. A 35,200-byte control of 200 short
+paragraphs takes 74.45 → 79.69 µs in TeX rewriting (about 5 µs more), while its complete
+parse stays around 5.2 ms. Short Markdown and code spans without TeX delimiters have
+unchanged complete-parse timings. These parser measurements exclude layout and drawing.
+
+Headless `nsh test <entry> --trace` (debug, against `bba76ef7`, three fresh processes per
+version, the same paragraphs in a mounted `TextView`): first-commit medians for 1,000 /
+10,000 spans are 51.121 / 2731.507 → 43.521 / 1905.226 ms. Both versions send 7 ops /
+16 mount items, with 3,007 / 30,007 nodes respectively. The counter control keeps
+56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
+commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
+
 Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
 sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
 behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
