@@ -2442,6 +2442,37 @@ fn scrolled(batch: &MountBatch, start: f32) -> f32 {
 }
 
 #[test]
+fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListAlignment(crate::ListAlignment::Bottom),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::FollowEnd(Some(px(80.0))),
+            },
+        ],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    for _ in 0..3 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        c.commit();
+    }
+    for offset in [4610.0, 4630.0, 4660.0, 4630.0, 4610.0, 4600.0] {
+        c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+        if let Some(batch) = c.commit() {
+            assert_eq!(scrolled(&batch, offset), offset, "native offset {offset}");
+        }
+    }
+}
+
+#[test]
 fn scroll_commands_follow_their_target_as_rows_are_measured() {
     let mut c = core();
     estimated_list(&mut c);
