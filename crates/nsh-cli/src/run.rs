@@ -182,6 +182,11 @@ pub(crate) fn run(
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;
+    if release {
+        // The app's crates and NSH's in the host, optimized as in a
+        // package: a debug host measures debug code.
+        crate::rust_app::set_release_hosts();
+    }
     let work = dunce::canonicalize(entry)?
         .parent()
         .context("entry has no directory")?
