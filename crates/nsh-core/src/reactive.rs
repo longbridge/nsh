@@ -244,6 +244,10 @@ pub struct Graph<H: Host> {
     effects: Option<Vec<u32>>,
     exec: u64,
     runs: u64,
+    /// The generation a slot added at the end starts at: above every
+    /// generation of the slots [`Graph::compact`] dropped, so a handle of a
+    /// dropped node never names the node made in its place.
+    floor: u32,
     /// The host's own state.
     pub data: H::Data,
 }
@@ -260,6 +264,7 @@ impl<H: Host> Graph<H> {
             effects: None,
             exec: 0,
             runs: 0,
+            floor: 1,
             data,
         }
     }
@@ -272,10 +277,34 @@ impl<H: Host> Graph<H> {
                 id
             }
             None => {
-                self.nodes.push(Node::new(kind, 1));
+                self.nodes.push(Node::new(kind, self.floor));
                 (self.nodes.len() - 1) as u32
             }
         }
+    }
+
+    /// Gives back the slots a large tree used once it is gone: drops the
+    /// free slots at the end of the arena, then lets the arena's spare
+    /// room go. Freed slots are reused lowest first from then on, so those
+    /// near the end empty out and go at the next compaction. Call when no
+    /// round runs (the engine does when it is idle); a no-op otherwise.
+    pub fn compact(&mut self) {
+        if self.updates.is_some() || self.effects.is_some() || self.free.is_empty() {
+            return;
+        }
+        while let Some(n) = self.nodes.last() {
+            if n.kind != Kind::Free {
+                break;
+            }
+            self.floor = self.floor.max(n.generation.wrapping_add(1).max(1));
+            self.nodes.pop();
+        }
+        let len = self.nodes.len() as u32;
+        self.free.retain(|&id| id < len);
+        // `alloc` pops from the end: the lowest ids go first.
+        self.free.sort_unstable_by(|a, b| b.cmp(a));
+        shrink_spare(&mut self.nodes);
+        shrink_spare(&mut self.free);
     }
 
     /// A new signal holding `value` (owned), compared by `equals`, named by
@@ -677,6 +706,15 @@ impl<H: Host> Graph<H> {
             n.context = None;
             n.kind = Kind::Free;
         }
+    }
+}
+
+/// Lets `v`'s room go when it is more than twice what it holds (and more
+/// than a small arena's), keeping a quarter more for growth.
+fn shrink_spare<T>(v: &mut Vec<T>) {
+    const SMALL: usize = 1024;
+    if v.capacity() > SMALL && v.capacity() > 2 * v.len() {
+        v.shrink_to((v.len() + v.len() / 4).max(SMALL));
     }
 }
 

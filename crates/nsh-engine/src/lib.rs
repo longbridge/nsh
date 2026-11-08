@@ -1238,6 +1238,9 @@ enum Message {
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// The embedding app's design tokens.
     Tokens(Option<Box<Tokens>>),
+    /// A font file the embedding app registers (TrueType, OpenType, WOFF or
+    /// WOFF2), before the first frame and whenever it registers another.
+    HostFont(Vec<u8>),
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
@@ -1460,6 +1463,14 @@ impl EngineControl {
     /// [`Engine::start_with`]'s `setup`, they are in the first frame.
     pub fn set_tokens(&self, tokens: Option<Tokens>) {
         let _ = self.tx.send(Message::Tokens(tokens.map(Box::new)));
+    }
+
+    /// Registers a font file the embedding app ships (TrueType, OpenType,
+    /// WOFF or WOFF2) so every app this engine runs can name its family.
+    /// Sent from [`Engine::start_with`]'s `setup`, it is registered before
+    /// the first frame; sent later, text measured already is measured again.
+    pub fn register_font(&self, data: Vec<u8>) {
+        let _ = self.tx.send(Message::HostFont(data));
     }
 }
 
@@ -1942,6 +1953,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         while let Ok(message) = rx.try_recv() {
             match message {
                 Message::Tokens(tokens) => core.set_host_tokens(tokens.map(|t| *t)),
+                Message::HostFont(data) => {
+                    if let Err(err) = core.register_font(&data) {
+                        log::error!("font failed: {err}");
+                    }
+                }
                 Message::Displays(list) => {
                     core.set_displays(list.clone());
                     displays = list;
@@ -3147,6 +3163,7 @@ impl<M: TextEngine> State<M> {
                 }
             }
             drop(ops);
+            release_spare_ops(&mut self.ops);
             if let Some(batch) = self.core.commit() {
                 commits += 1;
                 match &mut merged {
@@ -3516,6 +3533,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.set_theme_tokens(state.core.theme_tokens());
             }
         }
+        Message::HostFont(data) => {
+            if let Err(err) = state.core.register_font(&data) {
+                log::error!("font failed: {err}");
+            }
+        }
         // A Rust app has no `nsh/host`: what the host sends it goes.
         Message::HostEvent(name, data) => {
             if let Some(script) = script {
@@ -3620,8 +3642,33 @@ fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
     })
 }
 
+/// The most ops an emptied op buffer keeps room for.
+const RETAINED_OPS: usize = 16 * 1024;
+
+/// Gives back what a large commit (a screen made at once, a long list
+/// bound) grew the emptied op buffer to: it and the runtime's take turns
+/// ([`Script::take_ops`] swaps them), and each would otherwise hold the
+/// largest commit's capacity for the life of the app.
+fn release_spare_ops(ops: &mut Vec<Op>) {
+    debug_assert!(ops.is_empty());
+    if ops.capacity() > RETAINED_OPS {
+        ops.shrink_to(RETAINED_OPS);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_emptied_op_buffer_gives_back_what_a_large_commit_grew() {
+        let mut ops: Vec<super::Op> = Vec::with_capacity(super::RETAINED_OPS * 8);
+        super::release_spare_ops(&mut ops);
+        assert!(ops.capacity() <= super::RETAINED_OPS);
+        // A buffer of ordinary commits keeps its room.
+        let mut ops: Vec<super::Op> = Vec::with_capacity(1024);
+        super::release_spare_ops(&mut ops);
+        assert_eq!(ops.capacity(), 1024);
+    }
+
     #[test]
     fn moves_settle_and_changes_of_mode_do_not() {
         use nsh_core::{

@@ -565,6 +565,10 @@ for a Command key the window's own key equivalents, and for any key the main men
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
 key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
 the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+Presses go to the app's views as in the key window: AppKit gives a left press in a window that is not key only to a
+view that accepts the first mouse, and a hidden title bar's toolbar view, over the content's top, does not, so the
+host's window (`NshWindow`) hands a press the title bar would only take to make the window key to the content's view
+under it, with its drags and release.
 An item is not checked for being enabled (AppKit validates against the key window's responders:
 with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
 checks of this are `crates/nsh-platform-macos/tests/host`
@@ -944,7 +948,10 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). GPUI builds run in
+`crates/gpui`, their own workspace, and the CLI resolves their output through `cargo metadata`'s
+`target_directory`, honoring Cargo's configuration and `CARGO_TARGET_DIR` (or that Cargo implementation's own
+output policy), rather than assuming the main workspace's `target`. On macOS it runs the hosts
 built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug

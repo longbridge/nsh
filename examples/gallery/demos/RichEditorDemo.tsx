@@ -11,7 +11,7 @@ import {
   redo,
   undo,
 } from "nsh/base";
-import { colors, mono, Segmented } from "../ui";
+import { colors, mono, richEditorClasses, Segmented } from "../ui";
 import { IconButton, type LucideIconName, TOOL_GAP, ToggleGroup, type ToggleItem, ToolbarSeparator } from "./RichEditorUi";
 import { createLinkMenu, LinkBubble, type LinkMenu } from "./RichEditorLink";
 
@@ -215,38 +215,6 @@ function Toolbar(props: { editor: RichEditorSession; revision: number; link: Lin
   );
 }
 
-// --- The document ---------------------------------------------------------
-
-/** The document's look, by part, node type (and heading level) and mark. */
-const documentClasses = {
-  // The room around the text is the content's padding, inside the scroll
-  // view: its scroll bar runs along the editor's edge.
-  content: "gap-3 px-6 py-5",
-  placeholder: "text-muted-foreground",
-  listMarker: "text-muted-foreground",
-  taskCheckbox: "size-4 mr-2 mt-1 rounded border border-border",
-  nodes: {
-    paragraph: "leading-relaxed",
-    "heading[level=1]": "text-3xl font-bold tracking-tight",
-    "heading[level=2]": "text-2xl font-semibold tracking-tight",
-    "heading[level=3]": "text-xl font-semibold",
-    blockquote: "border-l-4 border-border pl-4 text-muted-foreground italic",
-    codeBlock: "font-mono text-sm bg-muted rounded-lg px-4 py-3",
-    bulletList: "gap-1.5 pl-6",
-    orderedList: "gap-1.5 pl-6",
-    taskList: "gap-1.5",
-    horizontalRule: "h-px bg-border my-3",
-    tableHeader: "font-semibold",
-  },
-  marks: {
-    bold: "font-bold",
-    italic: "italic",
-    code: "font-mono text-sm bg-muted rounded px-1",
-    link: "text-brand underline",
-    strike: "line-through",
-  },
-};
-
 export function RichEditorDemo() {
   // Mod-K opens the link field, as in most editors.
   const keys = new RichEditorPlugin("linkKey");
@@ -299,7 +267,7 @@ export function RichEditorDemo() {
           accessibilityLabel="Document"
           placeholder="Write something…"
           style={{ flex: 1 }}
-          classes={documentClasses}
+          classes={richEditorClasses}
           bubbleMenu={link.mode() === "closed" ? undefined : <LinkBubble menu={link} />}
           bubbleMenuPlacement="bottom"
         />
