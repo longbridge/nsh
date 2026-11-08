@@ -120,6 +120,21 @@ pub struct ProcessSample {
     pub gpu: Option<f32>,
 }
 
+/// What the app holds, as the engine read it after its last idle
+/// collection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MemorySample {
+    /// Bytes the JS heap holds (0 without a JS runtime).
+    pub js_heap: u64,
+    /// Live JS objects.
+    pub js_objects: u64,
+    /// Nodes alive in the core, the root included.
+    pub nodes: u64,
+    /// The node ids the core's id table has room for: far above `nodes`
+    /// when the ids of nodes that are gone still take room.
+    pub node_ids: u64,
+}
+
 /// What a [`PerfMonitor`] read, as of one moment.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PerfSnapshot {
@@ -161,6 +176,9 @@ pub struct PerfSnapshot {
     pub frames: Vec<Duration>,
     /// The process' resource use, as last given to [`PerfMonitor::set_process`].
     pub process: ProcessSample,
+    /// What the app holds, as last given to [`PerfMonitor::set_memory`]:
+    /// none before the engine's first idle collection.
+    pub memory: Option<MemorySample>,
 }
 
 /// Collects a surface's frame and commit timings. Shared by its engine
@@ -190,6 +208,7 @@ struct Inner {
     /// Engine wake-ups: when they ended, and how long they were busy.
     busy: VecDeque<(Instant, Duration)>,
     process: ProcessSample,
+    memory: Option<MemorySample>,
 }
 
 impl Default for PerfMonitor {
@@ -208,6 +227,7 @@ impl Default for PerfMonitor {
                 latencies: VecDeque::with_capacity(CAPACITY),
                 busy: VecDeque::new(),
                 process: ProcessSample::default(),
+                memory: None,
             }),
         }
     }
@@ -311,6 +331,11 @@ impl PerfMonitor {
         self.lock().process = sample;
     }
 
+    /// Engine thread: what the app holds, shown with the next snapshots.
+    pub fn set_memory(&self, sample: MemorySample) {
+        self.lock().memory = Some(sample);
+    }
+
     /// The readings as of now.
     pub fn snapshot(&self) -> PerfSnapshot {
         let now = Instant::now();
@@ -392,6 +417,7 @@ impl PerfMonitor {
             engine_busy: busy.as_secs_f32() / RATE_WINDOW.as_secs_f32() * 100.0,
             frames: inner.frames.iter().map(|&(_, cost)| cost).collect(),
             process: inner.process,
+            memory: inner.memory,
         }
     }
 }

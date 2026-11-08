@@ -6,7 +6,8 @@ pub(crate) fn requested() -> bool {
     REQUESTED.load(Ordering::Relaxed)
 }
 
-pub(crate) fn request_exit() {
+/// Asks the running host to leave its run loop and restore the terminal, as SIGTERM does.
+pub fn request_exit() {
     REQUESTED.store(true, Ordering::Relaxed);
 }
 

@@ -15,6 +15,7 @@ export { createKeymap } from "./keymap.js";
 export { createEnvironment } from "./environment.js";
 export { createI18n } from "./i18n.js";
 export { installTesting } from "./testing.js";
+export { installFetch } from "./fetch.js";
 export { createHot } from "./hot.js";
 
 
