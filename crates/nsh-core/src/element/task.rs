@@ -485,6 +485,12 @@ impl Executor {
         *self.runtime.borrow_mut() = Some(runtime);
     }
 
+    /// The runtime tasks are polled in the context of, if one is set.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn runtime(&self) -> Option<Handle> {
+        self.runtime.borrow().clone()
+    }
+
     pub(crate) fn set_notify(&self, notify: Notify) {
         *self.ready.notify.lock().expect("notify lock") = Some(notify);
     }

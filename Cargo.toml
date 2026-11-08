@@ -137,8 +137,9 @@ imara-diff = "0.2"
 markdown = "1.0.0"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3.0"
-# Syntax highlighting of TextView code blocks (`nsh-base` feature `highlight`): pure-Rust
-# regexes, so it builds for WebAssembly; two-face carries the syntaxes (bat's set), which
+# Syntax highlighting of TextView code blocks and the Editor (`nsh-base` feature
+# `highlight`): pure-Rust regexes, so it builds for WebAssembly (the native runtimes add
+# Oniguruma's, `nsh-base`'s `regex-onig`); two-face carries the syntaxes (bat's set), which
 # the web runtime reads from the page's copy of two-face's dump instead (`dump-load`).
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
@@ -525,6 +526,16 @@ opt-level = 3
 [profile.dev.package.syntect]
 opt-level = 3
 [profile.dev.package.fancy-regex]
+opt-level = 3
+# The native runtimes' regexes (syntect's `regex-onig`): C, built with the
+# package's opt-level.
+[profile.dev.package.onig_sys]
+opt-level = 3
+[profile.dev.package.onig]
+opt-level = 3
+# Deserializes the syntaxes (bincode's generic code, built in two-face):
+# unoptimized, the editor's first colors wait 25 ms more.
+[profile.dev.package.two-face]
 opt-level = 3
 # What fancy-regex runs its regexes with (also `regex`'s).
 [profile.dev.package.regex-automata]
