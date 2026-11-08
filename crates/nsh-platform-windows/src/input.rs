@@ -744,25 +744,58 @@ pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPar
     None
 }
 
+/// Whether a view from `view` up to the selectable view around it (that
+/// one included) listens to `onContextMenu`: it hears a context menu asked
+/// for on selectable text there, in place of the text's edit menu, as on
+/// macOS, where selectable text has no menu of its own.
+fn selectable_menu_is_the_apps(view: &NshView) -> bool {
+    let Some(area) = crate::selectable_view::area_of(view) else {
+        return false;
+    };
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.state().events.contains(EventKind::ContextMenu) {
+            return true;
+        }
+        if v == area {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
+/// The selectable view around `view` when the app's `onContextMenu` takes
+/// its menu ([`selectable_menu_is_the_apps`]): the area the app's menu's
+/// edit roles act on.
+fn menu_area(view: &NshView) -> Option<NshView> {
+    crate::selectable_view::area_of(view).filter(|_| selectable_menu_is_the_apps(view))
+}
+
 /// A context menu asked for on `view` without a pointer (UI Automation's
 /// `ShowContextMenu`): the view, or the nearest around it that listens to
 /// `onContextMenu`, hears it with no pointer at its bottom-start corner
 /// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
-/// selectable text is nearer. True when a view heard it.
+/// selectable text is nearer (selectable text whose selectable view
+/// listens excepted: [`selectable_menu_is_the_apps`]). True when a view
+/// heard it.
 pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
     let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
     let mut at = Some(view.clone());
     while let Some(v) = at {
-        let (id, listens, stop, size) = {
+        let (id, listens, field, selectable, size) = {
             let s = v.state();
             (
                 s.id,
                 s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input || crate::text::selectable(&s) || s.props.selectable_view,
+                s.kind == ViewKind::Input,
+                crate::text::selectable(&s) || s.props.selectable_view,
                 s.frame.size,
             )
         };
+        let stop = field || (selectable && !selectable_menu_is_the_apps(&v));
         if listens {
+            crate::selectable_view::set_menu_area(menu_area(view));
             let position = nsh_core::input::context_menu_anchor(size, rtl);
             let (page_x, page_y) = v
                 .to_root()
@@ -788,11 +821,14 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
-/// menu.
+/// menu, but where its selectable view, or a view between them, listens
+/// ([`selectable_menu_is_the_apps`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    let menu_area = menu_area(&hit.view);
+    crate::selectable_view::set_menu_area(None);
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let (id, listens, input, selectable, area) = {
@@ -806,6 +842,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             )
         };
         if listens {
+            crate::selectable_view::set_menu_area(menu_area);
             let (location_x, location_y) = local(&v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
@@ -820,7 +857,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable || area {
+        if (selectable || area) && !selectable_menu_is_the_apps(&v) {
             // Text in a selectable view has the area's menu.
             match crate::selectable_view::area_of(&v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
@@ -2450,6 +2487,34 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// Selectable text shows its edit menu, unless its selectable view, or
+    /// a view between them, listens to `onContextMenu`, which hears the
+    /// menu asked for instead; a listener around the selectable view does
+    /// not take it.
+    #[test]
+    fn a_selectable_views_listener_takes_its_texts_menu() {
+        let root = root();
+        let row = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        let area = view(&row, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        let block = view(&area, 6, ViewKind::View, rect(0.0, 0.0, 200.0, 40.0));
+        let text = view(&block, 8, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        assert!(!selectable_menu_is_the_apps(&text));
+        row.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(!selectable_menu_is_the_apps(&text));
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(selectable_menu_is_the_apps(&text));
+        // The app's menu is for that area: its edit roles act on it.
+        assert!(menu_area(&text).is_some_and(|a| a == area));
+        area.state_mut().events.set(EventKind::ContextMenu, false);
+        block.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(selectable_menu_is_the_apps(&text));
+        // Selectable text in no selectable view keeps its own menu.
+        let alone = view(&row, 10, ViewKind::Text, rect(0.0, 50.0, 200.0, 20.0));
+        assert!(!selectable_menu_is_the_apps(&alone));
+        assert!(menu_area(&alone).is_none());
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {

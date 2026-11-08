@@ -310,6 +310,37 @@ thread_local! {
     static CURRENT: RefCell<Option<Current>> = const { RefCell::new(None) };
     /// Texts or the tree changed since the last batch ended.
     static DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The area whose (or whose texts') `onContextMenu` heard the last
+    /// context menu asked for: the edit roles of the menu the app shows
+    /// for it act on it, not on whatever has the keyboard.
+    static MENU_AREA: RefCell<Option<NshView>> = const { RefCell::new(None) };
+}
+
+/// The area the app's next menu is for ([`menu_role`]), or none.
+pub(crate) fn set_menu_area(area: Option<NshView>) {
+    MENU_AREA.set(area);
+}
+
+/// A Copy or Select All of the app's menu for an area: acts on that area,
+/// as its own menu does; true when handled.
+pub(crate) fn menu_role(surface: &Surface, role: nsh_core::desktop::MenuRole) -> bool {
+    use nsh_core::desktop::MenuRole;
+    let Some(area) = MENU_AREA.with_borrow(Clone::clone).filter(NshView::attached) else {
+        return false;
+    };
+    match role {
+        MenuRole::Copy => {
+            if let Some(text) = selected_text(surface.key(), Some(&area)) {
+                crate::system::set_clipboard_text(&text);
+            }
+            true
+        }
+        MenuRole::SelectAll => {
+            select_all(surface.key(), &area);
+            true
+        }
+        _ => false,
+    }
 }
 
 /// The current area of `surface`, taken out (put it back with

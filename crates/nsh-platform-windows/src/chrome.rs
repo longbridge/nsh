@@ -1381,6 +1381,8 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
         }
         Some(MenuRole::Zoom) => toggle_maximize(hwnd),
         Some(MenuRole::ToggleFullScreen) => crate::window::toggle_full_screen(hwnd),
+        // The area the app's menu is for, as its own menu would.
+        Some(role) if crate::selectable_view::menu_role(surface, role) => {}
         Some(role) if role.edits_text() => {
             // The focused field's own keys.
             let (vk, shift) = match role {
@@ -1484,6 +1486,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
             Some(action) => action(surface),
             None => choose(surface, entry.id, entry.role),
         }
+    }
+    // An app's menu (not one of NSH's own, with actions) took the area it
+    // was asked for on.
+    if actions.is_empty() {
+        crate::selectable_view::set_menu_area(None);
     }
     // The app's `Menu.popup` promise settles.
     if awaited {
