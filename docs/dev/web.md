@@ -829,6 +829,10 @@ between them); the core bounds their travel by the list's end. A cell's animated
 (`op_a`): it is kept on the cell (`_stickyOffset`) and added to the track's inset. Views clip with `overflow: clip`, which, unlike
 `hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
 
+Pixel-mode wheel events follow the device's deltas directly, including its inertia. Line- and page-mode wheels
+and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
+position, so an unfinished target cannot cause a catch-up jump.
+
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
 as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
 pointer, touch or key takes it over. The glides of the wheel and the keys are nsh's (`scrollSmoothly`, on animation

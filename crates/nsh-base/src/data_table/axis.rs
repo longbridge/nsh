@@ -11,8 +11,9 @@
 //!
 //! Scaled, a finger would move the content several times as far as itself
 //! (a million rows of 28 points, nine times). Where the scroll bar is not
-//! dragged (touch), the offset is followed from an [`Anchor`] instead: the
-//! content moves as far as the scroll ([`Axis::content_offset_from`]), and
+//! dragged (touch, or web desktop wheels and keys), the offset is followed
+//! from an [`Anchor`] instead: the content moves as far as the scroll
+//! ([`Axis::content_offset_from`]), and
 //! once the scroll comes to rest the scroll view is moved, unseen, to where
 //! its bar stands for the content ([`Axis::anchor_at`]).
 
@@ -85,6 +86,25 @@ impl Axis {
             a_content + follow(scroll - a_scroll, smax - a_scroll, cmax - a_content)
         } else {
             a_content - follow(a_scroll - scroll, a_scroll, a_content)
+        };
+        at.clamp(0.0, cmax)
+    }
+
+    /// A scrollbar drag spans the full content, linearly on each side of
+    /// where it started. Keeping that starting point avoids a jump when a
+    /// wheel's one-to-one offset has not yet been recentered at rest.
+    pub(crate) fn content_offset_drag(&self, scroll: f64, anchor: Anchor) -> f64 {
+        if !self.scaled() {
+            return self.content_offset(scroll);
+        }
+        let smax = (self.extent() - self.viewport).max(0.0);
+        let cmax = (self.total - self.viewport).max(0.0);
+        let at = if scroll >= anchor.scroll {
+            anchor.content
+                + (scroll - anchor.scroll) * (cmax - anchor.content)
+                    / (smax - anchor.scroll).max(f64::MIN_POSITIVE)
+        } else {
+            anchor.content * scroll / anchor.scroll.max(f64::MIN_POSITIVE)
         };
         at.clamp(0.0, cmax)
     }
@@ -259,6 +279,43 @@ mod tests {
         let small = Axis::new(10_000.0, 500.0);
         let a = small.anchor_at(1234.0, 3.0);
         assert_eq!(small.content_offset_from(2000.0, a), 2000.0);
+    }
+
+    #[test]
+    fn a_web_bar_drag_starts_in_place_and_reaches_both_ends() {
+        let axis = Axis::new(68_000_000.0, 672.0);
+        // The wheel has moved locally and is still in flight: its native
+        // offset is not yet where the proportional scrollbar stands.
+        let anchor = Anchor {
+            scroll: 1500.0,
+            content: 34_000_250.0,
+        };
+        assert_eq!(
+            axis.content_offset_drag(anchor.scroll, anchor),
+            anchor.content
+        );
+        assert_eq!(axis.content_offset_drag(0.0, anchor), 0.0);
+        assert_eq!(
+            axis.content_offset_drag(MAX_EXTENT - 672.0, anchor),
+            68_000_000.0 - 672.0
+        );
+        let mut previous = 0.0;
+        for i in 0..=1000 {
+            let content =
+                axis.content_offset_drag((MAX_EXTENT - 672.0) * f64::from(i) / 1000.0, anchor);
+            assert!(content >= previous);
+            previous = content;
+        }
+        // After a drag ends, the same point becomes the local anchor:
+        // the next quarter-pixel wheel delta is a quarter content pixel.
+        let ended = Anchor {
+            scroll: 1_500_000.0,
+            content: 45_000_000.0,
+        };
+        assert_eq!(
+            axis.content_offset_from(ended.scroll + 0.25, ended),
+            ended.content + 0.25
+        );
     }
 
     #[test]

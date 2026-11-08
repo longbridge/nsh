@@ -7437,7 +7437,9 @@ class Player {
       return;
     }
     // Wheel notches glide; touchpads move with the fingers.
-    const smooth = e.deltaMode !== 0 || Math.abs(d) >= 40;
+    // Pixel-mode input may already contain touchpad inertia, including large
+    // deltas. Its magnitude cannot distinguish a notch from a finger.
+    const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
   }
 
@@ -7448,6 +7450,11 @@ class Player {
     if (!a) {
       a = el._glide = { x: el.scrollLeft, y: el.scrollTop, frame: 0, timer: 0, last: 0 };
       this.drive(el, 1);
+    }
+    // Direct input takes over where the glide is displayed, not where it
+    // was going. Keep fractional direct deltas between browser roundings.
+    if (!smooth && a.frame) {
+      [a.x, a.y] = a.at ?? [el.scrollLeft, el.scrollTop];
     }
     a.x = Math.min(Math.max(a.x + dx, 0), el.scrollWidth - el.clientWidth);
     a.y = Math.min(Math.max(a.y + dy, 0), el.scrollHeight - el.clientHeight);
