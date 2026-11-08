@@ -1173,6 +1173,13 @@ impl Host {
         self.guarded(Phase::Call, || {
             self.scheduler
                 .ready(self.rt.borrow().as_ref().expect("live VM").run_gc());
+            // What the collection released: the graph gives back the slots
+            // of nodes that are gone.
+            self.cx.with(|cx| {
+                // SAFETY: the state of this host's context; no other borrow
+                // of the graph is live between calls into JS.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.compact();
+            });
             self.run_jobs();
         });
     }
@@ -2301,7 +2308,7 @@ const report = (v) => text(String(v));
     /// `CET-1CEST,M3.5.0,M10.5.0/3`, whose summer instant shows a zone
     /// named by one offset.
     #[test]
-    fn intl_names_the_zone_it_formats_local_time_in() {
+    fn names_the_zone_it_formats_local_time_in() {
         let host = Host::new().unwrap();
         let script = format!(
             r#"{REPORT}
@@ -2330,8 +2337,17 @@ const report = (v) => text(String(v));
     /// `Intl` and the `toLocaleString`s format natively, in the device's
     /// locale by default.
     #[test]
-    fn intl_formats_numbers_and_dates() {
+    fn formats_numbers_and_dates() {
         let host = Host::new().unwrap();
+        // What a bundle listing these languages registers (`nsh:rt`'s
+        // `i18n`): the runtime has English only.
+        let mut languages = serde_json::Map::new();
+        for lang in ["de", "fr", "ja", "ko"] {
+            let data = nsh_i18n::language_data(lang).unwrap();
+            languages.insert(lang.into(), serde_json::from_str(data).unwrap());
+        }
+        host.cx
+            .with(|cx| crate::web::add_languages(cx.as_raw().as_ptr(), languages));
         host.eval_source(&format!(
             r#"{REPORT}
             report((1234567.891).toLocaleString());
@@ -2879,6 +2895,36 @@ const report = (v) => text(String(v));
         assert!(err.message.contains("top level"), "{}", err.message);
         assert!(rejections(&logs::take()).is_empty());
         assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn collecting_gives_back_the_graph_slots_of_a_tree_that_is_gone() {
+        let host = Host::new().unwrap();
+        let slots = |host: &Host| {
+            host.cx.with(|cx| {
+                // SAFETY: the host's state; no JS runs meanwhile.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.slots()
+            })
+        };
+        host.collect_garbage();
+        let (_, before) = slots(&host);
+        host.eval_source(
+            r#"import { cond } from "nsh:rt";
+            import { computed, signal } from "nsh";
+            const shown = signal(true);
+            const branch = cond(() => shown(), () => {
+                for (let i = 0; i < 20000; i++) computed(() => i)();
+                return null;
+            });
+            branch();
+            globalThis.hide = () => { shown.set(false); branch(); };"#,
+        )
+        .unwrap();
+        assert!(slots(&host).1 >= before + 20000);
+        host.eval_script("hide.js", "hide();").unwrap();
+        host.collect_garbage();
+        let (_, after) = slots(&host);
+        assert!(after < before + 100, "{before} → {after} slots");
     }
 
     #[test]

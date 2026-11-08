@@ -223,29 +223,21 @@ text("Today")
 
 ## 语言和地区
 
-`locale()` 是用户的区域设置，形式为 BCP 47 标签（Rust 中为 `locale().as_str()`）。在 TSX 中，`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取 `locale()` 来选择你自己的翻译文案：读取它的文字会在它变化时更新。
+`locale()` 是用户的区域设置，形式为 BCP 47 标签（Rust 中为 `locale().as_str()`）。在 TSX 中，`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取它的地方会在它变化时更新。
+
+应用自己在各语言下的文字来自它的翻译：`t("hello")`（`nsh/i18n`；Rust 中为 `t!("hello")`）以用户的语言显示一个 key，`setLocale` 让应用显示另一种语言。见 [I18n](./i18n.md)。
 
 ```rust tabs
 use nsh_core::prelude::*;
 
-fn greeting() -> &'static str {
-    match locale().as_str().split('-').next() {
-        Some("de") => "Willkommen",
-        Some("zh") => "欢迎",
-        _ => "Welcome",
-    }
-}
-
-text(greeting)
+text(move || t!("welcome"))
 ```
 
 ```tsx tabs
 import { Text } from "nsh";
-import { locale } from "nsh";
+import { t } from "nsh/i18n";
 
-const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
-
-<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+<Text>{t("welcome")}</Text>
 ```
 
 ## 语言与地区设置
@@ -276,30 +268,7 @@ const twelveHour = computed(() => ["h11", "h12"].includes(localeSettings().hourC
 
 ### 偏好语言
 
-`languages` 是用户的偏好语言列表，按偏好从高到低排列，BCP 47 标签：系统的列表（手机设置中的语言列表、桌面的界面语言、Web 上浏览器的语言）。用其中第一个有翻译的语言显示应用的文字，并沿列表回退：偏好瑞士德语、然后德语、然后英语的用户，在一个有德语和英语的应用中看到德语文字。`locale()` 是另一回事，它是数字和日期遵循的区域格式，可以是另一种（英文文字、德国日期）。列表从不为空，用户修改它时，读取它的地方会随之更新。
-
-```rust tabs
-use nsh_core::prelude::*;
-
-const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
-
-fn text_language() -> &'static str {
-    locale_settings()
-        .languages
-        .iter()
-        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
-        .unwrap_or("en")
-}
-```
-
-```tsx tabs
-import { localeSettings } from "nsh";
-
-const TRANSLATED = ["en", "de", "zh"];
-
-const textLanguage = () =>
-  localeSettings().languages.map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
-```
+`languages` 是用户的偏好语言列表，按偏好从高到低排列，BCP 47 标签：系统的列表（手机设置中的语言列表、桌面的界面语言、Web 上浏览器的语言）。应用的文字以其中第一个有翻译的语言显示，并沿列表回退：偏好瑞士德语、然后德语、然后英语的用户，在一个有德语和英语的应用中看到德语文字。`t`（`nsh/i18n`）就是这样选择的（[I18n](./i18n.md)）。`locale()` 是另一回事，它是数字和日期遵循的区域格式，可以是另一种（英文文字、德国日期）。列表从不为空，用户修改它时，读取它的地方会随之更新。
 
 显示在原生应用中、且该应用设置了自己语言的应用，会把那个语言排在最前。
 

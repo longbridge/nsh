@@ -69,6 +69,8 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
+# The language data an app ships (`locale_and_font_scale_follow_the_environment`).
+nsh-i18n.workspace = true
 crossbeam-channel.workspace = true
 # A WebSocket server for `tests/engine/websocket.rs`.
 tokio-tungstenite.workspace = true

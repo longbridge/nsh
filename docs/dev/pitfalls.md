@@ -178,8 +178,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Styles arrive before frames** (new views have a zero size): a shared radius goes straight to the layer (Core Animation clamps it itself);
   only paths, shadow paths, the content view and the image layer depend on the size, and they are rebuilt on `Frame` while `Decor::sized()`
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
+- **A view's first style does not transition**: a mounting tree's views are styled after they are added to the window, so
+  `window().is_some()` alone animates the first style from the defaults (a pill's corners growing out of a square). The
+  mounter only transitions a view it has styled before (`Slot::styled`), as `nsh_core`'s `transition::restyle` and
+  Android's mounter do.
 - **Property changes on standalone `CALayer`s animate implicitly for 0.25s** (a UIView's own layer does not): wrap changes to shape / image
   layers in `CATransaction.setDisableActions(true)`.
+- **Box-shadow geometry needs explicit animations of its own**: iOS transitions animate the view's `cornerRadius`, but the
+  shadow layer's `shadowPath`, the mask's `path` and the content clip layer's corners have no implicit action: set beside an
+  animating radius they jump to the new shape and the shadow's edge detaches from the background for the whole transition.
+  Set them through `interaction::animate_geometry`, which animates from the presented (mid-animation) value; quiet
+  decoration updates still apply at once.
 - **Core Animation always draws `border` above sublayers**, while CSS borders are below children: non-clipping views use a stroke layer below
   the children; when clipping both look the same, so the layer's own border is used.
 - **A UIScrollView's sublayers scroll with its content** (`bounds.origin` is the scroll offset), so scroll views cannot use shape layers / masks.
@@ -531,6 +540,12 @@ Things that were found the hard way. Read the section of the area you change bef
   an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
   one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
+- **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
+  makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its
+  `NSToolbarView` is what `hitTest:` finds across the title bar's whole width (macOS 26 finds the content there):
+  it does not accept the first mouse, so in a window that never becomes key (a background test host) a press there
+  is lost, while a key window hands it on to the content under it. The test hosts' window does that too
+  (`window.rs` `NshWindow`).
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).

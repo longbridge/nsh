@@ -494,3 +494,39 @@ fn a_computation_disposed_in_a_nested_run_tracks_nothing_after() {
     });
     check_links();
 }
+
+#[test]
+fn compacting_gives_back_the_slots_of_a_tree_that_is_gone() {
+    let kept = signal(1);
+    let many: Vec<u32> = (0..5000).map(signal).collect();
+    let last = *many.last().unwrap();
+    let last_generation = graph().generation(last);
+    // One in the middle stays: the slots after it go, those before stay free.
+    let middle = many[100];
+    for &id in &many {
+        if id != middle
+            && let Some(held) = graph().drop_handle(id)
+        {
+            held.free(Test);
+        }
+    }
+    graph().compact();
+    assert_eq!(graph().slots(), (2, middle as usize + 1));
+    assert_eq!(get(kept), 1);
+    assert_eq!(get(middle), 100);
+    // A handle of a dropped slot never names the node made in its place.
+    assert!(!graph().live(last, last_generation, u32::MAX));
+    // Freed slots are reused lowest first.
+    let next = signal(7);
+    assert!(next < middle);
+    if let Some(held) = graph().drop_handle(middle) {
+        held.free(Test);
+    }
+    graph().compact();
+    let mut made: Vec<u32> = (0..(last as i64 + 1)).map(signal).collect();
+    made.sort_unstable();
+    let again = made.iter().copied().find(|&id| id == last).unwrap();
+    assert_ne!(graph().generation(again), last_generation);
+    assert!(!graph().live(last, last_generation, u32::MAX));
+    check_links();
+}

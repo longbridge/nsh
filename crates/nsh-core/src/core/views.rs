@@ -250,12 +250,12 @@ impl<M: TextEngine> Core<M> {
     ) {
         inst.bound.insert(
             id,
-            BoundNode {
+            Box::new(BoundNode {
                 attrs: attrs.clone(),
                 style: style.clone(),
                 classes,
                 text,
-            },
+            }),
         );
     }
 

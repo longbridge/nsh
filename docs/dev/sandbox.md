@@ -62,7 +62,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
-  sources, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, speech sessions, sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
+  sources and inline HTML's base URLs, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, speech sessions, sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
 - What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
@@ -73,12 +73,17 @@ trusted: every limit and check is enforced in Rust, never in JS.
   refused by the core (the commit's `Command::HostCall`) and by the SDK channel (`nsh-js` `host_channel.rs`) with
   `nsh_core::host_channel::not_granted`. A refused `fetch` rejects as every failed fetch, with a `TypeError`, which
   carries `code`, `permission` `"network"` and `resource` the request's or the redirect's URL (`access::Refused`,
-  `Host::fetch_refused`). A refused source (image, placeholder, video, web view `src` or `html`) shows nothing and
+  `Host::fetch_refused`). A refused source (image, placeholder, video, web view `src` or `html`) shows nothing (a refused `baseUrl` is dropped and
+  the HTML loads without it) and
   reports `onError` with `code` `ERR_ACCESS_DENIED`, as the platforms report a refused navigation. What has no caller
   to answer (the status bar, a canvas image) only logs. Rust components' calls keep their Rust types: the core's
   checks answer them as the system would with nothing there (an empty clipboard, no picked files, `open_url` `false`)
   and an `Err` with the message for `fetch`.
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
+  A URL that parsers read differently (`access::read_url`: a backslash before the query, which WHATWG's parser, the
+  web views', ends the host at and Foundation's `NSURL` keeps in the user info; an ASCII control character; a host
+  with percent-encoding or a WHATWG forbidden host code point) names no one host, port or path: only a grant of every
+  host with no port or path covers it (`*`, or no `capabilities`), and `parse_url` gives `None` for it.
 - **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
   declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an

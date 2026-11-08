@@ -424,11 +424,12 @@ function regional(locale) {
  * (shortcuts work on any layout, as menus' do).
  */
 function keyCode(e) {
-  const named = NAMED_KEYS[e.key];
+  // Some IME and webview key events carry no `key`; fall back to `code`.
+  const k = typeof e.key === "string" ? e.key : "";
+  const named = NAMED_KEYS[k];
   if (named) return named;
-  const f = /^F([0-9]{1,2})$/.exec(e.key);
+  const f = /^F([0-9]{1,2})$/.exec(k);
   if (f) return Number(f[1]) >= 1 && Number(f[1]) <= 24 ? 512 + Number(f[1]) : -1;
-  const k = e.key;
   if (k.length === 1 && !e.shiftKey && !e.altKey && k >= " " && k <= "~") return k.toLowerCase().charCodeAt(0);
   const c = e.code ?? "";
   if (/^Key[A-Z]$/.test(c)) return c.charCodeAt(3) + 32;
@@ -4734,7 +4735,7 @@ class Player {
       // alone, as on the native platforms, where the field never sees it: a
       // RichEditor would delete twice on Backspace.
       if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
-        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
+        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
       // Return submits unless it inserts a line break (`submitBehavior`);

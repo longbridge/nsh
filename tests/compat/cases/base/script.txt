@@ -1251,6 +1251,16 @@ tap label:Favorite
 expect Favorite: true
 tap label:Favorite
 expect Favorite: false
+# A press going down and ending, as the platform reports them: the app's
+# own press feedback, with no change of value.
+listens id:favorite onPressDown
+listens id:favorite onPressUp
+expect Downs: 0, ups: 0
+event label:Favorite onPressDown
+expect Downs: 1, ups: 0
+event label:Favorite onPressUp
+expect Downs: 1, ups: 1
+expect Favorite: false
 # `disabled`: dimmed for screen readers, `group-disabled:` on the marker
 # (10 wide), presses do nothing; `accessibilityLabel` names it.
 prop id:underline accessibilityLabel Underline text
@@ -1284,6 +1294,8 @@ covers [props] pressedStyle
 covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onChange
+covers [events] onPressDown
+covers [events] onPressUp
 
 # base-toolbar
 tap id:case-base-toolbar

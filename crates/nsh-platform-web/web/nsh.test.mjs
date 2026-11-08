@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player };`)}`
+const { Player, keyCode } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -1847,4 +1847,11 @@ test("a forward the app shows goes on from the entry the browser is at", () => {
   } finally {
     Object.assign(globalThis, saved);
   }
+});
+
+test("a key event without `key` falls back to its physical key instead of throwing", () => {
+  assert.equal(keyCode({ code: "KeyA" }), 97);
+  assert.equal(keyCode({ key: null, code: "Digit3" }), 51);
+  assert.equal(keyCode({}), -1);
+  assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
 });

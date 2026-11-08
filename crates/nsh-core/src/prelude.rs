@@ -258,3 +258,8 @@ pub use crate::element::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};
+/// Translations ([`crate::i18n`]).
+pub use crate::{
+    i18n::{available_locales, set_locale},
+    t,
+};

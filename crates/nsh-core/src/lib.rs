@@ -28,6 +28,7 @@ pub mod filesystem;
 pub mod geometry;
 mod grid;
 pub mod host_channel;
+pub mod i18n;
 pub mod image;
 pub mod input;
 pub mod js;
@@ -65,6 +66,7 @@ pub mod time;
 mod transform;
 pub mod transition;
 pub mod url_scheme;
+pub mod web_resource;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.

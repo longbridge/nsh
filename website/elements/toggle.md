@@ -113,6 +113,11 @@ typed style methods and `.child(..)` for their content.
 | Event | Rust | Description |
 |---|---|---|
 | `onChange` (`Toggle`) | `.on_change(\|pressed: &bool\| ..)` | The toggle was pressed: a tap, a click, Space or Return while it has the keyboard focus, or a screen reader's activation. `{ pressed }` is the value it asks for, the opposite of `pressed`. It runs before anything changes: the toggle shows the `pressed` the app passes back. |
+| `onPressDown` (`Toggle`) | `.on_press_down(\|\| ..)` | A press went down on it. |
+| `onPressUp` (`Toggle`) | `.on_press_up(\|\| ..)` | The press ended: released, moved away or cancelled. |
+
+`onPressDown` and `onPressUp` are for press feedback of your own, such as a spring or a shape that the state styles do
+not express.
 
 An arrow key of a `ToggleGroup` only moves the keyboard focus: it presses nothing. A disabled toggle reports nothing.
 

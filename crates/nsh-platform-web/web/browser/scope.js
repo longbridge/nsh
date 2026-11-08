@@ -13,6 +13,7 @@ export { createAnimation } from "./animation.js";
 export { createNavigation } from "./navigation.js";
 export { createKeymap } from "./keymap.js";
 export { createEnvironment } from "./environment.js";
+export { createI18n } from "./i18n.js";
 export { installTesting } from "./testing.js";
 export { createHot } from "./hot.js";
 export { configureAddress } from "./address.js";

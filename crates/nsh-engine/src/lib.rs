@@ -1918,6 +1918,9 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(appearance) = root.appearance_ref() {
                 core.set_appearance(appearance);
             }
+            if let Some(translations) = root.translations_ref() {
+                core.set_translations(translations.clone());
+            }
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");
@@ -2013,6 +2016,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             events_handled: 0,
             events_reported: 0,
             pinned: config.pinned,
+            environment: config.environment,
+            app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
             net: Net {
@@ -2463,6 +2468,10 @@ struct State<M: TextEngine> {
     /// What the environment keeps whatever the platform reports
     /// ([`EngineConfig::pinned`]).
     pinned: EnvironmentPins,
+    /// The environment given last, before the app's language is applied.
+    environment: Environment,
+    /// The language the app shows in whatever the user's (`setLocale`).
+    app_locale: Option<nsh_core::platform::Locale>,
     /// A display frame was requested and has not begun yet.
     frame_requested: bool,
     ops: Vec<Op>,
@@ -3185,6 +3194,7 @@ impl<M: TextEngine> State<M> {
                 }
             }
             drop(ops);
+            release_spare_ops(&mut self.ops);
             if let Some(batch) = self.core.commit() {
                 commits += 1;
                 match &mut merged {
@@ -3208,6 +3218,16 @@ impl<M: TextEngine> State<M> {
                 }
                 _ => false,
             };
+            // A language the app asked for reaches the core and JS, whose
+            // views follow it in another round.
+            let relocale = match self.core.take_locale_request() {
+                Some(locale) => {
+                    self.app_locale = locale;
+                    apply_environment(script, self, self.environment);
+                    true
+                }
+                None => false,
+            };
             let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
             // What waited for the app's answer to the events just taken runs
             // in the next round, once JS has handled them, and shows in this
@@ -3217,6 +3237,7 @@ impl<M: TextEngine> State<M> {
                 && self.events.is_empty()
                 && !posted
                 && !retheme
+                && !relocale
                 && !more_paced
                 && !urls
                 && !answers
@@ -3370,6 +3391,14 @@ fn apply_environment<M: TextEngine>(
     state: &mut State<M>,
     env: Environment,
 ) {
+    state.environment = env;
+    let mut env = env;
+    // The app's language (`set_locale`) over the platform's, as an
+    // embedding app's own is.
+    if let Some(locale) = state.app_locale {
+        env.locale = locale;
+        env.locale_settings.languages = env.locale_settings.languages.preferring(locale);
+    }
     state.core.set_font_scale(env.font_scale);
     state.core.set_class_environment(class_environment(&env));
     state.core.set_safe_area(insets(&env));
@@ -3663,8 +3692,33 @@ fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
     })
 }
 
+/// The most ops an emptied op buffer keeps room for.
+const RETAINED_OPS: usize = 16 * 1024;
+
+/// Gives back what a large commit (a screen made at once, a long list
+/// bound) grew the emptied op buffer to: it and the runtime's take turns
+/// ([`Script::take_ops`] swaps them), and each would otherwise hold the
+/// largest commit's capacity for the life of the app.
+fn release_spare_ops(ops: &mut Vec<Op>) {
+    debug_assert!(ops.is_empty());
+    if ops.capacity() > RETAINED_OPS {
+        ops.shrink_to(RETAINED_OPS);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_emptied_op_buffer_gives_back_what_a_large_commit_grew() {
+        let mut ops: Vec<super::Op> = Vec::with_capacity(super::RETAINED_OPS * 8);
+        super::release_spare_ops(&mut ops);
+        assert!(ops.capacity() <= super::RETAINED_OPS);
+        // A buffer of ordinary commits keeps its room.
+        let mut ops: Vec<super::Op> = Vec::with_capacity(1024);
+        super::release_spare_ops(&mut ops);
+        assert_eq!(ops.capacity(), 1024);
+    }
+
     #[test]
     fn moves_settle_and_changes_of_mode_do_not() {
         use nsh_core::{
