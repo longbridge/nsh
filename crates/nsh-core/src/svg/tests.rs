@@ -393,23 +393,58 @@ fn svg_safety_file_hrefs_are_not_read() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn svg_safety_urls_resolve_nothing() {
+/// `bytes` as a percent-encoded `mime` data URI.
+fn data_uri(mime: &str, bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    let mut encoded = String::new();
-    // Percent-encoded, so the test needs no base64 encoder.
-    for b in RED.bytes() {
-        write!(encoded, "%{b:02X}").unwrap();
+    let mut uri = format!("data:{mime},");
+    for b in bytes {
+        write!(uri, "%{b:02X}").unwrap();
     }
+    uri
+}
+
+#[test]
+fn svg_safety_remote_urls_and_nested_svgs_resolve_nothing() {
+    // Files and URLs are never read: an image from either draws nothing.
     for href in [
         "http://127.0.0.1:9/a.svg".to_owned(),
         "https://127.0.0.1:9/a.svg".to_owned(),
-        format!("data:image/svg+xml,{encoded}"),
-        format!("data:text/plain,{encoded}"),
     ] {
         let raster = rasterize(&image_href(&href), 10).unwrap();
         assert!(transparent(&raster), "{href}");
     }
+    // An inline SVG is a document of its own: it would hide its tree and
+    // images from the budget, so the resolver refuses it.
+    let nested = data_uri("image/svg+xml", RED.as_bytes());
+    assert!(transparent(&rasterize(&image_href(&nested), 10).unwrap()));
+    // Only the declared MIME counts; SVG bytes declared as text do not.
+    let text = data_uri("text/plain", RED.as_bytes());
+    assert!(transparent(&rasterize(&image_href(&text), 10).unwrap()));
+    // An inline raster image is part of the document (a canvas snapshot's
+    // own images are self-contained) and draws.
+    let mut pixmap = tiny_skia::Pixmap::new(2, 2).unwrap();
+    pixmap.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let png = data_uri("image/png", &pixmap.encode_png().unwrap());
+    assert!(
+        !transparent(&rasterize(&image_href(&png), 10).unwrap()),
+        "an inline raster image draws"
+    );
+}
+
+#[test]
+fn svg_safety_inline_raster_area_is_budgeted() {
+    // Only the header is needed: the estimate reads the dimensions before
+    // resvg decodes, so a small document cannot decode 400 megapixels.
+    let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+    huge.extend_from_slice(&13u32.to_be_bytes());
+    huge.extend_from_slice(b"IHDR");
+    huge.extend_from_slice(&20_000u32.to_be_bytes());
+    huge.extend_from_slice(&20_000u32.to_be_bytes());
+    huge.extend_from_slice(&[8, 6, 0, 0, 0]);
+    huge.extend_from_slice(&0u32.to_be_bytes());
+    let doc = image_href(&data_uri("image/png", &huge));
+    assert!(doc.len() < 1000, "{} bytes", doc.len());
+    assert!(matches!(rasterize(&doc, 10), Err(Error::OverBudget { .. })));
 }
 
 #[test]
@@ -531,10 +566,44 @@ fn svg_safety_drawings_visiting_too_many_nodes_are_refused() {
 }
 
 #[test]
-fn svg_safety_text_is_not_drawn() {
-    let raster = rasterize(TEXT, 40).unwrap();
-    assert!(transparent(&raster));
+fn svg_text_draws_with_the_font_database() {
+    // The machine's fonts are not part of this test: the document's family
+    // comes from the database it is given.
+    const PACIFICO: &[u8] =
+        include_bytes!("../../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf");
+    let mut fontdb = usvg::fontdb::Database::new();
+    fontdb.load_font_data(PACIFICO.to_vec());
+    let mut options = options();
+    options.fontdb = std::sync::Arc::new(fontdb);
+    options.font_family = "Pacifico".into();
+    let tree = parse_with(TEXT, &options).unwrap();
+    let raster = draw(&tree, 40.0, MAX_SIDE).unwrap();
     assert_eq!(raster.size, pt(40.0, 20.0));
+    assert!(
+        !transparent(&raster),
+        "text is drawn with the database's font"
+    );
+}
+
+#[test]
+fn svg_safety_text_uses_system_fonts() {
+    use usvg::fontdb::{Family, Query, Stretch, Style, Weight};
+
+    let raster = rasterize(TEXT, 40).unwrap();
+    assert_eq!(raster.size, pt(40.0, 20.0));
+    // A canvas may rasterize an app-generated SVG with text; the text uses
+    // the system fonts the platform's text engine uses. A machine with no
+    // font, or none of the families the fallback names, has nothing to draw
+    // with.
+    let serif = Query {
+        families: &[Family::Serif],
+        weight: Weight::NORMAL,
+        stretch: Stretch::Normal,
+        style: Style::Normal,
+    };
+    if super::SYSTEM_FONTS.query(&serif).is_some() {
+        assert!(!transparent(&raster), "text is drawn with a system font");
+    }
 }
 
 /// What a drawing of an SVG ([`drawing`]) fills and strokes, painted for a

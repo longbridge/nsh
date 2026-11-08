@@ -25,8 +25,8 @@
 //! SVG images (sniffed from their bytes) are drawn by
 //! [`nsh_core::svg`] at the bucket's size, then go through the same blur,
 //! color matrix, tint and budget as decoded bitmaps; their size is their
-//! intrinsic size in points (CSS pixels of the SVG). Canvases draw bitmaps
-//! only.
+//! intrinsic size in points (CSS pixels of the SVG). Canvases draw them as
+//! their rasterized bitmap.
 //!
 //! Animated GIF / PNG / WebP images play through a keyframe animation of the
 //! layer's `contents`. The `placeholder` shows until the image arrives (and
@@ -986,14 +986,10 @@ pub(crate) fn load_icon(
     )
 }
 
-/// The first frame of `picture`, loaded from `uri`, unless it is an SVG.
-fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
-    match picture.natural {
-        Natural::Vector(_) => Err(format!(
-            "{uri} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-        )),
-        Natural::Pixels(..) => Ok(picture.frames[0].clone()),
-    }
+/// The first frame of `picture`, loaded from `uri`; an SVG is rasterized
+/// by the shared SVG renderer, so its frame is a bitmap here too.
+fn bitmap(_uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
+    Ok(picture.frames[0].clone())
 }
 
 /// `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`): reads the

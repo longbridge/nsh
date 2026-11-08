@@ -33,7 +33,7 @@ use objc2_ui_kit::{
 use crate::{
     animation::Animator,
     decor::{self, Decor},
-    image::{AssetBase, DecodedImage, ImageLoader, Request, not_a_bitmap},
+    image::{AssetBase, DecodedImage, ImageLoader, Request},
     input::Input,
     native_view::NshView,
     navigation::{ModalHost, ScreenHost, StackHost},
@@ -2828,9 +2828,6 @@ impl Mounter {
                 scale,
                 crate::image::Look::default(),
             ) {
-                Request::Ready(decoded) if decoded.vector => {
-                    log::warn!("canvas image failed: {}", not_a_bitmap(&image.uri));
-                }
                 Request::Ready(decoded) => view.set_image(image.uri.clone(), decoded.image),
                 Request::Pending => {}
             }
@@ -2893,9 +2890,6 @@ impl Mounter {
             {
                 // Canvas images are requested at their natural size.
                 match (&result, key.strip_prefix("0@")) {
-                    (Ok(decoded), Some(uri)) if decoded.vector => {
-                        log::warn!("canvas image failed: {}", not_a_bitmap(uri));
-                    }
                     (Ok(decoded), Some(uri)) => view.set_image(uri.into(), decoded.image.clone()),
                     (Err(message), _) => log::warn!("canvas image failed: {message}"),
                     _ => {}
