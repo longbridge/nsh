@@ -19,13 +19,15 @@
 //!
 //! An SVG from the network is untrusted input, so what drawing one takes is
 //! bounded: a document of at most [`MAX_BYTES`] (a `.svgz` once inflated),
-//! text of at most [`MAX_TEXT_CHARS`] characters, a raster of at most
+//! text of at most [`MAX_TEXT_CHARS`] characters as `<use>` and `<tref>`
+//! expand it, a raster of at most
 //! [`MAX_SIDE`] pixels a side and [`MAX_PIXELS`] in all, and layers (resvg
 //! draws every group with opacity, a mask, a clip path, filters or a blend
 //! mode into a pixmap of its own, and nested ones coexist) of at most
 //! [`MAX_LAYER_PIXELS`] at once by a conservative estimate made before
 //! drawing (`layers.rs`). The text limit applies before usvg lays the text
-//! out, which it does while parsing. A panic in the parser or the renderer is an
+//! out, which it does while parsing; the system font database is scanned only
+//! when a document lays out text. A panic in the parser or the renderer is an
 //! [`Error`] too: the backends call these functions where an unwinding panic
 //! would abort the process (GCD blocks, JNI functions).
 //!
@@ -33,7 +35,7 @@
 //! else its `viewBox`) is one point. Icons and logos carry a `viewBox`; one
 //! without a size and a `viewBox` reaches as far as what it draws.
 
-use std::{fmt, io::Read, panic};
+use std::{borrow::Cow, collections::HashMap, fmt, io::Read, panic};
 
 use resvg::{
     tiny_skia,
@@ -314,7 +316,7 @@ const TEXT_FAMILIES: &[&str] = &[
 /// documents (`data:image/svg+xml`) still resolve to nothing. A nested SVG
 /// would hide its own tree and images from [`layers`]' budget and from
 /// [`MAX_BYTES`], so it is refused rather than drawn unbounded.
-fn options() -> usvg::Options<'static> {
+fn options(with_text: bool) -> usvg::Options<'static> {
     let mut options = usvg::Options {
         resources_dir: None,
         image_href_resolver: usvg::ImageHrefResolver {
@@ -334,26 +336,52 @@ fn options() -> usvg::Options<'static> {
         },
         ..usvg::Options::default()
     };
-    options.fontdb = SYSTEM_FONTS.clone();
+    // Loading the system fonts maps every font file; a document with no text
+    // (an icon, a logo) must not pay that on its first parse.
+    if with_text {
+        options.fontdb = SYSTEM_FONTS.clone();
+    }
     options
 }
 
-/// Parses an SVG (or gzip-compressed SVG) with the [`options`].
+/// Parses an SVG (or gzip-compressed SVG), loading the system fonts only when
+/// the document actually lays out text.
 fn parse(bytes: &[u8]) -> Result<usvg::Tree, Error> {
-    parse_with(bytes, &options())
+    let text = text_of(bytes)?;
+    let has_text = {
+        let doc = xml(&text)?;
+        check_text(&doc)?
+    };
+    parse_text(&text, &options(has_text))
 }
 
-fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, Error> {
-    let inflated;
-    let bytes = if bytes.starts_with(&[0x1f, 0x8b]) {
-        inflated = inflate(bytes)?;
-        &inflated[..]
-    } else if bytes.len() > MAX_BYTES {
+/// Parses an SVG for a canvas drawing, which drops text, without loading the
+/// system fonts.
+pub(crate) fn parse_drawing(text: &str) -> Result<usvg::Tree, Error> {
+    parse_text(text, &options(false))
+}
+
+/// The document's text, decompressed and validated: a `.svgz` is inflated.
+fn text_of(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        return String::from_utf8(inflate(bytes)?)
+            .map(Cow::Owned)
+            .map_err(|_| Error::Invalid("not UTF-8".into()));
+    }
+    if bytes.len() > MAX_BYTES {
         return Err(Error::TooLarge);
-    } else {
-        bytes
-    };
-    let text = std::str::from_utf8(bytes).map_err(|_| Error::Invalid("not UTF-8".into()))?;
+    }
+    std::str::from_utf8(bytes)
+        .map(Cow::Borrowed)
+        .map_err(|_| Error::Invalid("not UTF-8".into()))
+}
+
+#[cfg(test)]
+fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, Error> {
+    parse_text(&text_of(bytes)?, options)
+}
+
+fn parse_text(text: &str, options: &usvg::Options<'_>) -> Result<usvg::Tree, Error> {
     let doc = xml(text)?;
     check_text(&doc)?;
     let Some(side) = OneSide::of(&doc, text) else {
@@ -368,28 +396,138 @@ fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, E
         Some(points) => points,
         None => side.given(convert(&doc, options)?.size()),
     };
-    convert(&xml(&side.completed(text, given))?, options)
+    let completed = side.completed(text, given);
+    let doc = xml(&completed)?;
+    check_text(&doc)?;
+    convert(&doc, options)
 }
 
-/// Refuses a document whose `<text>` is longer than [`MAX_TEXT_CHARS`]: usvg
-/// lays out and outlines every glyph while parsing, before any other budget
-/// runs, at a large and superlinear cost per glyph.
-fn check_text(doc: &roxmltree::Document<'_>) -> Result<(), Error> {
-    let mut chars = 0usize;
-    for node in doc.descendants().filter(|node| node.is_text()) {
-        let Some(text) = node.text() else { continue };
-        if !node
-            .ancestors()
-            .any(|ancestor| ancestor.is_element() && ancestor.tag_name().name() == "text")
-        {
-            continue;
-        }
-        chars = chars.saturating_add(text.chars().count());
-        if chars > MAX_TEXT_CHARS {
-            return Err(Error::TooMuchText);
+/// Refuses a document whose laid-out text is longer than [`MAX_TEXT_CHARS`]:
+/// usvg lays out and outlines every glyph while parsing, before any other
+/// budget runs, at a large and superlinear cost per glyph. Returns whether the
+/// document lays out text, so a document without any skips the system font
+/// scan.
+///
+/// `<use>` copies its target subtree and `<tref>` takes the text of another
+/// element, so counting only the source `<text>` nodes undercounts what usvg
+/// lays out. This walk expands both references: each `<use>` instance counts
+/// its target again, and a stack of ids stops cycles.
+fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
+    let mut ids: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
+    for node in doc.descendants().filter(roxmltree::Node::is_element) {
+        if let Some(id) = node.attribute("id") {
+            ids.entry(id).or_insert(node);
         }
     }
-    Ok(())
+    let mut scan = TextScan {
+        ids,
+        chars: 0,
+        has_text: false,
+    };
+    let mut visiting = Vec::new();
+    for child in doc.root().children() {
+        scan.node(child, false, false, &mut visiting)?;
+    }
+    Ok(scan.has_text)
+}
+
+/// The text a document lays out, as usvg expands its references.
+struct TextScan<'a, 'input> {
+    ids: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+    chars: usize,
+    has_text: bool,
+}
+
+impl<'a, 'input> TextScan<'a, 'input> {
+    fn add(&mut self, chars: usize) -> Result<(), Error> {
+        self.chars = self.chars.saturating_add(chars);
+        if self.chars > MAX_TEXT_CHARS {
+            return Err(Error::TooMuchText);
+        }
+        Ok(())
+    }
+
+    fn node(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        in_text: bool,
+        expanded: bool,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<(), Error> {
+        if node.is_text() {
+            if in_text {
+                self.add(node.text().unwrap_or_default().chars().count())?;
+            }
+            return Ok(());
+        }
+        if !node.is_element() {
+            return Ok(());
+        }
+        match node.tag_name().name() {
+            // Definitions are not drawn where they are written; `<use>`
+            // reaches them from its own position.
+            "defs" | "clipPath" | "mask" | "pattern" | "marker" | "linearGradient"
+            | "radialGradient" | "filter" | "style" | "title" | "desc" | "metadata" | "script" => {
+                Ok(())
+            }
+            "symbol" if !expanded => Ok(()),
+            "text" => {
+                self.has_text = true;
+                self.children(node, true, visiting)
+            }
+            "tref" => {
+                self.has_text = true;
+                if let Some(id) = href(node)
+                    && !visiting.contains(&id)
+                    && let Some(target) = self.ids.get(id).copied()
+                {
+                    visiting.push(id);
+                    let chars = target
+                        .descendants()
+                        .filter(|node| node.is_text())
+                        .filter_map(|node| node.text())
+                        .map(|text| text.chars().count())
+                        .sum();
+                    let result = self.add(chars);
+                    visiting.pop();
+                    result?;
+                }
+                Ok(())
+            }
+            "use" => {
+                if let Some(id) = href(node)
+                    && !visiting.contains(&id)
+                    && let Some(target) = self.ids.get(id).copied()
+                {
+                    visiting.push(id);
+                    let result = self.node(target, in_text, true, visiting);
+                    visiting.pop();
+                    result?;
+                }
+                Ok(())
+            }
+            _ => self.children(node, in_text, visiting),
+        }
+    }
+
+    fn children(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        in_text: bool,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<(), Error> {
+        for child in node.children() {
+            self.node(child, in_text, false, visiting)?;
+        }
+        Ok(())
+    }
+}
+
+/// The id a `<use>` or `<tref>` refers to, when it is in this document.
+fn href<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> Option<&'a str> {
+    node.attributes()
+        .find(|attribute| attribute.name() == "href")
+        .and_then(|attribute| attribute.value().strip_prefix('#'))
 }
 
 fn xml(text: &str) -> Result<roxmltree::Document<'_>, Error> {

@@ -79,7 +79,7 @@ pub fn drawing(source: &str) -> Result<Drawing, Error> {
         } else {
             source
         };
-        let tree = super::parse_with(text.as_bytes(), &super::options())?;
+        let tree = super::parse_drawing(text)?;
         let size = tree.size();
         let natural = Size::new(px(size.width()), px(size.height()));
         let view_box =

@@ -152,7 +152,8 @@ fn svg_browser_only(data: &[u8]) -> Vec<&'static str> {
     }
     if images {
         found.push(
-            "its <image> elements that reference files, URLs or SVG documents show only in              browsers; native platforms draw inline raster data images",
+            "its <image> elements that reference files, URLs or SVG documents show only in \
+             browsers; native platforms draw inline raster data images",
         );
     }
     if html {

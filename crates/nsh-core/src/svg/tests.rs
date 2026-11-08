@@ -385,7 +385,7 @@ fn svg_safety_file_hrefs_are_not_read() {
         in_dir(usvg::Options::default()),
         "the sentinel is reachable relatively"
     );
-    assert!(!in_dir(options()), "the resolver reads nothing");
+    assert!(!in_dir(options(false)), "the resolver reads nothing");
     assert!(
         transparent(&rasterize(&relative, 10).unwrap()),
         "relative path"
@@ -600,6 +600,43 @@ fn svg_safety_text_length_is_bounded() {
 }
 
 #[test]
+fn svg_safety_text_use_is_bounded() {
+    // Each <use> copies the tree's 1000 characters, so counting only the
+    // source <text> would let 100 uses lay out 100 000.
+    let text = "a".repeat(1000);
+    let uses = r##"<use href="#t"/>"##.repeat(100);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><text id="t">{text}</text></defs>{uses}</svg>"#
+    );
+    assert_eq!(rasterize(doc.as_bytes(), 10), Err(Error::TooMuchText));
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_tref_is_bounded() {
+    // <tref> may take the text of any element; each of the 70 references
+    // lays out the 1000 characters of a <g> outside any <text>.
+    let text = "b".repeat(1000);
+    let refs = r##"<text x="0" y="9"><tref href="#d"/></text>"##.repeat(70);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><g id="d">{text}</g></defs>{refs}</svg>"#
+    );
+    assert_eq!(rasterize(doc.as_bytes(), 10), Err(Error::TooMuchText));
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_references_under_the_bound_still_parse() {
+    // The same expansion, with a short target: a legitimate document stays
+    // within the budget and parses.
+    let uses = r##"<use href="#t"/>"##.repeat(3);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><text id="t">ok</text></defs>{uses}</svg>"#
+    );
+    assert!(size(doc.as_bytes()).is_ok());
+}
+
+#[test]
 fn svg_text_draws_with_the_font_database() {
     // The machine's fonts are not part of this test: the document's family
     // comes from the database it is given.
@@ -607,7 +644,7 @@ fn svg_text_draws_with_the_font_database() {
         include_bytes!("../../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf");
     let mut fontdb = usvg::fontdb::Database::new();
     fontdb.load_font_data(PACIFICO.to_vec());
-    let mut options = options();
+    let mut options = options(true);
     options.fontdb = std::sync::Arc::new(fontdb);
     options.font_family = "Pacifico".into();
     let tree = parse_with(TEXT, &options).unwrap();
@@ -687,6 +724,16 @@ mod as_drawing {
 
     fn at(x: f32, y: f32) -> Point<Points> {
         point(px(x), px(y))
+    }
+
+    /// A drawing parses text without scanning the system fonts: the vector
+    /// replay has no glyphs, so the fonts would only cost a scan.
+    #[test]
+    fn svg_drawing_with_text_needs_no_fonts() {
+        let doc = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#00ff00"/><text x="2" y="12">hello</text></svg>"##;
+        let d = drawing(doc).unwrap();
+        let painted = paint(&d, pt(20.0, 20.0));
+        assert_eq!(shapes(&painted).len(), 1);
     }
 
     /// An icon stroked with `currentColor` takes the view's text color,

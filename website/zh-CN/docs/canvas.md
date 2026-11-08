@@ -312,7 +312,7 @@ cx.fillText(label, 32 - 6 - cx.measureText(label).width, 16);
 
 在 Rust 中，绘制图片接受 URL（资源的 URL 是 `LOGO.url`）；在 TSX 中接受 URL 或导入的资源（`import logo from "./logo.png"`）。图片在原生端加载，加载完成后画布会重新绘制，你不需要自己跟踪加载状态。远程 URL 受应用的[网络能力声明](./sandbox-and-capabilities.md)约束。
 
-iOS、macOS、Android、Windows、Linux 和 GPUI 上的画布既绘制位图，也绘制 SVG：SVG 由 `nsh_core::svg` 栅格化为位图后交给画布，栅格尺寸由加载器按 SVG 的固有尺寸（点）分档决定。请把它绘制到明确的目标矩形中，不要依赖栅格位图的像素尺寸。在 Web 上，画布绘制浏览器能绘制的内容，包括 SVG。
+iOS、macOS、Android、Windows、Linux 和 GPUI 上的画布既绘制位图，也绘制 SVG：SVG 由 `nsh_core::svg` 栅格化为位图后交给画布，栅格尺寸由加载器按 SVG 的固有尺寸（点）分档决定。请把它绘制到明确的目标矩形中，不要依赖栅格位图的像素尺寸。把它放大很多倍绘制会放大位图而显得模糊；要得到清晰的边缘和文字，请按固有尺寸或更小绘制。在 Web 上，画布绘制浏览器能绘制的内容，包括 SVG。
 
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo.png");
