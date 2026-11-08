@@ -20,6 +20,16 @@
 //! a view hosts (a text field, a header) are [`ViewState::natives`]: they
 //! sit above the children, at their own rectangles.
 //!
+//! A child appended without a sibling to go below goes below the lowest
+//! subview that is not ours ([`is_ours`]: a hosted AppKit view, or one a
+//! host app added itself), which a scan of the subviews finds. Each view of
+//! ours that holds subviews ([`ViewObj`], [`Container`]) remembers whether
+//! one that may not stay ours can have come in since a scan last found none
+//! (AppKit's `didAddSubview:`, and `setSubviews:` and `replaceSubview:with:`
+//! whatever they bring); until then appends skip the scan, so appending N
+//! children no longer scans N² subviews ([`first_foreign`]). Removals keep
+//! the mark: the next append scans once.
+//!
 //! The root view of a surface takes every mouse event over an app's view
 //! (`hitTest:`) and hands it to [`crate::input`], which picks the view
 //! itself (transforms, `overflow`, `pointerEvents`, hit slop); hosted
@@ -339,6 +349,9 @@ pub(crate) struct Ivars {
     stale: Cell<bool>,
     /// Its frame waits to be placed ([`crate::mount::Mounter`]'s `unplaced`).
     unplaced: Cell<bool>,
+    /// A subview that may not stay ours ([`stays_ours`]) can have come in
+    /// since a scan of its subviews last found none ([`first_foreign`]).
+    foreign: Cell<bool>,
 }
 
 define_class!(
@@ -499,6 +512,32 @@ define_class!(
 
         #[unsafe(method(updateLayer))]
         fn update_layer(&self) {}
+
+        // What comes into its subviews ([`first_foreign`]): every
+        // `addSubview:` variant tells it, whoever sends it.
+        #[unsafe(method(didAddSubview:))]
+        fn did_add_subview(&self, subview: &NSView) {
+            note_added(&self.ivars().foreign, subview);
+            // SAFETY: NSView's own notification, on the main thread.
+            unsafe { msg_send![super(self), didAddSubview: subview] }
+        }
+
+        // Whatever these bring may not stay ours, told or not.
+        #[unsafe(method(setSubviews:))]
+        fn set_subviews(&self, subviews: &NSArray<NSView>) {
+            self.ivars().foreign.set(true);
+            // SAFETY: NSView's own setter, on the main thread.
+            unsafe { msg_send![super(self), setSubviews: subviews] }
+            self.ivars().foreign.set(true);
+        }
+
+        #[unsafe(method(replaceSubview:with:))]
+        fn replace_subview(&self, old: &NSView, new: &NSView) {
+            self.ivars().foreign.set(true);
+            // SAFETY: NSView's own replacement, on the main thread.
+            unsafe { msg_send![super(self), replaceSubview: old, with: new] }
+            self.ivars().foreign.set(true);
+        }
 
         // AppKit sets a layer-backed view's layer geometry (anchor,
         // position, transform) from the view when it lays it out or
@@ -1153,11 +1192,19 @@ impl ViewObj {
     }
 }
 
+/// Ivars of [`Container`].
+pub(crate) struct ContainerIvars {
+    /// As [`Ivars`]'s `foreign`: a subview that may not stay ours can have
+    /// come in since a scan last found none ([`first_foreign`]).
+    foreign: Cell<bool>,
+}
+
 define_class!(
     /// Holds a view's children ([`NshView::container`]): flipped, the
     /// view's size, scrolled by its bounds origin.
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
+    #[ivars = ContainerIvars]
     #[name = "NshContainer"]
     pub(crate) struct Container;
 
@@ -1176,8 +1223,45 @@ define_class!(
 
         #[unsafe(method(updateLayer))]
         fn update_layer(&self) {}
+
+        // As [`ViewObj`]'s: what comes into its subviews.
+        #[unsafe(method(didAddSubview:))]
+        fn did_add_subview(&self, subview: &NSView) {
+            note_added(&self.ivars().foreign, subview);
+            // SAFETY: NSView's own notification, on the main thread.
+            unsafe { msg_send![super(self), didAddSubview: subview] }
+        }
+
+        #[unsafe(method(setSubviews:))]
+        fn set_subviews(&self, subviews: &NSArray<NSView>) {
+            self.ivars().foreign.set(true);
+            // SAFETY: NSView's own setter, on the main thread.
+            unsafe { msg_send![super(self), setSubviews: subviews] }
+            self.ivars().foreign.set(true);
+        }
+
+        #[unsafe(method(replaceSubview:with:))]
+        fn replace_subview(&self, old: &NSView, new: &NSView) {
+            self.ivars().foreign.set(true);
+            // SAFETY: NSView's own replacement, on the main thread.
+            unsafe { msg_send![super(self), replaceSubview: old, with: new] }
+            self.ivars().foreign.set(true);
+        }
     }
 );
+
+impl Container {
+    /// A new, empty container at `frame` (also a navigation screen's
+    /// backdrop, `crate::navigation`). Its subviews are not known to be all
+    /// ours until a first scan ([`first_foreign`]).
+    pub(crate) fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Container> {
+        let this = mtm.alloc::<Container>().set_ivars(ContainerIvars {
+            foreign: Cell::new(true),
+        });
+        // SAFETY: NSView's designated initializer.
+        unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+}
 
 /// Whether `view` is an app's view (or a container of one), as opposed to
 /// a hosted AppKit view.
@@ -1185,6 +1269,67 @@ pub(crate) fn is_ours(view: &NSView) -> bool {
     view.downcast_ref::<ViewObj>().is_some()
         || view.downcast_ref::<Container>().is_some()
         || crate::visual::is_backdrop(view)
+}
+
+/// Only our view and container classes remain ours regardless of changes
+/// to their identifier. Backdrops are identified by a mutable identifier,
+/// so their holders conservatively keep scanning.
+fn stays_ours(view: &NSView) -> bool {
+    view.downcast_ref::<ViewObj>().is_some() || view.downcast_ref::<Container>().is_some()
+}
+
+/// AppKit added `subview` to a view of ours holding subviews whose
+/// tracking mark is `foreign` ([`first_foreign`]). Called for every add, so
+/// it only reads `subview`'s class: nothing reentrant.
+fn note_added(foreign: &Cell<bool>, subview: &NSView) {
+    if !stays_ours(subview) {
+        foreign.set(true);
+    }
+}
+
+/// The tracking mark of `holder` ([`first_foreign`]), when it is a view of
+/// ours that holds subviews. [`NshView::container`] only returns those.
+fn foreign_mark(holder: &NSView) -> Option<&Cell<bool>> {
+    if let Some(c) = holder.downcast_ref::<Container>() {
+        return Some(&c.ivars().foreign);
+    }
+    holder.downcast_ref::<ViewObj>().map(|v| &v.ivars().foreign)
+}
+
+/// The lowest subview of `holder` that is not ours ([`is_ours`]), the one
+/// an appended child goes below: what a scan of its subviews finds.
+///
+/// The scan is skipped while `holder`'s mark says nothing that may not stay
+/// ours ([`stays_ours`]) can have come in since a scan last found only
+/// views that stay ours: everything in it then still is ours, so the scan
+/// would find nothing. The mark is cleared before a scan, so that what
+/// AppKit adds while it runs (a host view's `identifier` may do anything)
+/// marks it again, and set again after a scan that found a view that is
+/// not ours or one that may not stay so (a host's view tagged as a
+/// backdrop). Removals leave it: the next append scans once.
+fn first_foreign(holder: &NSView) -> Option<Retained<NSView>> {
+    let mark = foreign_mark(holder);
+    if let Some(mark) = mark {
+        if !mark.get() {
+            return None;
+        }
+        mark.set(false);
+    }
+    let mut settled = true;
+    let mut found = None;
+    for v in holder.subviews().iter() {
+        if !is_ours(&v) {
+            found = Some(v);
+            break;
+        }
+        settled = settled && stays_ours(&v);
+    }
+    if (found.is_some() || !settled)
+        && let Some(mark) = mark
+    {
+        mark.set(true);
+    }
+    found
 }
 
 /// Whether the event AppKit handles is a mouse press.
@@ -1307,6 +1452,8 @@ impl NshView {
             overlay: RefCell::new(None),
             stale: Cell::new(false),
             unplaced: Cell::new(false),
+            // Not known until a first scan.
+            foreign: Cell::new(true),
         });
         // SAFETY: NSView's designated initializer.
         let obj: Retained<ViewObj> = unsafe { msg_send![super(obj), initWithFrame: NSRect::ZERO] };
@@ -1396,12 +1543,10 @@ impl NshView {
             return c;
         }
         let mtm = self.mtm();
-        // SAFETY: NSView's designated initializer.
-        let c: Retained<Container> =
-            unsafe { msg_send![Container::alloc(mtm), initWithFrame: self.ns().bounds()] };
+        let c = Container::new(mtm, self.ns().bounds());
         setup(&c);
         let children = self.child_views();
-        let first_native = self.ns().subviews().iter().find(|v| !is_ours(v));
+        let first_native = first_foreign(self.ns());
         match first_native {
             Some(native) => self.ns().addSubview_positioned_relativeTo(
                 &c,
@@ -1826,12 +1971,14 @@ impl NshView {
     }
 
     /// Inserts it into `parent` below `before` (on top of the other
-    /// children without one; hosted native views stay above).
+    /// children without one; hosted native views stay above:
+    /// [`first_foreign`]).
     pub(crate) fn insert_before(&self, parent: &NshView, before: Option<&NshView>) {
         let container = parent.container();
-        let above = before
-            .map(|b| Retained::from(b.ns()))
-            .or_else(|| container.subviews().iter().find(|v| !is_ours(v)));
+        let above = match before {
+            Some(b) => Some(Retained::from(b.ns())),
+            None => first_foreign(&container),
+        };
         match above {
             Some(above) => container.addSubview_positioned_relativeTo(
                 self.ns(),

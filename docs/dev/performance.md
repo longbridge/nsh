@@ -706,3 +706,27 @@ immediately before launching the TUI host. A private-PTY Gallery run with the ch
 at 52 ms, build completion before alternate-screen entry, and Gallery content at 5.436 s (including host
 recompilation). This verifies feedback during a build, not a startup speedup. The CLI integration test
 checks startup output and host-diagnostic isolation in ordinary and verbose modes.
+
+## macOS consecutive child appends
+
+Measured on an Apple silicon Mac on 2026-11-09, debug, baseline `36b91689c` versus the
+foreign-subview scan fast path. Three runs per size, medians, same Background priority:
+
+| Children | Before wall / CPU (ms) | After wall / CPU (ms) | Wall speedup |
+| --- | --- | --- | --- |
+| 100 | 41.071 / 40.526 | 12.591 / 12.596 | 3.3x |
+| 1,000 | 3031.449 / 2985.785 | 128.552 / 128.141 | 23.6x |
+| 8,600 | 215400.935 / 213106.725 | 1142.230 / 1129.177 | 188.6x |
+
+The isolated harness precreates a plain parent and children, then times repeated
+`NshView::insert_before(parent, None)` calls on a detached AppKit hierarchy and checks the final
+child count. CPU is process user + system time, not utilization. Creation, engine work, layout
+and drawing are excluded. Containers with hosted views or identifier-tagged backdrops retain
+the conservative scan. This removes redundant sibling scans; it does not establish that all
+AppKit mounting work is linear.
+
+The separate `NSH_MOUNT_BENCH_ONLY=1` native integration workload measures initial load to the
+native hierarchy. At 8,600 rows it showed no improvement: release 3903.0 → 3960.3 ms, debug
+18103.7 → 17985.3 ms (three-run medians). Most initial insertions specify a sibling and do not
+use the append path. These are not first-paint timings. GPU/power and engine trace item counts
+were not measured; interactive-priority execution was unavailable in this session.
