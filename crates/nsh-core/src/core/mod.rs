@@ -1195,6 +1195,13 @@ pub struct Core<M: TextEngine> {
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
+    /// The tops of the `pointer-events-*` regions that views joined or
+    /// left, or whose classes changed, since the last round: worked out
+    /// once each, before the round's mount items
+    /// ([`Self::flush_pointer_events`]). Worked out on every move, a
+    /// region's whole subtree was walked for each view inserted in it (an
+    /// editor's highlighted rows: 1600 spans, 2500 views, 10 ms a commit).
+    pointer_pending: Vec<Key>,
     /// The view with the keyboard focus, by key and id (keys are reused),
     /// as the platform reports it (`classes::focus_reported`).
     focus: Option<(Key, NodeId)>,
@@ -1389,6 +1396,7 @@ impl<M: TextEngine> Core<M> {
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
+            pointer_pending: Vec::new(),
             focus: None,
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
@@ -2699,6 +2707,7 @@ impl<M: TextEngine> Core<M> {
         if let Some(animation) = self.layout_animation.take() {
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
+        self.flush_pointer_events();
         self.flush_dirty();
         let relayout = self.needs_layout;
         if relayout {
@@ -5524,7 +5533,7 @@ impl<M: TextEngine> Core<M> {
         self.spacing_changed(parent, NO_KEY);
         if self.pointer_none_classes > 0 && self.pointer_region(parent).is_some() {
             // It no longer inherits the region's `none`.
-            self.update_pointer_events(key);
+            self.pointer_pending.push(key);
             self.pointer_events_moved(parent);
         }
         self.groups_changed(key, parent);
