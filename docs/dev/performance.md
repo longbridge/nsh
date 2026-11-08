@@ -29,6 +29,22 @@ version, the same paragraphs in a mounted `TextView`): first-commit medians for 
 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
 commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
 
+Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
+`nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
+100 body rows × 10 columns, each cell 100 `x` characters, in a 200 × 60 Cell terminal. Narrowing the table's
+container from 200 to 120 Cells commits in 616.6 → 267.1 ms; its initial commit takes 964.8 → 647.5 ms.
+Both versions send 33 / 2 ops and 12,995 / 5,267 mount items initially / on narrowing, with 5,376 nodes.
+A 10 × 6 table (40 characters per cell, narrowed to 100 Cells) takes 45.6 → 44.5 ms initially and
+25.9 → 22.7 ms on narrowing, keeping 869 / 379 items and 386 nodes. Commit times include component expansion,
+text measurement and layout; terminal drawing and input latency are outside the samples.
+
+The table shares one `computed` of its column widths (`text_view/view.rs`), borrowed by its cells and rules
+through `Memo::with`: the same fitting algorithm runs once per width change, down from 1,013 times for
+the 100 × 10 table. Its reactive graph and fitting kernel alone (`rustc -C opt-level=3`, same machine,
+seven alternating runs, width from zero to 120 Cells) take 8.636 → 0.0535 ms, excluding construction,
+text measurement, layout and drawing. All 49 paired terminal cell dumps match through consecutive widths,
+repeated widths, column floors and `colspan`; hiding and remounting the tables passes on both hosts.
+
 Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
 sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
 behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
