@@ -14,7 +14,9 @@ name: Release
 #
 # - Every night it builds the latest `main` and publishes it as the release
 #   `nightly`, a prerelease that is never the latest: `install.sh --nightly`
-#   installs it. A night without new commits
+#   installs it, `nsh update nightly` switches to it (its CLI is
+#   built with `NSH_CHANNEL=nightly`, and `nsh-release.json` names its
+#   revision). A night without new commits
 #   builds nothing. There is one `nightly` tag, moved to each build's commit,
 #   never a tag per night. Running it by hand with *nightly* publishes one now.
 #
@@ -236,7 +238,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-release-cargo-
 
+      # A nightly CLI knows its channel: `nsh update` stays on it.
       - name: Build the distribution
+        env:
+          NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
         run: cargo xtask dist -v
 
       # The packaged CLI makes and bundles a new app.
@@ -350,12 +355,20 @@ jobs:
           SHA: ${{ needs.plan.outputs.ref }}
         run: |
           short="${SHA:0:7}"
+          # What `nsh update nightly` compares its revision with.
+          version=$(gh api "repos/$GH_REPO/contents/Cargo.toml?ref=$SHA" --jq .content | base64 -d |
+            sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+          jq -n --arg version "$version" --arg commit "$SHA" '{version: $version, commit: $commit}' \
+            > assets/nsh-release.json
+          cat assets/nsh-release.json
           notes=$(cat <<NOTES
           The latest \`main\`, built $(date -u +%Y-%m-%d) from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA). It is rebuilt every night that \`main\` changes.
 
           \`\`\`sh
           curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
           \`\`\`
+
+          An installed nsh switches to it with \`nsh update nightly\`, and back with \`nsh update stable\`.
           NOTES
           )
           gh release delete nightly --cleanup-tag --yes 2> /dev/null || true
