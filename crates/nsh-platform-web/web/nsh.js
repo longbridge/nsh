@@ -322,6 +322,10 @@ img.nsh-fill { pointer-events: none; }
 .nsh-dark .nsh-sheet > div { background: rgba(44,44,46,.97); color: #fff; }
 .nsh-dark .nsh-sheet button { color: #0a84ff; border-top-color: rgba(255,255,255,.15); }
 .nsh-dark .nsh-sheet button.destructive { color: #ff453a; }
+/* Alert and sheet buttons take focus when they open: no browser outline.
+   Keyboard focus shows as a pressed tint on phones, a ring on desktop. */
+.nsh-dialog button:focus, .nsh-sheet button:focus { outline: none; }
+.nsh-dialog button:focus-visible, .nsh-sheet button:focus-visible { background: rgba(128,128,128,.12); }
 .nsh-desktop .nsh-sheet > div { border-radius: 12px; padding: 6px; background: #fff; color: #0a0a0a; border: 1px solid #e5e5e5;
   box-shadow: 0 10px 30px rgba(0,0,0,.25); }
 .nsh-desktop .nsh-sheet .nsh-sheet-head { color: #737373; border-bottom: 1px solid #e5e5e5; margin-bottom: 4px; padding: 8px 12px 12px; }
@@ -331,6 +335,8 @@ img.nsh-fill { pointer-events: none; }
 .nsh-desktop.nsh-dark .nsh-sheet > div { background: #171717; color: #fafafa; border-color: #262626; }
 .nsh-desktop.nsh-dark .nsh-sheet .nsh-sheet-head { color: #a3a3a3; border-bottom-color: #262626; }
 .nsh-desktop.nsh-dark .nsh-sheet button.destructive { color: #f87171; }
+.nsh-desktop .nsh-dialog button:focus-visible { box-shadow: 0 0 0 3px rgba(163,163,163,.5); }
+.nsh-desktop.nsh-dark .nsh-dialog button:focus-visible { box-shadow: 0 0 0 3px rgba(115,115,115,.5); }
 .nsh-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .nsh-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
 .nsh-spinner { position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px; pointer-events: none; z-index: 5; }
