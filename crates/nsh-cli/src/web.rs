@@ -133,6 +133,9 @@ pub(crate) fn package(
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
     let (linked, has_math) = {
         let plan = GatePlan::of(built);
+        if let Some(whole) = &plan.whole {
+            ui::warn(whole);
+        }
         let exports = prune::exports(&linkable)?;
         let keep: Vec<&str> = exports
             .iter()
@@ -412,6 +415,27 @@ struct GatePlan {
     /// By chunk id, the gates its own code needs that `main` lacks (a
     /// chunk's static imports list theirs: the page prepares them too).
     chunks: BTreeMap<String, Vec<String>>,
+    /// Why `main` keeps every gate when the bundler could have told which
+    /// ones the app uses ([`whole_because`]), and in which code.
+    whole: Option<Whole>,
+}
+
+/// What made a runtime linked for an app keep every gate: `why`, found in
+/// `code` (the app's entry, or a chunk it imports statically).
+#[derive(Debug, PartialEq, Eq)]
+struct Whole {
+    why: &'static str,
+    code: String,
+}
+
+impl std::fmt::Display for Whole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the engine keeps every part of nsh/base, zlib and the shader compiler: {} ({}). Import NSH's modules by name to leave out what the app doesn't use",
+            self.why, self.code
+        )
+    }
 }
 
 impl GatePlan {
@@ -428,15 +452,34 @@ impl GatePlan {
             Some((entry, chunks?))
         });
         let Some((entry, chunks)) = per_chunk else {
+            let whole = built
+                .native_use
+                .as_ref()
+                .and_then(whole_because)
+                .map(|why| Whole {
+                    why,
+                    code: "the app".to_owned(),
+                });
             return Self {
                 main: linked_gates(built.native_use.as_ref()),
                 chunks: BTreeMap::new(),
+                whole,
             };
         };
+        let mut whole = whole_because(entry).map(|why| Whole {
+            why,
+            code: "the app's entry".to_owned(),
+        });
         let mut first = entry.clone();
         for (id, uses) in &chunks {
             if built.entry_imports.iter().any(|e| e == id) {
                 first.merge(uses);
+                if whole.is_none() {
+                    whole = whole_because(uses).map(|why| Whole {
+                        why,
+                        code: format!("its chunk {id}"),
+                    });
+                }
             }
         }
         let main = linked_gates(Some(&first));
@@ -453,7 +496,11 @@ impl GatePlan {
                 plan.insert(id.to_owned(), gates);
             }
         }
-        Self { main, chunks: plan }
+        Self {
+            main,
+            chunks: plan,
+            whole,
+        }
     }
 
     /// Every gate some chunk loads later, each once, sorted.
@@ -503,6 +550,22 @@ pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String>
     linked_gates_of(uses, &app_set_specifiers())
 }
 
+/// Why [`linked_gates`] keeps every gate for code that uses `uses`, when
+/// the bundler read it: what the code does that it cannot tell apart.
+/// `None` when it keeps only what the code uses. [`linked_gates_of`]
+/// keeps everything by this, so the warning and the pruning agree.
+fn whole_because(uses: &nsh_bundler::NativeUse) -> Option<&'static str> {
+    if uses.computed_import {
+        return Some("it loads a module whose name is worked out as it runs, `import(name)`");
+    }
+    match uses.imports.get(nsh_base::SPECIFIER) {
+        Some(nsh_bundler::Imported::All) => {
+            Some("it takes nsh/base whole, `import * as` or `import(\"nsh/base\")`")
+        }
+        _ => None,
+    }
+}
+
 /// The prefix of the gates of an app's own UI sets ([`ui_set_gate`]).
 /// Not `nsh_set_`: the runtime's `nsh_set_base_url` and `nsh_set_dark`
 /// would read as gates.
@@ -550,7 +613,7 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
         gates
     };
     let Some(uses) = uses else { return all() };
-    if uses.computed_import {
+    if whole_because(uses).is_some() {
         return all();
     }
     let mut gates = Vec::new();
@@ -584,16 +647,16 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
                 }
             },
             "nsh/base/plot" => add("nsh_part_plot".into()),
-            nsh_base::SPECIFIER => match imported {
-                nsh_bundler::Imported::All => return all(),
-                nsh_bundler::Imported::Names(names) => {
+            // Taken whole, it kept everything above ([`whole_because`]).
+            nsh_base::SPECIFIER => {
+                if let nsh_bundler::Imported::Names(names) = imported {
                     for name in names {
                         if let Some(part) = part_of(name) {
                             add(format!("nsh_part_{part}"));
                         }
                     }
                 }
-            },
+            }
             module if app_sets.iter().any(|s| s == module) => add(ui_set_gate(module)),
             _ => {}
         }
@@ -1654,6 +1717,46 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_that_keeps_every_gate_says_why_and_where() {
+        let chunk = |id: &str, uses: nsh_bundler::NativeUse| crate::build::BuiltChunk {
+            id: id.to_owned(),
+            code: String::new(),
+            bytecode: Vec::new(),
+            source_map: None,
+            native_use: Some(uses),
+        };
+        let mut computed = uses(&[("nsh", Some(&["View"]))]);
+        computed.computed_import = true;
+        let mut built = crate::build::rust_root();
+        built.rust_root = false;
+        built.entry_native_use = Some(uses(&[("nsh", Some(&["View"]))]));
+        built.entry_imports = vec!["shared.js".into()];
+        built.chunks = vec![
+            chunk("shared.js", computed.clone()),
+            chunk("Later.js", uses(&[("nsh/base", None)])),
+        ];
+        let whole = GatePlan::of(&built).whole.unwrap();
+        assert_eq!(whole.code, "its chunk shared.js");
+        assert!(whole.why.contains("import(name)"));
+        assert!(whole.to_string().contains("Import NSH's modules by name"));
+
+        // The entry's own reason comes first; a chunk loaded later doesn't
+        // make the engine whole (its gates are side modules).
+        built.entry_native_use = Some(uses(&[("nsh/base", None)]));
+        let whole = GatePlan::of(&built).whole.unwrap();
+        assert_eq!(whole.code, "the app's entry");
+        assert!(whole.why.contains("nsh/base whole"));
+        built.entry_native_use = Some(uses(&[("nsh", Some(&["View"]))]));
+        built.chunks[0] = chunk("shared.js", uses(&[]));
+        assert_eq!(GatePlan::of(&built).whole, None);
+
+        // Not read at all (a development or Rust app's build): nothing to say.
+        built.entry_native_use = None;
+        built.native_use = None;
+        assert_eq!(GatePlan::of(&built).whole, None);
+    }
+
+    #[test]
     fn chunks_load_the_gates_the_entry_lacks_as_side_modules() {
         let chunk = |id: &str, uses: Option<nsh_bundler::NativeUse>| crate::build::BuiltChunk {
             id: id.to_owned(),
@@ -1714,6 +1817,8 @@ mod tests {
                 "Editor.js": ["nsh_part_editor"],
             })
         );
+
+        assert_eq!(plan.whole, None);
 
         // A chunk whose use is unknown: everything is the entry's.
         built.chunks.push(chunk("Unknown.js", None));
