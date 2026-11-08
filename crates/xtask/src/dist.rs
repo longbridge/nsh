@@ -55,7 +55,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
 
     // The CLI for this machine.
     cargo(&["build", "--release", "-p", "nsh-cli"], "nsh")?;
-    copy(
+    copy_executable(
         &release.join("release").join(exe("nsh")),
         &out.join("bin").join(exe("nsh")),
     )?;
@@ -67,7 +67,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ("nsh-macos-app", "the release runner for macOS"),
         ] {
             cargo(&["build", "--release", "-p", package], what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(package),
                 &out.join("runtime/macos").join(package),
             )?;
@@ -102,7 +102,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 }
             }
             cargo(&args, what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(package),
                 &out.join("runtime/linux").join(package),
             )?;
@@ -114,7 +114,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ("nsh-windows-app", "the release runner for Windows"),
         ] {
             cargo(&["build", "--release", "-p", package], what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(exe(package)),
                 &out.join("runtime/windows").join(exe(package)),
             )?;
@@ -151,7 +151,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             .iter()
             .find(|file| file.exists())
             .context("the GPUI build wrote no development host")?;
-        copy(host, &out.join("runtime/gpui").join(exe(package)))?;
+        copy_executable(host, &out.join("runtime/gpui").join(exe(package)))?;
 
         // The terminal's development host (`nsh run --target tui`).
         let package = "nsh-tui-host";
@@ -159,7 +159,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             &["build", "--release", "-p", package],
             "the development host for the terminal",
         )?;
-        copy(
+        copy_executable(
             &release.join("release").join(exe(package)),
             &out.join("runtime/tui").join(exe(package)),
         )?;
@@ -367,7 +367,7 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
             ],
             &format!("the release runner for {triple}"),
         )?;
-        copy(
+        copy_executable(
             &release.join(triple).join("release/nsh-ios-app"),
             &out.join("runtime/ios").join(dir).join("nsh-ios-app"),
         )?;
@@ -384,7 +384,7 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
             ],
             &format!("the development host for {triple}"),
         )?;
-        copy(
+        copy_executable(
             &release.join(triple).join("release/nsh-ios-host"),
             &out.join("runtime/ios").join(dir).join("nsh-ios-host"),
         )?;
@@ -541,6 +541,29 @@ pub(crate) fn remove(file: &Path) -> anyhow::Result<()> {
     }
 }
 
+/// Copies the executable `from` to `to` without its symbol table: a sixth
+/// or so of each executable, which nothing that runs it reads (panics name
+/// no functions). Stripped after the build, not by the release profile's
+/// `strip`, which would build everything again apart from the builds a
+/// checkout keeps for profiling. Windows' executables keep their symbols in
+/// PDB files, which the distribution leaves out.
+fn copy_executable(from: &Path, to: &Path) -> anyhow::Result<()> {
+    copy(from, to)?;
+    if cfg!(target_os = "macos") {
+        term::run(Command::new("strip").arg(to))?;
+        // Stripping invalidates the linker's ad-hoc signature, without
+        // which Apple silicon refuses to run the file.
+        term::run(
+            Command::new("codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(to),
+        )?;
+    } else if cfg!(target_os = "linux") {
+        term::run(Command::new("strip").arg("--strip-all").arg(to))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir)?;
@@ -557,7 +580,9 @@ mod tests {
         io::Read as _,
     };
 
-    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan};
+    use super::{
+        AAR_KEEP_RULES, copy_executable, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan,
+    };
 
     #[test]
     fn an_aar_carries_the_rules_that_keep_the_runtime() {
@@ -631,5 +656,33 @@ mod tests {
         // runtime/web.
         let error = web_runtimes_plan(true, false, cc).unwrap_err().to_string();
         assert!(error.contains("/opt/llvm/bin/clang"), "{error}");
+    }
+
+    /// A stripped executable (this test's own) is smaller and still runs:
+    /// on macOS, signed again.
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn a_stripped_executable_still_runs() {
+        let dir = std::env::temp_dir().join(format!("nsh-strip-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let exe = std::env::current_exe().unwrap();
+        let stripped = dir.join("stripped");
+        copy_executable(&exe, &stripped).unwrap();
+        let size = |p: &std::path::Path| fs::metadata(p).unwrap().len();
+        assert!(
+            size(&stripped) < size(&exe),
+            "{} >= {}",
+            size(&stripped),
+            size(&exe)
+        );
+        let output = std::process::Command::new(&stripped)
+            .args(["--list", "--format", "terse"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("a_stripped_executable_still_runs")
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
