@@ -80,6 +80,11 @@ pub fn main_with_options(options: AppOptions) -> io::Result<()> {
 
 /// Runs the host with an app's registered UI sets and options given by the embedding program
 /// rather than read from its command line, as when the host runs inside another program.
+///
+/// For the run, the host takes the process's SIGINT, SIGTERM and SIGHUP (on Windows, Ctrl+C
+/// and Ctrl+Break through `SetConsoleCtrlHandler`): each asks it to exit, as [`request_exit`]
+/// does, and the program's own handlers do not see them. The host puts back the handlers it
+/// found when the run ends.
 pub fn main_with_args(mut options: AppOptions, args: Args) -> io::Result<()> {
     let log_file = args.log_file.clone().unwrap_or_else(|| {
         std::env::temp_dir().join(format!("nsh-tui-host-{}.log", std::process::id()))
