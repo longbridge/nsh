@@ -5,7 +5,7 @@ after `nsh test --trace` timings and item counts (`nsh trace` before it, in the 
 (Apple Silicon except where noted):
 
 Markdown TeX preprocessing (`text_view/markdown/latex.rs`, 2026-11-08, Linux x86_64,
-Ryzen 9 7950X, Rust 1.99.1, release, against `3b4f2abf`): a paragraph of
+release, against `3b4f2abf`): a paragraph of
 ``"`a` x ".repeat(k) + "\\(x^2\\)"``, math enabled, streaming off. Eleven alternating
 before / after rounds on one CPU, warmed and batched; medians, input construction excluded:
 
