@@ -1425,6 +1425,9 @@ starting (the next display frame, or 50 ms where none comes: Base UI's `data-sta
   (`include_str!`); the web runtime fetches it with `runtime_data::load("emoji")` (`nsh-emoji.bin`, which `nsh
   package` publishes only for an app that links `nsh_part_emoji_picker`), and the picker shows `loading` until then.
   License: `emoji.LICENSE.txt` (MIT and Unicode License v3).
+- **The feature**: `nsh-base`'s `emoji-picker`, off in `nsh-base` and on in the platform crates' defaults, the runners
+  and the Rust apps' generated workspaces, as `math` is: the component and its data add about 440 kB to a release
+  runner (438 kB on Linux), which an embedding app's own build leaves out with `default-features = false`.
 - **The search** (`mod.rs` `Index`): each emoji's English name, the app's `annotations`' name, then the keywords, in
   lower case; a query is a substring of one line, matches whose names have a word starting with the query first,
   then keywords', then the rest, and a longer query searches the last one's matches (as `Command`'s).

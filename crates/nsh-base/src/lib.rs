@@ -36,6 +36,7 @@ mod diff;
 pub mod dock;
 #[cfg(feature = "editor")]
 pub mod editor;
+#[cfg(feature = "emoji-picker")]
 mod emoji_picker;
 mod hover_card;
 mod keys;
@@ -75,7 +76,7 @@ pub mod text_view;
 /// `EmojiPicker`'s emoji (`emoji_picker/emoji.tsv`): the native runtimes
 /// embed them; `nsh` publishes them next to a web runtime, which fetches
 /// them for its first picker.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "emoji-picker", not(target_arch = "wasm32")))]
 #[doc(hidden)]
 pub use crate::emoji_picker::EMOJI_DATA;
 
@@ -102,6 +103,12 @@ use nsh_core::element::{ComponentSpec, Registry};
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
 pub use nsh_core::element::{Input, input};
 
+#[cfg(feature = "emoji-picker")]
+pub use crate::emoji_picker::{
+    EmojiAnnotation, EmojiEntry, EmojiGroup, EmojiGroupId, EmojiGroupLabels, EmojiPicker,
+    EmojiPickerApi, EmojiPickerElement, EmojiPickerEvent, EmojiPickerProps, EmojiSkinTone,
+    emoji_picker,
+};
 #[cfg(feature = "term")]
 pub use crate::term::{
     Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,
@@ -165,11 +172,6 @@ pub use crate::{
         DateRangePreset, DateTime, PickedDate, date_picker,
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
-    emoji_picker::{
-        EmojiAnnotation, EmojiEntry, EmojiGroup, EmojiGroupId, EmojiGroupLabels, EmojiPicker,
-        EmojiPickerApi, EmojiPickerElement, EmojiPickerEvent, EmojiPickerProps, EmojiSkinTone,
-        emoji_picker,
-    },
     hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
@@ -308,6 +310,8 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
 pub mod parts {
     use nsh_core::element::Registry;
 
+    #[cfg(feature = "emoji-picker")]
+    use crate::EmojiPicker;
     #[cfg(feature = "plot")]
     use crate::plot;
     #[cfg(feature = "rich-editor")]
@@ -317,10 +321,10 @@ pub mod parts {
         Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
         CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
         Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
-        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, EmojiPicker, HoverCard,
-        Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress,
-        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
-        Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        Combobox, Command, ContextMenu, DataTable, DatePicker, DockArea, HoverCard, Link, Menu,
+        MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
+        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
+        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
         TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
         Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
@@ -341,6 +345,7 @@ pub mod parts {
         ("toast", toast),
         ("pickers", pickers),
         ("color_picker", color_picker),
+        #[cfg(feature = "emoji-picker")]
         ("emoji_picker", emoji_picker),
         ("carousel", carousel),
         ("tree", tree),
@@ -463,6 +468,7 @@ pub mod parts {
 
     /// `EmojiPicker`: a search field over every emoji, with the emoji's
     /// data (fetched by the web runtime the first time a picker shows).
+    #[cfg(feature = "emoji-picker")]
     pub fn emoji_picker(registry: &mut Registry) {
         registry.register::<EmojiPicker>();
     }
@@ -567,7 +573,12 @@ mod tests {
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
-    #[cfg(all(feature = "editor", feature = "plot", feature = "rich-editor"))]
+    #[cfg(all(
+        feature = "editor",
+        feature = "emoji-picker",
+        feature = "plot",
+        feature = "rich-editor"
+    ))]
     #[test]
     fn the_exports_are_pinned() {
         let registry = super::registry();
