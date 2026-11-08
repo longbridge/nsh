@@ -240,8 +240,11 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
 - **Marks.** `Core::pictured` holds the views whose layers read pictures or cover the screen. After a commit,
   `mark_shader_inputs` sends `MountItem::ShaderInput` for every effect or transition with a view of the batch in its
   subtree (`MountItem::view`) or a parent a view left (`Core::unlinked_from`, as a removed view has no parent left to
-  walk up from), and for every backdrop reader and screen layer once anything changed; the platforms
-  take those pictures again, and notice what changes on their UI thread themselves.
+  walk up from); for every backdrop reader once a view that draws before it changed (`Core::draws_before`: an
+  ancestor, or a view earlier in the order views draw in, siblings by `zIndex` then in order; never the reader, what
+  it holds or what draws over it, which are not in its backdrop), or an item that shows everywhere (`shown_by`: the
+  appearance, the tree's order, any item it does not know); and for every screen layer once anything changed. The
+  platforms take those pictures again, and notice what changes on their UI thread themselves.
 - **Pages and dialogs.** `transitionShader` (`NavShaderSpec`) compiles into a `Transition` layer sent as
   `MountItem::NavShader { id, shader }` (350 ms by default); the platform draws a push, pop, presentation or dismissal
   through it, the lower side `from` and the upper `to`.

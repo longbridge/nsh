@@ -4159,8 +4159,10 @@ impl<M: TextEngine> Core<M> {
     /// Tells the platform which shaders' pictures this commit changed
     /// ([`MountItem::ShaderInput`]): the effects and transitions with a
     /// changed view in their subtree (themselves included) or one that left
-    /// it, and every
-    /// shader that reads what is behind it, and every screen effect or
+    /// it; every shader that reads what is behind it once a view drawn
+    /// before it changed ([`Core::draws_before`]: not the view, what it holds
+    /// or what draws over it), or anything that shows everywhere (the
+    /// appearance, the tree's order); and every screen effect or
     /// transition, once anything changed.
     fn mark_shader_inputs(&mut self) {
         let unlinked_from = std::mem::take(&mut self.unlinked_from);
@@ -4178,6 +4180,7 @@ impl<M: TextEngine> Core<M> {
         let ids: Vec<NodeId> = self.pictured.iter().copied().collect();
         let mut marked: Vec<NodeId> = Vec::new();
         let mut subtrees: Vec<(NodeId, Key)> = Vec::new();
+        let mut backdrops: Vec<(NodeId, Key)> = Vec::new();
         for id in ids {
             let Ok(key) = self.key(id) else {
                 self.pictured.remove(&id);
@@ -4191,11 +4194,50 @@ impl<M: TextEngine> Core<M> {
                 continue;
             };
             let inputs = layer.shader.inputs();
-            if inputs.contains(I::Backdrop) || matches!(layer.role, R::Screen | R::ScreenTransition)
-            {
+            if matches!(layer.role, R::Screen | R::ScreenTransition) {
                 marked.push(id);
-            } else if matches!(layer.role, R::Effect | R::Transition) {
+                continue;
+            }
+            if inputs.contains(I::Backdrop) {
+                backdrops.push((id, key));
+            }
+            if matches!(layer.role, R::Effect | R::Transition) {
                 subtrees.push((id, key));
+            }
+        }
+        if !backdrops.is_empty() {
+            // What changed: the views of the items, and the parents of the
+            // views that left (`Remove`, `Delete`), which stand in for them.
+            let mut everywhere = false;
+            let mut changed: Vec<Key> = Vec::new();
+            let mut seen = rustc_hash::FxHashSet::default();
+            for item in &self.mount {
+                match shown_by(item) {
+                    Shown::Nothing => {}
+                    Shown::Everywhere => {
+                        everywhere = true;
+                        break;
+                    }
+                    Shown::View(id) => {
+                        if seen.insert(id)
+                            && let Ok(key) = self.key(id)
+                        {
+                            changed.push(key);
+                        }
+                    }
+                }
+            }
+            for &id in &unlinked_from {
+                if seen.insert(id)
+                    && let Ok(key) = self.key(id)
+                {
+                    changed.push(key);
+                }
+            }
+            for &(id, key) in &backdrops {
+                if everywhere || self.draws_before(&changed, key) {
+                    marked.push(id);
+                }
             }
         }
         if !subtrees.is_empty() {
@@ -4227,6 +4269,59 @@ impl<M: TextEngine> Core<M> {
         for id in marked {
             self.mount.push(MountItem::ShaderInput { id });
         }
+    }
+
+    /// Whether one of `views` draws before `reader` (under it): an ancestor
+    /// of it (its own box is behind it), or a view that comes before it in
+    /// the order the views draw in, siblings by [`Node::stack_rank`] then in
+    /// order. The reader, what it holds and what draws over it do not: they
+    /// are not in its backdrop. A view whose way up does not meet the
+    /// reader's (another root, an overlay's) is taken to draw before it.
+    fn draws_before(&self, views: &[Key], reader: Key) -> bool {
+        if views.is_empty() {
+            return false;
+        }
+        // The reader's way up, the reader first: where each ancestor is on it.
+        let mut up: Vec<Key> = Vec::new();
+        let mut key = reader;
+        while key != NO_KEY {
+            up.push(key);
+            key = self.nodes[key as usize].parent;
+        }
+        let at: rustc_hash::FxHashMap<Key, usize> =
+            up.iter().enumerate().map(|(i, &k)| (k, i)).collect();
+        views.iter().any(|&view| {
+            let mut below = NO_KEY;
+            let mut key = view;
+            while key != NO_KEY {
+                if let Some(&i) = at.get(&key) {
+                    if i == 0 {
+                        // The reader, or a view in it.
+                        return false;
+                    }
+                    if below == NO_KEY {
+                        // An ancestor of the reader.
+                        return true;
+                    }
+                    // `key` holds both: the side of the view and the
+                    // reader's.
+                    return self.stacks_before(key, below, up[i - 1]);
+                }
+                below = key;
+                key = self.nodes[key as usize].parent;
+            }
+            true
+        })
+    }
+
+    /// Whether `parent`'s child `a` draws before (under) its child `b`.
+    fn stacks_before(&self, parent: Key, a: Key, b: Key) -> bool {
+        let children = &self.nodes[parent as usize].children;
+        let rank = |k: Key| {
+            let index = children.iter().position(|&c| c == k).unwrap_or(usize::MAX);
+            (self.nodes[k as usize].stack_rank(), index)
+        };
+        rank(a) < rank(b)
     }
 
     /// A shader's `source`, program, `uniforms` or `paused`, or an effect's
@@ -9405,5 +9500,83 @@ fn leaf_context<P>(kind: Kind) -> Option<LeafContext<P>> {
         Kind::Image => Some(LeafContext::Image(None)),
         Kind::Native => Some(LeafContext::Native(None)),
         _ => None,
+    }
+}
+
+/// What a mount item changed of what shows, for the shaders that read what
+/// is behind them ([`Core::mark_shader_inputs`]).
+enum Shown {
+    /// Nothing that shows: input, accessibility, the pictures' own marks,
+    /// animated values (they reach the views on the UI thread, whose
+    /// platform pictures the backdrops again), views leaving (their old
+    /// parents stand in for them: `unlinked_from`).
+    Nothing,
+    /// What a view shows, or where.
+    View(NodeId),
+    /// Anything, anywhere: the appearance, the order of the tree, a
+    /// transition. An item not known here is one, to be safe.
+    Everywhere,
+}
+
+fn shown_by(item: &MountItem) -> Shown {
+    use MountItem as M;
+    match item {
+        M::Events { .. }
+        | M::Keymap(_)
+        | M::Gestures { .. }
+        | M::AccessibilityLabel { .. }
+        | M::ShaderInput { .. }
+        | M::LayoutAnimation(_)
+        | M::Animation(_)
+        | M::ComponentPropSlots { .. }
+        | M::TrackStates { .. }
+        | M::InputContent { .. }
+        | M::Remove { .. }
+        | M::Delete { .. } => Shown::Nothing,
+        M::Insert { child, .. } => Shown::View(*child),
+        M::ProjectStates { id, .. }
+        | M::ScrollConfig { id, .. }
+        | M::ScrollBy { id, .. }
+        | M::StickyCells { id, .. }
+        | M::ScrollBehavior { id, .. }
+        | M::Refreshing { id, .. }
+        | M::AnimationBindings { id, .. }
+        | M::ScreenConfig { id, .. }
+        | M::ModalConfig { id, .. } => Shown::View(*id),
+        M::Command { id, command } => {
+            use crate::ops::Command as C;
+            match command {
+                // Outside the window's content: the system's, the app's,
+                // another program's.
+                C::ExitApp
+                | C::PostMessage { .. }
+                | C::SendInput { .. }
+                | C::SetJsResponder { .. }
+                | C::ClearJsResponder
+                | C::Announce { .. }
+                | C::ImageInfo { .. }
+                | C::AccessibilityFocus
+                | C::Measure { .. }
+                | C::SetClipboard { .. }
+                | C::ReadClipboard { .. }
+                | C::SetClipboardImage { .. }
+                | C::ReadClipboardImage { .. }
+                | C::ReadClipboardFiles { .. }
+                | C::PickImages { .. }
+                | C::PickFiles { .. }
+                | C::OpenUrl { .. }
+                | C::PickScreenColor { .. }
+                | C::FileRequest { .. }
+                | C::Speech { .. }
+                | C::Audio { .. }
+                | C::Notification { .. }
+                | C::Desktop { .. }
+                | C::HostCall { .. } => Shown::Nothing,
+                // The design tokens: every view's colors.
+                C::Tokens { .. } => Shown::Everywhere,
+                _ => Shown::View(*id),
+            }
+        }
+        item => item.view().map_or(Shown::Everywhere, Shown::View),
     }
 }
