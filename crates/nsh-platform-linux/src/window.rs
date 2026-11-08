@@ -207,7 +207,7 @@ fn gtk_window(surface: &Surface, id: NodeId) -> Option<gtk::Window> {
     }
 }
 
-/// Blocks AT activation in the direct parent window of a shown modal.
+/// Blocks AT activation in the direct parent of a shown modal managed by this surface.
 /// GTK's wider window-group grab scope is not covered by this guard.
 pub(crate) fn blocked_by_modal(surface: &Surface, view: &NshView) -> bool {
     let Some(parent) = view.root().and_downcast::<gtk::Window>() else {

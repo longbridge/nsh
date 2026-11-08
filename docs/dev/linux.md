@@ -283,14 +283,17 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
 - **Accessibility**: `accessible={true}` grouping (children stay separate elements), app-defined `accessibilityActions`
   and real live regions (emulated by announcements).
   Press listeners and app-drawn window controls expose the parameterless `nsh.activate` action through AT-SPI.
-  Presses use the keyboard's event order and payload, stay inside the newest modal of the target window, and leave
-  keyboard focus alone. Alerts and action sheets block their NSH host subtree until dismissal. A shown native modal
-  also blocks its direct transient parent. Hidden, disabled, removed or untargetable controls cannot activate.
+  Presses use the keyboard's event order and payload, stay inside the target window's newest in-surface Nav modal,
+  and leave keyboard focus alone. Alerts and action sheets block their NSH host subtree until dismissal. A shown
+  native modal managed by the same surface also blocks its direct transient parent. Hidden, disabled, removed,
+  GTK-insensitive or untargetable controls cannot activate; GTK sensitivity includes native ancestors and the window.
   GTK queries the private action group's admission live for each AT-SPI request, including retained client objects;
-  blocked actions are omitted and stale action indices are rejected. Activation rechecks admission before dispatch.
-  This group is for the AT bridge, not signal-driven `GtkActionable` bindings. Native GTK group grabs can block more
-  windows than the direct-parent check, including independent windows and portal dialogs; that wider scope remains
-  unsupported by this check.
+  blocked actions are omitted and stale action indices are rejected. Activation rechecks admission before dispatch
+  and before a deferred native window operation. This group is for the AT bridge, not signal-driven `GtkActionable`
+  bindings. AT activation invokes a semantic action without reproducing physical input routing: an independent
+  window can remain AT-activatable while a GTK window-group grab blocks its pointer and keyboard input. Hosts that
+  require those background operations to be unavailable must set GTK sensitivity on the affected widget, container
+  or window, or set the NSH accessibility disabled state on each affected action target.
 - **No desktop equivalent**: the status bar; `AccessibilityFocus` moves keyboard focus when the view can take it.
 - **Packaged apps** are a directory and a `.tar.gz` (`embedding.md`); GTK 4, Pango and (with the release runner's
   default `webview` feature) WebKitGTK 6.0 must be installed where they run.

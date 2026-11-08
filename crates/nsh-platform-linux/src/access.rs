@@ -272,6 +272,7 @@ fn can_activate(surface: &Surface, view: &NshView) -> bool {
     if !(state.events.contains(EventKind::Press) || state.props.window_control.is_some())
         || a.state.disabled
         || a.accessible == Some(false)
+        || !view.is_sensitive()
         || !view.is_mapped()
         || mounter.views.get(&state.id) != Some(view)
     {
@@ -2151,6 +2152,122 @@ mod tests {
             assert!(!button.is_focus());
         });
         assert!(ran.is_some(), "the AT-SPI test requires a GTK display");
+    }
+
+    fn gtk_sensitivity_case(scope: &'static str) {
+        with_activation(move |surface, button, events| {
+            let group = button.state().access.activation.clone().unwrap();
+            let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+            let target: gtk::Widget = match scope {
+                "target" => button.clone().upcast(),
+                "ancestor" => surface.root.clone().upcast(),
+                "window" => window.upcast(),
+                _ => unreachable!(),
+            };
+            group.activate_action("activate", None);
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+            events.lock().unwrap().clear();
+            target.set_sensitive(false);
+            assert!(button.is_mapped() && button.can_target());
+            assert!(!button.is_sensitive());
+            assert!(!button.state().props.accessibility.state.disabled);
+            // Call the group directly: GTK's AT bridge cannot mask a missing
+            // activation-time check of inherited native sensitivity.
+            group.activate_action("activate", None);
+            flush(surface);
+            assert!(
+                events.lock().unwrap().is_empty(),
+                "GTK-insensitive {scope} dispatched {:?}",
+                *events.lock().unwrap()
+            );
+            assert!(!group.is_action_enabled("activate"));
+            target.set_sensitive(true);
+            assert!(button.is_sensitive());
+            assert!(group.is_action_enabled("activate"));
+            group.activate_action("activate", None);
+            flush(surface);
+            assert_eq!(*events.lock().unwrap(), expected_press());
+        });
+    }
+
+    #[test]
+    fn activation_gtk_sensitivity_target() {
+        gtk_sensitivity_case("target");
+    }
+
+    #[test]
+    fn activation_gtk_sensitivity_ancestor() {
+        gtk_sensitivity_case("ancestor");
+    }
+
+    #[test]
+    fn activation_gtk_sensitivity_window() {
+        gtk_sensitivity_case("window");
+    }
+
+    #[test]
+    fn activation_gtk_sensitivity_deferred_close() {
+        with_activation(|surface, button, events| {
+            let control = window_control(surface);
+            let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+            let closes = count_closes(&window);
+            assert!(control.is_sensitive());
+            control.activate_action("nsh.activate", None).unwrap();
+            window.set_sensitive(false);
+            assert!(control.is_mapped() && control.can_target());
+            assert!(!control.is_sensitive());
+            assert_eq!(
+                control.state().props.window_control,
+                Some(nsh_core::desktop::WindowControl::Close)
+            );
+            let done = Rc::new(std::cell::Cell::new(false));
+            let complete = done.clone();
+            gtk::glib::idle_add_local_once(move || complete.set(true));
+            assert!(crate::gtk_test::wait_until(|| done.get()));
+            assert_eq!(
+                closes.get(),
+                0,
+                "a newly insensitive host cancels pending Close"
+            );
+            window.set_sensitive(true);
+            control.activate_action("nsh.activate", None).unwrap();
+            assert!(crate::gtk_test::wait_until(|| closes.get() == 1));
+            flush(surface);
+            assert!(events.lock().unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "requires an AT-SPI session bus, Python 3 and libatspi"]
+    fn atspi_activation_gtk_sensitivity_dynamic() {
+        assert!(
+            with_activation(|surface, button, events| {
+                let window = button.root().unwrap().downcast::<gtk::Window>().unwrap();
+                let mut client = AtspiClient::new();
+                client.attempt(true);
+                flush(surface);
+                assert_eq!(*events.lock().unwrap(), expected_press());
+                events.lock().unwrap().clear();
+                for target in [
+                    button.clone().upcast::<gtk::Widget>(),
+                    surface.root.clone().upcast(),
+                    window.upcast(),
+                ] {
+                    target.set_sensitive(false);
+                    assert!(button.is_mapped() && !button.is_sensitive());
+                    client.attempt(false);
+                    flush(surface);
+                    assert!(events.lock().unwrap().is_empty());
+                    target.set_sensitive(true);
+                    client.attempt(true);
+                    flush(surface);
+                    assert_eq!(*events.lock().unwrap(), expected_press());
+                    events.lock().unwrap().clear();
+                }
+            })
+            .is_some()
+        );
     }
 
     fn with_role(role: Role) -> Accessibility {
