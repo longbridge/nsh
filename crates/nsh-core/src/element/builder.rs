@@ -1495,9 +1495,10 @@ pub trait Interactive: Element {
 
     /// The selection across the texts of a selectable view
     /// ([`Self::selectable`]) changed: the selected text, as a copy gives
-    /// it, empty once nothing is selected, and where it starts in the
-    /// view's whole text (TSX `onSelectionChange` of a `<View selectable>`,
-    /// `{ text, start }`). Only the outermost selectable view of an area
+    /// it, empty once nothing is selected, where it starts in the view's
+    /// whole text, and the box around it in the view and in its root view
+    /// (TSX `onSelectionChange` of a `<View selectable>`, `{ text, start,
+    /// bounds, pageBounds }`). Only the outermost selectable view of an area
     /// reports it; an [`Input`](super::Input)'s own selection is its
     /// `on_selection_change`.
     fn on_text_selection_change<M>(

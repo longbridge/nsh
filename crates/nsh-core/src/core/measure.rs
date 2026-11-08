@@ -201,14 +201,41 @@ impl<M: TextEngine> Core<M> {
                 Bounds::default()
             }
         };
-        let page = self.measure(id).map_or(Point::default(), |m| m.page);
         fields.push((
             "pageBounds",
-            PayloadValue::Bounds(Bounds {
-                origin: point(page.x + caret.origin.x, page.y + caret.origin.y),
-                size: caret.size,
-            }),
+            PayloadValue::Bounds(self.page_bounds(id, caret)),
         ));
+    }
+
+    /// Completes a selectable view's `onSelectionChange` payload from its
+    /// platform: adds `pageBounds`, its `bounds` (the selected text in the
+    /// view) moved by where the view is in its root view, as
+    /// [`Self::locate_caret`] does for a caret. A payload without `bounds`
+    /// (nothing selected, an input's selection) stays as it is.
+    pub fn locate_selection(&self, id: NodeId, payload: &mut EventPayload) {
+        let EventPayload::Map(fields) = payload else {
+            return;
+        };
+        if fields.iter().any(|(k, _)| *k == "pageBounds") {
+            return;
+        }
+        if let Some(&(_, PayloadValue::Bounds(selected))) =
+            fields.iter().find(|(k, _)| *k == "bounds")
+        {
+            fields.push((
+                "pageBounds",
+                PayloadValue::Bounds(self.page_bounds(id, selected)),
+            ));
+        }
+    }
+
+    /// `bounds` in view `id` moved by where the view is in its root view.
+    fn page_bounds(&self, id: NodeId, bounds: Bounds<Points>) -> Bounds<Points> {
+        let page = self.measure(id).map_or(Point::default(), |m| m.page);
+        Bounds {
+            origin: point(page.x + bounds.origin.x, page.y + bounds.origin.y),
+            size: bounds.size,
+        }
     }
 
     /// Whether `key` hangs from the main tree's root or a root view that

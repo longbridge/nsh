@@ -1933,8 +1933,8 @@ pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
 }
 
 /// The rectangles (view coordinates) the characters `start..end` of the
-/// text view with `state` cover, one per line (the test agent's spans).
-#[cfg(feature = "dev")]
+/// text view with `state` cover, one per line (the box of a selectable
+/// view's selection, the test agent's spans).
 pub(crate) fn range_rects(state: &crate::view::ViewState, start: u32, end: u32) -> Vec<CGRect> {
     let Some(drawn) = state.text.as_ref() else {
         return Vec::new();
