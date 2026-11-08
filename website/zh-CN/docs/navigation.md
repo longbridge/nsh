@@ -231,7 +231,7 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 
 页面（Rust 中是 `nav_page()`，TSX 中是 `NavPage`）包裹页面内容并携带它的标题栏。iOS 和 Android 显示系统标题栏，由标题和标题栏选项设置。桌面和 Web 显示页面的标题栏插槽（`.header(..)`，TSX 的 `header`），即应用自己的视图，放在页面顶部：与页面同宽，高度由它自己的布局决定，内容位于它下方。像上面的例子那样两者都给，页面在每个平台上都显得自然。所有选项都是响应式的：改变 signal，标题栏随之更新。
 
-在 Rust 中，下表的每个属性都是 `nav_page()` 上蛇形命名的方法：`.title(..)`、`.header(..)`、`.header_visible(..)`、`.header_transparent(..)`、`.header_style_with(..)`、`.header_style(..)`、`.header_back_visible(..)`、`.header_left(..)`、`.header_right(..)`、`.header_title(..)`、`.header_large_title(..)`、`.header_back_title(..)`、`.header_right_items(..)`、`.animation(ScreenAnimation::Fade)`、`.status_bar(..)`、`.pop_on_swipe(..)`、`.pop_on_back(..)`、`.on_back_press(..)`、`.on_dismiss(..)`、`.on_header_item_press(..)`、`.on_header_menu_select(..)`；它的子元素就是页面内容。
+在 Rust 中，下表的每个属性都是 `nav_page()` 上蛇形命名的方法：`.title(..)`、`.header(..)`、`.header_visible(..)`、`.header_transparent(..)`、`.header_style_with(..)`、`.header_style(..)`、`.header_back_visible(..)`、`.header_left(..)`、`.header_right(..)`、`.header_title(..)`、`.header_large_title(..)`、`.header_back_title(..)`、`.header_right_items(..)`、`.animation(ScreenAnimation::Fade)`、`.status_bar(..)`、`.pop_on_swipe(..)`、`.pop_on_back(..)`、`.on_back_press(..)`、`.on_dismiss(..)`；它的子元素就是页面内容。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -248,7 +248,7 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 | `ios={{ headerLeftSystemItem }}` | 同 `headerRightSystemItem` | | iOS：同上，放在标题栏开头，按下即按下 `headerLeft`。 |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS：在标题栏末尾显示 UIKit 自带的按钮，图标是该名称的 SF Symbol（如 `"slider.horizontal.3"`），代替 `headerRight` 的视图；按下它就是按下 `headerRight` 里第一个可按的视图，VoiceOver 读的也是那个视图的标签。`headerRightSystemItem` 优先；SF Symbols 里没有的名称照常显示 `headerRight`。Android 照常显示 `headerRight`。 |
 | `ios={{ headerLeftSymbol }}` | `string` | | iOS：同上，放在标题栏开头，按下即按下 `headerLeft`。 |
-| `ios={{ headerRightItems }}` | `HeaderRightItem[]` | | iOS：在标题栏末尾显示多个 UIKit 按钮（第一个在最右侧），每个用 `systemItem`、`symbol` 或 `title` 之一，可设 VoiceOver 的 `label`、原生 `menu`（UIMenu：操作、内联分组、子菜单）和 `disabled`。非空列表优先于 `headerRightSystemItem` / `headerRightSymbol`，且不把 `headerRight` 的视图放进 iOS 标题栏（Android、桌面和 Web 仍用 `headerRight` 作后备）。空列表表示未设置。没有菜单的按钮按下会触发 `onHeaderItemPress`；选择菜单项会触发 `onHeaderMenuSelect`。 |
+| `ios={{ headerRightItems }}` | `HeaderItem[]` | | iOS：在标题栏末尾显示多个 UIKit 按钮（第一个在最右侧）。每个按钮展示 `systemItem`、`symbol` 或 `label` 之一（没有系统项和图标时，`label` 是按钮标题；否则是 VoiceOver 标签），可设可选的 `key`（更新时保持同一个 `UIBarButtonItem`）、`disabled`、`onPress`（没有菜单时）和 `menu`（`nsh/desktop` 的 [`MenuItem`](../modules/nsh-desktop.md#menu-items)：`onSelect`、`destructive`、`inline`、`symbol`）。非空列表优先于 `headerRightSystemItem` / `headerRightSymbol`，且不把 `headerRight` 的视图放进 iOS 标题栏（Android、桌面和 Web 仍用 `headerRight` 作后备）。空列表表示未设置。 |
 | `headerTitle` | `JSX.Element` | | iOS 和 Android：替换标题的视图。 |
 | `headerLargeTitle` | `boolean` | `false` | iOS：大标题，内容滚动时缩进标题栏。 |
 | `headerBackTitle` | `string` | | 返回到本页面的返回按钮上的文字（iOS；Android 的向上箭头把它读给屏幕阅读器）。 |
@@ -258,11 +258,9 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 | `popOnBack` | `boolean` | `true` | 每一种返回方式都会弹出页面：返回按钮、Android 返回键、桌面的返回键、浏览器的返回按钮和侧滑。 |
 | `onBackPress` | `() => void` | | 用户在页面上按了返回，无论 `popOnBack` 是否让它弹出。 |
 | `onDismiss` | `() => void` | | 用户弹出了页面；路由已被移除。 |
-| `onHeaderItemPress` | `(e: { id: string }) => void` | | 按下了 `ios.headerRightItems` 里没有菜单的尾部按钮；`id` 是该按钮的。 |
-| `onHeaderMenuSelect` | `(e: { id: string }) => void` | | 选择了尾部按钮菜单里的一项；`id` 是该操作的。 |
 | `style`、`class` | | | 页面的内容视图。 |
 
-在 iOS 上，多个系统尾部按钮（可带原生菜单）可以代替 `headerRight`：
+在 iOS 上，多个系统尾部按钮（可带原生菜单）可以代替 `headerRight`。每个按钮和每个菜单项各自带处理器（`onPress` / `onSelect`）；平台把它们报告为根上的菜单事件，与桌面菜单同一条路径：
 
 ```tsx
 <NavPage
@@ -270,27 +268,49 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
   headerRight={<Text onPress={onEdit}>编辑</Text>}
   ios={{
     headerRightItems: [
-      { id: "edit", systemItem: "edit" },
+      { key: "edit", systemItem: "edit", onPress: onEdit },
       {
-        id: "more",
+        key: "more",
         symbol: "ellipsis.circle",
-        menu: {
-          items: [
-            { id: "share", title: "分享", symbol: "square.and.arrow.up" },
-            {
-              section: [{ id: "delete", title: "删除", destructive: true }],
-            },
-          ],
-        },
+        label: "More",
+        menu: [
+          { label: "分享", symbol: "square.and.arrow.up", onSelect: share },
+          {
+            label: "危险",
+            inline: true,
+            submenu: [
+              { label: "删除", destructive: true, onSelect: remove },
+            ],
+          },
+        ],
       },
     ],
   }}
-  onHeaderItemPress={({ id }) => id === "edit" && onEdit()}
-  onHeaderMenuSelect={({ id }) => {
-    if (id === "share") share();
-    if (id === "delete") remove();
-  }}
 />
+```
+
+在 Rust 里用 `nsh_core::element::header::HeaderItem` 和 `nsh_core::element::desktop::MenuItem` 构建同样的列表：
+
+```rust
+nav_page()
+    .header_right_items([
+        HeaderItem::system(HeaderSystemItem::Edit)
+            .key("edit")
+            .on_press(on_edit),
+        HeaderItem::new("Filter").key("filter").on_press(on_filter),
+        HeaderItem::symbol("ellipsis.circle")
+            .key("more")
+            .label("More")
+            .menu([
+                MenuItem::new("Share")
+                    .symbol("square.and.arrow.up")
+                    .on_select(share),
+                MenuItem::submenu("Danger", [
+                    MenuItem::new("Delete").destructive(true).on_select(remove),
+                ])
+                .inline(true),
+            ]),
+    ])
 ```
 
 `headerRight` 仍是 Android、桌面和 Web 的后备。非空的 `headerRightItems` 优先于 `headerRightSystemItem` 和 `headerRightSymbol`。

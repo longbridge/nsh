@@ -212,42 +212,65 @@ function NativeBarButtons() {
       ios={{
         headerRightItems: [
           {
-            id: "edit",
-            title: editing() ? "Done" : "Edit",
-          },
-          {
-            id: "filter",
-            title: "Filter",
-            menu: {
-              items: [
-                { id: "all", title: "All", checked: filter() === "all" },
-                { id: "open", title: "Open", checked: filter() === "open" },
-                { id: "done", title: "Done", checked: filter() === "done" },
-                {
-                  section: [{ id: "clear", title: "Clear filters", destructive: true }],
-                },
-              ],
+            key: "edit",
+            label: editing() ? "Done" : "Edit",
+            onPress: () => {
+              editing.set(!editing());
+              log.set(editing() ? "Editing" : "Edit");
             },
           },
-          { id: "add", systemItem: "add", label: "Add" },
+          {
+            key: "filter",
+            label: "Filter",
+            menu: [
+              {
+                label: "All",
+                checked: filter() === "all",
+                onSelect: () => {
+                  filter.set("all");
+                  log.set("Filter: all");
+                },
+              },
+              {
+                label: "Open",
+                checked: filter() === "open",
+                onSelect: () => {
+                  filter.set("open");
+                  log.set("Filter: open");
+                },
+              },
+              {
+                label: "Done",
+                checked: filter() === "done",
+                onSelect: () => {
+                  filter.set("done");
+                  log.set("Filter: done");
+                },
+              },
+              {
+                label: "Danger",
+                inline: true,
+                submenu: [
+                  {
+                    label: "Clear filters",
+                    destructive: true,
+                    symbol: "trash",
+                    onSelect: () => {
+                      filter.set("all");
+                      log.set("Filters cleared");
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            key: "add",
+            systemItem: "add",
+            label: "Add",
+            onPress: () => log.set("Add"),
+          },
         ],
-      }}
-      onHeaderItemPress={({ id }) => {
-        if (id === "edit") {
-          editing.set(!editing());
-          log.set(editing() ? "Editing" : "Edit");
-        } else if (id === "add") {
-          log.set("Add");
-        }
-      }}
-      onHeaderMenuSelect={({ id }) => {
-        if (id === "all" || id === "open" || id === "done") {
-          filter.set(id);
-          log.set(`Filter: ${id}`);
-        } else if (id === "clear") {
-          filter.set("all");
-          log.set("Filters cleared");
-        }
       }}
     >
       <Page
@@ -256,7 +279,7 @@ function NativeBarButtons() {
           "The trailing actions are views here; on iOS they are UIKit bar buttons with a native Filter menu.",
         )}
       >
-        <Section title="Last action" note="onHeaderItemPress / onHeaderMenuSelect">
+        <Section title="Last action" note="onPress / onSelect">
           <Figure value={log()} />
         </Section>
         <Section title="Filter" note="checked menu item">

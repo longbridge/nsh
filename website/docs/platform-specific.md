@@ -94,7 +94,7 @@ What exists today:
 | `.header_left_system_item(..)` | `ios={{ headerLeftSystemItem }}` | `NavPage` | UIKit's own bar button at the start of the header, pressing `headerLeft`. |
 | `.header_right_symbol(..)` | `ios={{ headerRightSymbol }}` | `NavPage` | UIKit's own bar button showing an SF Symbol at the end of the header, pressing `headerRight`. |
 | `.header_left_symbol(..)` | `ios={{ headerLeftSymbol }}` | `NavPage` | UIKit's own bar button showing an SF Symbol at the start of the header, pressing `headerLeft`. |
-| `.header_right_items(..)` | `ios={{ headerRightItems }}` | `NavPage` | Several UIKit bar buttons at the end of the header, with optional native menus; see [Navigation](./navigation.md). |
+| `.header_right_items(..)` | `ios={{ headerRightItems }}` | `NavPage` | Several UIKit bar buttons at the end of the header; each takes `onPress` / a `nsh/desktop` `MenuItem` menu; see [Navigation](./navigation.md). |
 | `.back_forward_gestures(..)` | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `.window_drag(..)` | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
 | `.window_control(..)` | `desktop={{ windowControl }}` | every element | The view is the window's minimize, maximize or close button, drawn by the app. |

@@ -1,9 +1,7 @@
 // A case of the API's test suite (docs/dev/compatibility.md): trailing
-// iOS bar buttons (`ios.headerRightItems`) with a native menu, their
-// presses and menu selections (`onHeaderItemPress`, `onHeaderMenuSelect`).
-// Other platforms ignore the iOS items and keep `headerRight`. The script
-// checks the props reach the page and the events report the item / action
-// ids.
+// iOS bar buttons (`ios.headerRightItems`) with `nsh/desktop`'s `MenuItem`
+// menus (`destructive`, `inline`, `symbol`) and per-item `onPress` /
+// `onSelect`. Other platforms ignore the iOS items and keep `headerRight`.
 import { Text, View, signal } from "nsh";
 import { NavPage, NavStack, createNavStack } from "nsh/base";
 
@@ -19,27 +17,48 @@ function Home() {
       headerRight={<Text>Fallback right</Text>}
       ios={{
         headerRightItems: [
-          { id: "edit", systemItem: "edit", label: "Edit" },
           {
-            id: "filter",
-            title: "Filter",
-            menu: {
-              items: [
-                { id: "all", title: "All", checked: filter() === "all" },
-                { id: "open", title: "Open", checked: filter() === "open" },
-                {
-                  section: [{ id: "delete", title: "Delete", destructive: true }],
-                },
-              ],
-            },
+            key: "edit",
+            systemItem: "edit",
+            label: "Edit",
+            onPress: () => log.set("press edit"),
           },
-          { id: "add", systemItem: "add" },
+          {
+            key: "filter",
+            label: "Filter",
+            menu: [
+              {
+                label: "All",
+                checked: filter() === "all",
+                onSelect: () => {
+                  filter.set("all");
+                  log.set("menu all");
+                },
+              },
+              {
+                label: "Open",
+                checked: filter() === "open",
+                onSelect: () => {
+                  filter.set("open");
+                  log.set("menu open");
+                },
+              },
+              {
+                label: "Danger",
+                inline: true,
+                submenu: [
+                  {
+                    label: "Delete",
+                    destructive: true,
+                    symbol: "trash",
+                    onSelect: () => log.set("menu delete"),
+                  },
+                ],
+              },
+            ],
+          },
+          { key: "add", systemItem: "add", onPress: () => log.set("press add") },
         ],
-      }}
-      onHeaderItemPress={({ id }) => log.set(`press ${id}`)}
-      onHeaderMenuSelect={({ id }) => {
-        if (id === "all" || id === "open") filter.set(id);
-        log.set(`menu ${id}`);
       }}
     >
       <Text>{`Log: ${log()}`}</Text>

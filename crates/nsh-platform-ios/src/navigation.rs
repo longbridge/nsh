@@ -20,10 +20,11 @@ use std::{
 
 use block2::RcBlock;
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, HeaderBarLook, HeaderMenu, HeaderMenuAction,
-    HeaderMenuEntry, HeaderRightItem, HeaderSystemItem, ModalAnimation, ModalConfig,
-    ModalPresentation, NavShader, NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig,
-    Size,
+    Color, EdgeInsets, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
+    ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
+    ScreenAnimation, ScreenConfig, Size,
+    desktop::{MenuAction, MenuItem},
+    element::header::same_right_buttons,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -759,11 +760,12 @@ impl BarItemTarget {
 }
 
 /// The target of a trailing `ios.headerRightItems` button without a menu:
-/// reports `onHeaderItemPress` with the item's id.
+/// reports the root's `Menu` event with the item's press id. The id is a
+/// [`Cell`] so a kept button can take the current binding's id without
+/// rebuilding the `UIBarButtonItem`.
 struct HeaderItemIvars {
     mounter: SharedMounter,
-    screen: NodeId,
-    id: Arc<str>,
+    press_id: Cell<u32>,
 }
 
 define_class!(
@@ -776,29 +778,31 @@ define_class!(
         #[unsafe(method(nshPress:))]
         fn press(&self, _sender: Option<&NSObject>) {
             let ivars = self.ivars();
+            let press_id = ivars.press_id.get();
+            if press_id == 0 {
+                return;
+            }
             if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
                 && let Some(m) = m.as_mut()
             {
-                m.header_item_event(ivars.screen, EventKind::HeaderItemPress, &ivars.id);
+                m.menu_id_event(press_id);
             }
         }
     }
 );
 
 impl HeaderItemTarget {
-    fn new(
-        mtm: MainThreadMarker,
-        screen: NodeId,
-        id: Arc<str>,
-        mounter: SharedMounter,
-    ) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, press_id: u32, mounter: SharedMounter) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(HeaderItemIvars {
             mounter,
-            screen,
-            id,
+            press_id: Cell::new(press_id),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
+    }
+
+    fn set_press_id(&self, press_id: u32) {
+        self.ivars().press_id.set(press_id);
     }
 }
 
@@ -820,23 +824,14 @@ type SystemBarItem = (
 
 /// Trailing `ios.headerRightItems`: the description, buttons and press
 /// targets kept while the buttons' identity stays (UIKit holds targets
-/// weakly). Rebuilding a bar button flashes it, so menus, labels and
-/// `disabled` update in place.
+/// weakly). Targets are one per button (`None` when it has a menu), so a
+/// re-bind can refresh `press_id` by index. Rebuilding a bar button
+/// flashes it, so menus, labels, `disabled` and press ids update in place.
 type RightItemsBar = (
-    Vec<HeaderRightItem>,
+    Vec<HeaderItem>,
     Vec<Retained<UIBarButtonItem>>,
-    Vec<Retained<HeaderItemTarget>>,
+    Vec<Option<Retained<HeaderItemTarget>>>,
 );
-
-/// Whether two lists describe the same trailing buttons (count, ids, looks,
-/// and whether each has a menu). Menus' contents, labels and `disabled` can
-/// change without rebuilding the bar buttons.
-fn same_right_buttons(a: &[HeaderRightItem], b: &[HeaderRightItem]) -> bool {
-    a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(x, y)| x.id == y.id && x.look == y.look && x.menu.is_some() == y.menu.is_some())
-}
 
 /// UIKit's bar button showing `kind`, pressing `target`; `None` for a
 /// symbol name SF Symbols does not have.
@@ -879,27 +874,30 @@ fn system_image(name: &str) -> Option<Retained<UIImage>> {
     UIImage::systemImageNamed(&NSString::from_str(name))
 }
 
-/// Dispatches a menu action's id to the screen.
-fn menu_select(mounter: &SharedMounter, mtm: MainThreadMarker, screen: NodeId, id: Arc<str>) {
+/// Dispatches a menu / press id as the root's `Menu` event.
+fn menu_select(mounter: &SharedMounter, mtm: MainThreadMarker, id: u32) {
+    if id == 0 {
+        return;
+    }
     if let Ok(mut m) = mounter.get(mtm).try_borrow_mut()
         && let Some(m) = m.as_mut()
     {
-        m.header_item_event(screen, EventKind::HeaderMenuSelect, &id);
+        m.menu_id_event(id);
     }
 }
 
-/// A `UIAction` for a menu entry.
+/// A `UIAction` for a [`MenuAction`].
 fn make_menu_action(
     mtm: MainThreadMarker,
-    action: &HeaderMenuAction,
-    screen: NodeId,
+    action: &MenuAction,
     mounter: SharedMounter,
 ) -> Retained<UIAction> {
-    let title = NSString::from_str(&action.title);
+    let title = NSString::from_str(&action.label);
+    // Prefer an SF Symbol; `icon` (an image source) is for desktop menus.
     let image = action.symbol.as_deref().and_then(system_image);
-    let id = Arc::clone(&action.id);
+    let id = action.id;
     let handler = RcBlock::new(move |_: NonNull<UIAction>| {
-        menu_select(&mounter, mtm, screen, Arc::clone(&id));
+        menu_select(&mounter, mtm, id);
     });
     // No UIKit identifier: the API lets an app reuse an action id in two
     // menus, and UIKit may drop or merge elements that share one. The
@@ -915,14 +913,14 @@ fn make_menu_action(
         )
     };
     let mut attrs = UIMenuElementAttributes::empty();
-    if action.disabled {
+    if !action.enabled {
         attrs |= UIMenuElementAttributes::Disabled;
     }
     if action.destructive {
         attrs |= UIMenuElementAttributes::Destructive;
     }
     item.setAttributes(attrs);
-    item.setState(if action.checked {
+    item.setState(if action.checked == Some(true) {
         UIMenuElementState::On
     } else {
         UIMenuElementState::Off
@@ -930,81 +928,85 @@ fn make_menu_action(
     item
 }
 
-/// Builds a `UIMenu` tree from a [`HeaderMenu`].
+/// Builds a `UIMenu` tree from [`MenuItem`]s.
 fn make_menu(
     mtm: MainThreadMarker,
-    menu: &HeaderMenu,
-    screen: NodeId,
+    items: &[MenuItem],
     mounter: &SharedMounter,
 ) -> Retained<UIMenu> {
-    let children = menu_children(mtm, &menu.items, screen, mounter);
-    let title = menu.title.as_deref().unwrap_or("");
-    UIMenu::menuWithTitle_children(&NSString::from_str(title), &children, mtm)
+    let children = menu_children(mtm, items, mounter);
+    UIMenu::menuWithTitle_children(&NSString::from_str(""), &children, mtm)
 }
 
-/// Menu children for a list of entries.
+/// Menu children for a list of [`MenuItem`]s.
 fn menu_children(
     mtm: MainThreadMarker,
-    entries: &[HeaderMenuEntry],
-    screen: NodeId,
+    entries: &[MenuItem],
     mounter: &SharedMounter,
 ) -> Retained<NSArray<UIMenuElement>> {
     let mut children: Vec<Retained<UIMenuElement>> = Vec::with_capacity(entries.len());
     for entry in entries {
         match entry {
-            HeaderMenuEntry::Action(action) => {
+            MenuItem::Action(action) => {
                 children.push(Retained::into_super(make_menu_action(
                     mtm,
                     action,
-                    screen,
                     mounter.clone(),
                 )));
             }
-            HeaderMenuEntry::Section { title, items } => {
-                let nested = menu_children(mtm, items, screen, mounter);
+            MenuItem::Separator => {
+                // Separators are expressed as empty inline sections.
+                let empty = NSArray::<UIMenuElement>::array();
                 let section = UIMenu::menuWithTitle_image_identifier_options_children(
-                    &NSString::from_str(title.as_deref().unwrap_or("")),
+                    &NSString::from_str(""),
                     None,
                     None,
                     UIMenuOptions::DisplayInline,
-                    &nested,
+                    &empty,
                     mtm,
                 );
                 children.push(Retained::into_super(section));
             }
-            HeaderMenuEntry::Submenu {
-                title,
-                symbol,
+            MenuItem::Submenu {
+                label,
+                enabled: _,
                 items,
+                icon: _,
+                symbol,
+                inline,
             } => {
-                let nested = menu_children(mtm, items, screen, mounter);
+                let nested = menu_children(mtm, items, mounter);
                 let image = symbol.as_deref().and_then(system_image);
+                let options = if *inline {
+                    UIMenuOptions::DisplayInline
+                } else {
+                    UIMenuOptions::empty()
+                };
                 let submenu = UIMenu::menuWithTitle_image_identifier_options_children(
-                    &NSString::from_str(title),
+                    &NSString::from_str(label),
                     image.as_deref(),
                     None,
-                    UIMenuOptions::empty(),
+                    options,
                     &nested,
                     mtm,
                 );
                 children.push(Retained::into_super(submenu));
             }
-            _ => {}
         }
     }
     NSArray::from_retained_slice(&children)
 }
 
-/// A bar button from its look only (no menu, target or action yet).
-fn make_right_item_look(
+/// A bar button from its content only (no menu, target or action yet).
+fn make_right_item_content(
     mtm: MainThreadMarker,
-    look: &HeaderBarLook,
+    content: &HeaderItemContent,
     fallback_title: &str,
 ) -> Retained<UIBarButtonItem> {
-    match look {
+    match content {
         // SAFETY: UIKit's designated initializer with no target yet; the
         // caller sets the menu or the target and action.
-        HeaderBarLook::SystemItem(system) => unsafe {
+        HeaderItemContent::SystemItem(system) => unsafe {
             UIBarButtonItem::initWithBarButtonSystemItem_target_action(
                 UIBarButtonItem::alloc(mtm),
                 system_bar_item(*system),
@@ -1012,7 +1014,7 @@ fn make_right_item_look(
                 None,
             )
         },
-        HeaderBarLook::Symbol(name) => match system_image(name) {
+        HeaderItemContent::Symbol(name) => match system_image(name) {
             Some(image) => unsafe {
                 UIBarButtonItem::initWithImage_style_target_action(
                     UIBarButtonItem::alloc(mtm),
@@ -1032,7 +1034,7 @@ fn make_right_item_look(
                 )
             },
         },
-        HeaderBarLook::Title(title) => unsafe {
+        HeaderItemContent::Label(title) => unsafe {
             UIBarButtonItem::initWithTitle_style_target_action(
                 UIBarButtonItem::alloc(mtm),
                 Some(&NSString::from_str(title)),
@@ -1053,16 +1055,21 @@ fn make_right_item_look(
     }
 }
 
-/// Menu, label and enabled on an existing trailing bar button.
+/// Menu, label, enabled and press id on an existing trailing bar button.
 fn update_right_item(
     mtm: MainThreadMarker,
-    item: &HeaderRightItem,
+    item: &HeaderItem,
     button: &UIBarButtonItem,
-    screen: NodeId,
+    target: Option<&HeaderItemTarget>,
     mounter: &SharedMounter,
 ) {
     if let Some(menu) = &item.menu {
-        button.setMenu(Some(&make_menu(mtm, menu, screen, mounter)));
+        button.setMenu(Some(&make_menu(mtm, menu, mounter)));
+    }
+    if let Some(target) = target {
+        // The previous binding's handlers are gone; take this binding's id
+        // (0 when `onPress` was removed).
+        target.set_press_id(item.press_id);
     }
     button.setEnabled(!item.disabled);
     if let Some(label) = item.label.as_deref() {
@@ -1074,25 +1081,29 @@ fn update_right_item(
 /// One trailing `ios.headerRightItems` button.
 fn make_right_item(
     mtm: MainThreadMarker,
-    item: &HeaderRightItem,
-    screen: NodeId,
+    item: &HeaderItem,
     mounter: SharedMounter,
-    targets: &mut Vec<Retained<HeaderItemTarget>>,
+    targets: &mut Vec<Option<Retained<HeaderItemTarget>>>,
 ) -> Retained<UIBarButtonItem> {
-    let fallback = item.label.as_deref().unwrap_or(item.id.as_ref());
-    let button = make_right_item_look(mtm, &item.look, fallback);
+    let fallback = item.label.as_deref().unwrap_or(match &item.content {
+        HeaderItemContent::Label(t) => t.as_ref(),
+        HeaderItemContent::Symbol(s) => s.as_ref(),
+        _ => "",
+    });
+    let button = make_right_item_content(mtm, &item.content, fallback);
     if let Some(menu) = &item.menu {
         // With no primary action, a tap opens the menu (iOS 14+).
-        button.setMenu(Some(&make_menu(mtm, menu, screen, &mounter)));
+        button.setMenu(Some(&make_menu(mtm, menu, &mounter)));
+        targets.push(None);
     } else {
-        let target = HeaderItemTarget::new(mtm, screen, Arc::clone(&item.id), mounter);
+        let target = HeaderItemTarget::new(mtm, item.press_id, mounter);
         // SAFETY: UIKit holds the target weakly; the caller keeps it as long
         // as the button, and `nshPress:` is its action.
         unsafe {
             button.setTarget(Some(&*target));
             button.setAction(Some(objc2::sel!(nshPress:)));
         }
-        targets.push(target);
+        targets.push(Some(target));
     }
     button.setEnabled(!item.disabled);
     if let Some(label) = item.label.as_deref() {
@@ -1541,26 +1552,24 @@ impl ScreenHost {
                 .is_none_or(|(items, ..)| !same_right_buttons(items, &c.right_items));
             if rebuild {
                 if let Some(mounter) = press.clone() {
-                    let screen = self.controller.screen_id();
                     let mut targets = Vec::new();
                     let buttons: Vec<_> = c
                         .right_items
                         .iter()
-                        .map(|item| {
-                            make_right_item(mtm, item, screen, mounter.clone(), &mut targets)
-                        })
+                        .map(|item| make_right_item(mtm, item, mounter.clone(), &mut targets))
                         .collect();
                     *kept = Some((c.right_items.clone(), buttons, targets));
                 } else {
                     *kept = None;
                 }
-            } else if let Some((cached, buttons, _)) = kept.as_mut()
+            } else if let Some((cached, buttons, targets)) = kept.as_mut()
                 && cached != &c.right_items
             {
                 if let Some(mounter) = press.clone() {
-                    let screen = self.controller.screen_id();
-                    for (item, button) in c.right_items.iter().zip(buttons.iter()) {
-                        update_right_item(mtm, item, button, screen, &mounter);
+                    for (item, (button, target)) in
+                        c.right_items.iter().zip(buttons.iter().zip(targets.iter()))
+                    {
+                        update_right_item(mtm, item, button, target.as_deref(), &mounter);
                     }
                 }
                 *cached = c.right_items.clone();

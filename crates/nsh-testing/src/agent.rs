@@ -695,6 +695,8 @@ impl MenuValue {
                 role: None,
                 when: nsh_core::keymap::When::Always,
                 icon: None,
+                symbol: None,
+                destructive: false,
             }),
             MenuValue::Submenu {
                 label,
@@ -706,6 +708,8 @@ impl MenuValue {
                 items: items.into_iter().map(MenuValue::into_item).collect(),
                 // A scene's answer is about what a test can ask of a menu.
                 icon: None,
+                symbol: None,
+                inline: false,
             },
         }
     }

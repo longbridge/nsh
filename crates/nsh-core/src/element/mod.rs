@@ -47,6 +47,7 @@ mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
+pub mod header;
 pub(crate) mod host;
 mod js;
 pub(crate) mod json_host;
@@ -206,15 +207,15 @@ pub use crate::geometry::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
-    EllipsizeMode, EventKind, EventPayload, HeaderBarLook, HeaderMenu, HeaderMenuAction,
-    HeaderMenuEntry, HeaderRightItem, HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode,
-    KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
-    LayoutProperty, LayoutTransition, ListAlignment, ListViewport, MacOsBackdrop,
-    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation,
-    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
-    PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
-    TouchEvent, TransformKind, TransformOrigin, Viewability,
+    EllipsizeMode, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
+    KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation,
+    Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment,
+    ListViewport, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState,
+    Measurement, ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation,
+    PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode,
+    ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
+    StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin,
+    Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

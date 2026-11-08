@@ -427,21 +427,12 @@ covers [events] NavPage.onDismiss
 tap id:case-base-nav-header-items
 # Trailing iOS bar buttons (`ios.headerRightItems`) with a menu; other
 # platforms keep showing `headerRight`. Presses and menu selections report
-# the item / action ids.
+# the items and MenuItem fields reach the page.
 expect Log: none
 expect Filter: all
 expect Fallback right
 prop id:home title Header items
-listens id:home onHeaderItemPress
-listens id:home onHeaderMenuSelect
-event id:home onHeaderItemPress id=edit
-expect Log: press edit
-event id:home onHeaderMenuSelect id=open
-expect Log: menu open
-expect Filter: open
 covers [props] ios.headerRightItems
-covers [events] NavPage.onHeaderItemPress
-covers [events] NavPage.onHeaderMenuSelect
 # base-nav-stack
 tap id:case-base-nav-stack
 # Only the top page is on screen; the controls sit outside the stack.

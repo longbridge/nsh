@@ -440,7 +440,7 @@ pub struct ScreenConfig {
     /// Trailing UIKit bar buttons (`ios={{ headerRightItems }}`); a
     /// non-empty list wins over `right_system_item` / `right_symbol` and
     /// leaves `right`'s view out of the iOS bar. Empty is unset.
-    pub right_items: Vec<crate::HeaderRightItem>,
+    pub right_items: Vec<crate::HeaderItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header

@@ -585,7 +585,11 @@ type MenuItem =
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
+      icon?: ImageAsset | string;
+      symbol?: string;
+      destructive?: boolean;
       submenu?: MenuItem[];
+      inline?: boolean;
     };
 ```
 
@@ -597,12 +601,16 @@ type MenuItem =
 | `when` | 在 GPUI 后端上，输入框获得键盘焦点时快捷键何时选中该菜单项：`"always"`（默认）、`"auto"`（除非输入框自己使用这个按键：输入字符、移动光标或删除的键，以及编辑快捷键，和 [`keymap`](./nsh.md#keymap) 的绑定相同）或 `"notEditing"`。菜单项让出的键交给输入框。 |
 | `disabled` | `true` 时菜单项变灰（默认 `false`）。 |
 | `checked` | 设置（为 `true` 或 `false`）后菜单项带勾选标记。 |
-| `submenu` | 让菜单项成为子菜单（需要 `label`）。 |
+| `icon` | 标签旁的图片，写法与 `<Image>` 的 `src` 相同（导入的文件或 URL）。会适配到菜单的图标尺寸；各平台细节见 TypeScript 声明。Apple 平台上的 SF Symbol 名称请用 `symbol`。 |
+| `symbol` | Apple 平台上标签旁的 SF Symbol 名称（iOS 标题栏菜单；macOS 菜单也可能使用）。其他平台忽略。与 `icon` 同时设置时以它为准。 |
+| `destructive` | `true` 表示破坏性操作：iOS 显示为红色（`UIMenuElementAttributesDestructive`）。桌面端目前忽略。 |
+| `submenu` | 让菜单项成为子菜单（需要 `label`）。配合 `inline: true` 成为内联分组：在 iOS 上是带 `label` 为分组标题的 `UIMenuOptions.displayInline`；在桌面上是夹在分隔线之间的条目，不显示 `label`。 |
+| `inline` | 在设置了 `submenu` 时表示内联分组（见 `submenu`）。 |
 | `role` | 由平台执行的标准菜单项（见下）。 |
 
 `null`、`undefined` 和 `false` 项会被忽略，因此可以在列表中写 `cond && { … }`。
 
-在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.shortcut_when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`，以及给 role 菜单项设置文字的 `.label(..)`。
+在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.shortcut_when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`、`.icon(..)`、`.symbol(..)`、`.destructive(true)`、子菜单上的 `.inline(true)`，以及给 role 菜单项设置文字的 `.label(..)`。
 
 修饰键：
 

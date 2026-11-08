@@ -256,8 +256,6 @@ events! {
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
-    HeaderItemPress = "onHeaderItemPress": "A trailing iOS bar button without a menu was pressed (`ios={{ headerRightItems }}`; payload: `id`, the item's).",
-    HeaderMenuSelect = "onHeaderMenuSelect": "An action of a trailing iOS bar button's menu was chosen (`ios={{ headerRightItems }}`; payload: `id`, the action's).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1256,235 +1254,70 @@ pub enum HeaderSystemItem {
 }
 
 /// What a trailing iOS bar button shows (`ios={{ headerRightItems }}`):
-/// exactly one of a system item, an SF Symbol, or a title.
+/// exactly one of a system item, an SF Symbol, or a text label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum HeaderBarLook {
+pub enum HeaderItemContent {
     /// A [`HeaderSystemItem`].
     SystemItem(HeaderSystemItem),
     /// An SF Symbol's name.
     Symbol(Arc<str>),
-    /// A text title.
-    Title(Arc<str>),
+    /// A text title on the button.
+    Label(Arc<str>),
 }
 
-impl Default for HeaderBarLook {
+impl Default for HeaderItemContent {
     fn default() -> Self {
         Self::SystemItem(HeaderSystemItem::Add)
     }
 }
 
-/// A trailing iOS navigation-bar button (`ios={{ headerRightItems }}`).
+/// A trailing iOS navigation-bar button (`ios={{ headerRightItems }}`), as
+/// the platform sees it: numeric ids for presses and menu actions report
+/// the root's [`EventKind::Menu`]. Rust apps build one with
+/// [`crate::element::header::HeaderItem`] (handlers included); JS sets
+/// `onPress` / `MenuItem.onSelect` and the runtime assigns the ids.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
-pub struct HeaderRightItem {
-    /// Reported by [`EventKind::HeaderItemPress`] when this item has no menu.
-    pub id: Arc<str>,
+pub struct HeaderItem {
+    /// Optional key for keeping a `UIBarButtonItem` across updates; without
+    /// it, the position in the list is the identity.
+    pub key: Option<Arc<str>>,
     /// What the button shows.
-    pub look: HeaderBarLook,
-    /// VoiceOver's label (default: the title, else the system's).
+    pub content: HeaderItemContent,
+    /// VoiceOver's label when the content is a system item or symbol
+    /// (the content's own text when it is a [`HeaderItemContent::Label`]).
     pub label: Option<Arc<str>>,
-    /// When set, a press opens this native menu instead of reporting a press.
-    pub menu: Option<HeaderMenu>,
     /// Whether the button is disabled.
     pub disabled: bool,
+    /// Reported as the root's [`EventKind::Menu`] when pressed with no
+    /// menu (0: no handler).
+    pub press_id: u32,
+    /// A native pull-down menu of [`crate::desktop::MenuItem`]s; a press
+    /// opens it instead of reporting [`Self::press_id`].
+    pub menu: Option<Vec<crate::desktop::MenuItem>>,
 }
 
-impl HeaderRightItem {
-    /// A system-item button with this `id`.
-    pub fn system(id: impl Into<Arc<str>>, item: HeaderSystemItem) -> Self {
-        Self {
-            id: id.into(),
-            look: HeaderBarLook::SystemItem(item),
-            ..Default::default()
-        }
-    }
-
-    /// An SF Symbol button with this `id`.
-    pub fn symbol(id: impl Into<Arc<str>>, name: impl Into<Arc<str>>) -> Self {
-        Self {
-            id: id.into(),
-            look: HeaderBarLook::Symbol(name.into()),
-            ..Default::default()
-        }
-    }
-
-    /// A titled button with this `id`.
-    pub fn title(id: impl Into<Arc<str>>, title: impl Into<Arc<str>>) -> Self {
-        Self {
-            id: id.into(),
-            look: HeaderBarLook::Title(title.into()),
-            ..Default::default()
-        }
-    }
-
-    /// VoiceOver's label.
-    pub fn label(mut self, label: impl Into<Arc<str>>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
-    /// Opens this native menu on press.
-    pub fn menu(mut self, menu: HeaderMenu) -> Self {
-        self.menu = Some(menu);
-        self
-    }
-
-    /// Disables the button.
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        self
-    }
-}
-
-/// A native pull-down menu on a trailing iOS bar button
-/// (`ios={{ headerRightItems }}` `.menu`).
-#[derive(Debug, Clone, PartialEq, Default)]
-#[non_exhaustive]
-pub struct HeaderMenu {
-    /// An optional title above the items.
-    pub title: Option<Arc<str>>,
-    /// The menu's entries, top to bottom.
-    pub items: Vec<HeaderMenuEntry>,
-}
-
-impl HeaderMenu {
-    /// A menu of these entries.
-    pub fn new(items: impl IntoIterator<Item = HeaderMenuEntry>) -> Self {
-        Self {
-            title: None,
-            items: items.into_iter().collect(),
-        }
-    }
-
-    /// Sets the menu's title.
-    pub fn title(mut self, title: impl Into<Arc<str>>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
-}
-
-/// One entry of a [`HeaderMenu`]: an action, an inline section, or a submenu.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum HeaderMenuEntry {
-    /// An action the user may choose.
-    Action(HeaderMenuAction),
-    /// Items shown inline with separators (`UIMenuOptionsDisplayInline`).
-    Section {
-        /// An optional section title.
-        title: Option<Arc<str>>,
-        /// The section's entries.
-        items: Vec<HeaderMenuEntry>,
-    },
-    /// A nested submenu.
-    Submenu {
-        /// The submenu's title.
-        title: Arc<str>,
-        /// An optional SF Symbol beside the title.
-        symbol: Option<Arc<str>>,
-        /// The submenu's entries.
-        items: Vec<HeaderMenuEntry>,
-    },
-}
-
-impl HeaderMenuEntry {
-    /// An action entry.
-    pub fn action(action: HeaderMenuAction) -> Self {
-        Self::Action(action)
-    }
-
-    /// An inline section of these entries.
-    pub fn section(items: impl IntoIterator<Item = HeaderMenuEntry>) -> Self {
-        Self::Section {
-            title: None,
-            items: items.into_iter().collect(),
-        }
-    }
-
-    /// Titles this section.
-    pub fn titled(mut self, title: impl Into<Arc<str>>) -> Self {
-        if let Self::Section {
-            title: section_title,
-            ..
-        } = &mut self
-        {
-            *section_title = Some(title.into());
-        }
-        self
-    }
-
-    /// A submenu of these entries.
-    pub fn submenu(
-        title: impl Into<Arc<str>>,
-        items: impl IntoIterator<Item = HeaderMenuEntry>,
+impl HeaderItem {
+    /// A platform header button with the given fields (for the JS runtime
+    /// and tests). Prefer [`crate::element::header::HeaderItem`] in Rust
+    /// apps so handlers are registered.
+    pub fn from_parts(
+        key: Option<Arc<str>>,
+        content: HeaderItemContent,
+        label: Option<Arc<str>>,
+        disabled: bool,
+        press_id: u32,
+        menu: Option<Vec<crate::desktop::MenuItem>>,
     ) -> Self {
-        Self::Submenu {
-            title: title.into(),
-            symbol: None,
-            items: items.into_iter().collect(),
-        }
-    }
-
-    /// Sets the submenu's SF Symbol.
-    pub fn symbol(mut self, name: impl Into<Arc<str>>) -> Self {
-        if let Self::Submenu { symbol, .. } = &mut self {
-            *symbol = Some(name.into());
-        }
-        self
-    }
-}
-
-/// An action in a [`HeaderMenu`].
-#[derive(Debug, Clone, PartialEq, Default)]
-#[non_exhaustive]
-pub struct HeaderMenuAction {
-    /// Reported by [`EventKind::HeaderMenuSelect`] when chosen.
-    pub id: Arc<str>,
-    /// The action's label.
-    pub title: Arc<str>,
-    /// An optional SF Symbol beside the title.
-    pub symbol: Option<Arc<str>>,
-    /// Shown in red (`UIMenuElementAttributesDestructive`).
-    pub destructive: bool,
-    /// Whether the action is disabled.
-    pub disabled: bool,
-    /// A check mark (`UIMenuElementState.on`).
-    pub checked: bool,
-}
-
-impl HeaderMenuAction {
-    /// An action with this `id` and `title`.
-    pub fn new(id: impl Into<Arc<str>>, title: impl Into<Arc<str>>) -> Self {
         Self {
-            id: id.into(),
-            title: title.into(),
-            ..Default::default()
+            key,
+            content,
+            label,
+            disabled,
+            press_id,
+            menu,
         }
-    }
-
-    /// Sets the SF Symbol beside the title.
-    pub fn symbol(mut self, name: impl Into<Arc<str>>) -> Self {
-        self.symbol = Some(name.into());
-        self
-    }
-
-    /// Marks the action destructive.
-    pub fn destructive(mut self, destructive: bool) -> Self {
-        self.destructive = destructive;
-        self
-    }
-
-    /// Disables the action.
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        self
-    }
-
-    /// Shows a check mark.
-    pub fn checked(mut self, checked: bool) -> Self {
-        self.checked = checked;
-        self
     }
 }
 
@@ -1817,11 +1650,11 @@ pub enum ScreenProp {
     /// at the trailing edge; a non-empty list wins over
     /// `headerRightSystemItem` / `headerRightSymbol` and leaves
     /// `headerRight`'s views out of the iOS bar (they stay the fallback on
-    /// other platforms). An empty list is unset. Presses without a menu
-    /// report `onHeaderItemPress`; a menu action reports
-    /// `onHeaderMenuSelect`.
+    /// other platforms). An empty list is unset. A press without a menu,
+    /// or a menu action, reports the root's `onMenu` with the item's id
+    /// (its `onPress` / `onSelect`).
     #[prop(ios = "headerRightItems", on = SCREEN)]
-    HeaderRightItems(Vec<HeaderRightItem>),
+    HeaderRightItems(Vec<HeaderItem>),
     /// `headerBackVisible`: the system header's back button shows (default
     /// true; iOS and Android).
     #[prop(js = "headerBackVisible", default = true, on = SCREEN)]

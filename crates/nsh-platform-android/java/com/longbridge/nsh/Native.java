@@ -85,8 +85,6 @@ final class Native {
     static final int URL_SCHEME = 73;
     static final int AUDIO = 74;
     static final int WINDOW = 75;
-    static final int HEADER_ITEM_PRESS = 76;
-    static final int HEADER_MENU_SELECT = 77;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

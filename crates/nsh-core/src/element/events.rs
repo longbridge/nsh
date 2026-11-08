@@ -332,11 +332,6 @@ pub(crate) fn key(p: &EventPayload) -> Option<Cow<'_, str>> {
     string(p, "key").map(Cow::Borrowed)
 }
 
-/// An event's `id` string (`onHeaderItemPress`, `onHeaderMenuSelect`).
-pub(crate) fn id(p: &EventPayload) -> Option<Cow<'_, str>> {
-    string(p, "id").map(Cow::Borrowed)
-}
-
 pub(crate) fn action(p: &EventPayload) -> Option<Cow<'_, str>> {
     string(p, "actionName").map(Cow::Borrowed)
 }

@@ -2191,6 +2191,8 @@ fn menus_reach_the_platform_and_call_back() {
         role: None,
         when: nsh_core::keymap::When::Always,
         icon: None,
+        symbol: None,
+        destructive: false,
     };
     let quit = MenuAction {
         id: 0,
@@ -2201,6 +2203,8 @@ fn menus_reach_the_platform_and_call_back() {
         role: Some(MenuRole::Quit),
         when: nsh_core::keymap::When::Always,
         icon: None,
+        symbol: None,
+        destructive: false,
     };
     assert_eq!(
         &*menu,
@@ -2213,6 +2217,8 @@ fn menus_reach_the_platform_and_call_back() {
                 MenuItem::Action(quit)
             ],
             icon: None,
+            symbol: None,
+            inline: false,
         }]
     );
     engine.control().dispatch_event(

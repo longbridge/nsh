@@ -3859,13 +3859,13 @@ impl Mounter {
         }
     }
 
-    /// A trailing `ios.headerRightItems` button without a menu was pressed,
-    /// or one of its menu actions was chosen.
-    pub(crate) fn header_item_event(&self, screen: NodeId, kind: EventKind, id: &str) {
+    /// A trailing `ios.headerRightItems` press or menu action: the root's
+    /// [`EventKind::Menu`] with the item's numeric id.
+    pub(crate) fn menu_id_event(&self, id: u32) {
         self.control.dispatch_event(
-            screen,
-            kind,
-            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Str(id.to_owned()))]),
+            nsh_core::ROOT_ID,
+            EventKind::Menu,
+            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(id as f64))]),
         );
     }
 

@@ -586,6 +586,7 @@ impl Builder<'_> {
                     enabled,
                     items,
                     icon,
+                    ..
                 } => {
                     let sub = self.menu(items);
                     let item = gio::MenuItem::new_submenu(Some(&label.replace('_', "__")), &sub);

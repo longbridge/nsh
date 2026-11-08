@@ -1452,6 +1452,8 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             role: Some(role),
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {
@@ -1459,6 +1461,8 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
         enabled: true,
         items,
         icon: None,
+        symbol: None,
+        inline: false,
     };
     vec![
         submenu(

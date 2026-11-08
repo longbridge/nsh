@@ -1266,6 +1266,7 @@ fn append(
                     enabled,
                     items,
                     icon,
+                    ..
                 } => {
                     let Ok(sub) = CreatePopupMenu() else { continue };
                     append(sub, items, entries, icons, true);

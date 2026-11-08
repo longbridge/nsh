@@ -1361,6 +1361,8 @@ mod tests {
             role: None,
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         })
     }
 
@@ -1438,6 +1440,8 @@ mod tests {
                 enabled: true,
                 items: Vec::new(),
                 icon: Some(source),
+                symbol: None,
+                inline: false,
             },
         ];
         assert_eq!(label_x(&mixed), LABEL_X + ICON_ADVANCE);

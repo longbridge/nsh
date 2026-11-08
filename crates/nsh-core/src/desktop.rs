@@ -682,6 +682,14 @@ pub struct MenuAction {
     pub when: When,
     /// What it shows beside its label, the app's own image ([`menu_icon`]).
     pub icon: Option<ImageSource>,
+    /// An SF Symbol name beside its label on Apple platforms (iOS header
+    /// menus; macOS menus may use it). Other platforms ignore it. Prefer
+    /// this over putting a symbol name in [`Self::icon`], which is an
+    /// image source.
+    pub symbol: Option<String>,
+    /// Shown as a destructive action where the platform has one (iOS:
+    /// red; the desktops ignore it for now).
+    pub destructive: bool,
 }
 
 impl MenuAction {
@@ -705,7 +713,8 @@ pub enum MenuItem {
     /// An item that does something.
     Action(MenuAction),
     /// An item opening a menu of its own (the top-level menus of a menu
-    /// bar).
+    /// bar), or an inline section when [`inline`](Self::Submenu::inline) is
+    /// set.
     Submenu {
         /// What it shows.
         label: String,
@@ -716,10 +725,63 @@ pub enum MenuItem {
         /// What it shows beside its label ([`menu_icon`]), but for the
         /// top-level menus of a menu bar, which show their titles alone.
         icon: Option<ImageSource>,
+        /// An SF Symbol name beside its label on Apple platforms; other
+        /// platforms ignore it.
+        symbol: Option<String>,
+        /// An inline section: on iOS, `UIMenuOptions.displayInline` with
+        /// `label` as the section title; on the desktops, its items between
+        /// separators, its label not shown ([`Self::with_inline_expanded`]).
+        inline: bool,
     },
 }
 
 impl MenuItem {
+    /// Expands [`inline`](Self::Submenu::inline) submenus into their items
+    /// between separators (no leading or trailing separator, label not
+    /// shown), for the desktops. Nested non-inline submenus are kept;
+    /// their children are expanded the same way. iOS header menus keep
+    /// inline sections as they are.
+    pub fn with_inline_expanded(items: &[MenuItem]) -> Vec<MenuItem> {
+        let mut out = Vec::new();
+        for item in items {
+            match item {
+                MenuItem::Submenu {
+                    items,
+                    inline: true,
+                    ..
+                } => {
+                    if !out.is_empty() && !matches!(out.last(), Some(MenuItem::Separator)) {
+                        out.push(MenuItem::Separator);
+                    }
+                    out.extend(Self::with_inline_expanded(items));
+                    if !matches!(out.last(), Some(MenuItem::Separator) | None) {
+                        out.push(MenuItem::Separator);
+                    }
+                }
+                MenuItem::Submenu {
+                    label,
+                    enabled,
+                    items,
+                    icon,
+                    symbol,
+                    inline: false,
+                } => out.push(MenuItem::Submenu {
+                    label: label.clone(),
+                    enabled: *enabled,
+                    items: Self::with_inline_expanded(items),
+                    icon: icon.clone(),
+                    symbol: symbol.clone(),
+                    inline: false,
+                }),
+                other => out.push(other.clone()),
+            }
+        }
+        while matches!(out.last(), Some(MenuItem::Separator)) {
+            out.pop();
+        }
+        out
+    }
+
     /// Calls `f` with the icon of every item of `items`, submenus' too.
     pub fn each_icon<'a>(items: &'a [MenuItem], f: &mut impl FnMut(&'a ImageSource)) {
         for item in items {
@@ -991,6 +1053,8 @@ mod tests {
                 role,
                 when: When::Always,
                 icon: None,
+                symbol: None,
+                destructive: false,
             })
         };
         let menu = vec![MenuItem::Submenu {
@@ -1002,6 +1066,8 @@ mod tests {
                 action(0, copy, Some(MenuRole::Copy)),
             ],
             icon: None,
+            symbol: None,
+            inline: false,
         }];
         assert_eq!(MenuItem::find_shortcut(&menu, &new).map(|a| a.id), Some(1));
         // Text fields keep their own shortcuts.
@@ -1019,6 +1085,8 @@ mod tests {
             role: None,
             when,
             icon: None,
+            symbol: None,
+            destructive: false,
         };
         let fires = |shortcut, when| item(shortcut, when).fires_while_editing();
         assert!(fires("ctrl+z", When::Always));
@@ -1031,5 +1099,115 @@ mod tests {
         assert!(fires("ctrl+shift+n", When::Auto));
         assert!(fires("f5", When::Auto));
         assert!(!fires("ctrl+shift+n", When::NotEditing));
+    }
+
+    #[test]
+    fn inline_submenus_expand_between_separators() {
+        let action = |label: &str| {
+            MenuItem::Action(MenuAction {
+                id: 0,
+                label: label.into(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                role: None,
+                when: When::Always,
+                icon: None,
+                symbol: None,
+                destructive: false,
+            })
+        };
+        let items = [
+            action("New"),
+            MenuItem::Submenu {
+                label: "Danger".into(),
+                enabled: true,
+                items: vec![action("Delete"), action("Wipe")],
+                icon: None,
+                symbol: None,
+                inline: true,
+            },
+            action("Quit"),
+            MenuItem::Submenu {
+                label: "More".into(),
+                enabled: true,
+                items: vec![
+                    action("Share"),
+                    MenuItem::Submenu {
+                        label: "Nested".into(),
+                        enabled: true,
+                        items: vec![action("Deep")],
+                        icon: None,
+                        symbol: None,
+                        inline: true,
+                    },
+                ],
+                icon: None,
+                symbol: None,
+                inline: false,
+            },
+        ];
+        let expanded = MenuItem::with_inline_expanded(&items);
+        assert_eq!(
+            expanded
+                .iter()
+                .map(|i| match i {
+                    MenuItem::Separator => "—".into(),
+                    MenuItem::Action(a) => a.label.clone(),
+                    MenuItem::Submenu {
+                        label,
+                        items,
+                        inline,
+                        ..
+                    } => {
+                        assert!(!inline, "nested non-inline kept");
+                        format!(
+                            "{label}[{}]",
+                            items
+                                .iter()
+                                .map(|c| match c {
+                                    MenuItem::Separator => "—",
+                                    MenuItem::Action(a) => a.label.as_str(),
+                                    MenuItem::Submenu { .. } => "sub",
+                                })
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        )
+                    }
+                })
+                .collect::<Vec<String>>(),
+            [
+                "New",
+                "—",
+                "Delete",
+                "Wipe",
+                "—",
+                "Quit",
+                "More[Share,—,Deep]",
+            ]
+            .map(str::to_owned)
+        );
+        // Separators only between groups: none leading or trailing.
+        assert!(!matches!(expanded.first(), Some(MenuItem::Separator)));
+        assert!(!matches!(expanded.last(), Some(MenuItem::Separator)));
+        // A lone inline group: no separators around it.
+        let alone = MenuItem::with_inline_expanded(&[MenuItem::Submenu {
+            label: "Only".into(),
+            enabled: true,
+            items: vec![action("A"), action("B")],
+            icon: None,
+            symbol: None,
+            inline: true,
+        }]);
+        assert_eq!(
+            alone
+                .iter()
+                .map(|i| match i {
+                    MenuItem::Action(a) => a.label.as_str(),
+                    _ => "?",
+                })
+                .collect::<Vec<_>>(),
+            ["A", "B"]
+        );
     }
 }

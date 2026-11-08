@@ -5,10 +5,10 @@
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
-    CellSlot, EdgeInsets, HeaderBarLook, HeaderMenu, HeaderMenuAction, HeaderMenuEntry,
-    HeaderRightItem, HeaderSystemItem, ImageScales, ImageSource, KeyboardTaps, ListContentStyle,
-    MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp,
-    Prop, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
+    CellSlot, EdgeInsets, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageScales,
+    ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop, MacOsBackdropBlending,
+    MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, ScrollProp, StatusBarSetting,
+    StatusBarStyle, Viewability,
     element::TsTypes,
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
@@ -408,133 +408,141 @@ impl HostValue for Ripple {
     }
 }
 
-/// A trailing iOS bar button: `{ id, systemItem | symbol | title, label?,
-/// menu?, disabled? }`.
-impl HostValue for HeaderRightItem {
+/// A trailing iOS bar button: `{ key?, systemItem | symbol | label,
+/// disabled?, menu? }`. Handlers (`onPress`, menu `onSelect`) are taken by
+/// the JS runtime when it sets the prop; this decode leaves their ids at 0.
+impl HostValue for HeaderItem {
     fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
         if !input.is_object() {
             return None;
         }
-        let id = field::<std::sync::Arc<str>, _>(input, "id", cx)?;
         let system = field::<HeaderSystemItem, _>(input, "systemItem", cx);
         let symbol = field::<std::sync::Arc<str>, _>(input, "symbol", cx);
-        let title = field::<std::sync::Arc<str>, _>(input, "title", cx);
-        let look = match (system, symbol, title) {
-            (Some(item), None, None) => HeaderBarLook::SystemItem(item),
-            (None, Some(name), None) => HeaderBarLook::Symbol(name),
-            (None, None, Some(text)) => HeaderBarLook::Title(text),
+        let label_content = field::<std::sync::Arc<str>, _>(input, "label", cx);
+        let content = match (system, symbol, label_content.clone()) {
+            (Some(item), None, _) => HeaderItemContent::SystemItem(item),
+            (None, Some(name), _) => HeaderItemContent::Symbol(name),
+            (None, None, Some(text)) => HeaderItemContent::Label(text),
             _ => {
-                cx.warn("headerRightItems entry needs exactly one of systemItem, symbol, or title");
+                cx.warn("headerRightItems entry needs exactly one of systemItem, symbol, or label");
                 return None;
             }
         };
+        // `label` is the button's title when it is the content; otherwise
+        // VoiceOver's label (re-read when content was system/symbol).
+        let label = match &content {
+            HeaderItemContent::Label(_) => None,
+            _ => label_content,
+        };
         let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
-        Some(HeaderRightItem {
-            id,
-            look,
-            label: field(input, "label", cx),
-            menu: field(input, "menu", cx),
+        let menu = input.field("menu").and_then(|v| {
+            v.as_list()?;
+            Some(
+                v.items()
+                    .iter()
+                    .filter_map(|item| decode_menu_item(item, cx))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        Some(HeaderItem {
+            key: field(input, "key", cx),
+            content,
+            label,
             disabled: flag("disabled"),
+            press_id: 0,
+            menu,
         })
     }
 
     fn ts_type(types: &mut TsTypes) -> String {
-        let menu = HeaderMenu::ts_type(types);
         let system = HeaderSystemItem::ts_type(types);
-        types.declare("HeaderRightItem", |_| {
+        types.declare("HeaderItem", |_| {
             format!(
-                "/** A trailing iOS navigation-bar button (`ios.headerRightItems`). */\n\
-                 export type HeaderRightItem = {{\n  id: string;\n  label?: string;\n  \
-                 menu?: {menu};\n  disabled?: boolean;\n}} & (\n  {{ systemItem: {system}; symbol?: never; title?: never }} \
-                 | {{ symbol: string; systemItem?: never; title?: never }} \
-                 | {{ title: string; systemItem?: never; symbol?: never }}\n);"
+                "/** A trailing iOS navigation-bar button (`ios.headerRightItems`).\n\
+                 * `menu` takes `nsh/desktop`'s `MenuItem` items (`onSelect` per\n\
+                 * item; `destructive`, `inline`, `symbol` as documented there).\n\
+                 * `onPress` runs when the button has no menu. */\n\
+                 export type HeaderItem = {{\n  key?: string;\n  disabled?: boolean;\n  \
+                 onPress?: () => void;\n  menu?: import(\"nsh/desktop\").MenuItem[];\n}} & (\n  \
+                 {{ systemItem: {system}; symbol?: never; label?: string }} \
+                 | {{ symbol: string; systemItem?: never; label?: string }} \
+                 | {{ label: string; systemItem?: never; symbol?: never }}\n);"
             )
         })
     }
 }
 
-impl HostValue for HeaderMenu {
-    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
-        if !input.is_object() {
-            return None;
-        }
-        let items = field::<Vec<HeaderMenuEntry>, _>(input, "items", cx).unwrap_or_default();
-        Some(HeaderMenu {
-            title: field(input, "title", cx),
+/// One `nsh/desktop` menu item without its handlers (ids stay 0); JS's
+/// special path for `headerRightItems` assigns ids and keeps the functions.
+fn decode_menu_item<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<crate::desktop::MenuItem> {
+    use crate::{
+        desktop::{MenuAction, MenuItem},
+        keymap::When,
+    };
+    if !input.is_object() {
+        return None;
+    }
+    if input.field("type").and_then(|v| v.as_string()).as_deref() == Some("separator") {
+        return Some(MenuItem::Separator);
+    }
+    let flag = |key| input.field(key).and_then(|v| v.as_bool());
+    let label = field::<String, _>(input, "label", cx).unwrap_or_default();
+    let enabled = !flag("disabled").unwrap_or(false);
+    let icon = field::<ImageSource, _>(input, "icon", cx);
+    let symbol = field::<String, _>(input, "symbol", cx);
+    if let Some(items_input) = input.field("submenu") {
+        let items = items_input
+            .items()
+            .iter()
+            .filter_map(|item| decode_menu_item(item, cx))
+            .collect();
+        return Some(MenuItem::Submenu {
+            label,
+            enabled,
             items,
-        })
+            icon,
+            symbol,
+            inline: flag("inline").unwrap_or(false),
+        });
     }
-
-    fn ts_type(types: &mut TsTypes) -> String {
-        let entry = HeaderMenuEntry::ts_type(types);
-        types.declare("HeaderMenu", |_| {
-            format!(
-                "/** A native UIMenu on a trailing iOS bar button. */\n\
-                 export interface HeaderMenu {{\n  title?: string;\n  items: {entry}[];\n}}"
-            )
-        })
+    let role = field::<String, _>(input, "role", cx).and_then(|name| menu_role(&name));
+    if label.is_empty() && role.is_none() {
+        return None;
     }
+    Some(MenuItem::Action(MenuAction {
+        id: 0,
+        label,
+        shortcut: None,
+        enabled,
+        checked: flag("checked"),
+        role,
+        when: When::Always,
+        icon,
+        symbol,
+        destructive: flag("destructive").unwrap_or(false),
+    }))
 }
 
-impl HostValue for HeaderMenuEntry {
-    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
-        if !input.is_object() {
-            return None;
-        }
-        if input.field("section").is_some() {
-            let items = field::<Vec<HeaderMenuEntry>, _>(input, "section", cx).unwrap_or_default();
-            return Some(HeaderMenuEntry::Section {
-                title: field(input, "title", cx),
-                items,
-            });
-        }
-        if input.field("items").is_some() {
-            let title = field::<std::sync::Arc<str>, _>(input, "title", cx)?;
-            let items = field::<Vec<HeaderMenuEntry>, _>(input, "items", cx).unwrap_or_default();
-            return Some(HeaderMenuEntry::Submenu {
-                title,
-                symbol: field(input, "symbol", cx),
-                items,
-            });
-        }
-        let action = HeaderMenuAction::decode(input, cx)?;
-        Some(HeaderMenuEntry::Action(action))
-    }
-
-    fn ts_type(types: &mut TsTypes) -> String {
-        let action = HeaderMenuAction::ts_type(types);
-        types.declare("HeaderMenuEntry", |_| {
-            format!(
-                "/** An entry of a trailing iOS bar button's menu. */\n\
-                 export type HeaderMenuEntry =\n  | {action}\n  \
-                 | {{ section: HeaderMenuEntry[]; title?: string }}\n  \
-                 | {{ title: string; symbol?: string; items: HeaderMenuEntry[] }};"
-            )
-        })
-    }
-}
-
-impl HostValue for HeaderMenuAction {
-    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
-        if !input.is_object() {
-            return None;
-        }
-        let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
-        Some(HeaderMenuAction {
-            id: field(input, "id", cx)?,
-            title: field(input, "title", cx)?,
-            symbol: field(input, "symbol", cx),
-            destructive: flag("destructive"),
-            disabled: flag("disabled"),
-            checked: flag("checked"),
-        })
-    }
-
-    fn ts_type(_: &mut TsTypes) -> String {
-        "{ id: string; title: string; symbol?: string; destructive?: boolean; \
-         disabled?: boolean; checked?: boolean }"
-            .into()
-    }
+fn menu_role(name: &str) -> Option<crate::desktop::MenuRole> {
+    use crate::desktop::MenuRole;
+    Some(match name {
+        "about" => MenuRole::About,
+        "hide" => MenuRole::Hide,
+        "hideOthers" => MenuRole::HideOthers,
+        "showAll" => MenuRole::ShowAll,
+        "quit" => MenuRole::Quit,
+        "undo" => MenuRole::Undo,
+        "redo" => MenuRole::Redo,
+        "cut" => MenuRole::Cut,
+        "copy" => MenuRole::Copy,
+        "paste" => MenuRole::Paste,
+        "selectAll" => MenuRole::SelectAll,
+        "minimize" => MenuRole::Minimize,
+        "zoom" => MenuRole::Zoom,
+        "toggleFullScreen" => MenuRole::ToggleFullScreen,
+        "close" => MenuRole::Close,
+        _ => return None,
+    })
 }
 
 // --- Whole variants ---------------------------------------------------------
