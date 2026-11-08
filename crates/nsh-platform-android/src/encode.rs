@@ -631,6 +631,21 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.string(text);
                     }
                     Command::AccessibilityFocus => e.int(18),
+                    // `Mounter.haptic` reads the haptic in this order.
+                    Command::Haptic(haptic) => {
+                        e.int(48);
+                        e.int(match haptic {
+                            nsh_core::Haptic::Selection => 0,
+                            nsh_core::Haptic::Light => 1,
+                            nsh_core::Haptic::Medium => 2,
+                            nsh_core::Haptic::Heavy => 3,
+                            nsh_core::Haptic::Soft => 4,
+                            nsh_core::Haptic::Rigid => 5,
+                            nsh_core::Haptic::Success => 6,
+                            nsh_core::Haptic::Warning => 7,
+                            nsh_core::Haptic::Error => 8,
+                        });
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);

@@ -2036,6 +2036,9 @@ pub enum Command {
     /// Show a notification, ask for the permission, set the app's badge
     /// (on the root; `Notifications` of `nsh`, [`crate::notifications`]).
     Notification(crate::notifications::NotificationCommand),
+    /// Play a haptic (on the root; `Haptics` of `nsh/mobile`,
+    /// [`crate::element::haptic`]). Platforms without haptics ignore it.
+    Haptic(Haptic),
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
@@ -2059,6 +2062,33 @@ pub enum Command {
         /// Its arguments (any JSON value).
         args: crate::JsonValue,
     },
+}
+
+/// A haptic the device plays ([`Command::Haptic`]): iOS's feedback
+/// generators (`UISelectionFeedbackGenerator`, `UIImpactFeedbackGenerator`,
+/// `UINotificationFeedbackGenerator`), Android's haptic feedback constants.
+/// What the user feels follows the device and its settings: none with
+/// haptics turned off, or on hardware without them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Haptic {
+    /// A selection changed: a picker's value, a segment, a slider's step.
+    Selection,
+    /// A light, small element collided (an impact).
+    Light,
+    /// A moderate element collided.
+    Medium,
+    /// A heavy, large element collided.
+    Heavy,
+    /// A soft, flexible element collided.
+    Soft,
+    /// A hard, inflexible element collided.
+    Rigid,
+    /// A task succeeded.
+    Success,
+    /// A task produced a warning.
+    Warning,
+    /// A task failed.
+    Error,
 }
 
 /// The status bar's look.

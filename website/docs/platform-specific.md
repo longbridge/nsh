@@ -106,7 +106,7 @@ What an element means on every platform is a top-level prop (in Rust a method of
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (windows: `window`, `current_window` and its `WindowRef`, `title_bar`, `displays`; the app: `quit`, `restart`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `haptic`, `input_accessory_view`) and of `nsh_core::element::desktop` (windows: `window`, `current_window` and its `WindowRef`, `title_bar`, `displays`; the app: `quit`, `restart`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
@@ -153,6 +153,16 @@ function Player() {
 ```
 
 The back button is handled by the top dialog first, then the back listeners (most recent first), then the top navigation stack, and the app exits when nothing handled it. See [Navigation](./navigation.md#the-android-back-button).
+
+#### Haptics (iOS, Android)
+
+| Rust | TSX | Description |
+|---|---|---|
+| `haptic(Haptic::Selection)` | `Haptics.selection()` | The haptic of a selection that changed. |
+| `haptic(Haptic::Light)`, ... `Rigid` | `Haptics.impact(style)` | The haptic of an element that collided, by its weight (`"medium"` by default). |
+| `haptic(Haptic::Success)`, `Warning`, `Error` | `Haptics.notification(kind)` | The haptic of a task that ended (`"success"` by default). |
+
+See [nsh/mobile](../modules/nsh-mobile.md#haptics).
 
 #### InputAccessoryView (iOS)
 
