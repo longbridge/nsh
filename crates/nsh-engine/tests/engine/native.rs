@@ -81,6 +81,7 @@ fn start_in(
         app: nsh_engine::App::Js(app),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,

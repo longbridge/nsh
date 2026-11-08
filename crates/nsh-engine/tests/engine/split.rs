@@ -92,6 +92,7 @@ fn config(bundle: Bundle) -> EngineConfig {
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,
