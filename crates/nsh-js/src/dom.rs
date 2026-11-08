@@ -4024,6 +4024,66 @@ mod tests {
         );
     }
 
+    /// nsh#1325: an entry that mounts after an `await` gets one root after
+    /// hot updates, also when an earlier run's `await` finishes late.
+    #[test]
+    fn hot_updates_replace_an_entry_mount_made_after_an_await() {
+        let host = Host::new().unwrap();
+        // `run` resolves when the test says so: the entry's `await`.
+        host.eval_source(
+            r#"
+            import "nsh:hot";
+            import { mount } from "nsh";
+            import { element } from "nsh:rt";
+            globalThis.waits = [];
+            const entry = (label) => (module, exports, require) => {
+                const App = __nsh_hot.component("main", "App", () => element(label), label);
+                new Promise((r) => waits.push(r)).then(() => mount(App));
+            };
+            globalThis.entry = entry;
+            __nsh_hot.define("main", entry("view"), false);
+            __nsh_hot.start("main", {});
+            waits.shift()();
+            "#,
+        )
+        .unwrap();
+        let first = ops(&host, false);
+        assert_eq!(
+            first.iter().filter(|o| o.ends_with("into 1")).count(),
+            1,
+            "{first:?}"
+        );
+        // An update: the previous root goes before the new run mounts.
+        host.eval_source(r#"__nsh_hot.update({ main: entry("text") }); waits.shift()();"#)
+            .unwrap();
+        let second = ops(&host, false);
+        assert_eq!(
+            second.iter().filter(|o| o.starts_with("remove")).count(),
+            1,
+            "{second:?}"
+        );
+        assert_eq!(
+            second.iter().filter(|o| o.ends_with("into 1")).count(),
+            1,
+            "{second:?}"
+        );
+        // Two updates before either `await` finishes: the late one of the
+        // superseded run replaces nothing it should keep.
+        host.eval_source(
+            r#"
+            __nsh_hot.update({ main: entry("view") });
+            __nsh_hot.update({ main: entry("text") });
+            waits.shift()();
+            waits.shift()();
+            "#,
+        )
+        .unwrap();
+        let third = ops(&host, false);
+        let inserted = third.iter().filter(|o| o.ends_with("into 1")).count();
+        let removed = third.iter().filter(|o| o.starts_with("remove")).count();
+        assert_eq!(inserted - removed, 0, "{third:?}");
+    }
+
     #[test]
     fn mounting_props_events_and_text_updates() {
         let host = Host::new().unwrap();
