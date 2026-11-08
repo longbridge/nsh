@@ -639,10 +639,13 @@ type Pixels<'a> = (&'a [u8], u32, u32, u32);
 /// points, drawn into `canvas` from `root` (the reader's window's root):
 /// the root's tree without the layers [`over_reader`] lists (the reader,
 /// what it holds and what draws over it), as Linux paints the surface up
-/// to the view. They are hidden only while it draws, and those hidden
-/// already stay so. Only the layers that can show there draw first
-/// ([`display_behind`]). `over` is kept for its allocation and left empty.
-/// `None`: `root` does not hold `reader`.
+/// to the view. The subtrees that draw nothing there ([`cull`]: a list's
+/// rows away from the reader, the rest of a page) are left out as well:
+/// `renderInContext:` rasterizes every layer it is given, wherever it
+/// lands, and skips hidden ones. They are hidden only while it draws, and
+/// those hidden already stay so; the pixels are those of the whole tree.
+/// `over` is kept for its allocation and left empty. `None`: `root` does
+/// not hold `reader`.
 fn backdrop_picture<'a>(
     canvas: &'a mut Canvas,
     root: &CALayer,
@@ -656,7 +659,9 @@ fn backdrop_picture<'a>(
     }
     let at = reader.convertRect_toLayer(reader.bounds(), Some(root));
     let area = grow(at, overflow as CGFloat);
-    display_behind(root, root, area, over);
+    // The layers it lists are left out anyway; [`cull`] adds after them.
+    let listed = over.len();
+    cull(root, area, over, listed);
     let pixels = canvas.draw((area.origin.x, area.origin.y), |context| {
         // After the drawing above, which places views' layers again.
         over.retain(|l| !l.isHidden());
@@ -704,26 +709,80 @@ fn over_reader(reader: &CALayer, root: &CALayer, out: &mut Vec<Retained<CALayer>
     true
 }
 
-/// As [`display_tree`], for a backdrop's picture: only the layers of
-/// `layer`'s tree that can show in `area` (in `root`'s space), not those
-/// `over` lists (left out of it), nor hidden ones, nor the trees of layers
-/// that clip them outside the area (a list's rows scrolled away, a screen
-/// under another).
-fn display_behind(layer: &CALayer, root: &CALayer, area: CGRect, over: &[Retained<CALayer>]) {
-    if layer.isHidden()
-        || (clips(layer) && !meets(layer.convertRect_toLayer(layer.bounds(), Some(root)), area))
-    {
-        return;
+/// What [`cull`] found of a layer's tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Reach {
+    /// Hidden already, or left out ([`over_reader`]): nothing to do.
+    Out,
+    /// It draws nothing in the area: the caller hides it.
+    Misses,
+    /// Some of it draws in the area.
+    Shows,
+}
+
+/// Readies a backdrop's picture of `layer`'s tree where it meets `area`
+/// (in `layer`'s space): the layers due to draw that show there draw (as
+/// [`display_tree`]), and the largest subtrees that draw nothing there
+/// are added to `hide` (whose first `listed` are left out already). A
+/// layer draws where [`drawn`] says (its bounds, a shape's path, its
+/// shadow) and its sublayers where they do, cut by its clip
+/// ([`clip_rect`]); what overflows a layer that does not clip shows, so a
+/// tree misses only when none of it meets the area. A tree whose reach is
+/// not known (a filter, a shadow cast by its content) is kept whole, and
+/// so is one where coordinates stop being finite (a flattening
+/// transform).
+fn cull(layer: &CALayer, area: CGRect, hide: &mut Layers, listed: usize) -> Reach {
+    if layer.isHidden() || hide[..listed].iter().any(|l| same(l, layer)) {
+        return Reach::Out;
     }
-    layer.displayIfNeeded();
-    // SAFETY: a getter; the sublayers are retained while they are drawn.
+    let own = match drawn(layer) {
+        Some(own) if finite(area) => own,
+        _ => {
+            display_tree(layer);
+            return Reach::Shows;
+        }
+    };
+    let shows = meets(own, area);
+    let inner = match clip_rect(layer) {
+        Some(clip) => intersection(area, clip),
+        None => Some(area),
+    };
+    let start = hide.len();
+    let mut any = false;
+    // SAFETY: a getter; the sublayers are retained while looked at.
     if let Some(sublayers) = unsafe { layer.sublayers() } {
         for sublayer in sublayers.iter() {
-            if !over.iter().any(|l| same(l, &sublayer)) {
-                display_behind(&sublayer, root, area, over);
+            let reach = match inner {
+                Some(inner) => cull(
+                    &sublayer,
+                    layer.convertRect_toLayer(inner, Some(&sublayer)),
+                    hide,
+                    listed,
+                ),
+                // Clipped away: hidden too, so that nothing draws it.
+                None if sublayer.isHidden()
+                    || hide[..listed].iter().any(|l| same(l, &sublayer)) =>
+                {
+                    Reach::Out
+                }
+                None => Reach::Misses,
+            };
+            match reach {
+                Reach::Misses => hide.push(sublayer),
+                Reach::Shows => any = true,
+                Reach::Out => {}
             }
         }
     }
+    if !shows && !any {
+        // The whole tree misses: the caller hides it, not its parts.
+        hide.truncate(start);
+        return Reach::Misses;
+    }
+    if shows {
+        layer.displayIfNeeded();
+    }
+    Reach::Shows
 }
 
 thread_local! {
@@ -799,11 +858,8 @@ fn meets_reader(way: &[Retained<CALayer>], reader: &CALayer, overflow: f32) -> b
         if !finite(area) {
             return true;
         }
-        if clips(ancestor) {
-            match intersection(
-                area,
-                ancestor.convertRect_toLayer(ancestor.bounds(), Some(top)),
-            ) {
+        if let Some(clip) = clip_rect(ancestor) {
+            match intersection(area, ancestor.convertRect_toLayer(clip, Some(top))) {
                 Some(r) => area = r,
                 None => return false,
             }
@@ -818,10 +874,10 @@ fn meets_reader(way: &[Retained<CALayer>], reader: &CALayer, overflow: f32) -> b
 }
 
 /// Whether what `layer`'s tree draws may meet `area` (in `layer`'s
-/// space). A layer that clips holds its tree in its bounds; what overflows
-/// one that does not shows (as in CSS), so its sublayers are looked at
-/// too. Unsure (a filter, a coordinate that is not finite, more layers
-/// than `budget`): yes.
+/// space). A layer that clips holds its tree in its clip ([`clip_rect`]);
+/// what overflows one that does not shows (as in CSS), so its sublayers
+/// are looked at too. Unsure (a filter, a coordinate that is not finite,
+/// more layers than `budget`): yes.
 fn reaches(layer: &CALayer, area: CGRect, budget: &mut u32) -> bool {
     if !finite(area) || *budget == 0 {
         return true;
@@ -833,9 +889,13 @@ fn reaches(layer: &CALayer, area: CGRect, budget: &mut u32) -> bool {
     if meets(drawn, area) {
         return true;
     }
-    if clips(layer) {
-        return false;
-    }
+    let area = match clip_rect(layer) {
+        Some(clip) => match intersection(area, clip) {
+            Some(area) => area,
+            None => return false,
+        },
+        None => area,
+    };
     // SAFETY: a getter; the sublayers are retained while looked at.
     let Some(sublayers) = (unsafe { layer.sublayers() }) else {
         return false;
@@ -845,34 +905,60 @@ fn reaches(layer: &CALayer, area: CGRect, budget: &mut u32) -> bool {
         .any(|l| reaches(&l, layer.convertRect_toLayer(area, Some(&l)), budget))
 }
 
-/// Where `layer` itself draws, in its space: its bounds and its shadow's
-/// reach. `None`: not known (a filter, such as a blur, draws beyond them).
+/// Where `layer` itself draws, in its space: its bounds (the contents and
+/// backing store NSH draws into), a shape layer's path with its stroke,
+/// and its shadow's reach. `None`: not known (a filter, such as a blur,
+/// draws beyond them; a shadow without a path is cast by the content of
+/// the whole tree).
 fn drawn(layer: &CALayer) -> Option<CGRect> {
+    use objc2_core_graphics::CGPath;
     if layer.filters().is_some_and(|f| f.count() > 0) {
         return None;
     }
     let bounds = layer.bounds();
+    let shape = layer
+        .downcast_ref::<objc2_quartz_core::CAShapeLayer>()
+        .and_then(|s| {
+            let path = s.path()?;
+            // A miter reaches `miterLimit` half widths out.
+            let stroke = s.lineWidth() * s.miterLimit().max(1.0) / 2.0;
+            Some(grow(CGPath::bounding_box(Some(&*path)), stroke))
+        });
+    let own = shape.map_or(bounds, |s| union(bounds, s));
     if layer.shadowOpacity() <= 0.0 {
-        return Some(bounds);
+        return Some(own);
     }
-    let shape = layer.shadowPath().map_or(bounds, |p| {
-        objc2_core_graphics::CGPath::bounding_box(Some(&*p))
-    });
+    let path = layer.shadowPath()?;
+    let cast = CGPath::bounding_box(Some(&*path));
     let offset = layer.shadowOffset();
     let cast = CGRect::new(
-        CGPoint::new(
-            shape.origin.x + offset.width,
-            shape.origin.y + offset.height,
-        ),
-        shape.size,
+        CGPoint::new(cast.origin.x + offset.width, cast.origin.y + offset.height),
+        cast.size,
     );
-    Some(union(bounds, grow(cast, 2.0 * layer.shadowRadius())))
+    Some(union(own, grow(cast, shadow_reach(layer.shadowRadius()))))
 }
 
-/// Whether `layer` clips its tree to its bounds (`masksToBounds`, or a
-/// mask: NSH's are the rounded box).
-fn clips(layer: &CALayer) -> bool {
-    layer.masksToBounds() || layer.mask().is_some()
+/// How far beyond its path a shadow of `radius` may draw: Core Animation
+/// blurs it over about twice the radius; this keeps a margin past that.
+fn shadow_reach(radius: CGFloat) -> CGFloat {
+    4.0 * radius.max(0.0) + 2.0
+}
+
+/// Where `layer` clips its tree (its sublayers and contents), in its
+/// space: its bounds with `masksToBounds`, its mask's frame (a shadow
+/// caster's mask reaches beyond the box), or both; `None`: it does not
+/// clip.
+fn clip_rect(layer: &CALayer) -> Option<CGRect> {
+    let mask = layer.mask().map(|m| m.frame());
+    if !layer.masksToBounds() {
+        return mask;
+    }
+    let bounds = layer.bounds();
+    Some(match mask {
+        Some(mask) => intersection(bounds, mask)
+            .unwrap_or_else(|| CGRect::new(bounds.origin, CGSize::new(0.0, 0.0))),
+        None => bounds,
+    })
 }
 
 /// Whether `a` and `b` are the same layer.
@@ -2026,9 +2112,15 @@ mod tests {
             // (which does not clip) shows there too.
             let card = sublayer(Some(&page), (0.0, 50.0, 100.0, 15.0));
             assert!(!layer_behind(&card, &bar, 0.0));
-            // Core Animation's default offset is 3 points up.
+            // Core Animation's default offset is 3 points up; a shadow
+            // cast by the content has no known reach.
             card.setShadowOpacity(0.5);
-            card.setShadowRadius(6.0);
+            card.setShadowRadius(2.0);
+            assert!(layer_behind(&card, &bar, 0.0), "a shadow without a path");
+            card.setShadowPath(Some(&rect_path((0.0, 0.0, 100.0, 15.0))));
+            card.setShadowRadius(0.5);
+            assert!(!layer_behind(&card, &bar, 0.0), "a short shadow");
+            card.setShadowRadius(2.0);
             assert!(layer_behind(&card, &bar, 0.0), "its shadow");
             let anchor = sublayer(Some(&page), (0.0, 0.0, 10.0, 10.0));
             let _overflowing = sublayer(Some(&anchor), (0.0, 75.0, 10.0, 10.0));
@@ -2126,5 +2218,143 @@ mod tests {
             "its size"
         );
         assert_ne!(picture_hash((&[][..], 0, 0, 0)), 0, "0 is no picture");
+    }
+
+    /// A rectangle `(x, y, w, h)` as a path.
+    fn rect_path((x, y, w, h): (f64, f64, f64, f64)) -> CFRetained<objc2_core_graphics::CGPath> {
+        let rect = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        // SAFETY: no transform.
+        unsafe { objc2_core_graphics::CGPath::with_rect(rect, std::ptr::null()) }
+    }
+
+    /// `layer`'s background, opaque.
+    fn fill(layer: &CALayer, (r, g, b): (f64, f64, f64)) {
+        let color = objc2_core_graphics::CGColor::new_srgb(r, g, b, 1.0);
+        layer.setBackgroundColor(Some(&*color));
+    }
+
+    /// A 100-point window: a page with a header, a card whose shadow
+    /// reaches down to 66, a zero-size anchor whose child overflows to
+    /// 70..80, and a scroll view (0..80, clipping) of 20 rows of 10 points,
+    /// each with a label, scrolled `offset` points; the bar (60..100) over
+    /// them: the root, the bar, the rows.
+    fn page(offset: f64) -> (Retained<CALayer>, Retained<CALayer>, Vec<Retained<CALayer>>) {
+        let root = sublayer(None, (0.0, 0.0, 100.0, 100.0));
+        let page = sublayer(Some(&root), (0.0, 0.0, 100.0, 100.0));
+        fill(&page, (0.2, 0.2, 0.2));
+        let header = sublayer(Some(&page), (0.0, 0.0, 100.0, 20.0));
+        fill(&header, (1.0, 1.0, 0.0));
+        let card = sublayer(Some(&page), (10.0, 30.0, 80.0, 20.0));
+        fill(&card, (1.0, 1.0, 1.0));
+        card.setShadowPath(Some(&rect_path((0.0, 0.0, 80.0, 20.0))));
+        card.setShadowOpacity(1.0);
+        card.setShadowRadius(4.0);
+        card.setShadowOffset(CGSize::new(0.0, 4.0));
+        let anchor = sublayer(Some(&page), (90.0, 0.0, 0.0, 0.0));
+        let overflowing = sublayer(Some(&anchor), (0.0, 70.0, 10.0, 10.0));
+        fill(&overflowing, (1.0, 0.0, 1.0));
+        let scroll = sublayer(Some(&page), (0.0, 20.0, 100.0, 60.0));
+        scroll.setMasksToBounds(true);
+        scroll.setSublayerTransform(CATransform3D::new_translation(0.0, -offset, 0.0));
+        let rows = (0..20)
+            .map(|i| {
+                let row = sublayer(Some(&scroll), (0.0, i as f64 * 10.0, 90.0, 10.0));
+                let shade = i as f64 / 20.0;
+                fill(&row, (shade, 0.5, 1.0 - shade));
+                let label = sublayer(Some(&row), (2.0, 2.0, 40.0, 6.0));
+                fill(&label, (0.0, 0.0, 0.0));
+                row
+            })
+            .collect();
+        let bar = sublayer(Some(&root), (0.0, 60.0, 100.0, 40.0));
+        fill(&bar, (0.0, 1.0, 0.0));
+        let _controls = sublayer(Some(&root), (0.0, 60.0, 100.0, 40.0));
+        (root, bar, rows)
+    }
+
+    #[test]
+    fn a_backdrop_leaves_out_the_trees_that_draw_nothing_where_it_reads() {
+        let (root, bar, rows) = page(0.0);
+        let mut hide = Vec::new();
+        assert!(over_reader(&bar, &root, &mut hide));
+        let listed = hide.len();
+        let area = grow(bar.convertRect_toLayer(bar.bounds(), Some(&root)), 0.0);
+        assert_eq!(cull(&root, area, &mut hide, listed), Reach::Shows);
+        let culled = |l: &CALayer| hide[listed..].iter().any(|h| same(h, l));
+        // SAFETY: getters.
+        let children = |l: &CALayer| unsafe { l.sublayers() }.unwrap().to_vec();
+        let top = children(&root);
+        let content = &top[0];
+        let parts = children(content);
+        let [header, card, anchor, scroll] = &parts[..] else {
+            panic!("the page's layers");
+        };
+        assert!(culled(header), "the header, away from the bar");
+        assert!(
+            !culled(card),
+            "the card, whose shadow reaches under the bar"
+        );
+        assert!(
+            !culled(anchor),
+            "the anchor, whose child overflows under it"
+        );
+        assert!(!culled(scroll));
+        // The scroll view shows 20..80 of the window: rows 4 and 5 (60..80)
+        // are under the bar; the rest is hidden row by row (not their
+        // labels: a row that misses goes whole).
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(culled(row), !(4..6).contains(&i), "row {i}");
+            assert!(!culled(&children(row)[0]), "row {i}'s label");
+        }
+        assert!(!culled(&root) && !culled(content));
+        // Scrolled 25 points: rows 6 to 8 (55..85 in the window, clipped to
+        // 80) show.
+        let (root, bar, rows) = page(25.0);
+        let mut hide = Vec::new();
+        over_reader(&bar, &root, &mut hide);
+        let listed = hide.len();
+        let area = bar.convertRect_toLayer(bar.bounds(), Some(&root));
+        cull(&root, area, &mut hide, listed);
+        for (i, row) in rows.iter().enumerate() {
+            let culled = hide[listed..].iter().any(|h| same(h, row));
+            assert_eq!(culled, !(6..9).contains(&i), "row {i}, scrolled");
+        }
+    }
+
+    #[test]
+    fn a_culled_backdrop_has_the_pixels_of_the_whole_tree() {
+        for offset in [0.0, 25.0, 113.0] {
+            for overflow in [0.0, 12.0] {
+                let (root, bar, rows) = page(offset);
+                let picture = picture_size(
+                    nsh_core::Size::new(nsh_core::Points(100.0), nsh_core::Points(40.0)),
+                    overflow,
+                    2.0,
+                )
+                .unwrap();
+                // Everything but the bar and what draws over it.
+                let mut over = Vec::new();
+                over_reader(&bar, &root, &mut over);
+                let mut slot = None;
+                let origin = (-(overflow as f64), 60.0 - overflow as f64);
+                let whole = Canvas::of(&mut slot, picture)
+                    .unwrap()
+                    .render(&root, origin, |context| {
+                        over.iter().for_each(|l| l.setHidden(true));
+                        root.renderInContext(context);
+                        over.iter().for_each(|l| l.setHidden(false));
+                    })
+                    .0
+                    .to_vec();
+                let mut slot = None;
+                let canvas = Canvas::of(&mut slot, picture).unwrap();
+                let (culled, ..) =
+                    backdrop_picture(canvas, &root, &bar, overflow, &mut over).unwrap();
+                assert!(whole == culled, "offset {offset}, overflow {overflow}");
+                assert!(whole.iter().any(|&b| b != 0), "something drawn");
+                assert!(over.is_empty());
+                assert!(rows.iter().all(|r| !r.isHidden()), "shown again");
+            }
+        }
     }
 }
