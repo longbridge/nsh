@@ -249,21 +249,16 @@ pub(crate) fn app_json(
 }
 
 /// The `app.json` of a desktop package (macOS, Windows, Linux) of the app
-/// `name` with the id `id`: its version and appearance, `schemes` and
-/// nsh.json `"window"`, which the runner reads before the app's code runs
-/// (`nsh_engine::Bundle::read_trusted`).
-pub(crate) fn desktop_app_json(
-    config: &AppConfig,
-    name: &str,
-    id: &str,
-    schemes: &[String],
-) -> String {
+/// `name` with the id `id`: its version and appearance, the schemes it
+/// claims and nsh.json `"window"`, which the runner reads before the app's
+/// code runs (`nsh_engine::Bundle::read_trusted`).
+pub(crate) fn desktop_app_json(config: &AppConfig, name: &str, id: &str) -> String {
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
-    app_json(info, schemes, config.window.as_ref())
+    app_json(info, &config.url_schemes(), config.window.as_ref())
 }
 
 /// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
@@ -964,7 +959,7 @@ fn package_linux(
     }
     fs::write(
         resources.join("app.json"),
-        desktop_app_json(config, name, id, &config.url_schemes()),
+        desktop_app_json(config, name, id),
     )?;
     if let Some(icon) = &config.icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
@@ -1056,10 +1051,7 @@ fn package_macos(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let schemes = config.url_schemes();
-    fs::write(
-        nsh.join("app.json"),
-        desktop_app_json(config, name, id, &schemes),
-    )?;
+    fs::write(nsh.join("app.json"), desktop_app_json(config, name, id))?;
     let icon = match &config.icon {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
@@ -1609,11 +1601,11 @@ mod tests {
         assert_eq!(config.url_schemes(), ["myapp"]);
     }
 
-    /// Every desktop package (macOS, Windows, Linux) writes nsh.json
-    /// `"window"` into its `app.json`, which the Windows and Linux packages
-    /// once left out.
+    /// Every desktop package (macOS, Windows, Linux) writes the same
+    /// `app.json`: nsh.json `"window"` and the schemes included, which the
+    /// Windows package once left out.
     #[test]
-    fn a_desktop_packages_app_json_carries_the_window() {
+    fn a_desktop_packages_app_json_carries_the_window_and_the_schemes() {
         let window = serde_json::json!({
             "title": "Stage",
             "minSize": { "width": 1100, "height": 720 },
@@ -1622,11 +1614,12 @@ mod tests {
         let config: AppConfig = serde_json::from_value(serde_json::json!({
             "version": "0.1.0",
             "appearance": "dark",
+            "schemes": ["MyApp"],
             "window": window,
         }))
         .unwrap();
         let json: serde_json::Value =
-            serde_json::from_str(&desktop_app_json(&config, "Stage", "com.a", &[])).unwrap();
+            serde_json::from_str(&desktop_app_json(&config, "Stage", "com.a")).unwrap();
         assert_eq!(
             json,
             serde_json::json!({
@@ -1634,13 +1627,13 @@ mod tests {
                 "id": "com.a",
                 "version": "0.1.0",
                 "appearance": "dark",
+                "schemes": ["myapp"],
                 "window": window,
             })
         );
-        // Without it, none: the runner's defaults.
+        // Without them, neither: the runner's defaults.
         let json: serde_json::Value =
-            serde_json::from_str(&desktop_app_json(&AppConfig::default(), "A", "com.a", &[]))
-                .unwrap();
+            serde_json::from_str(&desktop_app_json(&AppConfig::default(), "A", "com.a")).unwrap();
         assert_eq!(
             json,
             serde_json::json!({ "name": "A", "id": "com.a", "version": "1.0.0" })
