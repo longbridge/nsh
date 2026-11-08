@@ -49,7 +49,7 @@ use dispatch2::DispatchQueue;
 use nsh_core::{
     EventKind, EventPayload, ImageSource, NodeId, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarOptions,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, TitleBarOptions,
         TitleBarStyle, WindowFrame, menu_icon,
     },
     geometry::{DevicePixels, Edges, Points, size},
@@ -83,6 +83,9 @@ thread_local! {
     /// The app's name for the app menu's roles ("Quit Gallery"), set by
     /// [`crate::run_app`].
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The app's labels of the roles ([`crate::AppOptions::menu_labels`]),
+    /// set by [`crate::run_app`].
+    static MENU_LABELS: RefCell<MenuLabels> = RefCell::default();
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
     static ORIGINAL_MENU: RefCell<Option<Option<Retained<NSMenu>>>> = const { RefCell::new(None) };
@@ -91,6 +94,12 @@ thread_local! {
 /// Names the app for the app menu's roles.
 pub(crate) fn set_app_name(name: &str) {
     APP_NAME.with(|n| *n.borrow_mut() = Some(name.to_owned()));
+}
+
+/// The app's labels of the roles, for the items with a role and no label
+/// of their own.
+pub(crate) fn set_menu_labels(labels: MenuLabels) {
+    MENU_LABELS.set(labels);
 }
 
 pub(crate) fn app_name() -> String {
@@ -752,20 +761,50 @@ fn role_action(role: MenuRole) -> Sel {
     }
 }
 
-/// An item's title: its label, else its role's (with the app's name where
-/// macOS writes it).
+/// An item's title: its label, else its role's ([`role_title`]).
 fn title(action: &MenuAction) -> String {
     if !action.label.is_empty() {
         return action.label.clone();
     }
-    match action.role {
-        Some(role @ (MenuRole::About | MenuRole::Hide | MenuRole::Quit)) => {
+    action.role.map(role_title).unwrap_or_default()
+}
+
+/// The title of an item with `role` and no label of its own: the app's
+/// label of it ([`crate::AppOptions::menu_labels`]), else the English one,
+/// with the app's name where macOS writes it.
+fn role_title(role: MenuRole) -> String {
+    if let Some(label) = MENU_LABELS.with_borrow(|l| l.role(role).map(str::to_owned)) {
+        return label;
+    }
+    match role {
+        MenuRole::About | MenuRole::Hide | MenuRole::Quit => {
             format!("{} {}", role.label(), app_name())
         }
-        Some(MenuRole::ToggleFullScreen) => "Enter Full Screen".to_owned(),
-        Some(role) => role.label().to_owned(),
-        None => String::new(),
+        MenuRole::ToggleFullScreen => "Enter Full Screen".to_owned(),
+        role => role.label().to_owned(),
     }
+}
+
+/// An item that is `role` alone: its title ([`role_title`]), its
+/// shortcut on a Mac and its standard action, as the standard menu bar's
+/// items are.
+pub(crate) fn role_item(mtm: MainThreadMarker, role: MenuRole) -> Retained<NSMenuItem> {
+    let (key, modifiers) = role.shortcut(true).map_or_else(
+        || (String::new(), NSEventModifierFlags::empty()),
+        |shortcut| key_equivalent(&shortcut),
+    );
+    // SAFETY: the action is AppKit's standard one, sent down the responder
+    // chain.
+    let item = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            NSMenuItem::alloc(mtm),
+            &NSString::from_str(&role_title(role)),
+            Some(role_action(role)),
+            &NSString::from_str(&key),
+        )
+    };
+    item.setKeyEquivalentModifierMask(modifiers);
+    item
 }
 
 /// A shortcut as a key equivalent and its modifiers.
@@ -1116,6 +1155,35 @@ pub(crate) fn window_changed(surface: &Surface) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Items with a role and no label of their own read the app's labels,
+    /// as they are, and English for the roles it does not label, the app
+    /// menu's with the app's name.
+    #[test]
+    fn roles_read_the_apps_labels() {
+        set_app_name("Notes");
+        assert_eq!(role_title(MenuRole::Quit), "Quit Notes");
+        assert_eq!(role_title(MenuRole::ToggleFullScreen), "Enter Full Screen");
+        let mut labels = MenuLabels::default();
+        labels.roles.insert(MenuRole::Quit, "Notes を終了".into());
+        labels.roles.insert(MenuRole::Copy, "コピー".into());
+        set_menu_labels(labels);
+        assert_eq!(role_title(MenuRole::Quit), "Notes を終了");
+        assert_eq!(role_title(MenuRole::Copy), "コピー");
+        assert_eq!(role_title(MenuRole::Paste), "Paste");
+        let action = MenuAction {
+            id: 0,
+            label: String::new(),
+            shortcut: None,
+            enabled: true,
+            checked: None,
+            role: Some(MenuRole::Copy),
+            when: nsh_core::keymap::When::Always,
+            icon: None,
+        };
+        assert_eq!(title(&action), "コピー");
+        set_menu_labels(MenuLabels::default());
+    }
 
     #[test]
     fn window_buttons_go_where_the_app_put_them() {

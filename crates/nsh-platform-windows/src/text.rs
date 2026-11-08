@@ -2928,7 +2928,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
         vec![
             LocalItem::Item {
                 role: Some(MenuRole::Copy),
-                label: "",
+                label: String::new(),
                 enabled: selected,
                 action: Rc::new(move |_| {
                     if let Some(text) = selected_text(&copy) {
@@ -2938,7 +2938,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
             },
             LocalItem::Item {
                 role: Some(MenuRole::SelectAll),
-                label: "",
+                label: String::new(),
                 enabled: true,
                 action: Rc::new(move |s| {
                     let len = all.state().text.as_ref().map_or(0, |t| t.text.len_utf16());

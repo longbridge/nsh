@@ -9,13 +9,13 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::{MenuLabels, MenuRole},
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
-    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::ProtocolObject, sel,
+    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
@@ -221,6 +221,11 @@ pub struct AppOptions {
     /// too, but never changes the host's window: the embedding app makes its
     /// window nonopaque and clear itself where it wants that.
     pub transparent: bool,
+    /// The labels of the menus [`run_app`] makes in the app's language: its
+    /// standard menu bar (the app menu, Edit and Window) and the items with
+    /// a role and no label of their own in the app's menus. English for
+    /// what it does not label.
+    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -247,6 +252,7 @@ impl Default for AppOptions {
             notifications: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
+            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -971,9 +977,10 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     app.setActivationPolicy(activation_policy(&options));
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
+    crate::chrome::set_menu_labels(options.menu_labels.clone());
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm, &options.title)));
+    app.setMainMenu(Some(&main_menu(mtm, &options.title, &options.menu_labels)));
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -1154,78 +1161,66 @@ fn secondary(frames: &[NSRect]) -> Option<usize> {
 
 /// The app menu (About, Hide, Quit), Edit (the text commands fields
 /// answer: undo, cut, copy, paste, select all) and Window (minimize, zoom,
-/// full screen, close).
-fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
+/// full screen, close): items of their roles, labelled as `labels` says
+/// ([`crate::chrome::role_item`]).
+fn main_menu(mtm: MainThreadMarker, title: &str, labels: &MenuLabels) -> Retained<NSMenu> {
     let bar = NSMenu::new(mtm);
-    let item = |menu: &NSMenu, title: &str, action: Option<objc2::runtime::Sel>, key: &str| {
-        // SAFETY: the actions are AppKit's standard ones, sent down the
-        // responder chain.
-        let item = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(title),
-                action,
-                &NSString::from_str(key),
-            )
-        };
-        menu.addItem(&item);
-        item
-    };
     let submenu = |name: &str| {
         let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(name));
-        let holder = item(&bar, name, None, "");
+        // SAFETY: an item without an action, holding the submenu.
+        let holder = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(name),
+                None,
+                &NSString::new(),
+            )
+        };
         holder.setSubmenu(Some(&menu));
+        bar.addItem(&holder);
         menu
     };
-    let app_menu = submenu(title);
-    item(
-        &app_menu,
-        &format!("About {title}"),
-        Some(sel!(orderFrontStandardAboutPanel:)),
-        "",
+    let fill = |menu: &NSMenu, roles: &[Option<MenuRole>]| {
+        for role in roles {
+            match role {
+                Some(role) => menu.addItem(&crate::chrome::role_item(mtm, *role)),
+                None => menu.addItem(&NSMenuItem::separatorItem(mtm)),
+            }
+        }
+    };
+    fill(
+        &submenu(title),
+        &[
+            Some(MenuRole::About),
+            None,
+            Some(MenuRole::Hide),
+            Some(MenuRole::HideOthers),
+            None,
+            Some(MenuRole::Quit),
+        ],
     );
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&app_menu, &format!("Hide {title}"), Some(sel!(hide:)), "h");
-    let others = item(
-        &app_menu,
-        "Hide Others",
-        Some(sel!(hideOtherApplications:)),
-        "h",
+    fill(
+        &submenu(labels.edit_menu.as_deref().unwrap_or("Edit")),
+        &[
+            Some(MenuRole::Undo),
+            Some(MenuRole::Redo),
+            None,
+            Some(MenuRole::Cut),
+            Some(MenuRole::Copy),
+            Some(MenuRole::Paste),
+            Some(MenuRole::SelectAll),
+        ],
     );
-    others
-        .setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Option);
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(
-        &app_menu,
-        &format!("Quit {title}"),
-        Some(sel!(terminate:)),
-        "q",
+    fill(
+        &submenu(labels.window_menu.as_deref().unwrap_or("Window")),
+        &[
+            Some(MenuRole::Minimize),
+            Some(MenuRole::Zoom),
+            Some(MenuRole::ToggleFullScreen),
+            None,
+            Some(MenuRole::Close),
+        ],
     );
-
-    let edit = submenu("Edit");
-    item(&edit, "Undo", Some(sel!(undo:)), "z");
-    // An uppercase key equivalent is Shift with it.
-    item(&edit, "Redo", Some(sel!(redo:)), "Z");
-    edit.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&edit, "Cut", Some(sel!(cut:)), "x");
-    item(&edit, "Copy", Some(sel!(copy:)), "c");
-    item(&edit, "Paste", Some(sel!(paste:)), "v");
-    item(&edit, "Select All", Some(sel!(selectAll:)), "a");
-
-    let window = submenu("Window");
-    item(&window, "Minimize", Some(sel!(performMiniaturize:)), "m");
-    item(&window, "Zoom", Some(sel!(performZoom:)), "");
-    let full = item(
-        &window,
-        "Enter Full Screen",
-        Some(sel!(toggleFullScreen:)),
-        "f",
-    );
-    full.setKeyEquivalentModifierMask(
-        NSEventModifierFlags::Command | NSEventModifierFlags::Control,
-    );
-    window.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&window, "Close", Some(sel!(performClose:)), "w");
     bar
 }
 

@@ -529,7 +529,7 @@ fn parse_key(text: &str, key: &str) -> Result<Key, ShortcutError> {
 
 /// A standard menu item: the platform carries it out (and labels it when
 /// the item has no label of its own).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
 pub enum MenuRole {
     /// The about panel (macOS).
     About,
@@ -658,6 +658,41 @@ impl MenuRole {
                 | MenuRole::Paste
                 | MenuRole::SelectAll
         )
+    }
+}
+
+/// The labels of the menu items NSH labels itself, in the app's language:
+/// the standard menu bar a standalone app opens with on macOS (`run_app`'s:
+/// the app menu, Edit and Window), the edit menus of text fields and
+/// selectable text where NSH shows its own (Windows), and the items with a
+/// role and no label of their own. English ([`MenuRole::label`]) for what
+/// the app does not label.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct MenuLabels {
+    /// The label of each role the app labels. On macOS an About, Hide or
+    /// Quit item shows it as it is: it names the app itself (`"About Bex"`),
+    /// where the English one is followed by the app's name.
+    pub roles: std::collections::HashMap<MenuRole, String>,
+    /// The title of the standard menu bar's Edit menu (`"Edit"`).
+    pub edit_menu: Option<String>,
+    /// The title of the standard menu bar's Window menu (`"Window"`).
+    pub window_menu: Option<String>,
+    /// The Delete item of a text field's edit menu, where NSH shows its own
+    /// (`"Delete"`).
+    pub delete: Option<String>,
+}
+
+impl MenuLabels {
+    /// The app's label of `role`, if it labels it.
+    pub fn role(&self, role: MenuRole) -> Option<&str> {
+        self.roles.get(&role).map(String::as_str)
+    }
+
+    /// The label of an item with `role` and no label of its own: the
+    /// app's, else [`MenuRole::label`].
+    pub fn label(&self, role: MenuRole) -> &str {
+        self.role(role).unwrap_or(role.label())
     }
 }
 
