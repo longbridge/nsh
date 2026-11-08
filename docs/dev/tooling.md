@@ -264,10 +264,11 @@ An observer sees every batch with the step it came in; `print_batch` prints it a
 Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
 with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
 (`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
-returns the views that are on screen in tree order as layout placed them (`LayoutNode`: bounds in the root's points,
-parent, kind, `testID`, hidden, clips, scroll axis and content size, a text's `AttributedText` and the box it was
-laid out in), for checks of the layout itself: what overflows its parent, is cut by a view that clips, or is too wide
-for its text.
+returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
+bounds in the root's points with transforms left aside, hidden, clips, a scroll view's `LayoutScroll` (axis, content
+size), a text view's `LayoutText` (its `AttributedText` and the box it was laid out in, in the root's points too)),
+for checks of the layout itself: what overflows its parent, is cut by a view that clips, or is too wide for its text.
+Both are Rust API of `nsh-testing` for `cargo test`; the TSX `nsh/test` module has no counterpart yet.
 
 The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
 `label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`

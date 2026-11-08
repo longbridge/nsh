@@ -3070,18 +3070,19 @@ mod tests {
         // Tree order, the root left out, and every parent is in the list.
         let ids: Vec<_> = nodes.iter().map(|n| n.id).collect();
         let outer = node(&nodes, "outer");
-        assert_eq!(outer.parent, Some(ROOT_ID));
+        assert_eq!(outer.parent, ROOT_ID);
+        assert_eq!(outer.kind, nsh_core::ViewKind::View);
         assert_eq!(ids[0], outer.id);
         for n in nodes.iter().filter(|n| n.id != outer.id) {
-            assert!(ids.contains(&n.parent.unwrap()), "{n:?}");
+            assert!(ids.contains(&n.parent), "{n:?}");
         }
 
         // Boxes are in the root's points; padding moves the children.
         assert_eq!(outer.bounds.size, Size::new(px(200.0), px(100.0)));
         assert!(outer.clips);
-        assert!(!outer.is_scroll && !outer.hidden);
+        assert!(outer.scroll.is_none() && outer.text.is_none() && !outer.hidden);
         let wide = node(&nodes, "wide");
-        assert_eq!(wide.parent, Some(outer.id));
+        assert_eq!(wide.parent, outer.id);
         assert_eq!(wide.bounds.origin.x, outer.bounds.origin.x + px(10.0));
         // It is wider than the box that clips it: the audit's evidence.
         assert!(wide.bounds.right() > outer.bounds.right());
@@ -3090,15 +3091,19 @@ mod tests {
         // scrolls and how large its content is.
         assert!(node(&nodes, "ghost").hidden);
         let strip = node(&nodes, "strip");
-        assert!(strip.is_scroll && strip.horizontal);
-        assert_eq!(strip.content_size.map(|s| s.width), Some(px(400.0)));
-        assert_eq!(node(&nodes, "long").parent, Some(strip.id));
+        let scrolling = strip.scroll.as_ref().unwrap();
+        assert!(scrolling.horizontal);
+        assert_eq!(scrolling.content_size.map(|s| s.width), Some(px(400.0)));
+        assert_eq!(node(&nodes, "long").parent, strip.id);
 
-        // A text keeps its attributed text and the box it was laid out in.
+        // A text keeps its attributed text and the box it was laid out in,
+        // in the root's points as its own box.
         let label = node(&nodes, "label");
-        assert_eq!(label.text.as_ref().unwrap().text, "Label");
-        assert!(label.text_content.size.width.0 > 0.0);
-        assert!(label.text_content.size.width <= label.bounds.size.width);
+        let text = label.text.as_ref().unwrap();
+        assert_eq!(text.text.text, "Label");
+        assert!(text.content.size.width.0 > 0.0);
+        assert!(text.content.origin.x >= label.bounds.origin.x);
+        assert!(text.content.right() <= label.bounds.right());
     }
 
     #[test]
@@ -3109,11 +3114,11 @@ mod tests {
             let nodes = app.screen().layout_nodes();
             let text = nodes
                 .iter()
-                .find(|n| n.text.as_ref().is_some_and(|t| t.text == "Row 3"))
+                .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == "Row 3"))
                 .unwrap()
                 .clone();
             // The row's box is the text's parent.
-            let parent = nodes.iter().find(|n| Some(n.id) == text.parent).unwrap();
+            let parent = nodes.iter().find(|n| n.id == text.parent).unwrap();
             parent.bounds.origin.y
         };
         let before = row(&app);
