@@ -250,6 +250,14 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
         })
+        .on_scroll_drag_start({
+            let dt = dt.clone();
+            move |offset: &Point<Points>| dt.drag_started(false, *offset)
+        })
+        .on_scroll_drag_end({
+            let dt = dt.clone();
+            move |offset: &Point<Points>| dt.drag_ended(false, *offset)
+        })
         .on_scroll_end({
             let dt = dt.clone();
             move |_: &Point<Points>| dt.rest()
@@ -274,6 +282,18 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                         .flex_1()
                         .scrollbar(false)
                         .bounces(move || props.bounces.get())
+                        .on_scroll_drag_start({
+                            let dt = dt.clone();
+                            move |offset: &Point<Points>| dt.drag_started(true, *offset)
+                        })
+                        .on_scroll_drag_end({
+                            let dt = dt.clone();
+                            move |offset: &Point<Points>| dt.drag_ended(true, *offset)
+                        })
+                        .on_scroll_end({
+                            let dt = dt.clone();
+                            move |_: &Point<Points>| dt.rest()
+                        })
                         .on_scroll(move |e: &ScrollEvent| {
                             hscroll_dt.scroll_x.set(e.offset.x);
                             // The desktops' bar follows, unless it leads.
@@ -391,6 +411,14 @@ fn strip(dt: Dt, lead: Lead) -> impl IntoElement {
             .right_0()
             .bottom_0()
             .h(px(STRIP))
+            .on_scroll_drag_start({
+                let dt = dt.clone();
+                move |offset: &Point<Points>| dt.drag_started(true, *offset)
+            })
+            .on_scroll_drag_end({
+                let dt = dt.clone();
+                move |offset: &Point<Points>| dt.drag_ended(true, *offset)
+            })
             .on_scroll(move |e: &ScrollEvent| {
                 // The table follows the bar, unless the table leads (the bar
                 // following it): sending that back would fight a drag.

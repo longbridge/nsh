@@ -115,6 +115,11 @@ pub(crate) struct Dt {
     anchored: bool,
     anchor_x: Signal<Anchor>,
     anchor_y: Signal<Anchor>,
+    // Web desktop wheels follow one-to-one; explicit drags still span the
+    // entire range. Touch idioms retain their existing anchored physics.
+    web_desktop: bool,
+    drag_x: Signal<Option<Anchor>>,
+    drag_y: Signal<Option<Anchor>>,
     rows_window: RowWindow,
     cols_window: RowWindow,
     /// The width a resize drag started from.
@@ -164,9 +169,15 @@ impl Dt {
             strip: element_ref(),
             // A terminal's pointer is a mouse that drags the bar, as a
             // desktop's does.
-            anchored: !nsh_core::element::is_desktop() && !crate::terminal::is_terminal(),
+            anchored: (!nsh_core::element::is_desktop()
+                || nsh_core::element::os() == nsh_core::platform::Os::Web)
+                && !crate::terminal::is_terminal(),
             anchor_x: signal(Anchor::default()),
             anchor_y: signal(Anchor::default()),
+            web_desktop: nsh_core::element::is_desktop()
+                && nsh_core::element::os() == nsh_core::platform::Os::Web,
+            drag_x: signal(None),
+            drag_y: signal(None),
             // Rows are short, columns wide: a window of columns reaches
             // less far.
             rows_window: RowWindow::following(4),
@@ -454,8 +465,8 @@ impl Dt {
             .get()
             .map_or(0.0, |rows| (width - rows.0).max(0.0));
         let x = Axis::new(scroll_width, (width - lead - fixed - bar).max(0.0) as f64);
-        let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x);
-        let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y);
+        let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x, self.drag_x);
+        let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y, self.drag_y);
         Geo {
             row_height,
             header,
@@ -797,13 +808,61 @@ impl Dt {
     }
 
     /// The content offset scroll offset `scroll` of `axis` shows.
-    fn offset_on(&self, axis: &Axis, scroll: Points, anchor: Signal<Anchor>) -> f64 {
+    fn offset_on(
+        &self,
+        axis: &Axis,
+        scroll: Points,
+        anchor: Signal<Anchor>,
+        drag: Signal<Option<Anchor>>,
+    ) -> f64 {
         let scroll = scroll.0 as f64;
-        if self.anchored {
+        if let Some(a) = drag.get() {
+            axis.content_offset_drag(scroll, a)
+        } else if self.anchored {
             axis.content_offset_from(scroll, anchor.get())
         } else {
             axis.content_offset(scroll)
         }
+    }
+
+    /// Explicit desktop drags (the web scrollbar) use the whole range;
+    /// wheels use the local anchor. Both start from the content now shown.
+    pub(crate) fn drag_started(&self, horizontal: bool, offset: Point<Points>) {
+        if !self.web_desktop {
+            return;
+        }
+        let (scroll, drag) = if horizontal {
+            (self.scroll_x, self.drag_x)
+        } else {
+            (self.scroll_y, self.drag_y)
+        };
+        scroll.set(if horizontal { offset.x } else { offset.y });
+        let g = untracked(|| self.geo());
+        drag.set(Some(Anchor {
+            scroll: f64::from(scroll.get_untracked().0),
+            content: if horizontal { g.cx } else { g.cy },
+        }));
+    }
+
+    pub(crate) fn drag_ended(&self, horizontal: bool, offset: Point<Points>) {
+        if !self.web_desktop {
+            return;
+        }
+        let (scroll, drag, anchor) = if horizontal {
+            (self.scroll_x, self.drag_x, self.anchor_x)
+        } else {
+            (self.scroll_y, self.drag_y, self.anchor_y)
+        };
+        scroll.set(if horizontal { offset.x } else { offset.y });
+        let g = untracked(|| self.geo());
+        // Take the drag's final content before switching back to local
+        // following. The subsequent rest recenters the invisible hit layer.
+        anchor.set(Anchor {
+            scroll: f64::from(scroll.get_untracked().0),
+            content: if horizontal { g.cx } else { g.cy },
+        });
+        drag.set(None);
+        self.rest();
     }
 
     /// Scrolls the rows to content offset `content` at the top.
@@ -866,7 +925,7 @@ impl Dt {
         }
         let g = untracked(|| self.geo());
         let ratio = f64::from(nsh_core::element::pixel_ratio());
-        if g.y.scaled() {
+        if g.y.scaled() && self.drag_y.get_untracked().is_none() {
             let mut a = self.anchor_y.get_untracked();
             let moved = settle(&g.y, g.cy, ratio, &mut a, self.scroll_y.get_untracked());
             self.anchor_y.set(a);
@@ -875,7 +934,7 @@ impl Dt {
                 self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
             }
         }
-        if g.x.scaled() {
+        if g.x.scaled() && self.drag_x.get_untracked().is_none() {
             let mut a = self.anchor_x.get_untracked();
             let moved = settle(&g.x, g.cx, ratio, &mut a, self.scroll_x.get_untracked());
             self.anchor_x.set(a);
