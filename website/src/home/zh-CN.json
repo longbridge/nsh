@@ -118,7 +118,7 @@
   "kitNote": [
     "只做桌面应用？同一 Longbridge 团队打造的 ",
     "GPUI Kit",
-    " 为 macOS、Windows 和 Linux 提供 75+ 个现成组件，用 NSH 开发的应用也可以直接嵌入 GPUI Kit 应用。"
+    " 提供一套开箱即用的 UI 组件库，覆盖 macOS、Windows 和 Linux；用 NSH 开发的应用也可以直接嵌入 GPUI Kit 应用。"
   ],
   "closeTitle": [
     "原生视图与交互，",
