@@ -58,7 +58,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 |---|---|---|---|---|
 | `src` | `web_view(url)` | `string` | | The URL of the page to show. |
 | `html` | `web_view_html(html, base_url)`, `.html(html, base_url)` | `string` | | Inline HTML, shown instead of `src`. |
-| `baseUrl` | `base_url` of `web_view_html` / `.html` | `string` | | What `html`'s relative links resolve against. |
+| `baseUrl` | `base_url` of `web_view_html` / `.html` | `string` | | What `html`'s relative links resolve against. It needs the same grant as a page there (`webview.hosts`); without it the HTML loads with no base URL and `onError` reports `ERR_ACCESS_DENIED`. |
 | `injectedJavaScript` | `.injected_java_script(..)` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `.user_agent(..)` | `string` | | The browser's user agent string. |
@@ -80,7 +80,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | A page started loading. |
 | `onLoad` | `.on_load` | `WebViewNavigation` | A page finished loading. |
-| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page or `html` the app's capabilities do not grant. |
+| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant. |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
 | `onDownload` | | `WebViewDownload` | A download started, finished or failed (macOS). |
@@ -172,7 +172,8 @@ function Bridge() {
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md) in `nsh.json`, a web view shows and
 navigates to the hosts listed under `webview`. A `src` on another host, or `html` in an app without `webview`, shows an
-empty view; a top-level navigation to another host (a link the user taps) is cancelled natively. Each reports
+empty view; a `baseUrl` on another host is dropped, and the HTML loads without it; a top-level navigation to another
+host (a link the user taps) is cancelled natively. Each reports
 `onError` with `code` `"ERR_ACCESS_DENIED"`.
 
 ```json
