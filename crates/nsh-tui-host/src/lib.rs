@@ -19,8 +19,10 @@ mod terminal;
 pub use shutdown::request_exit;
 pub use terminal::convert;
 
-/// The host's options, as its command line gives them.
+/// The host's options, as its command line gives them. An embedding program parses its own
+/// arguments (`Args::try_parse_from`) or starts from [`Args::default`].
 #[derive(Parser)]
+#[non_exhaustive]
 #[command(
     about = "Run Native Shell in the terminal (C-h e opens logs; Ctrl+C copies a selection, else exits)"
 )]
@@ -57,6 +59,13 @@ pub struct Args {
     /// Initial in-memory viewport in points, rounded up to whole Cells.
     #[arg(long, requires = "headless")]
     pub window_size: Option<CellSize>,
+}
+
+impl Default for Args {
+    /// The options of a command line that gives none.
+    fn default() -> Self {
+        Self::parse_from(["nsh-tui-host"])
+    }
 }
 
 /// Parses host arguments and runs the selected bundle. The binary owns logging and diagnostics.
