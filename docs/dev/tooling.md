@@ -879,12 +879,13 @@ program that describes them, builds the hosts and runners with them, and does ev
   directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
   CI jobs share), and Cargo resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on
   is published by `release-crate.yml`, the hosts and runners included; the binaries are named after the app
-  (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-test`), and so are
-  the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`, installed as `libnsh.so`),
-  so apps sharing a target directory never take each other's. Generated workspaces optimize `quickjs-jit-sys`,
-  `taffy`, `objc2` and `objc2-encode` at level 3 in debug builds, matching NSH's own workspace, so hot reload hosts
-  keep interpreter, layout and Objective-C bridge performance while application Rust code retains debug settings.
-  Objective-C signature checks stay enabled: their encoding parser needs optimization too, since every native
+  (`nsh-app-<package>-describe`; with several crates the first one's package and the first 8 hex digits of the SHA-256
+  of all their packages, sorted, `nsh-app-charts-ef5aa537-test`, so the names stay short for Windows' 260-character
+  paths), and so are the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`,
+  installed as `libnsh.so`), so apps sharing a target directory never take each other's. Generated workspaces optimize
+  `quickjs-jit-sys`, `taffy`, `objc2` and `objc2-encode` at level 3 in debug builds, matching NSH's own workspace, so
+  hot reload hosts keep interpreter, layout and Objective-C bridge performance while application Rust code retains debug
+  settings. Objective-C signature checks stay enabled: their encoding parser needs optimization too, since every native
   message checks its signature in debug builds.
 - Before a command on the app (`build`, `test`, `dev`, `run`, `package`, `publish`, `check`) `nsh` builds `describe`
   ("building the Rust crate …": Cargo decides whether the app's Rust code changed) and runs it when the program is
