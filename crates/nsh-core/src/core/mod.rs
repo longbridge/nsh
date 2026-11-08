@@ -1529,6 +1529,13 @@ impl<M: TextEngine> Core<M> {
         self.nodes.len()
     }
 
+    /// How many node ids the core's id table has room for: far above
+    /// [`Self::node_count`] when the ids of nodes that are gone still take
+    /// room (diagnostics).
+    pub fn node_id_room(&self) -> usize {
+        self.slots.len()
+    }
+
     /// Sets what the app may reach: remote images, canvas images, video
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {

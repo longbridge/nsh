@@ -337,6 +337,9 @@ impl Script {
         self.0.fetch_refused(id, message, url);
     }
     pub(crate) fn collect_garbage(&self) {}
+    pub(crate) fn heap_usage(&self) -> (u64, u64) {
+        (0, 0)
+    }
     pub(crate) fn fatal(&self) -> Option<String> {
         self.0.fatal()
     }

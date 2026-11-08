@@ -2406,6 +2406,17 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(start) = start {
                 log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
             }
+            // What the app holds, for the performance monitor: read here,
+            // when the heap was just walked and nothing waits.
+            if let Some(monitor) = &self.state.perf {
+                let (js_heap, js_objects) = script.heap_usage();
+                monitor.set_memory(perf::MemorySample {
+                    js_heap,
+                    js_objects,
+                    nodes: self.state.core.node_count() as u64,
+                    node_ids: self.state.core.node_id_room() as u64,
+                });
+            }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
             if let Some(batch) = self.state.commit(Some(script)) {
