@@ -20,6 +20,7 @@ mod publish_ios;
 mod run;
 mod runtime;
 mod rust_app;
+mod self_update;
 mod sign;
 mod test;
 mod test_android;
@@ -79,7 +80,7 @@ pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
 }
 
 #[derive(Parser)]
-#[command(name = "nsh", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("NSH_GIT_SHA"), ")"), about = "Build and run nsh apps")]
+#[command(name = "nsh", version = env!("NSH_VERSION_TEXT"), about = "Build and run nsh apps")]
 struct Cli {
     /// Show everything: log lines with their targets, cargo's output and
     /// the hosts' own.
@@ -314,6 +315,15 @@ enum Command {
     Keygen {
         /// Path and name of the key files, e.g. `keys/root`.
         name: PathBuf,
+    },
+    /// Update this nsh to the latest release, or to the latest nightly
+    /// build of `main` (`nsh update nightly`, as `rustup update nightly`);
+    /// it stays on the channel it was installed from unless one is named.
+    Update {
+        /// `stable` (the releases) or `nightly` (every night `main` changes);
+        /// default: the channel this nsh is on.
+        #[arg(value_enum)]
+        channel: Option<self_update::Channel>,
     },
     /// Write an app's update manifest (`latest.json`, signed with `--key`)
     /// from the archives `nsh package` made for each platform; publish them
@@ -563,6 +573,7 @@ impl Command {
             Command::Package(args) => Some(&mut args.entry),
             Command::Init { .. }
             | Command::Keygen { .. }
+            | Command::Update { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -943,6 +954,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             )
         }
         Command::Keygen { name } => sign::keygen(&name),
+        Command::Update { channel } => self_update::update(channel),
         Command::UpdateManifest {
             archives,
             package,
@@ -1119,9 +1131,14 @@ mod command_tests {
             assert_eq!(
                 error.to_string(),
                 format!(
-                    "nsh {} ({})\n",
+                    "nsh {} ({}{})\n",
                     env!("CARGO_PKG_VERSION"),
-                    env!("NSH_GIT_SHA")
+                    env!("NSH_GIT_SHA"),
+                    if env!("NSH_CHANNEL") == "nightly" {
+                        " nightly"
+                    } else {
+                        ""
+                    }
                 )
             );
         }

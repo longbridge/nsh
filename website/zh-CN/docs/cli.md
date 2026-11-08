@@ -233,6 +233,14 @@ nsh package my-app --target web
 
 参见[打包](./packaging.md)。
 
+## nsh update
+
+把已安装的 `nsh` 更新到所在渠道的最新构建；指定渠道即切换（与 `rustup update nightly` 一致）（[安装](./installation.md#更新)）。
+
+```sh
+nsh update [stable|nightly]
+```
+
 ## 签名命令
 
 这些命令用于生成和校验签名包（`.nshpkg`）：嵌入 NSH 的应用会下载这些应用包，并在运行前进行校验。[签名包](./signed-packages.md)介绍了整个模型（由离线保存的根密钥为某些应用 id 认证 release 密钥）。

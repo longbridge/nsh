@@ -1,4 +1,5 @@
-//! Stamps the CLI with its source revision without changing crate versions.
+//! Stamps the CLI with its source revision and release channel without
+//! changing crate versions.
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -64,8 +65,22 @@ fn main() {
             .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
             .and_then(|data| data["git"]["sha1"].as_str().and_then(short_sha))
     };
+    let revision = revision.as_deref().unwrap_or("unknown");
+    println!("cargo:rustc-env=NSH_GIT_SHA={revision}");
+
+    // The release channel the build is published on: the nightly workflow
+    // sets `nightly`, `nsh update` stays on it. Anything else is `stable`.
+    println!("cargo:rerun-if-env-changed=NSH_CHANNEL");
+    let nightly = env::var("NSH_CHANNEL").as_deref() == Ok("nightly");
     println!(
-        "cargo:rustc-env=NSH_GIT_SHA={}",
-        revision.as_deref().unwrap_or("unknown")
+        "cargo:rustc-env=NSH_CHANNEL={}",
+        if nightly { "nightly" } else { "stable" }
     );
+    let version = env::var("CARGO_PKG_VERSION").expect("package version");
+    let version = if nightly {
+        format!("{version} ({revision} nightly)")
+    } else {
+        format!("{version} ({revision})")
+    };
+    println!("cargo:rustc-env=NSH_VERSION_TEXT={version}");
 }

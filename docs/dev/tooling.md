@@ -986,7 +986,9 @@ whose `main` the nightly already has builds nothing (the `plan` job compares the
 tag: each build deletes the previous nightly release and its tag and creates them again at the new commit (moving
 the tag through the refs API would need the `workflows` permission when the commits change workflows), so tags do
 not pile up. Running the workflow by hand with *nightly* publishes one at once. `install.sh --nightly` installs
-it; the CLI keeps the workspace version, and `-V` shows the commit. Pull
+it; the CLI keeps the workspace version, and `-V` shows the commit and `nightly`: the dist job builds with
+`NSH_CHANNEL=nightly`, which the CLI's build script stamps in, and the nightly release carries `nsh-release.json`
+(`{ version, commit }`). Pull
 requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
@@ -1009,6 +1011,13 @@ How users get it (`website/docs/installation.md`):
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
 - `install.sh --nightly` installs the `nightly` release the same way (`NSH_VERSION=nightly` does too).
+- `nsh update [stable|nightly]` (`crates/nsh-cli/src/self_update.rs`) replaces the installed
+  distribution in place: the directory holding `bin/nsh` with a `runtime/` beside it, never a checkout's build or
+  what Homebrew, Scoop or mise installed (it names their command). It stays on the channel stamped at build time
+  unless one is named (as `rustup update nightly`); the stable channel reads the latest tag from the redirect of `releases/latest`, the
+  nightly one compares `nsh-release.json`'s commit with its own (neither is an API call, so no rate limit). The
+  archive is checked against its `.sha256` and swapped by `nsh_updater::install::Installation::directory`, the
+  machinery packaged apps update with (on Windows, entry by entry, descending into `bin` past the running exe).
 - `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
   Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
   are preserved and rejected. The checkout stays available for on-demand native runtime builds.
