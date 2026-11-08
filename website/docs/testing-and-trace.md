@@ -610,7 +610,10 @@ has the simulated device's size. The variables of `nsh test`'s environment that 
 On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
 of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
 `back` is the system's back. `setColorScheme` switches the device's dark theme, which `nsh test` sets back after the
-app.
+app. The variables of `nsh test`'s environment that the app declares in `capabilities.process.env` reach the app on
+the device, as on the desktops (`nsh run --target android` passes them to a TSX app too); `PATH`, `HOME`, `TMPDIR` and
+the other paths Android sets for each app hold the device's values. Packaged apps (`nsh package --target android`)
+run with the device's environment.
 
 ### Steps from standard input
 

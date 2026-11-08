@@ -717,7 +717,14 @@ The system's appearance is the simulator's: the CLI switches it (`simctl ui appe
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
-(`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
+(`dataDir`, emptied as it starts). As `nsh run --target android` does for a TSX app, it passes the variables of its
+environment that the app's `capabilities.process.env` declares as `nsh.env.<name>` string extras
+(`run::android_app_env`; values quoted for the device's shell, which `adb shell` hands the command line), and
+`DevActivity` sets them in its process's environment before the engine starts, so `process.env` reads them as on the
+desktops; the paths Android sets for each app process (`PATH`, `HOME`, `TMPDIR`, `ANDROID_*`, `LD_*`, ...) keep the
+device's values. Only the development host applies these extras: a packaged app's `AppActivity` (Rust roots'
+`nsh run`, `nsh package --target android --run`) is exported, so it runs with the device's environment. The agent's
+calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
 each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
 topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
 iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
