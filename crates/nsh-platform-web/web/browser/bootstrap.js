@@ -3689,6 +3689,7 @@
 			"focusWithinStyle",
 			"disabledStyle",
 			"testID",
+			"tooltip",
 			"onLayout"
 		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
