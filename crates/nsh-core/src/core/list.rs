@@ -22,7 +22,9 @@
 //! what is still to bind is always derived from the current assignment:
 //! nothing stale is queued. Cells whose item moved (a splice) learn their
 //! new index in the same commit, and so does every cell in the viewport and
-//! just ahead of it in the scroll direction. A list with `paced` set (the
+//! ahead of it in the scroll direction, as far as the next few frames of
+//! the scroll go ([`URGENT_STEPS`]): the rows bound now reach the screen a
+//! frame or two later, after the engine's turn and the main thread's. A list with `paced` set (the
 //! runtime's) leaves the rest of the overscan pending: the engine binds it
 //! with `take_paced`, nearest the leading edge first, as its per-turn
 //! budget allows, and asks for a display frame while some is left.
@@ -72,6 +74,18 @@ use crate::{
 
 /// How far beyond the viewport cells are kept rendered, in viewports.
 const OVERSCAN: f32 = 1.0;
+/// How many of the scroll's recent steps ahead of the viewport bind with
+/// the window, not paced: the rows a commit binds show a frame after the
+/// report at best (the engine's turn, then the main thread's), two or three
+/// when either is busy, and a fling's steps grow and come unevenly (wheel
+/// notches, touchpad events bunched into frames). Rows enter this span a
+/// step's worth per frame however long it is, so a longer one costs only
+/// when a scroll speeds up.
+const URGENT_STEPS: f32 = 4.0;
+/// What the step [`ListState::urgent_span`] reads keeps of a longer one
+/// before it, per report, while the scroll goes the same way: one slow
+/// frame between fast ones does not shrink the span.
+const LEAD_DECAY: f32 = 0.75;
 /// Default `loadMoreThreshold`, in viewports.
 const END_THRESHOLD: f32 = 1.0;
 /// Default `loadMoreAtStartThreshold`, in viewports.
@@ -170,6 +184,20 @@ pub(super) fn replay(offset: f32, pending: &[(u32, PendingScroll)]) -> f32 {
         }
     }
     at
+}
+
+/// The step [`ListState::urgent_span`] reads after the platform reported a
+/// move of `step` (natural coordinates): the move itself, unless a longer
+/// recent one in the same direction outlasts it, decayed by [`LEAD_DECAY`].
+/// A jump (longer than the viewport) is not kept: the steps after it bind
+/// ahead again at once.
+fn next_lead(lead: f32, step: f32, viewport: f32) -> f32 {
+    let kept = lead.abs() * LEAD_DECAY;
+    if step.signum() == lead.signum() && lead.abs() <= viewport && kept > step.abs() {
+        lead.signum() * kept
+    } else {
+        step
+    }
 }
 
 /// The view a `viewport="parent"` list is virtualized against: the
@@ -356,9 +384,10 @@ pub(super) struct ListState {
     /// Binds of overscan cells wait for the engine's budget
     /// ([`Self::take_paced`]); the rest bind with the window.
     pub(super) paced: bool,
-    /// The last scroll step the platform reported, in natural coordinates
-    /// (its sign is the scroll direction). The core's own moves (anchoring
-    /// a splice, measured rows, following a pin) are not steps.
+    /// The scroll step the platform reported last, in natural coordinates
+    /// (its sign is the scroll direction), or a longer recent one in the
+    /// same direction, decayed ([`LEAD_DECAY`]). The core's own moves
+    /// (anchoring a splice, measured rows, following a pin) are not steps.
     lead: f32,
     /// Scroll that keeps the visible content in place after a splice or a
     /// change of columns.
@@ -732,7 +761,8 @@ impl ListState {
     fn moved_to(&mut self, at: f32, settled: bool) {
         if at != self.offset {
             let step = at - self.offset;
-            self.lead = if self.inverted { -step } else { step };
+            let step = if self.inverted { -step } else { step };
+            self.lead = next_lead(self.lead, step, self.viewport);
             if (at - self.offset).abs() > PIN_SLACK {
                 // Not a platform's rounding: the user scrolled.
                 self.moved_by_scroll = true;
@@ -1688,13 +1718,14 @@ impl ListState {
     }
 
     /// The span (natural coordinates) whose cells bind with the window:
-    /// the viewport, and ahead of it in the scroll direction twice the last
-    /// step (what the next frames of a fling show). A step longer than the
-    /// viewport is a jump: only the viewport.
+    /// the viewport, and ahead of it in the scroll direction
+    /// [`URGENT_STEPS`] steps (what the next frames of a fling show, by the
+    /// time the rows bound now do). A step longer than the viewport is a
+    /// jump: only the viewport.
     fn urgent_span(&self, at: f32) -> (f32, f32) {
         let step = self.lead.abs();
         let ahead = if step <= self.viewport {
-            (2.0 * step).min(self.viewport * OVERSCAN)
+            (URGENT_STEPS * step).min(self.viewport * OVERSCAN)
         } else {
             0.0
         };
@@ -2443,33 +2474,64 @@ mod tests {
         while l.take_paced(100, &mut binds) > 0 {}
         assert!(!l.has_paced());
 
-        // The platform reports the scroll: scrolling up by 100, the
-        // viewport and two steps above it bind now; the rest above comes
+        // The platform reports the scroll: scrolling up by 50, the
+        // viewport and four steps above it bind now; the rest above comes
         // before what is below.
         l.reported(2000.0, 0);
         l.update_window(&mut binds);
         while l.take_paced(100, &mut binds) > 0 {}
-        l.reported(1900.0, 0);
+        l.reported(1950.0, 0);
         binds.clear();
         l.update_window(&mut binds);
-        // 1700..2300 was bound already; 1500..1600 is new and waits.
+        // 1600..2800 was bound already; 1550..1600 is new and, above
+        // 1750, waits.
         assert_eq!(binds, []);
         // A jump binds its viewport only.
         l.reported(5000.0, 0);
         l.update_window(&mut binds);
         let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
         assert_eq!(now, (100..108).collect::<Vec<_>>());
-        // A step up before the overscan bound: the viewport (4900..5300)
-        // and two steps ahead (4700..4900) bind now ...
-        l.reported(4900.0, 0);
+        // A step up before the overscan bound: the viewport (4975..5375)
+        // and four steps ahead (4875..4975) bind now ...
+        l.reported(4975.0, 0);
         binds.clear();
         l.update_window(&mut binds);
         let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
-        assert_eq!(now, (94..100).collect::<Vec<_>>());
+        assert_eq!(now, (97..100).collect::<Vec<_>>());
         // ... the rest above before what is below.
         binds.clear();
         l.take_paced(3, &mut binds);
-        assert_eq!(binds.iter().map(|b| b.1).collect::<Vec<_>>(), [93, 92, 91]);
+        assert_eq!(binds.iter().map(|b| b.1).collect::<Vec<_>>(), [96, 95, 94]);
+    }
+
+    /// Uneven steps (wheel notches, touchpad events bunched into frames)
+    /// bind as far ahead as the fast ones while the scroll goes on the same
+    /// way; a turn or a jump starts over from the step itself.
+    #[test]
+    fn a_fast_step_keeps_the_rows_ahead_binding_through_slow_ones() {
+        assert_eq!(next_lead(0.0, 80.0, 400.0), 80.0);
+        assert_eq!(next_lead(80.0, 20.0, 400.0), 60.0);
+        assert_eq!(next_lead(60.0, 100.0, 400.0), 100.0);
+        assert_eq!(next_lead(100.0, -20.0, 400.0), -20.0);
+        assert_eq!(next_lead(-20.0, -10.0, 400.0), -15.0);
+        // After a jump, the next step binds ahead of the viewport again.
+        assert_eq!(next_lead(3000.0, 20.0, 400.0), 20.0);
+
+        let mut l = list(1000, 50.0, 400.0);
+        l.paced = true;
+        let mut binds = Vec::new();
+        l.reported(1000.0, 0);
+        l.update_window(&mut binds);
+        while l.take_paced(100, &mut binds) > 0 {}
+        // A step of 100, then one of 10: the span ahead of the viewport is
+        // four steps of the 75 kept, 300, not of the 10.
+        l.reported(1100.0, 0);
+        l.update_window(&mut binds);
+        l.reported(1110.0, 0);
+        binds.clear();
+        l.update_window(&mut binds);
+        assert!(binds.is_empty(), "{binds:?}");
+        assert_eq!(l.urgent_span(l.natural_offset()), (1110.0, 1810.0));
     }
 
     /// A list at its start shows the rows that arrive above its first one,
