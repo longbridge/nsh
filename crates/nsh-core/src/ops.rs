@@ -1914,7 +1914,7 @@ pub enum Command {
     Announce(String),
     /// Turn the performance monitor on or off (on the root;
     /// `setFpsEnabled`): what the platform has of one, the
-    /// macOS panel or the other platforms' `nsh::perf` lines. Platforms
+    /// macOS panel or the other platforms' `nsh::fps` lines. Platforms
     /// without a monitor ignore it.
     PerfMonitor(bool),
     /// Load the image at `uri` (keeping its bytes for views that show it

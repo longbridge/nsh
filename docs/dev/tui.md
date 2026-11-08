@@ -120,7 +120,7 @@ cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --igno
 `--fps` enables a single line at the top right; `C-h p` toggles it beside `C-h e`. These prefixes apply outside
 editable fields and inside diagnostics; a field keeps C-h as Backspace. The line shows active FPS (`idle` after
 a second with no app frames), mean frame time and p95, mean apply / draw / flush milliseconds, and mean bytes
-and changed Cells per frame. It logs the same line through `nsh::perf`, visible in `C-h e`. Long lines clip to
+and changed Cells per frame. It logs the same line through `nsh::fps`, visible in `C-h e`. Long lines clip to
 the terminal width. The readings update once a second while active, with one final idle update; HUD-only
 refreshes never count as app frames and idle monitoring schedules no recurring draws.
 
@@ -1096,7 +1096,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Feature | Terminal representation |
 |---|---|
 | Device form | `platform.idiom` `"terminal"` with the real `platform.os`; desktop behavior (`desktop={{…}}`, `platform.select`'s `desktop`, shortcuts, hover, context menus) |
-| Performance monitor | One corner line, toggled by `C-h p` or enabled by `--fps`; idle draws stop and readings also go to `nsh::perf` |
+| Performance monitor | One corner line, toggled by `C-h p` or enabled by `--fps`; idle draws stop and readings also go to `nsh::fps` |
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Alerts (`AlertDialog`) | A centered framed box over the dimmed screen, buttons as `< OK >`, the focused one reversed |

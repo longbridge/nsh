@@ -106,7 +106,7 @@ pub enum AppSource {
 pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
-    /// Logs the performance monitor's readings once a second (`nsh::perf`:
+    /// Logs the performance monitor's readings once a second (`nsh::fps`:
     /// frame rate, frame and commit costs, CPU, memory).
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers

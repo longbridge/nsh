@@ -240,7 +240,7 @@ Measure with `--release`: for an app with a Rust crate it also builds the develo
 ([macOS: performance monitor](./macos.md#performance-monitor)). Linux also shows a panel with the frame rate, frame time and p95, JS and core time,
 CPU, memory, the JS heap and the nodes alive, over a curve of the last 120 frames' cost along its bottom, rising in amber for slow frames; a click collapses it to the frame rate and
 expands it again. On Linux and Windows, `--target linux --fps` and
-`--target windows --fps` also log readings once a second, with the time of each phase of a frame;
+`--target windows --fps` also log readings once a second, with the time of each phase of a frame, which `-v` shows;
 `nsh test --target linux --fps -v` (or `windows`) takes them while a test drives the app.
 
 The environment variable `NSH_FPS=1` turns the monitor on however the app is started: a development host, a packaged

@@ -43,6 +43,12 @@ pub fn enabled_by_env() -> bool {
         .is_some_and(|value| !matches!(value.to_str(), Some("" | "0" | "false")))
 }
 
+/// The log target of the readings the platforms log once a second while
+/// the monitor runs (`--fps`). It is not `nsh::perf`, the timings of
+/// `--trace`, so a command line tells the two apart: `nsh run --fps` shows
+/// the panel and logs these lines only with `-v`.
+pub const LOG_TARGET: &str = "nsh::fps";
+
 use nsh_core::time::Instant;
 
 /// Samples kept for the distributions (frames, commits).

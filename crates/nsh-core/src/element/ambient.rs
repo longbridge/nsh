@@ -1543,7 +1543,7 @@ pub fn fps_enabled() -> bool {
 }
 
 /// Turns the platform's performance monitor on or off (TS:
-/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::fps`
 /// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {

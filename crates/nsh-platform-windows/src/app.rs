@@ -119,7 +119,7 @@ pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
     /// Logs the performance monitor's readings once a second (target
-    /// `nsh::perf`): frame rate, frame phases, commits, CPU, memory.
+    /// `nsh::fps`): frame rate, frame phases, commits, CPU, memory.
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.

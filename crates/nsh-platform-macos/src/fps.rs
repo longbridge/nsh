@@ -24,7 +24,7 @@
 //! The panel lets the mouse through. It measures nothing while hidden: the
 //! surface's monitor is removed with it.
 //!
-//! While it shows it also logs one `nsh::perf` line a second, in the shape
+//! While it shows it also logs one `nsh::fps` line a second, in the shape
 //! of the Linux backend's (`examples/gallery/tools/perf.py` reads both):
 //!
 //! `fps 120/120 frame 1.21/1.10/2.40/3.90 gap 8.33/8.33/8.40/16.70 over 0%
@@ -302,7 +302,7 @@ impl Hud {
                     drain_stat(&mut p.canvas),
                 ]
             });
-            log::info!(target: "nsh::perf", "{}", log_line(&snapshot, &phases));
+            log::info!(target: nsh_engine::perf::LOG_TARGET, "{}", log_line(&snapshot, &phases));
         }
         self.label
             .setStringValue(&NSString::from_str(&readings(&snapshot)));

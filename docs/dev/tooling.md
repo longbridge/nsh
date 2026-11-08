@@ -99,7 +99,8 @@ step, the details only when something fails. Every command prints through it:
 - Log lines (`logger.rs`): the library crates and the devices log through `log`; normally warnings and errors are shown
   without targets (a device's after its name: `warn iOS Simulator: …`), `js` lines and a device's lines from other
   crates (the app's Rust code) plainly (with the device's name when several are connected), `nsh::perf` as `perf …`;
-  NSH's own info lines (a device's "loading build 3") are not shown: the CLI's steps say what happens. The dev server
+  NSH's own info lines (a device's "loading build 3") and the performance monitor's line a second (`--fps`, `nsh::fps`)
+  are not shown: the CLI's steps say what happens. The dev server
   reports hosts connecting and leaving (`nsh_dev::ClientEvent`) rather than logging it, so the CLI prints
   `• Mac Catalyst connected, build 1`, and a host that cannot run the app as one `warn` line
   (`warn Android Emulator: its host has no gallery/native (it was built for another app): nsh run examples/gallery-rs
