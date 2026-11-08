@@ -241,6 +241,16 @@ nsh package my-app --target web
 nsh update [stable|nightly]
 ```
 
+## nsh component
+
+添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
+
+```sh
+nsh component list
+nsh component add <NAME>...
+nsh component remove <NAME>...
+```
+
 ## 签名命令
 
 这些命令用于生成和校验签名包（`.nshpkg`）：嵌入 NSH 的应用会下载这些应用包，并在运行前进行校验。[签名包](./signed-packages.md)介绍了整个模型（由离线保存的根密钥为某些应用 id 认证 release 密钥）。
