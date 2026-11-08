@@ -153,4 +153,5 @@ const visited = signal(new Set<string>());
 - iOS、Android 和 Mac Catalyst：按压是在链接上结束的一次轻点。
 - 桌面（macOS、Windows、Linux、GPUI）和 Web：按压是一次点击。在 macOS 和 Web 上，获得键盘焦点的链接也可以用 Return 和 Space 打开。
 - Web 把链接渲染为带 `role="link"` 的元素。
+- 终端：启用的链接如果 `href` 是 URL（不是应用自己的路径），其中的文字会成为指向它的 OSC 8 超链接，由终端模拟器在带修饰键的点击时自己打开，不经过 `openWith`。Linux 控制台（`TERM=linux`）显示纯文本。
 - 每个平台绘制的都是应用设置的样式。
