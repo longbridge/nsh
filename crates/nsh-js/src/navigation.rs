@@ -569,7 +569,20 @@ unsafe extern "C" fn screen_of_accessor(
 ) -> JsValue {
     // SAFETY: two data values: the accessor and the pop callback.
     let (accessor, popped) = unsafe { (*data, *data.add(1)) };
-    let rendered = unsafe { qjs::JS_Call(cx, accessor, UNDEFINED, 0, ptr::null_mut()) };
+    let mut rendered = unsafe { qjs::JS_Call(cx, accessor, UNDEFINED, 0, ptr::null_mut()) };
+    // A component rendering another gives an accessor around the next one
+    // (each made hot is one): read them all, tracked, down to what the
+    // innermost rendered, so a `<NavPage>` there is the screen itself and
+    // an edit of any of them renders the screen again.
+    while !unsafe { qjs::JS_IsException(rendered) }
+        && unsafe { qjs::JS_IsFunction(cx, rendered) }
+        && dom::node_id(cx, rendered).is_none()
+    {
+        // SAFETY: an owned function, freed once called.
+        let next = unsafe { qjs::JS_Call(cx, rendered, UNDEFINED, 0, ptr::null_mut()) };
+        free(cx, rendered);
+        rendered = next;
+    }
     if unsafe { qjs::JS_IsException(rendered) } {
         return rendered;
     }
