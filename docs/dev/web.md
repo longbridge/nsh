@@ -416,7 +416,7 @@ the page pump: `LocalEngine::set_wake` hooks the engine's notifications to the `
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **Local time** is the browser's own: app code runs on its engine. Rust's default zone is the page's
-  (`nsh.time_zone`: `timeZoneName`, `intl/mod.rs` `local_zone_name`).
+  (`nsh.time_zone`: `timeZoneName`, `format/mod.rs` `local_zone_name`).
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
 ## Standard modules in the browser
@@ -569,6 +569,11 @@ it. Text with numeric variants (`tabular-nums`, ...) and color emoji are measure
 canvas measures them differently. The CSS of runs (`src/text/css.rs`) and line breaking (`src/text/wrap.rs`, with
 CJK punctuation's line start and end rules) depend on nothing of the browser and are tested on the host
 (`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws.
+
+Each run is a span placed at its position. The characters a line broke at (the space a soft break ate, a hard
+break's newline: a run's `after`) stand between the spans as text nodes (`Player.lineBreaks`), so a text's
+`textContent` and its `aria-label` read as the text was written ("it now brings", never "it nowbrings"), which is
+what search engines and screen readers get; beside absolutely placed spans that whitespace collapses and shows nothing.
 
 ## Styles as classes
 

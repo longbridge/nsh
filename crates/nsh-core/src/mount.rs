@@ -83,6 +83,10 @@ pub struct WebProps {
     /// HTTP cache and no saved form data). Read when the platform makes the
     /// web view: the core keeps it from changing afterwards.
     pub incognito: bool,
+    /// The URL schemes the page loads from the app
+    /// ([`crate::web_resource`]). Read when the platform makes the web
+    /// view, as `incognito`.
+    pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
 }
 
 impl Default for WebProps {
@@ -98,6 +102,7 @@ impl Default for WebProps {
             javascript_enabled: true,
             back_forward_gestures: false,
             incognito: false,
+            url_schemes: Vec::new(),
         }
     }
 }

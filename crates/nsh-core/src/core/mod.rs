@@ -4013,6 +4013,34 @@ impl<M: TextEngine> Core<M> {
                 no_webviews(self);
                 Prop::Native(NativeProp::Source(crate::WebSource::None))
             }
+            // Inline HTML with a base URL runs at that URL's origin (WebKit's
+            // `loadHTMLString:baseURL:`, Android's `loadDataWithBaseURL`,
+            // Windows answering the base URL's request with it): the base
+            // URL takes the grant a page there would, and without it the
+            // HTML loads with no base. Without web views at all, the arms
+            // above refuse the HTML itself, and that is the one error.
+            Prop::Native(NativeProp::BaseUrl(Some(url)))
+                if kind == Kind::WebView
+                    && !url.is_empty()
+                    && self.access.allows_webviews()
+                    && !self.access.allows_webview(&url) =>
+            {
+                refuse(self, "the base URL", &url, "webview.hosts");
+                Prop::Native(NativeProp::BaseUrl(None))
+            }
+            Prop::Native(NativeProp::Source(crate::WebSource::Html {
+                html,
+                base_url: Some(url),
+            })) if kind == Kind::WebView
+                && !url.is_empty()
+                && !self.access.allows_webview(&url) =>
+            {
+                refuse(self, "the base URL", &url, "webview.hosts");
+                Prop::Native(NativeProp::Source(crate::WebSource::Html {
+                    html,
+                    base_url: None,
+                }))
+            }
             prop => prop,
         }
     }
@@ -5122,19 +5150,33 @@ impl<M: TextEngine> Core<M> {
                     self.set_disabled(key, d);
                 }
                 let node = &mut self.nodes[key as usize];
-                // The platforms make a web view's website data store with
-                // the web view, from its first props.
-                if let (NativeProp::Incognito(on), Some(NativeProps::WebView(p))) =
-                    (&prop, node.control.as_deref())
-                    && node.created
+                // The platforms make a web view with its website data store
+                // and the URL schemes it serves, from its first props.
+                if node.created
+                    && let Some(NativeProps::WebView(p)) = node.control.as_deref()
                 {
-                    if *on != p.incognito {
-                        log::warn!(
-                            target: "js",
-                            "a web view's `incognito` is read when it is made; render a new element to change it"
-                        );
+                    let changed = match &prop {
+                        NativeProp::Incognito(on) => Some(("`incognito` is", *on != p.incognito)),
+                        // A re-render builds new handlers: only a change
+                        // of the schemes served is worth a warning.
+                        NativeProp::UrlSchemes(schemes) => Some((
+                            "URL schemes are",
+                            !schemes
+                                .iter()
+                                .map(|s| s.scheme())
+                                .eq(p.url_schemes.iter().map(|s| s.scheme())),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((what, changed)) = changed {
+                        if changed {
+                            log::warn!(
+                                target: "js",
+                                "a web view's {what} read when it is made; render a new element to change it"
+                            );
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
                 }
                 if let Some(control) = node.control.as_mut() {
                     apply_native(control, prop);
@@ -6241,7 +6283,19 @@ impl<M: TextEngine> Core<M> {
             {
                 let mut config = root.modal;
                 config.window = self.window_of(key);
-                self.mount.push(MountItem::ModalConfig { id, config });
+                // A platform presents a dialog when it is inserted, over the
+                // window its config names: a dialog inserted in this batch
+                // (one that mounts in a window of the app's own already
+                // open) gets its config ahead of its insertion.
+                let item = MountItem::ModalConfig { id, config };
+                match self
+                    .mount
+                    .iter()
+                    .position(|m| matches!(m, MountItem::Insert { child, .. } if *child == id))
+                {
+                    Some(at) => self.mount.insert(at, item),
+                    None => self.mount.push(item),
+                }
             }
             if flags & dirty::NAV_SHADER != 0
                 && let Some(root) = &node.root
@@ -8973,8 +9027,8 @@ fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
 
 /// The message for a refused URL.
 fn not_granted(what: &str, uri: &str, capability: &str) -> String {
-    let host = crate::access::parse_url(uri).map_or_else(|| uri.to_owned(), |u| u.host);
-    format!("{what} {uri} is not granted: add `{host}` to capabilities.{capability} in nsh.json")
+    let advice = crate::access::grant_advice(uri, capability);
+    format!("{what} {uri} is not granted: {advice}")
 }
 
 /// Applies one property to a control.
@@ -9023,6 +9077,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
+        (NativeProps::WebView(p), P::UrlSchemes(v)) => p.url_schemes = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),

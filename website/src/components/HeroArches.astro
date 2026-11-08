@@ -244,14 +244,14 @@ void main(){
       if (width >= 1000) {
         arch.r = Math.min(content * 0.235, height * 0.54);
         arch.x = left + content * 0.8;
-        arch.y = arch.r * 0.2;
+        arch.y = arch.r * 0.34;
         copy = left + content * 0.54;
       } else {
         // The copy above, the arches centered at the hero's foot (the hero
         // leaves them this room: `--arch-room` in Home.astro).
         arch.r = Math.min(width * 0.46, 290);
         arch.x = width / 2;
-        arch.y = arch.r * 0.12;
+        arch.y = arch.r * 0.24;
         copy = 0;
       }
     };

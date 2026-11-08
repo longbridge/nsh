@@ -222,6 +222,13 @@ impl Mounter {
         match item {
             MountItem::Create { id, kind } => {
                 let view = NshView::new(surface.mtm, *id, *kind);
+                // The mounter places it by its frame alone. Once its window
+                // lays out with Auto Layout, AppKit gives a view that
+                // translates its autoresizing mask constraints, anchors and
+                // layout storage that nothing here reads: hundreds of bytes
+                // per view. The root keeps them: the host places it.
+                view.ns()
+                    .setTranslatesAutoresizingMaskIntoConstraints(false);
                 crate::access::created(&view);
                 match kind {
                     ViewKind::Input => crate::text_input::create(surface, &view),

@@ -212,6 +212,9 @@ pub(crate) struct WebHost {
     /// [`Self::make`] ran.
     made: bool,
     handler: Retained<WebHandler>,
+    /// Serves the URL schemes of the first props while the web view is
+    /// here.
+    schemes: Option<nsh_platform_apple::web_scheme::SchemeServer>,
     props: WebProps,
 }
 
@@ -229,6 +232,7 @@ impl WebHost {
             web: None,
             made: false,
             handler,
+            schemes: None,
             props: WebProps {
                 // Forces the first `configure` to load.
                 source: WebSource::Uri("".into()),
@@ -238,8 +242,8 @@ impl WebHost {
     }
 
     /// Makes the WKWebView, keeping its website data in memory only (a
-    /// store of its own) when `incognito`.
-    fn make(&mut self, incognito: bool) {
+    /// store of its own) when `incognito`, serving the app's URL schemes.
+    fn make(&mut self, p: &WebProps) {
         self.made = true;
         if !webkit() {
             return;
@@ -249,11 +253,13 @@ impl WebHost {
         // is unregistered when the host is dropped.
         let web = unsafe {
             let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration"), new];
-            if incognito {
+            if p.incognito {
                 let store: Retained<AnyObject> =
                     msg_send![class(c"WKWebsiteDataStore"), nonPersistentDataStore];
                 let _: () = msg_send![&config, setWebsiteDataStore: &*store];
             }
+            self.schemes =
+                nsh_platform_apple::web_scheme::serve(handler.mtm(), &config, &p.url_schemes);
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
             let _: () = msg_send![&content, addScriptMessageHandler: &**handler, name: &*NSString::from_str("nsh")];
             let alloc: Allocated<AnyObject> = msg_send![class(c"WKWebView"), alloc];
@@ -272,8 +278,9 @@ impl WebHost {
 
     pub(crate) fn configure(&mut self, p: WebProps) {
         if !self.made {
-            // The core keeps `incognito` from changing once it is made.
-            self.make(p.incognito);
+            // The core keeps `incognito` and the URL schemes from changing
+            // once it is made.
+            self.make(&p);
         }
         let Some(web) = &self.web else { return };
         // SAFETY: WebKit's documented API.

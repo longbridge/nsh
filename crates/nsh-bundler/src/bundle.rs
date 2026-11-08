@@ -349,6 +349,7 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
     let path = dir.join("nsh.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
         setup.theme.set_tokens(&tokens);
+        setup.i18n = i18n_json(dir, None)?;
         return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
@@ -391,7 +392,46 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
         warn_ignored("statusBar", &ignored);
         setup.status_bar = Some(status_bar.to_string());
     }
+    setup.i18n = i18n_json(dir, Some(&config))?;
     Ok(Arc::new(setup))
+}
+
+/// The app's translations (`locales/`) and the language data of the
+/// languages `nsh.json` `"locales"` lists (or, without it, of the
+/// translations' languages), as the runtime takes them; `None` when it has
+/// neither.
+pub fn i18n_json(
+    dir: &std::path::Path,
+    config: Option<&serde_json::Value>,
+) -> Result<Option<String>, BundleError> {
+    let translations = nsh_i18n::read_translations(dir).map_err(BundleError::other)?;
+    let locales = match config.and_then(|c| c.get("locales")) {
+        None => None,
+        Some(serde_json::Value::Array(items)) => Some(
+            items
+                .iter()
+                .filter_map(|item| match item.as_str() {
+                    Some(locale) => Some(locale.to_owned()),
+                    None => {
+                        warn_ignored("locales", &[format!("{item} is not a language tag")]);
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Some(other) => {
+            warn_ignored(
+                "locales",
+                &[format!("{other} is not a list of language tags")],
+            );
+            None
+        }
+    };
+    Ok(nsh_i18n::bundle_json(
+        &translations,
+        locales.as_deref(),
+        |warning| log::warn!(target: "nsh::build", "nsh.json: {warning}"),
+    ))
 }
 
 /// Warns of what this NSH left out of `nsh.json`'s `section` (an unknown
@@ -577,6 +617,8 @@ fn watch_files(bundler: &rolldown::Bundler, dir: &std::path::Path) -> Vec<PathBu
     {
         files.push(path);
     }
+    // The translations come with the entry: a change rebuilds it.
+    files.extend(nsh_i18n::locale_files(dir));
     files.sort();
     files.dedup();
     files

@@ -419,11 +419,12 @@ function regional(locale) {
  * (shortcuts work on any layout, as menus' do).
  */
 function keyCode(e) {
-  const named = NAMED_KEYS[e.key];
+  // Some IME and webview key events carry no `key`; fall back to `code`.
+  const k = typeof e.key === "string" ? e.key : "";
+  const named = NAMED_KEYS[k];
   if (named) return named;
-  const f = /^F([0-9]{1,2})$/.exec(e.key);
+  const f = /^F([0-9]{1,2})$/.exec(k);
   if (f) return Number(f[1]) >= 1 && Number(f[1]) <= 24 ? 512 + Number(f[1]) : -1;
-  const k = e.key;
   if (k.length === 1 && !e.shiftKey && !e.altKey && k >= " " && k <= "~") return k.toLowerCase().charCodeAt(0);
   const c = e.code ?? "";
   if (/^Key[A-Z]$/.test(c)) return c.charCodeAt(3) + 32;
@@ -2363,7 +2364,7 @@ class Player {
     el.classList.toggle("nsh-noselect", selectable === false);
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
-    el._textLabel = runs.map((r) => r[2]).join("");
+    el._textLabel = runs.map((r) => r[2] + (r[6] ?? "")).join("").trimEnd();
     if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
 
@@ -2400,7 +2401,23 @@ class Player {
       if (after) span._after = after;
       else delete span._after;
     });
+    this.lineBreaks(el);
     return true;
+  }
+
+  /**
+   * The characters a line broke at (`after`: the space a soft break ate,
+   * a hard break's newline) as text between the runs' spans, so the
+   * text's `textContent` reads as it was written ("it now brings", never
+   * "it nowbrings"): what search engines and the page's markup see. They
+   * are whitespace beside absolutely placed spans, which collapses: nothing
+   * shows of them.
+   */
+  lineBreaks(el) {
+    for (const node of [...el.childNodes]) if (node.nodeType === 3) node.remove();
+    for (const span of el.querySelectorAll(":scope > .nsh-run")) {
+      if (span._after) span.after(span._after);
+    }
   }
 
   /** The runs of a text made again: its spans and their backgrounds. */
@@ -2431,6 +2448,7 @@ class Player {
     }
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
+    this.lineBreaks(el);
   }
 
 
@@ -4709,7 +4727,7 @@ class Player {
       // alone, as on the native platforms, where the field never sees it: a
       // RichEditor would delete twice on Backspace.
       if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
-        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
+        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
       // Return submits unless it inserts a line break (`submitBehavior`);
