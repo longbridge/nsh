@@ -17,26 +17,28 @@ pub(crate) struct State {
 
 #[derive(Default)]
 struct Destinations {
-    enabled: Vec<bool>,
-    count: usize,
+    /// The views that take drops, by id (a table that follows the views
+    /// alive, not every id made).
+    enabled: nsh_core::id_table::IdTable<()>,
 }
 impl Destinations {
     fn set(&mut self, id: nsh_core::NodeId, enabled: bool) -> Option<bool> {
         let index = id as usize;
-        if self.enabled.get(index).copied().unwrap_or(false) == enabled {
+        if self.enabled.contains(index) == enabled {
             return None;
         }
-        let before = self.count != 0;
+        let before = self.count() != 0;
         if enabled {
-            self.enabled
-                .resize(self.enabled.len().max(index + 1), false);
-            self.count += 1;
+            self.enabled.insert(index, ());
         } else {
-            self.count -= 1;
+            self.enabled.remove(index);
         }
-        self.enabled[index] = enabled;
-        let after = self.count != 0;
+        let after = self.count() != 0;
         (before != after).then_some(after)
+    }
+
+    fn count(&self) -> usize {
+        self.enabled.len()
     }
 }
 
@@ -73,7 +75,7 @@ fn destination_changed(surface: &Surface, id: nsh_core::NodeId, enabled: bool) {
 
 pub(crate) fn reset(surface: &Surface) {
     clear(surface);
-    if surface.file_drop.destinations.borrow().count > 0 {
+    if surface.file_drop.destinations.borrow().count() > 0 {
         surface.root.ns().unregisterDraggedTypes();
     }
     *surface.file_drop.destinations.borrow_mut() = Destinations::default();
@@ -82,7 +84,7 @@ pub(crate) fn reset(surface: &Surface) {
 /// Whether a view of the surface takes file drops: a window's root view
 /// made later registers then ([`crate::window`]).
 pub(crate) fn accepting(surface: &Surface) -> bool {
-    surface.file_drop.destinations.borrow().count > 0
+    surface.file_drop.destinations.borrow().count() > 0
 }
 
 pub(crate) fn register(view: &NSView) {

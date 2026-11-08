@@ -1059,7 +1059,7 @@ impl ApplyError {
 pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
-    slots: Vec<u32>,
+    slots: crate::id_table::IdTable<Key>,
     layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
     measure_cache: MeasureCache,
@@ -1195,6 +1195,13 @@ pub struct Core<M: TextEngine> {
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
+    /// The tops of the `pointer-events-*` regions that views joined or
+    /// left, or whose classes changed, since the last round: worked out
+    /// once each, before the round's mount items
+    /// ([`Self::flush_pointer_events`]). Worked out on every move, a
+    /// region's whole subtree was walked for each view inserted in it (an
+    /// editor's highlighted rows: 1600 spans, 2500 views, 10 ms a commit).
+    pointer_pending: Vec<Key>,
     /// The view with the keyboard focus, by key and id (keys are reused),
     /// as the platform reports it (`classes::focus_reported`).
     focus: Option<(Key, NodeId)>,
@@ -1314,8 +1321,8 @@ impl<M: TextEngine> Core<M> {
                 ..terminal_layout::Role::default()
             },
         );
-        let mut slots = vec![0; 256];
-        slots[ROOT_ID as usize] = root + 1;
+        let mut slots = crate::id_table::IdTable::new();
+        slots.insert(ROOT_ID as usize, root);
         Self {
             nodes,
             slots,
@@ -1389,6 +1396,7 @@ impl<M: TextEngine> Core<M> {
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
+            pointer_pending: Vec::new(),
             focus: None,
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
@@ -2706,6 +2714,7 @@ impl<M: TextEngine> Core<M> {
         if let Some(animation) = self.layout_animation.take() {
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
+        self.flush_pointer_events();
         self.flush_dirty();
         let relayout = self.needs_layout;
         if relayout {
@@ -2940,8 +2949,8 @@ impl<M: TextEngine> Core<M> {
     #[inline]
     fn key(&self, id: NodeId) -> Result<Key, ApplyError> {
         match self.slots.get(id as usize) {
-            Some(&k) if k != 0 => Ok(k - 1),
-            _ => Err(ApplyError::UnknownNode(id)),
+            Some(&k) => Ok(k),
+            None => Err(ApplyError::UnknownNode(id)),
         }
     }
 
@@ -2950,16 +2959,14 @@ impl<M: TextEngine> Core<M> {
         if self.nodes.len() >= self.max_nodes {
             return Err(ApplyError::TooManyNodes(self.max_nodes));
         }
-        if idx > self.slots.len().saturating_add(self.max_nodes) {
+        if idx > self.slots.extent().saturating_add(self.max_nodes) {
             return Err(ApplyError::IdOutOfRange(id));
         }
-        if idx >= self.slots.len() {
-            self.slots.resize((idx + 1).next_power_of_two(), 0);
-        } else if self.slots[idx] != 0 {
+        if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(id));
         }
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
-        self.slots[idx] = key + 1;
+        self.slots.insert(idx, key);
         Ok(key)
     }
 
@@ -2970,15 +2977,13 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         let idx = alias as usize;
-        if idx > self.slots.len().saturating_add(self.max_nodes) {
+        if idx > self.slots.extent().saturating_add(self.max_nodes) {
             return Err(ApplyError::IdOutOfRange(alias));
         }
-        if idx >= self.slots.len() {
-            self.slots.resize((idx + 1).next_power_of_two(), 0);
-        } else if self.slots[idx] != 0 {
+        if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(alias));
         }
-        self.slots[idx] = key + 1;
+        self.slots.insert(idx, key);
         Ok(())
     }
 
@@ -2990,7 +2995,7 @@ impl<M: TextEngine> Core<M> {
     /// Forgets alias `id` (its node stays).
     pub(super) fn unalias(&mut self, id: NodeId) {
         if self.is_alias(id) {
-            self.slots[id as usize] = 0;
+            self.slots.remove(id as usize);
         }
     }
 
@@ -5531,7 +5536,7 @@ impl<M: TextEngine> Core<M> {
         self.spacing_changed(parent, NO_KEY);
         if self.pointer_none_classes > 0 && self.pointer_region(parent).is_some() {
             // It no longer inherits the region's `none`.
-            self.update_pointer_events(key);
+            self.pointer_pending.push(key);
             self.pointer_events_moved(parent);
         }
         self.groups_changed(key, parent);
@@ -5658,7 +5663,7 @@ impl<M: TextEngine> Core<M> {
         }
         let node = self.nodes.remove(key as usize);
         self.ch_readers -= usize::from(node.reads_ch);
-        self.slots[id as usize] = 0;
+        self.slots.remove(id as usize);
         if node.class_props.as_ref().and_then(|c| c.pointer_events)
             == Some(crate::props::PointerEvents::None)
         {
