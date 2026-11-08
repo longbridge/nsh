@@ -61,14 +61,14 @@ pub(crate) struct Emoji {
 
 impl Emoji {
     /// Whether it takes a skin tone.
-    pub(crate) fn skin_tones(&self) -> bool {
+    pub(crate) fn has_skin_tones(&self) -> bool {
         !self.light.is_empty()
     }
 
     /// The emoji with `tone` on every person (itself when it takes none).
     pub(crate) fn with_tone(&self, tone: EmojiSkinTone) -> SharedString {
         match tone.modifier() {
-            Some(modifier) if self.skin_tones() => self
+            Some(modifier) if self.has_skin_tones() => self
                 .light
                 .replace(LIGHT, modifier.encode_utf8(&mut [0; 4]))
                 .into(),
@@ -223,7 +223,7 @@ mod tests {
         );
         assert_eq!(&*of("😀").with_tone(EmojiSkinTone::Dark), "😀");
         assert_eq!(&*of("👍").with_tone(EmojiSkinTone::None), "👍");
-        assert!(!of("😀").skin_tones() && of("👋").skin_tones());
+        assert!(!of("😀").has_skin_tones() && of("👋").has_skin_tones());
     }
 
     #[test]

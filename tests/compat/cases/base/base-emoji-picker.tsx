@@ -42,7 +42,7 @@ function App() {
         groupLabels={{ recent: "Recent", smileysEmotion: "Smileys", peopleBody: "People" }}
         annotations={[{ emoji: "😂", label: "LaughCry", keywords: ["xiaoku"] }]}
         skinTone="dark"
-        maxVersion="15"
+        emojiVersion="15"
         columns={6}
         placeholder="FindEmoji"
         accessibilityLabel="Emoji"

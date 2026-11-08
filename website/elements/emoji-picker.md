@@ -89,7 +89,7 @@ shows until then.
 - **Groups**: `groups` chooses the groups shown and their order. `"recent"` is the app's `recent` emoji: the app keeps
   them (from `onSelect`'s `base`) and the picker shows them.
 - **Skin tones**: `skinTone` puts one tone on every emoji that takes one (on every person of a group emoji).
-- **Newer emoji**: `maxVersion` leaves out the emoji added after an Emoji version, for systems whose fonts do not draw
+- **Newer emoji**: `emojiVersion` leaves out the emoji added after an Emoji version, for systems whose fonts do not draw
   them yet (Emoji 16 needs iOS 18.4, Android 16 or a recent Windows 11).
 
 ## Props
@@ -104,7 +104,7 @@ shows until then.
 | `recent` | `.recent(..)` | `string[]` | `[]` | The app's recent emoji, most recent first: the `"recent"` group. |
 | `groupLabels` | `.group_labels(..)` | `EmojiGroupLabels` | `{}` | The groups' headings by group (`{ recent, smileysEmotion, ... }`): a group without one shows no header (unless `renderGroup` draws one). |
 | `annotations` | `.annotations(..)` | `EmojiAnnotation[]` | `[]` | The emoji's names and keywords in the app's language (`{ emoji, label, keywords }`). |
-| `maxVersion` | `.max_version(..)` | `string` | none | The newest Emoji version shown (`"15.1"`). |
+| `emojiVersion` | `.emoji_version(..)` | `string` | none | The newest Emoji version shown (`"15.1"`). |
 | `searchable` | `.searchable(..)` | `boolean` | `true` | A search field above the grid. Without it the picker is one stop of the keyboard focus whose arrows move the highlight. |
 | `placeholder` | `.placeholder(..)` | `string` | none | The search field's placeholder. |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | The search field takes the keyboard focus once shown: on a desktop. On a phone the keyboard would cover the emoji. |
@@ -135,7 +135,7 @@ shows until then.
 | `onCancel` | `.on_cancel(..)` | none | Escape with an empty query: close what holds the picker. |
 
 `EmojiEntry` is what an emoji is: `emoji` (with the skin tone), `base`, `label`, `keywords`, `group`, `version` (the
-Emoji version that added it) and `skinTones` (whether it takes one). `renderItem` gets it for each cell in view, and
+Emoji version that added it) and `hasSkinTones` (whether it takes one). `renderItem` gets it for each cell in view, and
 the highlight is the cell's `focus:`: the drawing is made once per emoji and keeps its views while the highlight moves.
 
 ## Parts

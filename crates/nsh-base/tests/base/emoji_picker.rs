@@ -4,7 +4,7 @@
 //! move the highlight down a column, Left and Right along the cells while
 //! the query is empty; Return and a press choose the emoji with the skin
 //! tone; the pointer highlights; Escape clears the query and then cancels;
-//! the app's recent emoji lead; `maxVersion` and `groups` choose what
+//! the app's recent emoji lead; `emojiVersion` and `groups` choose what
 //! shows; the ref scrolls to a group, which is reported, and looks emoji
 //! up; and a key press costs the two cells it concerns.
 
@@ -29,7 +29,7 @@ struct HarnessProps {
     groups: Option<Vec<EmojiGroupId>>,
     recent: Vec<SharedString>,
     skin_tone: EmojiSkinTone,
-    max_version: Option<SharedString>,
+    emoji_version: Option<SharedString>,
     annotations: Vec<EmojiAnnotation>,
 }
 
@@ -38,7 +38,7 @@ fn props() -> HarnessProps {
         groups: Some(vec![EmojiGroupId::SmileysEmotion, EmojiGroupId::PeopleBody]),
         recent: Vec::new(),
         skin_tone: EmojiSkinTone::None,
-        max_version: None,
+        emoji_version: None,
         annotations: Vec::new(),
     }
 }
@@ -73,7 +73,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             let e = a.entry("👍".into()).unwrap();
             push(format!(
                 "entry={}|{}|{:?}|{}",
-                e.label, e.version, e.group, e.skin_tones
+                e.label, e.version, e.group, e.has_skin_tones
             ));
         });
     });
@@ -110,8 +110,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     if let Some(groups) = props.groups.clone() {
         el = el.groups(groups);
     }
-    if let Some(max) = props.max_version.clone() {
-        el = el.max_version(max);
+    if let Some(max) = props.emoji_version.clone() {
+        el = el.emoji_version(max);
     }
     view()
         .child(el)
@@ -309,7 +309,7 @@ fn the_apps_recent_emoji_lead_and_its_annotations_name_them() {
 #[test]
 fn groups_and_the_newest_version_choose_what_shows() {
     let mut app = start(HarnessProps {
-        max_version: Some("15".into()),
+        emoji_version: Some("15".into()),
         ..props()
     });
     // Melting face is 14, cracking face 18.

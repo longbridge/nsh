@@ -167,7 +167,7 @@ export function EmojiPanel(props: {
       columns={desktop ? 9 : 8}
       // Emoji 16 and later are missing from the fonts of many systems in
       // use (iOS before 18.4, Android before 16, Windows 10): no tofu.
-      maxVersion="15.1"
+      emojiVersion="15.1"
       autoFocus={desktop}
       placeholder="Search emoji"
       accessibilityLabel="Emoji"

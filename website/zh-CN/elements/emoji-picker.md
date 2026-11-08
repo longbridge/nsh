@@ -73,7 +73,7 @@ mount(App);
 - **搜索**：名称或某个关键词包含查询词（不区分大小写）的表情会被匹配；名称里有以查询词开头的词的表情排在最前，其次是关键词里有这样的词的，然后是其余匹配项。匹配结果显示为一个没有标题的分组。
 - **分组**：`groups` 选择显示哪些分组以及顺序。`"recent"` 是应用的 `recent` 表情：由应用保存（取自 `onSelect` 的 `base`），面板负责显示。
 - **肤色**：`skinTone` 为所有能换肤色的表情设置同一种肤色（多人表情的每个人都会换上）。
-- **较新的表情**：`maxVersion` 去掉某个 Emoji 版本之后新增的表情，供字体还画不出它们的系统使用（Emoji 16 需要 iOS 18.4、Android 16 或较新的 Windows 11）。
+- **较新的表情**：`emojiVersion` 去掉某个 Emoji 版本之后新增的表情，供字体还画不出它们的系统使用（Emoji 16 需要 iOS 18.4、Android 16 或较新的 Windows 11）。
 
 ## Props
 
@@ -87,7 +87,7 @@ mount(App);
 | `recent` | `.recent(..)` | `string[]` | `[]` | 应用最近使用的表情，最近的在前：即 `"recent"` 分组。 |
 | `groupLabels` | `.group_labels(..)` | `EmojiGroupLabels` | `{}` | 各分组的标题（`{ recent, smileysEmotion, ... }`）：没有标题的分组不显示标题行（除非 `renderGroup` 绘制）。 |
 | `annotations` | `.annotations(..)` | `EmojiAnnotation[]` | `[]` | 应用语言的表情名称和关键词（`{ emoji, label, keywords }`）。 |
-| `maxVersion` | `.max_version(..)` | `string` | 无 | 显示的最新 Emoji 版本（`"15.1"`）。 |
+| `emojiVersion` | `.emoji_version(..)` | `string` | 无 | 显示的最新 Emoji 版本（`"15.1"`）。 |
 | `searchable` | `.searchable(..)` | `boolean` | `true` | 网格上方的搜索框。没有它时面板在键盘焦点里只占一站，方向键移动高亮。 |
 | `placeholder` | `.placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | 搜索框显示后获得键盘焦点：适合桌面。手机上弹出的键盘会挡住表情。 |
@@ -117,7 +117,7 @@ mount(App);
 | `onGroupChange` | `.on_group_change(..)` | `{ group: EmojiGroupId }` | 网格顶部换成了另一个分组（滚动到那里，或 `scrollToGroup`）：分组标签跟着它走。查询词显示匹配结果时不触发。 |
 | `onCancel` | `.on_cancel(..)` | 无 | 查询词为空时按 Escape：关闭承载面板的容器。 |
 
-`EmojiEntry` 描述一个表情：`emoji`（带肤色）、`base`、`label`、`keywords`、`group`、`version`（引入它的 Emoji 版本）和 `skinTones`（能否换肤色）。`renderItem` 会为每个可见的格子拿到它，高亮是格子的 `focus:`：每个表情只绘制一次，高亮移动时视图保持不变。
+`EmojiEntry` 描述一个表情：`emoji`（带肤色）、`base`、`label`、`keywords`、`group`、`version`（引入它的 Emoji 版本）和 `hasSkinTones`（能否换肤色）。`renderItem` 会为每个可见的格子拿到它，高亮是格子的 `focus:`：每个表情只绘制一次，高亮移动时视图保持不变。
 
 ## 部件
 

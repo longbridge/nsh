@@ -270,7 +270,7 @@ pub struct EmojiEntry {
     /// The Emoji version that added it (`"15.1"`).
     pub version: SharedString,
     /// It takes a skin tone.
-    pub skin_tones: bool,
+    pub has_skin_tones: bool,
 }
 
 /// A group's header as `renderGroup` draws it.
@@ -318,7 +318,7 @@ pub struct EmojiPickerProps {
     /// The newest Emoji version shown (`"15.1"`): emoji added later are
     /// left out, for systems whose fonts do not draw them. Without it every
     /// emoji shows.
-    pub max_version: Prop<Option<SharedString>>,
+    pub emoji_version: Prop<Option<SharedString>>,
     /// A search field above the rows (default `true`). Without it the
     /// picker is one stop of the keyboard focus whose arrows move the
     /// highlight.
@@ -646,7 +646,7 @@ impl Picker {
             keywords,
             group: e.group,
             version: e.version.to_string().into(),
-            skin_tones: e.skin_tones(),
+            has_skin_tones: e.has_skin_tones(),
         })
     }
 
@@ -929,7 +929,7 @@ fn sections(
 /// its own: the app styles every part, draws the cells and headers
 /// (`renderItem`, `renderGroup`), names the groups (`groupLabels`) and
 /// fills the `header`, `footer`, `empty`, `loading`, `searchPrefix` and
-/// `searchSuffix` slots. `maxVersion` leaves out emoji the system's fonts
+/// `searchSuffix` slots. `emojiVersion` leaves out emoji the system's fonts
 /// may not draw yet. Screen readers hear a list box of the emoji by name,
 /// the highlighted one announced.
 #[component(methods = EmojiPickerApi)]
@@ -962,10 +962,10 @@ pub fn EmojiPicker(props: EmojiPickerProps, cx: Scope<EmojiPickerEvent>) -> impl
     });
     let searching = computed(move || query.with(|q| !q.is_empty()));
     let max = computed(move || {
-        let text = props.max_version.get()?;
+        let text = props.emoji_version.get()?;
         let version = Version::parse(&text);
         if version.is_none() {
-            log::warn!("EmojiPicker: `maxVersion` `{text}` is no Emoji version");
+            log::warn!("EmojiPicker: `emojiVersion` `{text}` is no Emoji version");
         }
         version
     });

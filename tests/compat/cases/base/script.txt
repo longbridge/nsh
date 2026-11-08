@@ -2169,7 +2169,7 @@ covers [props] EmojiPicker.recent
 covers [props] EmojiPicker.groupLabels
 covers [props] EmojiPicker.annotations
 covers [props] EmojiPicker.skinTone
-covers [props] EmojiPicker.maxVersion
+covers [props] EmojiPicker.emojiVersion
 covers [props] EmojiPicker.columns
 covers [props] EmojiPicker.searchable
 covers [props] EmojiPicker.searchAccessibilityLabel
