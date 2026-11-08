@@ -1,5 +1,8 @@
 //! Scroll views make the native views of their content near their
-//! viewport only (`EngineConfig::content_culling`).
+//! viewport only (`EngineConfig::content_culling`). The rows of an
+//! `<Each>` far from it wait as placeholders sized like the rows rendered
+//! (`Op::Placeholder`): JS renders a row once its placeholder would be
+//! made (`JsEvent::Rows`).
 
 use taffy::Position;
 
@@ -18,6 +21,9 @@ const RECLAIM: f32 = 3.0;
 /// The most views a subtree given up may have: a larger one is kept, so
 /// the check stays cheap on every scroll.
 const RECLAIM_MAX_NODES: usize = 200;
+
+/// How high a placeholder is until rows rendered beside it give its size.
+const PLACEHOLDER_HEIGHT: f32 = 44.0;
 
 impl<M: TextEngine> Core<M> {
     /// The scroll view that culls the children of `parent` (`parent`
@@ -66,6 +72,11 @@ impl<M: TextEngine> Core<M> {
     /// Holds back `child`, about to be made in `scope`'s content, when it
     /// may be culled; whether it was.
     pub(super) fn hold_back(&mut self, scope: Option<Key>, child: Key) -> bool {
+        if self.nodes[child as usize].placeholder && (scope.is_none() || self.never_culled(child)) {
+            // Nothing culls it: its row is rendered in its place now.
+            self.ask_row(child);
+            return true;
+        }
         let Some(scope) = scope else { return false };
         if self.nodes[child as usize].created || self.never_culled(child) {
             return false;
@@ -295,6 +306,11 @@ impl<M: TextEngine> Core<M> {
                     left = true;
                     continue;
                 }
+                if self.nodes[child as usize].placeholder {
+                    self.ask_row(child);
+                    left = true;
+                    continue;
+                }
                 self.make_culled(parent, child);
                 made = true;
                 if self.nodes[child as usize].kind.is_container() {
@@ -456,4 +472,122 @@ impl<M: TextEngine> Core<M> {
         }
         self.tree_order_changed |= self.track_tree_order;
     }
+
+    /// View `key` is the placeholder of an `<Each>` row
+    /// ([`crate::Op::Placeholder`]).
+    pub(super) fn placeholder(&mut self, key: Key) {
+        let node = &mut self.nodes[key as usize];
+        if node.placeholder || node.kind != Kind::View {
+            return;
+        }
+        node.placeholder = true;
+        self.placeholders.push((key, node.id));
+        if let Some(layout) = node.layout {
+            let mut style = self.layout.style(layout).clone();
+            style.size.height = taffy::Dimension::length(PLACEHOLDER_HEIGHT);
+            self.layout.set_style(layout, style);
+        }
+    }
+
+    /// Asks JS to render the row of placeholder `key` (once).
+    pub(super) fn ask_row(&mut self, key: Key) {
+        let node = &mut self.nodes[key as usize];
+        if !node.row_asked {
+            node.row_asked = true;
+            self.asked_rows.push(node.id);
+        }
+    }
+
+    /// Sizes each placeholder as the rows rendered beside it are on
+    /// average (as lists estimate rows not measured); whether any changed
+    /// (then laid out again).
+    pub(super) fn size_placeholders(&mut self) -> bool {
+        let mut sizes: Vec<(Key, Option<(f32, f32)>)> = Vec::new();
+        let mut changed = false;
+        let mut i = 0;
+        while i < self.placeholders.len() {
+            let (key, id) = self.placeholders[i];
+            // Released (its key may be another node's now).
+            if !self
+                .nodes
+                .get(key as usize)
+                .is_some_and(|n| n.id == id && n.placeholder)
+            {
+                self.placeholders.swap_remove(i);
+                continue;
+            }
+            i += 1;
+            let node = &self.nodes[key as usize];
+            let (parent, layout) = (node.parent, node.layout);
+            // Its row replaces it soon.
+            let Some(layout) = layout.filter(|_| parent != NO_KEY && !node.row_asked) else {
+                continue;
+            };
+            let size = match sizes.iter().find(|(p, _)| *p == parent) {
+                Some(&(_, size)) => size,
+                None => {
+                    let size = self.rendered_size(parent);
+                    sizes.push((parent, size));
+                    size
+                }
+            };
+            let Some((width, height)) = size else {
+                continue;
+            };
+            let style = self.layout.style(layout);
+            if near(style.size.width, width) && near(style.size.height, height) {
+                continue;
+            }
+            let mut style = style.clone();
+            style.size = taffy::Size {
+                width: taffy::Dimension::length(width),
+                height: taffy::Dimension::length(height),
+            };
+            self.layout.set_style(layout, style);
+            changed = true;
+        }
+        if changed {
+            self.needs_layout = true;
+            self.placeholders_resized = true;
+            // What the scroll views show stays where it is.
+            self.resize_settling = true;
+        }
+        changed
+    }
+
+    /// The average size of the children of `parent` in its flow that are
+    /// not placeholders, when it has any.
+    fn rendered_size(&self, parent: Key) -> Option<(f32, f32)> {
+        let (mut width, mut height, mut count) = (0.0f32, 0.0f32, 0u32);
+        for &child in &self.nodes[parent as usize].children {
+            let node = &self.nodes[child as usize];
+            let Some(layout) = node.layout else { continue };
+            if node.placeholder
+                || node.is_layout_root()
+                || node.is_overlay()
+                || self.layout.displays_none(layout)
+                || self.layout.style(layout).position == Position::Absolute
+            {
+                continue;
+            }
+            let size = self.layout.unrounded_layout(layout).size;
+            width += size.width;
+            height += size.height;
+            count += 1;
+        }
+        (count > 0).then(|| {
+            (
+                (width / count as f32).round(),
+                (height / count as f32).round(),
+            )
+        })
+    }
+}
+
+/// Whether `dimension` is a length within 5% (and a point) of `value`: a
+/// placeholder close to its estimate keeps its size.
+fn near(dimension: taffy::Dimension, value: f32) -> bool {
+    let raw = dimension.into_raw();
+    raw.tag() == taffy::CompactLength::LENGTH_TAG
+        && (raw.value() - value).abs() < (value * 0.05).max(1.0)
 }

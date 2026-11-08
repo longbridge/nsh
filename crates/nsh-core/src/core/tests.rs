@@ -126,6 +126,7 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
                     "$unrender",
                     serde_json::json!({ "prop": prop, "key": key.as_str() }),
                 ),
+                JsEvent::Rows(ids) => native(ROOT_ID, "$rows", serde_json::json!(ids)),
                 JsEvent::Reply { call, result } => native(
                     ROOT_ID,
                     "$return",
@@ -25407,6 +25408,168 @@ fn culled_text_is_estimated_and_measured_once_it_comes_near() {
         frame_of(&batch, 10 + 2 * 59).map(|f| f.size.height),
         Some(Points(16.0))
     );
+}
+
+/// The rows JS is asked to render (`$rows`), in order.
+fn asked_rows<M: TextEngine>(c: &mut Core<M>) -> Vec<NodeId> {
+    js_events(c)
+        .into_iter()
+        .filter_map(|(_, _, payload)| match payload {
+            EventPayload::Native { name, data } if &*name == "$rows" => {
+                Some(serde_json::from_value::<Vec<NodeId>>(data).unwrap())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// A scroll view 100 high (2) holding ten rows of 50 (10, 12, ...) and
+/// then `count` placeholders of rows not rendered yet (100, 102, ...).
+fn rows_and_placeholders(count: u32) -> Vec<Op> {
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for i in 0..10u32 {
+        ops.extend(child_view(10 + 2 * i, 2, 50.0, &[]));
+    }
+    for i in 0..count {
+        let id = 100 + 2 * i;
+        ops.extend([
+            Op::Create { id, tag: Tag::View },
+            Op::Placeholder { id },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    ops
+}
+
+#[test]
+fn placeholders_ask_for_their_rows_as_they_come_near() {
+    let mut c = core();
+    apply(&mut c, rows_and_placeholders(100));
+    let batch = c.commit().unwrap();
+    // The rows rendered fill the viewport and the one around it: no row
+    // is asked for, and no placeholder gets a view.
+    assert_eq!(asked_rows(&mut c), Vec::<NodeId>::new());
+    assert!(created_in(&batch).iter().all(|&id| id < 100));
+    // Placeholders are sized like the rows rendered beside them.
+    assert_eq!(c.measure(100).unwrap().frame, rect(0.0, 500.0, 320.0, 50.0));
+    assert_eq!(
+        c.measure(100 + 2 * 99).unwrap().frame,
+        rect(0.0, 500.0 + 99.0 * 50.0, 320.0, 50.0)
+    );
+    // Scrolled to 600: the placeholders within a viewport of it (500 to
+    // 800) ask for their rows, once, with no view.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(600.0)), 0);
+    let batch = c.commit();
+    assert!(
+        batch
+            .as_ref()
+            .is_none_or(|b| created_in(b).iter().all(|&id| id < 100))
+    );
+    assert_eq!(asked_rows(&mut c), [100, 102, 104, 106, 108, 110]);
+    c.set_scroll_offset(2, point(Points::ZERO, Points(590.0)), 0);
+    c.commit();
+    assert_eq!(asked_rows(&mut c), Vec::<NodeId>::new());
+}
+
+#[test]
+fn a_row_replacing_its_placeholder_keeps_the_scroll_view_where_it_is() {
+    let mut c = core();
+    apply(&mut c, rows_and_placeholders(100));
+    c.commit();
+    c.set_scroll_offset(2, point(Points::ZERO, Points(600.0)), 0);
+    c.commit();
+    assert_eq!(asked_rows(&mut c)[0], 100);
+    // The first one's row, 80 high instead of 50, above the viewport.
+    let mut ops = child_view(1000, 2, 80.0, &[]);
+    ops.pop();
+    ops.extend([
+        Op::Insert {
+            parent: 2,
+            child: 1000,
+            before: Some(100),
+        },
+        Op::Remove {
+            parent: 2,
+            child: 100,
+        },
+        Op::Release { id: 100 },
+    ]);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&1000));
+    assert_eq!(frame_of(&batch, 1000), Some(rect(0.0, 500.0, 320.0, 80.0)));
+    // What showed stays in place: the scroll view goes down by 30.
+    let moved: f32 = page_scrolls(&batch)
+        .iter()
+        .map(|&(to, v)| if to { v - 600.0 } else { v })
+        .sum();
+    assert_eq!(moved, 30.0);
+}
+
+#[test]
+fn a_placeholder_nothing_culls_asks_for_its_row_at_once() {
+    // In a plain view.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Placeholder { id: 4 },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!created_in(&batch).contains(&4));
+    assert_eq!(asked_rows(&mut c), [4]);
+    // In a scroll view, with culling off (a test driver's): all of them.
+    let mut c = core();
+    c.set_content_culling(false);
+    apply(&mut c, rows_and_placeholders(40));
+    c.commit();
+    assert_eq!(
+        asked_rows(&mut c),
+        (0..40).map(|i| 100 + 2 * i).collect::<Vec<_>>()
+    );
+    // Culling turned off later: the ones it held back.
+    let mut c = core();
+    apply(&mut c, rows_and_placeholders(40));
+    c.commit();
+    assert_eq!(asked_rows(&mut c), Vec::<NodeId>::new());
+    c.set_content_culling(false);
+    c.commit();
+    assert_eq!(asked_rows(&mut c).len(), 40);
 }
 
 #[test]

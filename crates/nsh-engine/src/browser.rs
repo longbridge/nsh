@@ -277,6 +277,9 @@ impl Script {
     pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
         self.0.bind_list(list, binds);
     }
+    // The web culls no content (`EngineConfig::content_culling` is off
+    // there): its `<Each>` renders every row.
+    pub(crate) fn set_lazy_rows(&self, _: bool) {}
     pub(crate) fn host_event(&self, name: &str, data: nsh_core::JsonValue) {
         self.0.host_event(name, data);
     }

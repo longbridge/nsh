@@ -1960,7 +1960,10 @@ mod tests {
         let declared = caps(
             r#"{"process":{"execute":["/bin/sh","/usr/bin/open","git"]},"fs":{"read":["/Applications"]}}"#,
         );
-        assert_eq!(declared.process.execute, ["/bin/sh", "/usr/bin/open", "git"]);
+        assert_eq!(
+            declared.process.execute,
+            ["/bin/sh", "/usr/bin/open", "git"]
+        );
         if !cfg!(windows) {
             assert!(super::valid_command("/bin/sh"));
             assert!(super::absolute(Path::new("/Applications")));

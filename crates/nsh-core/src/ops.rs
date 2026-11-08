@@ -2887,6 +2887,14 @@ pub enum Op {
         /// Sibling to insert before; `None` appends.
         before: Option<NodeId>,
     },
+    /// Marks detached view `id` the stand-in of an `<Each>` row not
+    /// rendered yet, sized like its rendered siblings: the core asks JS to
+    /// render the row once the view would be made
+    /// ([`crate::element::JsEvent::Rows`]).
+    Placeholder {
+        /// Node id.
+        id: NodeId,
+    },
     /// Detaches `child` from `parent`. The child stays alive until released.
     Remove {
         /// Parent node id.

@@ -636,6 +636,18 @@ impl Host {
         });
     }
 
+    /// Whether `<Each>` leaves the rows the core may cull unrendered, as
+    /// placeholders, until the core asks for them (`content_culling`);
+    /// off by default. Set before evaluating the bundle.
+    pub fn set_lazy_rows(&self, lazy: bool) {
+        self.cx.with(|cx| {
+            // SAFETY: the state of this host's context.
+            unsafe { &(*crate::state::state(cx.as_raw().as_ptr())).dom }
+                .lazy_rows
+                .set(lazy);
+        });
+    }
+
     /// Asks a `List` to render items into cells: `(slot, item index)`
     /// pairs.
     pub fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
