@@ -30,6 +30,8 @@ url.workspace = true
 sha2.workspace = true
 # Picked images' sizes and types (`picker.rs`).
 imagesize.workspace = true
+# A GIF's first frame for the SVG layer budget (`svg/layers.rs`).
+gif = { workspace = true, optional = true }
 naga = { workspace = true, optional = true }
 # WOFF and WOFF2 fonts (`text::font_data`).
 wuff.workspace = true
@@ -39,7 +41,7 @@ ttf-parser.workspace = true
 [features]
 # SVG images for the native backends (`svg`: sniffing, sizes and rasters with
 # resvg). The web runtime leaves it off: the browser draws SVG itself.
-svg = ["dep:resvg", "dep:flate2"]
+svg = ["dep:resvg", "dep:flate2", "dep:gif"]
 # Remote images for the shared image loader (`image::loader`: downloads with
 # ureq). Without it, the loader reads files, assets and inline bytes only.
 loader = ["dep:ureq"]

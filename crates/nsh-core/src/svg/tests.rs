@@ -448,6 +448,28 @@ fn svg_safety_inline_raster_area_is_budgeted() {
 }
 
 #[test]
+fn svg_safety_gif_area_uses_the_frame_not_the_screen() {
+    // resvg decodes a GIF's first frame at its Image Descriptor size, which
+    // can be larger than the 1x1 logical screen imagesize reports.
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = gif::Encoder::new(&mut bytes, 1, 1, &[0, 0, 0, 255, 0, 0]).unwrap();
+        let frame = gif::Frame {
+            width: 1000,
+            height: 1000,
+            buffer: std::borrow::Cow::Owned(vec![0; 1000 * 1000]),
+            ..Default::default()
+        };
+        encoder.write_frame(&frame).unwrap();
+    }
+    let doc = image_href(&data_uri("image/gif", &bytes));
+    let tree = super::parse(&doc).unwrap();
+    let pixels = super::layers::peak(&tree, tiny_skia::Transform::identity(), (10, 10)).unwrap();
+    // 1000x1000 at 9 bytes a pixel is 2.25M layer pixels.
+    assert!(pixels >= 2_250_000.0, "{pixels}");
+}
+
+#[test]
 fn svg_safety_external_use_resolves_nothing() {
     let path = sentinel("use");
     let doc = format!(
@@ -563,6 +585,18 @@ fn svg_safety_drawings_visiting_too_many_nodes_are_refused() {
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs>{patterns}<pattern id="p24" width="1" height="1"><rect width="1" height="1"/></pattern></defs><rect width="10" height="10" fill="url(#p0)"/></svg>"#
     );
     assert_eq!(rasterize(doc.as_bytes(), 10), Err(Error::TooManyNodes));
+}
+
+#[test]
+fn svg_safety_text_length_is_bounded() {
+    // usvg lays out every glyph while parsing, before the layer estimate:
+    // a document with too much text is refused before that.
+    let text = "a".repeat(super::MAX_TEXT_CHARS + 1);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text x="0" y="9">{text}</text></svg>"#
+    );
+    assert_eq!(rasterize(doc.as_bytes(), 10), Err(Error::TooMuchText));
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
 }
 
 #[test]

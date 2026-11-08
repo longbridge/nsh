@@ -18,12 +18,14 @@
 //! with its capability checks.
 //!
 //! An SVG from the network is untrusted input, so what drawing one takes is
-//! bounded: a document of at most [`MAX_BYTES`] (a `.svgz` once inflated), a
-//! raster of at most [`MAX_SIDE`] pixels a side and [`MAX_PIXELS`] in all, and
-//! layers (resvg draws every group with opacity, a mask, a clip path, filters
-//! or a blend mode into a pixmap of its own, and nested ones coexist) of at
-//! most [`MAX_LAYER_PIXELS`] at once by a conservative estimate made before
-//! drawing (`layers.rs`). A panic in the parser or the renderer is an
+//! bounded: a document of at most [`MAX_BYTES`] (a `.svgz` once inflated),
+//! text of at most [`MAX_TEXT_CHARS`] characters, a raster of at most
+//! [`MAX_SIDE`] pixels a side and [`MAX_PIXELS`] in all, and layers (resvg
+//! draws every group with opacity, a mask, a clip path, filters or a blend
+//! mode into a pixmap of its own, and nested ones coexist) of at most
+//! [`MAX_LAYER_PIXELS`] at once by a conservative estimate made before
+//! drawing (`layers.rs`). The text limit applies before usvg lays the text
+//! out, which it does while parsing. A panic in the parser or the renderer is an
 //! [`Error`] too: the backends call these functions where an unwinding panic
 //! would abort the process (GCD blocks, JNI functions).
 //!
@@ -56,6 +58,13 @@ const SNIFF_INFLATED: u64 = 4096;
 /// The largest SVG document read, in bytes (a `.svgz` once inflated):
 /// larger ones are refused rather than filling memory.
 pub const MAX_BYTES: usize = 16 << 20;
+
+/// The most characters of `<text>` one SVG may hold. usvg lays out and
+/// outlines every glyph while parsing, before the layer estimate runs, and
+/// each glyph costs most of a kilobyte and time quadratic in the text
+/// length; a document over this is refused rather than stalling a decode
+/// thread or exhausting memory.
+pub const MAX_TEXT_CHARS: usize = 64 * 1024;
 
 /// The longest side of a raster, in pixels: a sanity limit, as large as
 /// the textures GPUs take.
@@ -103,6 +112,8 @@ pub enum Error {
     Invalid(String),
     /// The document is larger than [`MAX_BYTES`] (a `.svgz` once inflated).
     TooLarge,
+    /// The document holds more than [`MAX_TEXT_CHARS`] characters of text.
+    TooMuchText,
     /// The SVG has no area: a width or height of zero or less, or neither a
     /// size, a `viewBox` nor anything drawn to measure it by.
     NoArea,
@@ -129,6 +140,10 @@ impl fmt::Display for Error {
                 f,
                 "the SVG document is larger than {} MiB (a .svgz once inflated)",
                 MAX_BYTES >> 20
+            ),
+            Error::TooMuchText => write!(
+                f,
+                "the SVG holds more than {MAX_TEXT_CHARS} characters of text"
             ),
             Error::NoArea => write!(
                 f,
@@ -340,6 +355,7 @@ fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, E
     };
     let text = std::str::from_utf8(bytes).map_err(|_| Error::Invalid("not UTF-8".into()))?;
     let doc = xml(text)?;
+    check_text(&doc)?;
     let Some(side) = OneSide::of(&doc, text) else {
         return convert(&doc, options);
     };
@@ -353,6 +369,27 @@ fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, E
         None => side.given(convert(&doc, options)?.size()),
     };
     convert(&xml(&side.completed(text, given))?, options)
+}
+
+/// Refuses a document whose `<text>` is longer than [`MAX_TEXT_CHARS`]: usvg
+/// lays out and outlines every glyph while parsing, before any other budget
+/// runs, at a large and superlinear cost per glyph.
+fn check_text(doc: &roxmltree::Document<'_>) -> Result<(), Error> {
+    let mut chars = 0usize;
+    for node in doc.descendants().filter(|node| node.is_text()) {
+        let Some(text) = node.text() else { continue };
+        if !node
+            .ancestors()
+            .any(|ancestor| ancestor.is_element() && ancestor.tag_name().name() == "text")
+        {
+            continue;
+        }
+        chars = chars.saturating_add(text.chars().count());
+        if chars > MAX_TEXT_CHARS {
+            return Err(Error::TooMuchText);
+        }
+    }
+    Ok(())
 }
 
 fn xml(text: &str) -> Result<roxmltree::Document<'_>, Error> {

@@ -14,9 +14,10 @@
 //! a layer-sized pixmap and its alpha masks beside what its content draws.
 //! A pattern draws its tile (the pattern's box at the path's scale, not
 //! clamped) whenever a path fills or strokes with it. An inline raster image
-//! takes a pixmap of its own decoded size while it is drawn. The estimate
-//! adds up what is alive at once along every nesting path, takes the largest
-//! sum, and rounds sizes up. A nested SVG image is refused by the parser's
+//! takes a pixmap of its own decoded size while it is drawn; a GIF adds the
+//! decoder's RGBA frame and indexed buffer to that pixmap. The estimate adds
+//! up what is alive at once along every nesting path, takes the largest sum,
+//! and rounds sizes up. A nested SVG image is refused by the parser's
 //! resolver (it would hide its tree from this estimate), so it counts as
 //! over budget if one ever reaches the walker.
 
@@ -74,9 +75,11 @@ impl Walk {
     fn image(&mut self, image: &usvg::Image) -> Option<f64> {
         let area = match image.kind() {
             usvg::ImageKind::SVG(_) => f64::MAX,
+            // resvg decodes a GIF's first frame at the frame's own size, which
+            // may exceed the logical screen `imagesize` reports.
+            usvg::ImageKind::GIF(data) => gif_area(data.as_slice()).unwrap_or(0.0),
             usvg::ImageKind::JPEG(data)
             | usvg::ImageKind::PNG(data)
-            | usvg::ImageKind::GIF(data)
             | usvg::ImageKind::WEBP(data) => imagesize::blob_size(data.as_slice())
                 .map_or(0.0, |size| size.width as f64 * size.height as f64),
         };
@@ -215,4 +218,16 @@ impl Walk {
         }
         Some(peak)
     }
+}
+
+/// A GIF's first frame as resvg decodes it: the frame's Image Descriptor size
+/// (not the logical screen `imagesize` reads), whose RGBA frame, indexed
+/// buffer and resvg's pixmap are alive together (9 bytes a pixel, 2.25 layer
+/// pixels).
+fn gif_area(data: &[u8]) -> Option<f64> {
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = options.read_info(std::io::Cursor::new(data)).ok()?;
+    let frame = decoder.next_frame_info().ok()??;
+    Some(f64::from(frame.width) * f64::from(frame.height) * 9.0 / 4.0)
 }

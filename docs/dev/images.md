@@ -220,9 +220,9 @@
   `svg::reported_size` rounds it), measured off the main thread; layout and fitting use it unrounded, and a file
   name's `@2x` does not apply. The bundler sizes `.svg` imports with the same `svg::size` and warns (`nsh::build`)
   about animation (SMIL elements, CSS `animation` and `@keyframes`), an `<image>` that references a file, URL or
-  nested SVG, and `<foreignObject>`, which the native rasterizer leaves out. A canvas draws an SVG as the raster its image load produced (`load_bitmap`, sized from the SVG's
-  intrinsic points like a view's, with the backend's size bucket); draw it into an explicit destination rectangle
-  rather than relying on the raster's pixel size. An SVG a Rust
+  nested SVG, and `<foreignObject>`, which the native rasterizer leaves out. A canvas draws an SVG as the raster its
+  image load produced (its pixels are the loader's size, not necessarily the SVG's intrinsic points); draw it into an
+  explicit destination rectangle rather than relying on the raster's pixel size. An SVG a Rust
   component shows as an icon is better drawn by `element::svg`, as vectors at the device's pixels and with
   `currentColor` the text color (`docs/dev/canvas.md` "SVGs"): it takes the same `ImageSrc` (`asset!("x.svg")`, which
   carries the SVG's size in points, read by `nsh-macros` from its root's `width` / `height` / `viewBox`; a URL; a
@@ -235,13 +235,16 @@
   nothing; the default resolver reads files and parses nested SVGs). `<text>` uses the system font database the
   platform's text engine uses, and raster `data:` images are decoded by resvg's `raster-images` feature. A nested SVG
   is refused rather than drawn because its tree and images would sit outside `MAX_BYTES` and the layer budget below.
-  A document is at most `svg::MAX_BYTES` (16 MiB; a `.svgz` inflates that far and no further). A raster is at most
+  A document is at most `svg::MAX_BYTES` (16 MiB; a `.svgz` inflates that far and no further), and its `<text>` is at
+  most `svg::MAX_TEXT_CHARS` (64 Ki) characters: usvg lays out and outlines every glyph while parsing, before the
+  layer estimate runs. A raster is at most
   `svg::MAX_SIDE` (8192) pixels a side and `svg::MAX_PIXELS` (16 Mi, 64 MiB of RGBA: a full-screen image on a 5K
   display fits) in all; a larger one is drawn smaller. resvg draws each isolated group (opacity, a mask, a clip path,
   filters, a blend mode) into a layer of its own, up to 5 × the canvas each way, and nested layers live at once, so a
   few hundred bytes of nested groups would take gigabytes: before drawing, `svg/layers.rs` walks the tree as resvg
   0.46 draws it and adds up, along every nesting path, the layers, clip and mask pixmaps, filter regions (a pixmap per
-  primitive, not clamped), pattern tiles (not clamped) and each inline raster image's decoded area alive at once, and
+  primitive, not clamped), pattern tiles (not clamped) and each inline raster image's decoded area alive at once (a
+  GIF's first frame, which may be larger than its logical screen, with its decoder buffers), and
   an SVG over `svg::MAX_LAYER_PIXELS` (64 Mi, four rasters' worth) or whose drawing visits more than a million nodes
   (shared patterns count each time they are drawn) is refused with an `svg::Error`. A panic in usvg or resvg is an
   `svg::Error` too (`catch_unwind`): the decoders run in GCD blocks and JNI functions, where an unwinding panic aborts.

@@ -170,9 +170,15 @@ fn inline_raster(href: &str) -> bool {
     let Some(rest) = href.strip_prefix("data:") else {
         return false;
     };
-    let mime = rest.split([';', ',']).next().unwrap_or_default();
+    // The MIME is trimmed and lowercased, as usvg's data URL parser reads it.
+    let mime = rest
+        .split([';', ','])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
     matches!(
-        mime,
+        mime.as_str(),
         "image/png" | "image/jpeg" | "image/jpg" | "image/gif" | "image/webp"
     )
 }
@@ -872,11 +878,18 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert!(images[0].starts_with("icons/a.svg: "), "{images:?}");
         assert!(images[0].contains("<image>"), "{images:?}");
-        assert!(
-            warnings(r#"<image href="data:image/png;base64,AAAA" width="5" height="5"/>"#)
-                .is_empty(),
-            "inline raster images draw natively"
-        );
+        for href in [
+            "data:image/png;base64,AAAA",
+            "data: IMAGE/PNG;base64,AAAA",
+            "data:image/PNG,AAAA",
+        ] {
+            let body = format!(r#"<image href="{href}" width="5" height="5"/>"#);
+            let found = svg_asset("icons/a.svg", &svg(&body)).unwrap().1;
+            assert!(
+                found.is_empty(),
+                "inline raster images draw natively: {href}: {found:?}"
+            );
+        }
         let html = warnings(r#"<foreignObject width="5" height="5"><p>NSH</p></foreignObject>"#);
         assert_eq!(html.len(), 1);
         assert!(html[0].contains("<foreignObject>"), "{html:?}");
