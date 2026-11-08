@@ -682,6 +682,7 @@ fn report(surface: &Surface, view: &NshView) {
         (state.id, x, y, applied)
     };
     surface.control(|c| c.scroll(id, point(Points(x), Points(y)), applied));
+    crate::access::scroll_bar::moved(view);
 }
 
 /// Eases to `to` (clamped to the rest limits).
@@ -1368,6 +1369,7 @@ pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size<Points>)
         ensure_ticking(surface, view);
     }
     update_overlays(view);
+    crate::access::scroll_bar::moved(view);
 }
 
 /// `ScrollBy`: the core keeps the visible content in place (items above
