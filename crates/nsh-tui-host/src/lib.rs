@@ -110,6 +110,11 @@ pub fn main_with_args(mut options: AppOptions, args: Args) -> io::Result<()> {
         )));
     }
     let _shutdown = shutdown::Guard::install()?;
+    // A request made before the run ends it here: once a request is set, the terminal refuses
+    // writes, so entering the session would fail.
+    if shutdown::requested() {
+        return Ok(());
+    }
     // The terminal answers its startup queries before the surface takes its colors.
     let session = if args.headless {
         None
