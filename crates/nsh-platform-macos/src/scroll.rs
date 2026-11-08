@@ -41,7 +41,7 @@ use nsh_core::{
     Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
     geometry::point,
     scroll::{
-        dragged, ease_out, indicator_alpha, indicator_span, projected, rate, reveal_delta,
+        dragged, ease_out, indicator_alpha, indicator_span, projected, rate, reveal_focus_delta,
         snap_duration, sticky_shift, thumb_scroll,
     },
 };
@@ -2033,7 +2033,7 @@ pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
         };
         // Pending animations count from where they are headed.
         let start = start - (base - pos);
-        let delta = reveal_delta(Points(start), Points(start + len), Points(dim)).0;
+        let delta = reveal_focus_delta(Points(start), Points(start + len), Points(dim)).0;
         let to = (base + delta).clamp(min, max.max(min));
         if (to - base).abs() < 0.5 {
             continue;
