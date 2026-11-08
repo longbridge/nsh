@@ -9,7 +9,7 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{MenuLabels, MenuRole},
+    desktop::MenuLabels,
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -20,8 +20,7 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
-    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSEventType, NSScreen, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -980,7 +979,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     crate::chrome::set_menu_labels(options.menu_labels.clone());
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm, &options.title, &options.menu_labels)));
+    crate::chrome::show_standard_menu(mtm);
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -1157,71 +1156,6 @@ fn center_on_display(window: &NSWindow, display: WindowDisplay) {
 fn secondary(frames: &[NSRect]) -> Option<usize> {
     let primary = frames.first()?;
     frames.iter().position(|f| f != primary)
-}
-
-/// The app menu (About, Hide, Quit), Edit (the text commands fields
-/// answer: undo, cut, copy, paste, select all) and Window (minimize, zoom,
-/// full screen, close): items of their roles, labelled as `labels` says
-/// ([`crate::chrome::role_item`]).
-fn main_menu(mtm: MainThreadMarker, title: &str, labels: &MenuLabels) -> Retained<NSMenu> {
-    let bar = NSMenu::new(mtm);
-    let submenu = |name: &str| {
-        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(name));
-        // SAFETY: an item without an action, holding the submenu.
-        let holder = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(name),
-                None,
-                &NSString::new(),
-            )
-        };
-        holder.setSubmenu(Some(&menu));
-        bar.addItem(&holder);
-        menu
-    };
-    let fill = |menu: &NSMenu, roles: &[Option<MenuRole>]| {
-        for role in roles {
-            match role {
-                Some(role) => menu.addItem(&crate::chrome::role_item(mtm, *role)),
-                None => menu.addItem(&NSMenuItem::separatorItem(mtm)),
-            }
-        }
-    };
-    fill(
-        &submenu(title),
-        &[
-            Some(MenuRole::About),
-            None,
-            Some(MenuRole::Hide),
-            Some(MenuRole::HideOthers),
-            None,
-            Some(MenuRole::Quit),
-        ],
-    );
-    fill(
-        &submenu(labels.edit_menu.as_deref().unwrap_or("Edit")),
-        &[
-            Some(MenuRole::Undo),
-            Some(MenuRole::Redo),
-            None,
-            Some(MenuRole::Cut),
-            Some(MenuRole::Copy),
-            Some(MenuRole::Paste),
-            Some(MenuRole::SelectAll),
-        ],
-    );
-    fill(
-        &submenu(labels.window_menu.as_deref().unwrap_or("Window")),
-        &[
-            Some(MenuRole::Minimize),
-            Some(MenuRole::Zoom),
-            Some(MenuRole::ToggleFullScreen),
-            None,
-            Some(MenuRole::Close),
-        ],
-    );
-    bar
 }
 
 #[cfg(test)]

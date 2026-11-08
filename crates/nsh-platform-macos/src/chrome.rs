@@ -84,8 +84,11 @@ thread_local! {
     /// [`crate::run_app`].
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The app's labels of the roles ([`crate::AppOptions::menu_labels`]),
-    /// set by [`crate::run_app`].
+    /// set by [`crate::run_app`] and [`DesktopCommand::SetMenuLabels`].
     static MENU_LABELS: RefCell<MenuLabels> = RefCell::default();
+    /// The standard menu bar [`crate::run_app`] showed, made again as the
+    /// labels change ([`relabel`]); none in an app that embeds NSH.
+    static STANDARD_MENU: RefCell<Option<Retained<NSMenu>>> = const { RefCell::new(None) };
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
     static ORIGINAL_MENU: RefCell<Option<Option<Retained<NSMenu>>>> = const { RefCell::new(None) };
@@ -149,6 +152,8 @@ pub(crate) struct Chrome {
     target: RefCell<Option<Retained<MenuTarget>>>,
     /// The main menu it set (`setApplicationMenu`).
     menu: RefCell<Option<Retained<NSMenu>>>,
+    /// That menu's items, made again with new labels ([`relabel`]).
+    menu_items: RefCell<Option<Arc<[MenuItem]>>>,
     /// The loads of the icons of that menu, given up with it.
     menu_icons: RefCell<Vec<crate::image::Load>>,
 }
@@ -489,7 +494,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => crate::app::quit_app(),
         // Quits as above, then the runner starts the app again.
         DesktopCommand::Restart => crate::app::restart_app(),
-        DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
+        DesktopCommand::SetMenu(items) => set_menu(surface, items.clone()),
+        DesktopCommand::SetMenuLabels(labels) => relabel(surface, labels),
         // The menu bar is the system's.
         DesktopCommand::SetMenuBar(_) => {}
         DesktopCommand::PopupMenu { items, at } => {
@@ -807,6 +813,109 @@ pub(crate) fn role_item(mtm: MainThreadMarker, role: MenuRole) -> Retained<NSMen
     item
 }
 
+/// The standard menu bar: the app menu (About, Hide, Quit), Edit (the
+/// text commands fields answer: undo, cut, copy, paste, select all) and
+/// Window (minimize, zoom, full screen, close), items of their roles
+/// ([`role_item`]) labelled with the app's labels.
+fn standard_menu(mtm: MainThreadMarker) -> Retained<NSMenu> {
+    let title = app_name();
+    let (edit, window) = MENU_LABELS.with_borrow(|l| (l.edit_menu.clone(), l.window_menu.clone()));
+    let bar = NSMenu::new(mtm);
+    let submenu = |name: &str| {
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(name));
+        // SAFETY: an item without an action, holding the submenu.
+        let holder = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(name),
+                None,
+                &NSString::new(),
+            )
+        };
+        holder.setSubmenu(Some(&menu));
+        bar.addItem(&holder);
+        menu
+    };
+    let fill = |menu: &NSMenu, roles: &[Option<MenuRole>]| {
+        for role in roles {
+            match role {
+                Some(role) => menu.addItem(&role_item(mtm, *role)),
+                None => menu.addItem(&NSMenuItem::separatorItem(mtm)),
+            }
+        }
+    };
+    fill(
+        &submenu(&title),
+        &[
+            Some(MenuRole::About),
+            None,
+            Some(MenuRole::Hide),
+            Some(MenuRole::HideOthers),
+            None,
+            Some(MenuRole::Quit),
+        ],
+    );
+    fill(
+        &submenu(edit.as_deref().unwrap_or("Edit")),
+        &[
+            Some(MenuRole::Undo),
+            Some(MenuRole::Redo),
+            None,
+            Some(MenuRole::Cut),
+            Some(MenuRole::Copy),
+            Some(MenuRole::Paste),
+            Some(MenuRole::SelectAll),
+        ],
+    );
+    fill(
+        &submenu(window.as_deref().unwrap_or("Window")),
+        &[
+            Some(MenuRole::Minimize),
+            Some(MenuRole::Zoom),
+            Some(MenuRole::ToggleFullScreen),
+            None,
+            Some(MenuRole::Close),
+        ],
+    );
+    bar
+}
+
+/// Shows the standard menu bar ([`standard_menu`]) as the app's main menu:
+/// the standalone runner's, which [`relabel`] makes again.
+pub(crate) fn show_standard_menu(mtm: MainThreadMarker) {
+    let menu = standard_menu(mtm);
+    NSApplication::sharedApplication(mtm).setMainMenu(Some(&menu));
+    STANDARD_MENU.set(Some(menu));
+}
+
+/// The app's labels changed ([`DesktopCommand::SetMenuLabels`]): the
+/// standard menu bar is made again with them, shown or kept to come back
+/// (`setApplicationMenu(null)`), and so is the app's own menu, whose items
+/// with a role and no label take them.
+fn relabel(surface: &Surface, labels: &MenuLabels) {
+    set_menu_labels(labels.clone());
+    let mtm = surface.mtm;
+    if let Some(old) = STANDARD_MENU.take() {
+        let menu = standard_menu(mtm);
+        let app = NSApplication::sharedApplication(mtm);
+        if app.mainMenu().is_some_and(|m| m == old) {
+            app.setMainMenu(Some(&menu));
+        }
+        ORIGINAL_MENU.with_borrow_mut(|o| {
+            if let Some(original) = o
+                && original.as_ref().is_some_and(|m| *m == old)
+            {
+                *original = Some(menu.clone());
+            }
+        });
+        STANDARD_MENU.set(Some(menu));
+    }
+    let items = surface.chrome.menu_items.borrow().clone();
+    if let Some(items) = items {
+        set_menu(surface, Some(items));
+    }
+}
+
 /// A shortcut as a key equivalent and its modifiers.
 fn key_equivalent(shortcut: &Shortcut) -> (String, NSEventModifierFlags) {
     let function = |code: u32| char::from_u32(code).map(String::from).unwrap_or_default();
@@ -1000,7 +1109,7 @@ fn holder(
 /// The application menu: the main menu, with a menu of the bar per
 /// top-level submenu (its top-level actions go to the first one). The bar's
 /// titles are text: an icon is for the items of a menu.
-fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
+fn set_menu(surface: &Surface, items: Option<Arc<[MenuItem]>>) {
     let mtm = surface.mtm;
     let app = NSApplication::sharedApplication(mtm);
     ORIGINAL_MENU.with(|o| {
@@ -1009,6 +1118,7 @@ fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
             *o = Some(app.mainMenu());
         }
     });
+    *surface.chrome.menu_items.borrow_mut() = items.clone();
     let Some(items) = items else {
         surface.chrome.menu.borrow_mut().take();
         surface.chrome.menu_icons.borrow_mut().clear();
@@ -1017,7 +1127,7 @@ fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
     };
     let bar = NSMenu::new(mtm);
     let mut loads = Vec::new();
-    for item in items {
+    for item in items.iter() {
         // A top-level item that is not a submenu gets one of its own.
         let (label, enabled, sub_items) = match item {
             MenuItem::Submenu {

@@ -54,9 +54,10 @@ use super::{
 use crate::{
     Command, EventKind, EventPayload,
     desktop::{
-        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame, WindowKind,
-        WindowMode, WindowOptions, WindowPlacement, WindowPosition, WindowRequest, WindowState,
+        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuLabels,
+        MenuRole, Shortcut, WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame,
+        WindowKind, WindowMode, WindowOptions, WindowPlacement, WindowPosition, WindowRequest,
+        WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -1158,6 +1159,19 @@ fn decode(
 /// Whether the app runs on a desktop OS, where menus show (as TS's).
 fn desktop_os() -> bool {
     super::os().is_desktop()
+}
+
+/// Labels the menus NSH makes in the app's language, in place of the
+/// labels the app opened with (the host's `AppOptions::menu_labels`): the
+/// standard menu bar on macOS, the edit menus of text fields and selectable
+/// text on Windows, and the items with a role and no label of their own in
+/// the app's menus. For an app whose language changes while it runs; the
+/// menus shown take them at once.
+pub fn set_menu_labels(labels: MenuLabels) {
+    if !desktop_os() {
+        return;
+    }
+    super::desktop_command(DesktopCommand::SetMenuLabels(Box::new(labels)));
 }
 
 /// Sets the application menu, a submenu per top-level item (`File`,

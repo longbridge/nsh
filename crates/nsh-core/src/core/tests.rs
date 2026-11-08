@@ -21328,10 +21328,12 @@ mod rust_menus {
     use super::*;
     use crate::{
         PayloadValue, PressEvent,
-        desktop::{DesktopCommand, MenuItem as Item, MenuRole},
+        desktop::{DesktopCommand, MenuItem as Item, MenuLabels, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, current_window, popup_menu_at, set_application_menu},
+            desktop::{
+                MenuItem, current_window, popup_menu_at, set_application_menu, set_menu_labels,
+            },
         },
         keymap::Modifiers,
         platform::Os,
@@ -21450,6 +21452,60 @@ mod rust_menus {
             .icon("asset:/file.svg"),
         ]);
         view()
+    }
+
+    /// Labels the menus NSH makes in Japanese when "日本語" is pressed, as
+    /// an app does when its language changes.
+    #[component]
+    fn Labels() -> impl IntoElement {
+        text("日本語").on_press(|_: &PressEvent| {
+            let mut labels = MenuLabels::default();
+            labels.roles.insert(MenuRole::Copy, "コピー".into());
+            labels.edit_menu = Some("編集".into());
+            set_menu_labels(labels);
+        })
+    }
+
+    /// The labels the app gives as its language changes reach the platform
+    /// as they are, on the desktops only.
+    #[test]
+    fn menu_labels_follow_the_apps_language() {
+        let labels_in = |batch: &MountBatch| {
+            batch
+                .items
+                .iter()
+                .filter_map(desktop)
+                .find_map(|c| match c {
+                    DesktopCommand::SetMenuLabels(labels) => Some((**labels).clone()),
+                    _ => None,
+                })
+        };
+        for (os, sent) in [(Os::MacOs, true), (Os::Ios, false)] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                ..Default::default()
+            });
+            c.mount_root(&Root::of::<Labels>());
+            let batch = c.commit().unwrap();
+            assert_eq!(labels_in(&batch), None, "{os:?}: the launch labels stay");
+            let button = batch
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Text { id, text, .. } if text.text == "日本語" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            let labels = c.commit().and_then(|batch| labels_in(&batch));
+            assert_eq!(labels.is_some(), sent, "{os:?}");
+            if let Some(labels) = labels {
+                assert_eq!(labels.label(MenuRole::Copy), "コピー");
+                assert_eq!(labels.label(MenuRole::Paste), "Paste");
+                assert_eq!(labels.edit_menu.as_deref(), Some("編集"));
+            }
+        }
     }
 
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {

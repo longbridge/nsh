@@ -400,6 +400,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         // The Win32 menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        // The edit menus read them as they open, the menu bar now.
+        DesktopCommand::SetMenuLabels(labels) => {
+            c.labels.replace((**labels).clone());
+            show_menu_bar(surface);
+        }
         DesktopCommand::PopupMenu { items, at } => popup(
             surface,
             Popup {

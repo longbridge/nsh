@@ -838,6 +838,10 @@ pub enum DesktopCommand {
     SetMenu(Option<Arc<[MenuItem]>>),
     /// When the menu bar the window draws for the application menu shows.
     SetMenuBar(MenuBarMode),
+    /// The labels of the menus NSH makes, in place of those the app opened
+    /// with (the host's `AppOptions::menu_labels`): the app's language
+    /// changed. The menus shown take them at once.
+    SetMenuLabels(Box<MenuLabels>),
     /// Shows a context menu at `at` (root coordinates, points) or at the
     /// pointer.
     PopupMenu {

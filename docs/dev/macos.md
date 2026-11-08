@@ -158,7 +158,8 @@ belong to the app, which owns retention and its storage budget.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view; `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
   Full Screen, Close: items of those roles, `chrome::role_item`, labelled with `AppOptions::menu_labels` where the app
-  labels them, as the role items with no label of the app's menus are), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
+  labels them, as the role items with no label of the app's menus are; `set_menu_labels`, `DesktopCommand::SetMenuLabels`,
+  makes both again with new labels while the app runs, `chrome::relabel`), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
   menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window
   opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
