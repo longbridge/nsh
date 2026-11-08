@@ -480,7 +480,10 @@ mod tests {
         let archive = dir.join("Demo.zip");
         zip_dir(&app, "Demo", &archive).unwrap();
         let mut zip = zip::ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
-        let mut names: Vec<String> = zip.file_names().map(str::to_owned).collect();
+        let mut names: Vec<String> = zip
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
         names.sort_unstable();
         assert_eq!(
             names,

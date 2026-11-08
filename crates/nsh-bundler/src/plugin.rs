@@ -63,7 +63,17 @@ pub(crate) struct ThemeSetup {
     pub(crate) appearance: Option<&'static str>,
     /// `"statusBar"`, checked, as JSON: the status bar's default.
     pub(crate) status_bar: Option<String>,
+    /// The app's translations (`locales/`) and the language data it ships
+    /// (`"locales"`), as the runtime's `i18n` takes them: a module of their
+    /// own the entry imports first ([`I18N_MODULE`]).
+    pub(crate) i18n: Option<String>,
 }
+
+/// The module that hands the runtime the app's translations and language
+/// data, imported first by the entry so that it runs before any other
+/// module's code.
+pub(crate) const I18N_MODULE: &str = "virtual:nsh-i18n";
+const I18N_ID: &str = "\0nsh-i18n";
 
 /// File types imported as image assets.
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"];
@@ -278,7 +288,11 @@ impl NshPlugin {
             None => "null".to_owned(),
         };
         let setup = &self.tailwind;
-        (setup.json.is_some()
+        let i18n = setup
+            .i18n
+            .is_some()
+            .then(|| format!("import {I18N_MODULE:?};\n"));
+        let call = (setup.json.is_some()
             || setup.ui.is_some()
             || setup.appearance.is_some()
             || setup.status_bar.is_some())
@@ -290,7 +304,11 @@ impl NshPlugin {
                 json(&setup.appearance.map(str::to_owned)),
                 json(&setup.status_bar)
             )
-        })
+        });
+        match (i18n, call) {
+            (None, None) => None,
+            (i18n, call) => Some(i18n.unwrap_or_default() + &call.unwrap_or_default()),
+        }
     }
 
     /// Records `message` as the build's error (shown as it is).
@@ -366,6 +384,9 @@ impl Plugin for NshPlugin {
         args: &HookResolveIdArgs<'_>,
     ) -> HookResolveIdReturn {
         let spec = args.specifier;
+        if spec == I18N_MODULE && self.tailwind.i18n.is_some() {
+            return Ok(Some(HookResolveIdOutput::from_id(I18N_ID)));
+        }
         if self.modules.contains(spec) {
             // Hot factories keep external import() expressions. Preloading
             // their namespaces would turn an optional native API into an
@@ -418,6 +439,19 @@ impl Plugin for NshPlugin {
     }
 
     async fn load(&self, _cx: SharedLoadPluginContext, args: &HookLoadArgs<'_>) -> HookLoadReturn {
+        if args.id == I18N_ID
+            && let Some(json) = &self.tailwind.i18n
+        {
+            let code = format!(
+                "import {{ i18n }} from \"nsh:rt\";\ni18n({});",
+                serde_json::Value::String(json.clone())
+            );
+            return Ok(Some(HookLoadOutput {
+                code: code.into(),
+                module_type: Some(ModuleType::Js),
+                ..Default::default()
+            }));
+        }
         let path = Path::new(args.id);
         let rel = self.rel(path);
         if has_extension(path, FONT_EXTENSIONS) {

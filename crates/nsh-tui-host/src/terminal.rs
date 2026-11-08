@@ -23,8 +23,10 @@ const DISABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007l";
 const DECODE_POLL: Duration = Duration::from_micros(50);
 /// How long startup waits for the terminal to answer its queries. Every terminal
 /// answers the primary device attributes (DA1), which ends the wait earlier.
+/// Remote terminals can answer after a network round trip; an answer that arrives
+/// after the host stops reading reaches the app as typed input.
 #[cfg(unix)]
-const QUERY_TIMEOUT: Duration = Duration::from_millis(100);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
 /// The default foreground (OSC 10) and background (OSC 11), the kitty keyboard
 /// protocol's flags (`CSI ? u`), synchronized output (DECRQM 2026) and DA1 last:
 /// its answer closes the replies.

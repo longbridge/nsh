@@ -15,22 +15,26 @@ const scanned = [
   'examples/nsh-gallery-ui/demo.ts',
   'examples/nsh-gallery-ui/palette.ts',
   'examples/nsh-gallery-ui/look',
-  // The overlays' demos, on the shared overlay and menu looks.
-  'website/demos/el-alert-dialog.tsx',
-  'website/demos/el-dialog.tsx',
-  'website/demos/el-hover-card.tsx',
-  'website/demos/el-menu.tsx',
-  'website/demos/el-popover.tsx',
-  'website/demos/el-sheet.tsx',
-  'website/demos/el-toast.tsx',
-  'website/demos/el-tooltip.tsx',
+  // Every website demo: the interface on the theme, content allowed below.
+  'website/demos',
 ];
 
 /** Files the guard skips, each with why its colors are content rather than
  * the interface's look (a canvas's drawing, a shader, a color picker's
- * swatches). Empty while only the shared layer and the demos on it are
- * scanned. */
-const allowed: Record<string, string> = {};
+ * swatches). */
+const allowed: Record<string, string> = {
+  'website/demos/el-avatar.tsx': "the initials' identity color, a hue per person's name (`avatarIdentity`), not the interface's",
+  'website/demos/el-carousel.tsx': "white captions over the slides' photographs and the scrim under them",
+  'website/demos/el-color-picker.tsx': 'the swatches and colors picked, the content of a color picker',
+  'website/demos/el-image.tsx': "an SVG picture's drawing, the image shown",
+  'website/demos/el-shader.tsx': "the shader's palettes and the white text over what it draws",
+  'website/demos/el-text.tsx': 'the text styles shown: a highlight and a text shadow',
+  'website/demos/el-video.tsx': "a video's black letterbox",
+  'website/demos/guide-scrolling.tsx': "the tiles' own hues, the content scrolled",
+  'website/demos/guide-styling.tsx': 'the gradients the styling guide shows',
+  'website/demos/guide-tailwind.tsx': "Tailwind's own palette, arbitrary values and dark: variants, what the Tailwind guide shows",
+  'website/demos/home-chat.tsx': "the home page's chat, drawn in that showcase's own system palette",
+};
 
 /** Color literals and spliced token values, by what each is. */
 const rules: [string, RegExp][] = [
@@ -49,6 +53,7 @@ function files(path: string): string[] {
   const full = join(root, path);
   try {
     return readdirSync(full, { recursive: true, encoding: 'utf8' })
+      // Not declarations, nor what the toolchain generates into dot directories (`.nsh/`, local, ignored by Git).
       .filter((name) => /\.(?:ts|tsx)$/.test(name) && !name.endsWith('.d.ts') && !name.split('/').some((part) => part.startsWith('.')))
       .map((name) => `${path}/${name}`);
   } catch {
@@ -225,4 +230,168 @@ test('the demos\' menus and overlays spread the shared looks', () => {
     }
   }
   expect(report).toEqual([]);
+});
+
+// The demos' cards, checkboxes and tabs take the shared looks too: a card is
+// `sectionSurface()` (flat, its corners the density's), a checkbox spreads
+// `checkboxLook()` and a strip of tabs is laid out by one of the tab looks.
+// A card with corners of its own, or a box drawn in place, drifted from the
+// gallery's as the copies did (radii from 10 to 16 on one page, a check
+// box's off state lighter than the field it stood for).
+
+/** Whether a source has a card with corners of its own: an object (one
+ * level of braces) that spreads `ui().card` and sets `borderRadius`, before
+ * the spread (which overrides it) or after it. */
+function ownCardCorners(source: string): boolean {
+  return [...code(source).matchAll(/\{[^{}]*\.\.\.ui\(\)\.card\b[^{}]*\}/g)].some((m) => /\bborderRadius:/.test(m[0]));
+}
+
+test('the card guard finds a card with corners of its own', () => {
+  expect(ownCardCorners('<View style={{ ...ui().card, borderRadius: 14, padding: 16 }}>')).toBe(true);
+  expect(ownCardCorners('<View style={{ borderRadius: 14, padding: 16, ...ui().card }}>')).toBe(true);
+  expect(ownCardCorners('<View style={{ ...ui().card, flex: 1, borderRadius: 12, overflow: "hidden" }}>')).toBe(true);
+  expect(ownCardCorners('<View style={{ ...sectionSurface(), padding: 16 }}>')).toBe(false);
+  expect(ownCardCorners('<Dot style={{ borderRadius: 4, backgroundColor: ui().card.backgroundColor }} />')).toBe(false);
+});
+
+test('the demos\' cards are the shared section surface', () => {
+  const report = files('website/demos')
+    .filter((file) => ownCardCorners(readFileSync(join(root, file), 'utf8')))
+    .map((file) => `${file}: spreads ui().card with a radius of its own (use sectionSurface())`);
+  expect(report).toEqual([]);
+});
+
+/** What is wrong with a checkbox's tag: no shared look. */
+function checkboxViolations(tag: string): string[] {
+  return /\{\.\.\.checkboxLook\(/.test(tag) ? [] : ['does not spread checkboxLook(..)'];
+}
+
+test('the checkbox guard finds a checkbox without the shared look', () => {
+  const styled = '<Checkbox checked={on()} indicatorStyle={{ width: 16 }}>';
+  expect(checkboxViolations(openingTags(styled, 'Checkbox')[0])).toEqual(['does not spread checkboxLook(..)']);
+  const shared = '<Checkbox\n  checked={on()}\n  {...checkboxLook()}\n  indicator={<CheckboxMark mark="check" />}\n>';
+  expect(openingTags(shared, 'Checkbox')).toHaveLength(1);
+  expect(checkboxViolations(openingTags(shared, 'Checkbox')[0])).toEqual([]);
+});
+
+test('the demos\' checkboxes spread the shared look', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    for (const tag of openingTags(readFileSync(join(root, file), 'utf8'), 'Checkbox')) {
+      for (const what of checkboxViolations(tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+test('the demos\' tabs are laid out by a shared tab look', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    const source = readFileSync(join(root, file), 'utf8');
+    if (openingTags(source, 'Tabs').length === 0) continue;
+    if (!/\b(?:tabsLook|underlineTabsLook|segmentedLook)\(/.test(source)) report.push(`${file}: <Tabs> without tabsLook(), underlineTabsLook() or segmentedLook()`);
+  }
+  expect(report).toEqual([]);
+});
+
+// The demos' form controls take the shared looks too: an input spreads the
+// field look (`field()`, `inputLook()`), a select's and a combobox's list
+// spread `listboxProps()`, a combobox its field (`comboboxLook()`), a date
+// picker `datePickerLook()`, a number input's well is `numberInputClasses`'
+// and a one-time code's cells `otpCellLook()`'s. Their copies had drifted:
+// three focus looks, a trigger whose open and error edges a finish hid, a
+// list's colors spliced into a class once.
+
+/** The looks each control's opening tag must use, by element name. */
+const formLooks: [string, RegExp, string][] = [
+  ['Input', /\{\.\.\.(?:field|inputLook)\(/, 'does not spread field(..) or inputLook(..)'],
+  ['ColorField', /\{\.\.\.(?:field|inputLook)\(/, 'does not spread field(..) or inputLook(..)'],
+  ['Select', /\{\.\.\.listboxProps\(/, 'does not spread listboxProps(..)'],
+  ['Combobox', /\{\.\.\.listboxProps\(/, 'does not spread listboxProps(..)'],
+  ['Combobox', /\{\.\.\.comboboxLook\(/, 'does not spread comboboxLook(..)'],
+  ['DatePicker', /\{\.\.\.datePickerLook\(/, 'does not spread datePickerLook(..)'],
+  ['NumberInput', /\bclass=\{numberInputClasses\.frame\}/, 'is not numberInputClasses.frame'],
+  ['OtpInput', /\{\.\.\.otpCellLook\(/, 'does not spread otpCellLook(..)'],
+];
+
+/** Demos whose inputs are content, each with why. */
+const ownInputs: Record<string, string> = {
+  'website/demos/home-chat.tsx': "the home page's chat composer, drawn in that showcase's own system palette",
+};
+
+test('the form guard finds a control without its shared look', () => {
+  const own = '<Select items={items} popupStyle={{ ...ui().card, borderRadius: 12 }} itemClass="rounded-lg">';
+  const select = formLooks.filter(([name]) => name === 'Select');
+  expect(select.flatMap(([, pattern, what]) => (pattern.test(own) ? [] : [what]))).toEqual(['does not spread listboxProps(..)']);
+  const shared = '<Combobox\n  items={items}\n  {...comboboxLook(() => open())}\n  {...listboxProps()}\n>';
+  const combobox = formLooks.filter(([name]) => name === 'Combobox');
+  expect(openingTags(shared, 'Combobox')).toEqual([shared]);
+  expect(combobox.flatMap(([, pattern, what]) => (pattern.test(shared) ? [] : [what]))).toEqual([]);
+});
+
+test('the demos\' form controls take the shared looks', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    if (Object.hasOwn(ownInputs, file)) continue;
+    const source = readFileSync(join(root, file), 'utf8');
+    for (const [name, pattern, what] of formLooks) {
+      for (const tag of openingTags(source, name)) {
+        if (!pattern.test(tag)) report.push(`${file}: <${name}> ${what}: ${tag.split('\n')[0]}`);
+      }
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+/** The other controls' shared looks: what a website demo's tag of each
+ * spreads (`needs`), and the parts it must not style in place instead
+ * (`forbids`), so the demos keep the gallery's look. */
+const looks: { tag: string; needs?: RegExp; forbids?: RegExp; look: string }[] = [
+  { tag: 'Progress', needs: /\{\.\.\.progressLook\(/, forbids: /\b(?:track|indicator)(?:Class|Style)=/, look: 'progressLook(..)' },
+  { tag: 'AccordionTrigger', needs: /\{\.\.\.disclosureTriggerLook\(/, look: 'disclosureTriggerLook(..)' },
+  { tag: 'CarouselPaginationItem', needs: /\{\.\.\.carouselDotItemLook\(/, look: 'carouselDotItemLook()' },
+  { tag: 'Link', needs: /\{\.\.\.linkLook\(/, look: 'linkLook(..)' },
+  { tag: 'Pagination', forbids: /\bitemClass=["'`]/, look: 'paginationItemClass(..)' },
+  { tag: 'Scrollbar', needs: /\bscrollbarTheme\.(?:vertical|horizontal)\b/, forbids: /\bthumbStyle=/, look: 'scrollbarTheme' },
+  { tag: 'Plot', forbids: /\bcrossLine(?:Class|Style)=/, look: 'plotCrossLine(..)' },
+  { tag: 'ResizablePanelGroup', needs: /\{\.\.\.resizableHandleLook\(/, forbids: /\bhandle(?:Thumb)?Class=/, look: 'resizableHandleLook(..)' },
+  { tag: 'DockArea', needs: /\{\.\.\.dockClasses\}/, look: 'dockClasses' },
+  { tag: 'RichEditor', needs: /\bclasses=\{richEditorClasses\}/, look: 'richEditorClasses' },
+];
+
+/** What is wrong with a tag of `rule`'s element: a part styled in place, or no shared look. */
+function lookViolations(rule: (typeof looks)[number], tag: string): string[] {
+  const found: string[] = [];
+  if (rule.forbids?.test(tag)) found.push(`styles in place what ${rule.look} owns`);
+  if (rule.needs && !rule.needs.test(tag)) found.push(`does not use ${rule.look}`);
+  return found;
+}
+
+test('the look guard finds styled parts and a missing look', () => {
+  const [progress, plot] = looks.filter((r) => r.tag === 'Progress' || r.tag === 'Plot');
+  const styled = '<Progress value={v()} indicatorStyle={{ backgroundColor: x }}>';
+  expect(lookViolations(progress, styled)).toEqual(['styles in place what progressLook(..) owns', 'does not use progressLook(..)']);
+  expect(lookViolations(progress, '<Progress value={v()} {...progressLook(() => v())}>')).toEqual([]);
+  expect(lookViolations(plot, '<Plot data={d} crossLineClass="w-px">')).toEqual(['styles in place what plotCrossLine(..) owns']);
+  expect(lookViolations(plot, '<Plot data={d} {...plotCrossLine()}>')).toEqual([]);
+});
+
+test('the demos\' other controls take the shared looks', () => {
+  const report: string[] = [];
+  for (const file of files('website/demos')) {
+    const source = readFileSync(join(root, file), 'utf8');
+    for (const rule of looks) {
+      for (const tag of openingTags(source, rule.tag)) {
+        for (const what of lookViolations(rule, tag)) report.push(`${file}: ${what}: ${tag.split('\n')[0]}`);
+      }
+    }
+  }
+  expect(report).toEqual([]);
+});
+
+test('every demo with inputs of its own still exists and says why', () => {
+  for (const [file, reason] of Object.entries(ownInputs)) {
+    expect(readFileSync(join(root, file), 'utf8')).toContain('<Input');
+    expect(reason.length).toBeGreaterThan(0);
+  }
 });

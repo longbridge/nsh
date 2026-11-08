@@ -28,7 +28,6 @@ function SafeAreaDiagram() {
         borderColor: colors.border,
         backgroundColor: colors.surface,
         backgroundImage: finish.card.backgroundImage,
-        boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 #ffffff",
         overflow: "hidden",
       }}
     >

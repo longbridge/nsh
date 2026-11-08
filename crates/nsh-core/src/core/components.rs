@@ -154,8 +154,10 @@ pub(super) struct Instance {
     /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
-    /// The nodes of its view with bindings: what was applied last.
-    pub(super) bound: FxHashMap<NodeId, super::views::BoundNode>,
+    /// The nodes of its view with bindings: what was applied last. Boxed:
+    /// a record is large, and a map's free slots are as large as its
+    /// entries.
+    pub(super) bound: FxHashMap<NodeId, Box<super::views::BoundNode>>,
     /// In a view placing its JS children one by one: them, as a signal.
     pub(super) js_kids: Option<crate::element::Signal<Vec<NodeId>>>,
     /// A cell of a view's list: the owner of the row it shows.
@@ -608,6 +610,9 @@ pub(super) struct Components {
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
+    /// The language the app asked to show in (`Some(None)`: the user's
+    /// again), for the engine ([`Core::take_locale_request`]).
+    pub(super) locale_request: Option<Option<crate::platform::Locale>>,
     next_url_open: u32,
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
@@ -711,6 +716,7 @@ impl Default for Components {
             clipboard_reads: FxHashMap::default(),
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
+            locale_request: None,
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
@@ -888,6 +894,20 @@ impl<M: TextEngine> Core<M> {
     pub fn set_tokens(&mut self, tokens: Tokens) {
         self.components.app_tokens = Arc::new(tokens);
         self.tokens_changed();
+    }
+
+    /// The app's translations ([`crate::i18n`]): what `t!` and TS's `t`
+    /// read from now on.
+    pub fn set_translations(&mut self, translations: crate::i18n::Translations) {
+        let _entered = self.components.runtime.enter();
+        crate::element::global::<crate::i18n::Translations>().set(translations);
+    }
+
+    /// The language the app asked to show in since the last call
+    /// (`Some(None)`: the user's again), which the engine applies to the
+    /// environment it gives the core and JS.
+    pub fn take_locale_request(&mut self) -> Option<Option<crate::platform::Locale>> {
+        self.components.locale_request.take()
     }
 
     /// The embedding app's design tokens (`None`: the app's again): an app
@@ -5330,6 +5350,8 @@ impl<M: TextEngine> Core<M> {
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Appearance(appearance) => self.set_appearance(appearance),
             Action::Tokens(tokens) => self.set_tokens(tokens),
+            Action::Translations(translations) => self.set_translations(translations),
+            Action::Locale(locale) => self.components.locale_request = Some(locale),
             Action::BuiltInScrollbars(source, theme) => {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }

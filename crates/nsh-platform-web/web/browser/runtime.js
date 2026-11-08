@@ -171,7 +171,7 @@ export function createBrowserHost(player) {
         rejectLoad = null;
         delete realm.__nsh_browser_bootstrap;
         const { Values, createReactive, createModules, createDom, createComponents, createGestures,
-          createCanvas, createAnimation, createNavigation, createKeymap, createEnvironment,
+          createCanvas, createAnimation, createNavigation, createKeymap, createEnvironment, createI18n,
           createHost, createStandard, createResource, createLists, configureAPIs, createHot } = scope;
         values = new Values();
         values.trace = () => player.wasm.nsh_browser_trace();
@@ -188,6 +188,8 @@ export function createBrowserHost(player) {
         const gestures = createGestures(call, values, reactive, dom, active, requestPump);
         dom.setTouches(gestures);
         dom.rt.setup = env.setup;
+        const i18n = createI18n(reactive, call, env);
+        dom.rt.i18n = i18n.setup;
         dom.rt.font = (uri, family) => call(404, [uri, family]);
         stopped.push(() => dom.dispose(), () => modules?.dispose(), () => host?.dispose(), () => animation?.dispose(), () => player.wasm.nsh_stop(), () => player.wasm.nsh_browser_dispose());
         const event = (name, args) => {
@@ -218,9 +220,13 @@ export function createBrowserHost(player) {
           if (delay === -2) throw new Error("browser engine startup failed");
           return delay;
         }, true);
-        // The engine's clock and a test session's network, in the realm's
-        // place before any of the app's code runs (`testing.js`).
-        scope.installTesting(realm, call, { active, wake: requestPump, network: !!player.testing });
+        // The engine's clock and a test session's sockets (`testing.js`),
+        // and `fetch` through the engine's network for the app's files and
+        // a test session's HTTP (`fetch.js`), in the realm's place before
+        // any of the app's code runs.
+        const network = !!player.testing;
+        scope.installTesting(realm, call, { active, wake: requestPump, network });
+        scope.installFetch(realm, call, { active, wake: requestPump, network });
         lists = createLists(call, values, reactive, dom, active, requestPump);
         dom.rt.list = lists.render;
         components = createComponents(call, values, reactive, dom);
@@ -254,6 +260,7 @@ export function createBrowserHost(player) {
           return hot.hot;
         } });
         for (const [specifier, namespace] of Object.entries(env.modules)) namespaces.set(specifier, namespace);
+        namespaces.set("nsh/i18n", i18n.api);
         namespaces.set("nsh/host", { host: nsh.host });
         namespaces.set("nsh/native", { nativeComponent: nsh.nativeComponent, nativeModule: nsh.nativeModule });
         namespaces.set("nsh/keymap", { keymap: nsh.keymap });

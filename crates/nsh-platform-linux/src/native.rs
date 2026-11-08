@@ -52,6 +52,8 @@ use crate::{image::AssetBase, surface::Surface, view::NshView};
 
 #[cfg(feature = "webview")]
 mod web;
+#[cfg(feature = "webview")]
+mod web_scheme;
 
 /// A native component made by a registered factory.
 ///
@@ -341,7 +343,7 @@ pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) 
             Some(Host::Web(None))
         );
         if unmade {
-            let web = web::WebHost::new(surface, view, p.incognito);
+            let web = web::WebHost::new(surface, view, p);
             if let Some(Host::Web(slot)) = surface.native.hosts.borrow_mut().get_mut(&view.id()) {
                 *slot = Some(web);
             }

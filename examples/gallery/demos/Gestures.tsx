@@ -4,7 +4,7 @@ const pointer = platform.desktop;
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { PanResponder } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, density, finish, hint, IconTile, isDark, mono, Press, radius, Row, Stat, terminal, tints } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, density, finish, hint, IconTile, mono, Press, radius, Row, Stat, terminal, tints } from "../ui";
 
 /** The dots of a matrix `step` apart along `length`, centered: as far from either end, at least 8. */
 function along(length: number, step: number): number[] {
@@ -39,8 +39,9 @@ const stage = () =>
     ...finish.track,
   }) as const;
 
-/** The highlight and shadow of a small colored knob (call in a reactive scope). */
-const knob = () => (isDark() ? { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 10px rgba(0,0,0,0.45)" } : finish.knob);
+/** The drop under a small colored knob (call in a reactive scope): a
+ * switch knob's (`finish.knob`), its fill left to the knob's own color. */
+const knob = () => ({ boxShadow: finish.knob.boxShadow });
 
 /** A plain label with the API it uses, in code type. */
 function Api(props: { label: string; api: string }) {
@@ -156,7 +157,7 @@ function Ball() {
             scale: grab.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] }),
           }}
         >
-          <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: "rgba(19,22,12,0.35)" }} />
+          <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: alpha(colors.onAccent, 0.35) }} />
         </View>
       </View>
       <Caption label="Position" note={`${Math.round(pos().x)}, ${Math.round(pos().y)}`} />

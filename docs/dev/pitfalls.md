@@ -178,8 +178,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Styles arrive before frames** (new views have a zero size): a shared radius goes straight to the layer (Core Animation clamps it itself);
   only paths, shadow paths, the content view and the image layer depend on the size, and they are rebuilt on `Frame` while `Decor::sized()`
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
+- **A view's first style does not transition**: a mounting tree's views are styled after they are added to the window, so
+  `window().is_some()` alone animates the first style from the defaults (a pill's corners growing out of a square). The
+  mounter only transitions a view it has styled before (`Slot::styled`), as `nsh_core`'s `transition::restyle` and
+  Android's mounter do.
 - **Property changes on standalone `CALayer`s animate implicitly for 0.25s** (a UIView's own layer does not): wrap changes to shape / image
   layers in `CATransaction.setDisableActions(true)`.
+- **Box-shadow geometry needs explicit animations of its own**: iOS transitions animate the view's `cornerRadius`, but the
+  shadow layer's `shadowPath`, the mask's `path` and the content clip layer's corners have no implicit action: set beside an
+  animating radius they jump to the new shape and the shadow's edge detaches from the background for the whole transition.
+  Set them through `interaction::animate_geometry`, which animates from the presented (mid-animation) value; quiet
+  decoration updates still apply at once.
 - **Core Animation always draws `border` above sublayers**, while CSS borders are below children: non-clipping views use a stroke layer below
   the children; when clipping both look the same, so the layer's own border is used.
 - **A UIScrollView's sublayers scroll with its content** (`bounds.origin` is the scroll offset), so scroll views cannot use shape layers / masks.
@@ -479,6 +488,12 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **A view's display link follows the window to another screen but keeps the frame rates it was asked for**: one
+  resumed while the window was on a 60 Hz screen (range 60–60) and kept running by a looping animation or the
+  performance monitor drew at 60 Hz after the window moved to a 120 Hz built-in screen (measured, macOS 26, a 120 Hz
+  built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
+  `maximumFramesPerSecond` differs from the one it was made for.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
@@ -525,6 +540,12 @@ Things that were found the hard way. Read the section of the area you change bef
   an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
   one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
+- **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
+  makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its
+  `NSToolbarView` is what `hitTest:` finds across the title bar's whole width (macOS 26 finds the content there):
+  it does not accept the first mouse, so in a window that never becomes key (a background test host) a press there
+  is lost, while a key window hands it on to the content under it. The test hosts' window does that too
+  (`window.rs` `NshWindow`).
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).
@@ -556,8 +577,9 @@ Things that were found the hard way. Read the section of the area you change bef
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages
-  and dialogs that leave as images take their live web views and videos along (`native::lend`). The test agent's
-  screenshots are the window server's instead (next item).
+  and dialogs that leave as images take their live web views and videos along (`native::lend`). They also draw a
+  layer's own `border` unevenly around rounded corners (the outer edge on the corner curve, the inner one circular),
+  which a window draws evenly. The test agent's screenshots are the window server's instead (next item).
 - `CARenderer` (`rendererWithMTLTexture:options:`) renders only a layer tree in a context of its own: given a window's
   content layer it rendered it offscreen and left the window's content blank on screen (macOS 27), so it cannot take a
   picture of a shown window. It also renders nothing unless the layer is set inside a committed `CATransaction`.

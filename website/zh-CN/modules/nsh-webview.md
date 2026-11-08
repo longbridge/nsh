@@ -54,7 +54,7 @@ mount(Browser);
 |---|---|---|---|
 | `src` | `string` | | 要显示的页面的 URL。 |
 | `html` | `string` | | 内联 HTML，代替 `src` 显示。 |
-| `baseUrl` | `string` | | `html` 中相对链接的解析基准。 |
+| `baseUrl` | `string` | | `html` 中相对链接的解析基准。它需要与该地址的页面相同的授权（`webview.hosts`）；未授权时 HTML 不带基准 URL 加载，`onError` 报告 `ERR_ACCESS_DENIED`。 |
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自身的脚本之前运行。 |
 | `userAgent` | `string` | 平台默认 | 用户代理字符串。 |

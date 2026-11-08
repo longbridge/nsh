@@ -1746,6 +1746,9 @@ struct WebHost {
     holder: objc2::rc::Weak<ViewObj>,
     web: Option<Retained<AnyObject>>,
     handler: Retained<WebHandler>,
+    /// Serves the URL schemes of the first props while the web view is
+    /// here.
+    schemes: Option<nsh_platform_apple::web_scheme::SchemeServer>,
     /// The props applied (`None` before the first).
     props: Option<WebProps>,
     /// The page scrolls with the wheel and the trackpad
@@ -1765,14 +1768,16 @@ impl WebHost {
             holder: objc2::rc::Weak::new(&**view),
             web: None,
             handler,
+            schemes: None,
             props: None,
             scrolls: true,
         }
     }
 
     /// Makes the `WKWebView`, keeping its website data in memory only
-    /// (a store of its own) when `incognito`.
-    fn make(&mut self, incognito: bool) {
+    /// (a store of its own) when `incognito`, serving the app's URL
+    /// schemes.
+    fn make(&mut self, p: &WebProps) {
         let Some(view) = self.holder.load().and_then(|v| NshView::from_ns(&v)) else {
             return;
         };
@@ -1783,11 +1788,16 @@ impl WebHost {
             // NSView.
             unsafe {
                 let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration")?, new];
-                if incognito {
+                if p.incognito {
                     let store: Retained<AnyObject> =
                         msg_send![class(c"WKWebsiteDataStore")?, nonPersistentDataStore];
                     let _: () = msg_send![&config, setWebsiteDataStore: &*store];
                 }
+                self.schemes = nsh_platform_apple::web_scheme::serve(
+                    handler.mtm(),
+                    &config,
+                    &p.url_schemes,
+                );
                 let content: Retained<AnyObject> = msg_send![&config, userContentController];
                 let _: () = msg_send![
                     &content,
@@ -1826,8 +1836,9 @@ impl WebHost {
     fn set(&mut self, p: &WebProps) {
         self.scrolls = p.scrollable;
         if self.props.is_none() {
-            // The core keeps `incognito` from changing once it is made.
-            self.make(p.incognito);
+            // The core keeps `incognito` and the URL schemes from changing
+            // once it is made.
+            self.make(p);
         }
         let Some(web) = &self.web else { return };
         let old = self.props.take();

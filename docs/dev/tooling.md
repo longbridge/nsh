@@ -261,6 +261,15 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
+Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
+with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
+(`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
+returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
+bounds in the root's points with transforms left aside, hidden, clips, a scroll view's `LayoutScroll` (axis, content
+size), a text view's `LayoutText` (its `AttributedText` and the box it was laid out in, in the root's points too)),
+for checks of the layout itself: what overflows its parent, is cut by a view that clips, or is too wide for its text.
+Both are Rust API of `nsh-testing` for `cargo test`; the TSX `nsh/test` module has no counterpart yet.
+
 The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
 `label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`
 with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
@@ -557,6 +566,10 @@ for a Command key the window's own key equivalents, and for any key the main men
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
 key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
 the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+Presses go to the app's views as in the key window: AppKit gives a left press in a window that is not key only to a
+view that accepts the first mouse, and a hidden title bar's toolbar view, over the content's top, does not, so the
+host's window (`NshWindow`) hands a press the title bar would only take to make the window key to the content's view
+under it, with its drags and release.
 An item is not checked for being enabled (AppKit validates against the key window's responders:
 with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
 checks of this are `crates/nsh-platform-macos/tests/host`
@@ -684,8 +697,12 @@ offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`)
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
 feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
 iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
-and files). Touches are IOHID digitizer events handed to UIKit (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's
-and BackBoardServices' functions looked up at run time, `synth.rs`), so UIKit makes the `UITouch`es and runs hit
+and files). As `nsh run --target ios` and `nsh package --target ios-simulator --run` do, it passes the app the variables
+of its environment that the app's `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads
+them as on the desktops, whose hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`,
+`TMPDIR`, `PATH`, ...) keep the simulator's values. Touches are IOHID digitizer events handed to UIKit
+(`-[UIApplication _enqueueHIDEvent:]`, with IOKit's and BackBoardServices' functions looked up at run time,
+`synth.rs`), so UIKit makes the `UITouch`es and runs hit
 testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
 inside the scroll view that rests (still reporting where it is) before it lifts, so it ends without a fling; a tap
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
@@ -700,7 +717,14 @@ The system's appearance is the simulator's: the CLI switches it (`simctl ui appe
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
-(`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
+(`dataDir`, emptied as it starts). As `nsh run --target android` does for a TSX app, it passes the variables of its
+environment that the app's `capabilities.process.env` declares as `nsh.env.<name>` string extras
+(`run::android_app_env`; values quoted for the device's shell, which `adb shell` hands the command line), and
+`DevActivity` sets them in its process's environment before the engine starts, so `process.env` reads them as on the
+desktops; the paths Android sets for each app process (`PATH`, `HOME`, `TMPDIR`, `ANDROID_*`, `LD_*`, ...) keep the
+device's values. Only the development host applies these extras: a packaged app's `AppActivity` (Rust roots'
+`nsh run`, `nsh package --target android --run`) is exported, so it runs with the device's environment. The agent's
+calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
 each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
 topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
 iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
@@ -936,7 +960,10 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). GPUI builds run in
+`crates/gpui`, their own workspace, and the CLI resolves their output through `cargo metadata`'s
+`target_directory`, honoring Cargo's configuration and `CARGO_TARGET_DIR` (or that Cargo implementation's own
+output policy), rather than assuming the main workspace's `target`. On macOS it runs the hosts
 built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
@@ -966,7 +993,9 @@ whose `main` the nightly already has builds nothing (the `plan` job compares the
 tag: each build deletes the previous nightly release and its tag and creates them again at the new commit (moving
 the tag through the refs API would need the `workflows` permission when the commits change workflows), so tags do
 not pile up. Running the workflow by hand with *nightly* publishes one at once. `install.sh --nightly` installs
-it; the CLI keeps the workspace version, and `-V` shows the commit. Pull
+it; the CLI keeps the workspace version, and `-V` shows the commit and `nightly`: the dist job builds with
+`NSH_CHANNEL=nightly`, which the CLI's build script stamps in, and the nightly release carries `nsh-release.json`
+(`{ version, commit }`). Pull
 requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
@@ -989,6 +1018,13 @@ How users get it (`website/docs/installation.md`):
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
 - `install.sh --nightly` installs the `nightly` release the same way (`NSH_VERSION=nightly` does too).
+- `nsh update [stable|nightly]` (`crates/nsh-cli/src/self_update.rs`) replaces the installed
+  distribution in place: the directory holding `bin/nsh` with a `runtime/` beside it, never a checkout's build or
+  what Homebrew, Scoop or mise installed (it names their command). It stays on the channel stamped at build time
+  unless one is named (as `rustup update nightly`); the stable channel reads the latest tag from the redirect of `releases/latest`, the
+  nightly one compares `nsh-release.json`'s commit with its own (neither is an API call, so no rate limit). The
+  archive is checked against its `.sha256` and swapped by `nsh_updater::install::Installation::directory`, the
+  machinery packaged apps update with (on Windows, entry by entry, descending into `bin` past the running exe).
 - `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
   Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
   are preserved and rejected. The checkout stays available for on-demand native runtime builds.

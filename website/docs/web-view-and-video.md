@@ -69,13 +69,13 @@ In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows 
 
 ### Props
 
-In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scrollable`, `user_agent`, `incognito`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
+In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scrollable`, `user_agent`, `incognito`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`. Rust also serves the page resources of the app's own with `url_scheme` ([below](#resources-the-app-serves)).
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `src` | `string` | | The URL of the page to show. |
 | `html` | `string` | | Inline HTML, shown instead of `src`. |
-| `baseUrl` | `string` | | What `html`'s relative URLs resolve against. |
+| `baseUrl` | `string` | | What `html`'s relative URLs resolve against. It needs the same grant as a page there (`webview.hosts`); without it the HTML loads with no base URL and `onError` reports `ERR_ACCESS_DENIED`. |
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
@@ -287,6 +287,43 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### Resources the app serves
+
+A page can load bytes the app holds (images it has in memory or on disk, a message's attachments) from a URL scheme
+of the app's own. `url_scheme` names the scheme and the Rust function that answers its requests; the page refers to
+its URLs as to any other (`<img src="app-image:42">`, `fetch("app-image:42")`), and the web engine loads them as it
+loads any subresource, bytes as they are, beside the page's scripts. Images of tens of megabytes load at the speed
+of a file.
+
+```rust
+use nsh_core::{
+    prelude::*,
+    web_resource::{WebResource, WebResourceRequest},
+};
+
+fn serve(request: WebResourceRequest) {
+    // On the main thread: hand slow work to a thread and answer from there.
+    std::thread::spawn(move || match std::fs::read(path_for(request.url())) {
+        Ok(bytes) if !request.is_cancelled() => request.respond(WebResource::new("image/png", bytes)),
+        _ => request.fail(),
+    });
+}
+
+web_view_html(html, None).url_scheme("app-image", serve).flex_1()
+```
+
+The handler runs on the platform's main thread, so it returns at once; the request is answered once, then or later
+and from any thread, with `respond` (bytes and a MIME type) or `fail` (the image's `error` event, a rejected `fetch`).
+A request dropped unanswered fails. When the page no longer needs it (it navigated, the web view went),
+`is_cancelled()` turns true and an answer is dropped. Answers carry `Access-Control-Allow-Origin: *`, so a page's
+scripts can `fetch` them whatever the page's origin, and a Content-Security-Policy names the scheme as any source
+(`img-src app-image:`).
+
+A scheme is a letter followed by letters, digits, `+`, `-` or `.`, and none of the web's or the system's (`http`,
+`https`, `file`, `data`, `blob`, `about`, ...). Several schemes are several calls. Like `incognito`, the schemes are
+read when the web view is made. iOS, macOS and Linux serve them (WebKit's `WKURLSchemeHandler` and
+`webkit_web_context_register_uri_scheme`).
 
 ### Signed-in pages: request headers
 

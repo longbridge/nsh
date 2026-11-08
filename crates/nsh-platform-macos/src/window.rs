@@ -96,14 +96,23 @@ pub(crate) struct WindowIvars {
     /// AppKit leaves its frame as asked, also taller than its screen
     /// ([`crate::AppOptions::keep_size`]).
     keep_size: Cell<bool>,
+    /// Its app runs in the background ([`crate::AppOptions::background`]):
+    /// presses the title bar would only take to make the window key go to
+    /// the content ([`NshWindow`]).
+    background: Cell<bool>,
+    /// The view a left press of the title bar went to in place of the
+    /// title bar's own: its drags and its release follow it there.
+    passed: RefCell<Option<Retained<NSView>>>,
 }
 
 impl WindowIvars {
-    fn new(focusable: bool, main: bool, keep_size: bool) -> WindowIvars {
+    fn new(focusable: bool, main: bool, keep_size: bool, background: bool) -> WindowIvars {
         WindowIvars {
             focusable: Cell::new(focusable),
             main: Cell::new(main),
             keep_size: Cell::new(keep_size),
+            background: Cell::new(background),
+            passed: RefCell::new(None),
         }
     }
 }
@@ -111,6 +120,19 @@ impl WindowIvars {
 define_class!(
     /// A normal window or a dialog of NSH's (the standalone app's main
     /// window too): AppKit's, with its key status set by `focusable`.
+    ///
+    /// In the background (`nsh test --target macos`) the window is never
+    /// key (its app is never active), and AppKit gives a left press in a
+    /// window that is not key only to a view that accepts the first mouse;
+    /// another one only makes the window key. NSH's views all accept it,
+    /// but a hidden title bar's toolbar lies over the content's top
+    /// (`currentWindow().set({ titleBar: { style: "hidden", height } })`:
+    /// full-size content under an empty `NSToolbar`), and where its view is
+    /// what AppKit hits (macOS 15: the title bar's whole width) it does not:
+    /// there a press on the app's own views was lost. The key window hands such a press on to
+    /// the content under it, so this window does too: what the title bar
+    /// would only take to make the window key goes to the content's view at
+    /// that point, as do its drags and release.
     #[unsafe(super(NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = WindowIvars]
@@ -138,8 +160,69 @@ define_class!(
             // SAFETY: NSWindow's own constraint.
             unsafe { msg_send![super(self), constrainFrameRect: rect, toScreen: screen] }
         }
+
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            if !self.ivars().background.get() || !self.pass_title_bar_press(event) {
+                // SAFETY: NSWindow's own dispatch of the event.
+                unsafe { msg_send![super(self), sendEvent: event] }
+            }
+        }
     }
 );
+
+impl NshWindow {
+    /// Hands `event` to the content when it is a left press AppKit would
+    /// only make the window key with (or the drag or release of one handed
+    /// on before): true when it did.
+    fn pass_title_bar_press(&self, event: &NSEvent) -> bool {
+        let passed = &self.ivars().passed;
+        match event.r#type() {
+            NSEventType::LeftMouseDown => {
+                let Some(view) = self.title_bar_press_target(event) else {
+                    passed.replace(None);
+                    return false;
+                };
+                view.mouseDown(event);
+                passed.replace(Some(view));
+                true
+            }
+            NSEventType::LeftMouseDragged => {
+                let Some(view) = passed.borrow().clone() else {
+                    return false;
+                };
+                view.mouseDragged(event);
+                true
+            }
+            NSEventType::LeftMouseUp => {
+                let Some(view) = passed.take() else {
+                    return false;
+                };
+                view.mouseUp(event);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The content's view under left press `event` when, in this window
+    /// that is not key, AppKit would give it to a view outside the content
+    /// that does not accept the first mouse (the title bar's toolbar).
+    fn title_bar_press_target(&self, event: &NSEvent) -> Option<Retained<NSView>> {
+        if self.isKeyWindow() {
+            return None;
+        }
+        let content = self.contentView()?;
+        // SAFETY: a view's superview, read on the main thread.
+        let frame = unsafe { content.superview() }?;
+        // The frame view's superview is none: it takes window points.
+        let hit = frame.hitTest(event.locationInWindow())?;
+        if hit.isDescendantOf(&content) || hit.acceptsFirstMouse(Some(event)) {
+            return None;
+        }
+        content.hitTest(frame.convertPoint_fromView(event.locationInWindow(), None))
+    }
+}
 
 define_class!(
     /// A panel, popup or overlay of NSH's: an `NSPanel`, with its key status
@@ -175,7 +258,7 @@ fn make_window(
 ) -> Retained<NSWindow> {
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), size);
     let window: Retained<NSWindow> = if is_panel(kind) {
-        let this = NshPanel::alloc(mtm).set_ivars(WindowIvars::new(focusable, false, false));
+        let this = NshPanel::alloc(mtm).set_ivars(WindowIvars::new(focusable, false, false, false));
         // SAFETY: NSWindow's designated initializer.
         let panel: Retained<NshPanel> = unsafe {
             msg_send![
@@ -188,7 +271,7 @@ fn make_window(
         };
         Retained::into_super(Retained::into_super(panel))
     } else {
-        new_window(mtm, rect, style, focusable, false)
+        new_window(mtm, rect, style, focusable, false, false)
     };
     // SAFETY: the window is kept in `Surface::windows` until it goes.
     unsafe { window.setReleasedWhenClosed(false) };
@@ -196,15 +279,18 @@ fn make_window(
 }
 
 /// A new [`NshWindow`] (the standalone app's main window, a normal window
-/// or a dialog of the app's own).
+/// or a dialog of the app's own). `background`: its app runs in the
+/// background ([`crate::AppOptions::background`]).
 pub(crate) fn new_window(
     mtm: MainThreadMarker,
     rect: NSRect,
     style: NSWindowStyleMask,
     focusable: bool,
     keep_size: bool,
+    background: bool,
 ) -> Retained<NSWindow> {
-    let this = NshWindow::alloc(mtm).set_ivars(WindowIvars::new(focusable, true, keep_size));
+    let this =
+        NshWindow::alloc(mtm).set_ivars(WindowIvars::new(focusable, true, keep_size, background));
     // SAFETY: NSWindow's designated initializer.
     let window: Retained<NshWindow> = unsafe {
         msg_send![

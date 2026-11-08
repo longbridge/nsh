@@ -2295,8 +2295,12 @@ fn app_quit_reaches_the_platform() {
     }
 }
 
+/// German's data stands for what the bundle of an app listing it carries.
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";
+import { i18n } from "nsh:rt";
+
+i18n(JSON.stringify({ languages: { de: GERMAN } }));
 
 mount(() => (
   <Text>{`${locale()} ${new Intl.NumberFormat().format(1234.5)} ${fontScale()}`}</Text>
@@ -2305,7 +2309,8 @@ mount(() => (
 
 #[test]
 fn locale_and_font_scale_follow_the_environment() {
-    let (engine, rx) = start(LOCALE);
+    let app = LOCALE.replace("GERMAN", nsh_i18n::language_data("de").unwrap());
+    let (engine, rx) = start(&app);
     let first = until(&rx, |b| shows(b, "en-US 1,234.5 1"));
     assert!(first.iter().any(|b| shows(b, "en-US 1,234.5 1")));
     // What an embedding app sets in place of the system's.

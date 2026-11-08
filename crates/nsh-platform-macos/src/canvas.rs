@@ -160,7 +160,7 @@ struct Prefix {
 
 /// Sets up a canvas view.
 pub(crate) fn create(view: &NshView) {
-    view.state_mut().canvas = Some(CanvasState::default());
+    view.state_mut().canvas = Some(Box::default());
 }
 
 /// A new drawing: loads the images it names that are new.
@@ -227,7 +227,7 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) -> Dama
         scan,
         changed,
         ..
-    }) = state.canvas.as_mut()
+    }) = state.canvas.as_deref_mut()
     else {
         return Damage::None;
     };

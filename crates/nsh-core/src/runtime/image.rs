@@ -157,11 +157,9 @@ fn granted(sys: &System, url: &str) -> Result<(), JsError> {
     if sys.access.allows_media(url) {
         return Ok(());
     }
-    let host = crate::access::parse_url(url).map_or_else(|| url.to_owned(), |u| u.host);
+    let advice = crate::access::grant_advice(url, "network");
     Err(JsError::access_denied(
-        format!(
-            "Image.getSize / prefetch of {url} is not granted: add `{host}` to capabilities.network in nsh.json"
-        ),
+        format!("Image.getSize / prefetch of {url} is not granted: {advice}"),
         "network",
         url,
     ))

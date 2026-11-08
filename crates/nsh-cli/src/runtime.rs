@@ -487,19 +487,17 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     }
     // Cargo checkout: target/<profile>/nsh -> target/<triple>/<profile>/<name>.
     let profile = bin.file_name().context("cli profile dir")?;
+    let mut host_target = None;
     if let Some(root) = checkout(bin) {
         let mut args = vec!["build", "-p", name];
-        // The GPUI backend is a workspace of its own, built into the same
-        // `target/` (cargo reads `crates/gpui/.cargo/config.toml` only when
-        // run from there).
-        let manifest = root.join("crates/gpui/Cargo.toml");
-        let manifest = manifest.to_string_lossy();
-        let target_dir = root.join("target");
-        let target_dir = target_dir.to_string_lossy();
-        if matches!(platform, Platform::Gpui) {
-            args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+        // GPUI has its own workspace. Run there so Cargo reads its config,
+        // and ask Cargo where it builds rather than imposing the CLI's target.
+        let workspace = if matches!(platform, Platform::Gpui) {
             args.extend(gpui_features());
-        }
+            root.join("crates/gpui")
+        } else {
+            root.clone()
+        };
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
         }
@@ -516,12 +514,19 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
             Some(other) => format!("{} ({other} build)", platform.host(runner)),
             None => platform.host(runner),
         };
-        cargo(&root, &args, &what)?;
+        cargo(&workspace, &args, &what)?;
+        if matches!(platform, Platform::Gpui) {
+            host_target = Some(
+                crate::rust_app::cargo_target_directory(&workspace)
+                    .context("Cargo did not report the GPUI workspace's target directory")?,
+            );
+        }
     }
-    let mut built = bin
-        .parent()
-        .context("cli is not in a target directory")?
-        .to_path_buf();
+    let mut built = host_target.unwrap_or(
+        bin.parent()
+            .context("cli is not in a target directory")?
+            .to_path_buf(),
+    );
     if let Some(triple) = platform.triple() {
         built.push(triple);
     }

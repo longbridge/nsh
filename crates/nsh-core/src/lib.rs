@@ -28,6 +28,7 @@ pub mod filesystem;
 pub mod geometry;
 mod grid;
 pub mod host_channel;
+pub mod i18n;
 pub mod id_table;
 pub mod image;
 pub mod input;
@@ -66,6 +67,7 @@ pub mod time;
 mod transform;
 pub mod transition;
 pub mod url_scheme;
+pub mod web_resource;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
@@ -120,7 +122,7 @@ pub use crate::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
         BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
         TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
-        font_data, font_family,
+        font_data, font_family, keep_font,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

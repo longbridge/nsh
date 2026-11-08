@@ -62,7 +62,8 @@ screen stays yours; `--display <n>` picks another): each app a test opens gets a
 test asks for even on a display shorter than it, and
 the steps click, type and scroll with the system's input at the views their selectors name
 ([Testing](./testing-and-trace.md#on-a-real-platform)). The apps run in the background: their windows show while the
-keyboard stays with the app you type in (`--foreground` lets them become the active app).
+keyboard stays with the app you type in (`--foreground` lets them become the active app), and clicks reach the app's
+views as they do in the active window, under a hidden title bar too.
 
 ### Performance monitor
 
