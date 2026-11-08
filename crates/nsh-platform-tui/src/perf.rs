@@ -130,7 +130,7 @@ impl Monitor {
                 output(|s| s.bytes),
                 output(|s| s.cells)
             );
-            log::info!(target: "nsh::perf", "{}", self.line);
+            log::info!(target: nsh_engine::perf::LOG_TARGET, "{}", self.line);
             // One final idle update, then no timer until app work resumes.
             self.refresh = (!recent.is_empty()).then_some(now + REFRESH);
         }

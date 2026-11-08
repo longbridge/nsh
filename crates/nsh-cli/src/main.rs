@@ -280,10 +280,11 @@ enum Command {
         #[arg(long)]
         trace: bool,
         /// Show the performance monitor over the app: frame rate, frame and
-        /// commit costs, CPU, GPU, memory (`--target macos`, which also logs
-        /// its readings once a second; `--target linux`, `windows` and `ios`
-        /// log them). On `tui`, show FPS/idle, frame p95, apply/draw/flush
-        /// times, bytes and changed Cells; C-h p toggles the line.
+        /// commit costs, CPU, GPU, memory (`--target macos` and `linux`; on
+        /// `macos`, `linux`, `windows` and `ios` the host also logs its
+        /// readings once a second, shown with `-v`). On `tui`, show FPS/idle,
+        /// frame p95, apply/draw/flush times, bytes and changed Cells; C-h p
+        /// toggles the line.
         #[arg(long)]
         fps: bool,
         /// Where to run.

@@ -262,7 +262,7 @@ it reads is `nsh_engine::perf` (`docs/dev/performance.md`):
 - The engine records its commits (`EngineControl::set_perf_monitor`).
 
 For checking a change: run a release host with `--fps --trace` (`nsh run --release --target macos --fps --trace`) and
-scroll it; the host logs the readings once a second (`nsh::perf fps …`, milliseconds as mean/p50/p95/max: `tick` the
+scroll it; the host logs the readings once a second (`nsh::fps fps …`, milliseconds as mean/p50/p95/max: `tick` the
 delivered refresh gaps, `frame-gap` the gaps between shown frames, `main` the main-thread time per frame). A frame
 rate of 120 does not mean a smooth scroll: check how far each frame moves (fling a few times, as event and display
 phases differ from gesture to gesture). For where the time goes, `sample <pid> 5` the host (Instruments' Time Profiler: `xctrace

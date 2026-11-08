@@ -6,7 +6,7 @@
 //! - `nsh-gpui-host --bundle <path> [--trace]` runs a built bundle (`.nshc`
 //!   is QuickJS bytecode, anything else JS source).
 //! - `--window-size 1200x800` sets the window size.
-//! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
+//! - `--fps` logs frame statistics once a second (`nsh::fps fps …`).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`Storage` of `nsh`)
 //!   is kept under the id its bundle carries, in the system's data

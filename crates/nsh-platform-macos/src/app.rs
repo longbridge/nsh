@@ -429,7 +429,7 @@ impl AppView {
     /// Shows (or hides) the performance monitor: a panel at the top right
     /// with the frame rate, what frames cost the main thread, what commits
     /// cost the engine thread (JS, layout), and the process' CPU, GPU and
-    /// memory, also logged once a second (target `nsh::perf`). Measuring
+    /// memory, also logged once a second (target `nsh::fps`). Measuring
     /// starts with it and stops when it hides; it survives reloads.
     pub fn set_fps_monitor(&self, show: bool) {
         let mut hud = self.fps.borrow_mut();
