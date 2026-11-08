@@ -1475,6 +1475,9 @@ impl NshView {
     /// Something it draws changed: content (text, canvas) is drawn again
     /// and the decoration applied again.
     pub(crate) fn changed(&self) {
+        // What it drew where it was (a shadow that shrinks, an opacity
+        // that goes) is a backdrop's too.
+        crate::shader::ui_changing(self);
         self.restyle();
         self.redraw();
         crate::shader::ui_changed(self);
@@ -1693,6 +1696,8 @@ impl NshView {
 
     /// Its frame, transform or shift changed: places it again.
     pub(crate) fn moved(&self) {
+        // Where it was shows anew to a backdrop over it.
+        crate::shader::ui_changing(self);
         self.place();
         crate::decor::apply(self);
         crate::shader::ui_changed(self);

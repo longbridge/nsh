@@ -26,9 +26,15 @@
 //! is deleted ([`deleted`]) or the app stops ([`clear`]). The pictures a
 //! shader reads are the
 //! container rendered with `renderInContext:` (without its mask) and, for
-//! `sample_backdrop`, the root with the view left out, taken again on the
-//! frame after the core says they changed ([`input_changed`]) or the UI
-//! thread changed a view in them ([`ui_changed`]). A transition pictures
+//! `sample_backdrop`, what draws under the view where it reads: the root
+//! without the view, what it holds and the layers that draw over it
+//! ([`over_reader`]), only the reader's box and overflow drawn
+//! ([`backdrop_picture`]). They are taken again on the frame after the
+//! core says they changed ([`input_changed`]) or the UI thread changed a
+//! view in them ([`ui_changed`]); a backdrop only when the changed view
+//! (or a shader's frame) draws under the reader where it reads
+//! ([`behind`]), and one with the pixels of the last is not uploaded
+//! again ([`picture_hash`]). A transition pictures
 //! the children as they were when it starts ([`start_transition`]).
 //! `renderInContext:` draws no video or web page, nor other shaders'
 //! frames under an effect taken before they arrive.
@@ -111,6 +117,12 @@ pub(crate) struct ShaderState {
     canvas: Option<Canvas>,
     /// Where the backdrop's pictures are drawn, kept for the next.
     backdrop_canvas: Option<Canvas>,
+    /// The hash of the last backdrop given to the shader ([`picture_hash`];
+    /// 0: none): one equal to it is not given again.
+    backdrop_hash: u64,
+    /// The layers a backdrop's picture leaves out ([`over_reader`]), kept
+    /// for its allocation (empty between pictures).
+    over: Vec<Retained<CALayer>>,
 }
 
 impl ShaderState {
@@ -135,6 +147,8 @@ impl ShaderState {
             masked: false,
             canvas: None,
             backdrop_canvas: None,
+            backdrop_hash: 0,
+            over: Vec::new(),
         }
     }
 
@@ -297,6 +311,8 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
             .as_ref()
             .is_some_and(|l| l.shader.inputs().contains(ShaderInput::Backdrop));
         shader.stale = pictures;
+        // The new layer's backdrop is given whether or not it changed.
+        shader.backdrop_hash = 0;
         shader.role = role;
         shader.view.set_layer(layer.clone());
         track(surface, view, pictures);
@@ -395,29 +411,49 @@ pub(crate) fn input_changed(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The UI thread changed `view` (an animated value, a scroll, an image
-/// that loaded): the effects around it, and every backdrop, take their
-/// pictures again.
+/// that loaded): the effects around it take their pictures again, and so
+/// do the backdrop readers it draws under where they read ([`behind`]).
 pub(crate) fn ui_changed(view: &NshView) {
-    let keys = PICTURING.with(|p| p.borrow().clone());
-    for key in keys {
+    changed_in_surfaces(view, false);
+}
+
+/// The UI thread is about to move or restyle `view`: a backdrop reader
+/// over where it draws now takes its picture again ([`behind`]), as what
+/// it leaves there shows anew ([`ui_changed`] after the change sees only
+/// where it went).
+pub(crate) fn ui_changing(view: &NshView) {
+    changed_in_surfaces(view, true);
+}
+
+fn changed_in_surfaces(view: &NshView, backdrops_only: bool) {
+    // By index, not a copy of the keys: this runs on every animator
+    // write (a surface leaving meanwhile only shifts the rest).
+    let mut i = 0;
+    while let Some(key) = PICTURING.with(|p| p.borrow().get(i).copied()) {
+        i += 1;
         if let Some(surface) = Surface::with_key(key) {
-            ui_changed_in(&surface, view);
+            ui_changed_in(&surface, view, backdrops_only);
         }
     }
 }
 
-fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
+/// Marks the pictures `view`'s change makes due in `surface`: the
+/// overlays and effects around it (not `backdrops_only`) and the backdrop
+/// readers it draws under where they read.
+fn ui_changed_in(surface: &Rc<Surface>, view: &NshView, backdrops_only: bool) {
     // Another surface's view (an app embedding two): none of this one's
     // pictures holds it. A window of the app's own is this surface's.
     if crate::window::root_containing(surface, view).is_none() {
         return;
     }
     // A page's or a dialog's overlay pictures its side again.
-    for mark in surface.shaders.overlays.borrow().iter() {
-        if let Some(mark) = mark.upgrade()
-            && view.ns().isDescendantOf(&mark.host)
-        {
-            mark.dirty.set(true);
+    if !backdrops_only {
+        for mark in surface.shaders.overlays.borrow().iter() {
+            if let Some(mark) = mark.upgrade()
+                && view.ns().isDescendantOf(&mark.host)
+            {
+                mark.dirty.set(true);
+            }
         }
     }
     let views = surface.shaders.pictured.borrow();
@@ -436,12 +472,17 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
         };
         // Only a shader that reads them pictures its children (the whole
         // surface, for a screen's) again.
-        let inside =
-            shader.reads_children() && (is_screen(shader.role) || view.ns().isDescendantOf(v.ns()));
+        let inside = !backdrops_only
+            && shader.reads_children()
+            && (is_screen(shader.role) || view.ns().isDescendantOf(v.ns()));
+        // A backdrop already due needs no look; one that is not is due
+        // when the view draws under the reader where it reads (what draws
+        // over it, it holds, or draws elsewhere is not in its picture).
         let backdrop = shader
             .view
             .layer()
-            .is_some_and(|l| l.shader.inputs().contains(ShaderInput::Backdrop));
+            .is_some_and(|l| l.shader.inputs().contains(ShaderInput::Backdrop))
+            && (shader.backdrop_stale || behind(view, v, shader.view.overflow().0));
         if inside {
             shader.stale = true;
         }
@@ -594,6 +635,444 @@ fn display_tree(layer: &CALayer) {
 /// A picture's pixels: premultiplied RGBA, its width, height and stride.
 type Pixels<'a> = (&'a [u8], u32, u32, u32);
 
+/// What draws under `reader` where it reads, its box grown by `overflow`
+/// points, drawn into `canvas` from `root` (the reader's window's root):
+/// the root's tree without the layers [`over_reader`] lists (the reader,
+/// what it holds and what draws over it), as Linux paints the surface up
+/// to the view. The subtrees that draw nothing there ([`cull`]: a list's
+/// rows away from the reader, the rest of a page) are left out as well:
+/// `renderInContext:` rasterizes every layer it is given, wherever it
+/// lands, and skips hidden ones. They are hidden only while it draws, and
+/// those hidden already stay so; the pixels are those of the whole tree.
+/// `over` is kept for its allocation and left empty. `None`: `root` does
+/// not hold `reader`.
+fn backdrop_picture<'a>(
+    canvas: &'a mut Canvas,
+    root: &CALayer,
+    reader: &CALayer,
+    overflow: f32,
+    over: &mut Vec<Retained<CALayer>>,
+) -> Option<Pixels<'a>> {
+    if !over_reader(reader, root, over) {
+        over.clear();
+        return None;
+    }
+    let at = reader.convertRect_toLayer(reader.bounds(), Some(root));
+    let area = grow(at, overflow as CGFloat);
+    // The layers it lists are left out anyway; [`cull`] adds after them.
+    let listed = over.len();
+    cull(root, area, over, listed);
+    let pixels = canvas.draw((area.origin.x, area.origin.y), |context| {
+        // After the drawing above, which places views' layers again.
+        over.retain(|l| !l.isHidden());
+        over.iter().for_each(|l| l.setHidden(true));
+        root.renderInContext(context);
+        over.iter().for_each(|l| l.setHidden(false));
+    });
+    over.clear();
+    Some(pixels)
+}
+
+/// A list of layers, kept to be filled again.
+type Layers = Vec<Retained<CALayer>>;
+
+/// The layers a backdrop of `reader` leaves out, into `out`: the reader
+/// (with what it holds) and, at each layer on its way up to `root`, the
+/// siblings that draw over that way ([`draws_over`]): the views after the
+/// reader and after each of its ancestors (NSH orders a view's subviews by
+/// `zIndex` and stacking, then by order), hosted native views, the frames
+/// of effects around it, borders drawn in front. Whether `root` holds
+/// `reader`.
+fn over_reader(reader: &CALayer, root: &CALayer, out: &mut Vec<Retained<CALayer>>) -> bool {
+    out.clear();
+    let mut child: Retained<CALayer> = Retained::from(reader);
+    out.push(child.clone());
+    while !same(&child, root) {
+        let Some(parent) = child.superlayer() else {
+            return false;
+        };
+        // SAFETY: a getter; the sublayers are retained while listed.
+        if let Some(sublayers) = unsafe { parent.sublayers() }
+            && let Some(at) = sublayers.iter().position(|l| same(&l, &child))
+        {
+            let z = child.zPosition();
+            out.extend(
+                sublayers
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, l)| draws_over((l.zPosition(), *i), (z, at)))
+                    .map(|(_, l)| l),
+            );
+        }
+        child = parent;
+    }
+    true
+}
+
+/// What [`cull`] found of a layer's tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Reach {
+    /// Hidden already, or left out ([`over_reader`]): nothing to do.
+    Out,
+    /// It draws nothing in the area: the caller hides it.
+    Misses,
+    /// Some of it draws in the area.
+    Shows,
+}
+
+/// Readies a backdrop's picture of `layer`'s tree where it meets `area`
+/// (in `layer`'s space): the layers due to draw that show there draw (as
+/// [`display_tree`]), and the largest subtrees that draw nothing there
+/// are added to `hide` (whose first `listed` are left out already). A
+/// layer draws where [`drawn`] says (its bounds, a shape's path, its
+/// shadow) and its sublayers where they do, cut by its clip
+/// ([`clip_rect`]); what overflows a layer that does not clip shows, so a
+/// tree misses only when none of it meets the area. A tree whose reach is
+/// not known (a filter, a shadow cast by its content) is kept whole, and
+/// so is one where coordinates stop being finite (a flattening
+/// transform).
+fn cull(layer: &CALayer, area: CGRect, hide: &mut Layers, listed: usize) -> Reach {
+    if layer.isHidden() || hide[..listed].iter().any(|l| same(l, layer)) {
+        return Reach::Out;
+    }
+    let own = match drawn(layer) {
+        Some(own) if finite(area) => own,
+        _ => {
+            display_tree(layer);
+            return Reach::Shows;
+        }
+    };
+    let shows = meets(own, area);
+    let inner = match clip_rect(layer) {
+        Some(clip) => intersection(area, clip),
+        None => Some(area),
+    };
+    let start = hide.len();
+    let mut any = false;
+    // SAFETY: a getter; the sublayers are retained while looked at.
+    if let Some(sublayers) = unsafe { layer.sublayers() } {
+        for sublayer in sublayers.iter() {
+            let reach = match inner {
+                Some(inner) => cull(
+                    &sublayer,
+                    layer.convertRect_toLayer(inner, Some(&sublayer)),
+                    hide,
+                    listed,
+                ),
+                // Clipped away: hidden too, so that nothing draws it.
+                None if sublayer.isHidden()
+                    || hide[..listed].iter().any(|l| same(l, &sublayer)) =>
+                {
+                    Reach::Out
+                }
+                None => Reach::Misses,
+            };
+            match reach {
+                Reach::Misses => hide.push(sublayer),
+                Reach::Shows => any = true,
+                Reach::Out => {}
+            }
+        }
+    }
+    if !shows && !any {
+        // The whole tree misses: the caller hides it, not its parts.
+        hide.truncate(start);
+        return Reach::Misses;
+    }
+    if shows {
+        layer.displayIfNeeded();
+    }
+    Reach::Shows
+}
+
+thread_local! {
+    /// The ways up [`behind`] compares, kept for their allocations: it
+    /// runs on animator writes while a backdrop reader shows.
+    static WAYS: RefCell<(Layers, Layers)> =
+        const { RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// The most layers [`reaches`] looks through before it takes a tree as
+/// reaching the area (a whole page that moved).
+const REACH_LAYERS: u32 = 256;
+
+/// Whether `changed`, which the UI thread changed, may show in `reader`'s
+/// backdrop: it draws before (under) the reader ([`order`]: an ancestor,
+/// or a view before it in the order layers composite; not the reader,
+/// what it holds or what draws over it), and what its tree draws, clipped
+/// by its ancestors that clip (a scroll view), meets the reader's box
+/// grown by `overflow` points. Unsure (no layer, no tree in common, a
+/// filter, a tree too large to look through): yes.
+fn behind(changed: &NshView, reader: &NshView, overflow: f32) -> bool {
+    match (changed.ns().layer(), reader.ns().layer()) {
+        (Some(changed), Some(reader)) => layer_behind(&changed, &reader, overflow),
+        _ => true,
+    }
+}
+
+/// [`behind`] for the views' layers.
+fn layer_behind(changed: &CALayer, reader: &CALayer, overflow: f32) -> bool {
+    WAYS.with(|ways| {
+        let Ok(mut ways) = ways.try_borrow_mut() else {
+            return true;
+        };
+        let (from, to) = &mut *ways;
+        way_up(changed, from);
+        way_up(reader, to);
+        let behind = match order(
+            &from[..],
+            &to[..],
+            |a, b| same(a, b),
+            |p, a, b| stacks_before(p, a, b),
+        ) {
+            None => true,
+            Some(false) => false,
+            Some(true) => meets_reader(&from[..], reader, overflow),
+        };
+        from.clear();
+        to.clear();
+        behind
+    })
+}
+
+/// `layer` and its superlayers up to the top of its tree, into `way`.
+fn way_up(layer: &CALayer, way: &mut Vec<Retained<CALayer>>) {
+    way.clear();
+    let mut at: Option<Retained<CALayer>> = Some(Retained::from(layer));
+    while let Some(layer) = at {
+        at = layer.superlayer();
+        way.push(layer);
+    }
+}
+
+/// Whether what the tree of `way[0]` draws (`way` its way up, to the top
+/// `reader` shares), clipped by its ancestors that clip, may meet
+/// `reader`'s box grown by `overflow` points.
+fn meets_reader(way: &[Retained<CALayer>], reader: &CALayer, overflow: f32) -> bool {
+    let (Some(layer), Some(top)) = (way.first(), way.last()) else {
+        return true;
+    };
+    let mut area =
+        reader.convertRect_toLayer(grow(reader.bounds(), overflow as CGFloat), Some(top));
+    for ancestor in &way[1..] {
+        if !finite(area) {
+            return true;
+        }
+        if let Some(clip) = clip_rect(ancestor) {
+            match intersection(area, ancestor.convertRect_toLayer(clip, Some(top))) {
+                Some(r) => area = r,
+                None => return false,
+            }
+        }
+    }
+    let mut budget = REACH_LAYERS;
+    reaches(
+        layer,
+        top.convertRect_toLayer(area, Some(layer)),
+        &mut budget,
+    )
+}
+
+/// Whether what `layer`'s tree draws may meet `area` (in `layer`'s
+/// space). A layer that clips holds its tree in its clip ([`clip_rect`]);
+/// what overflows one that does not shows (as in CSS), so its sublayers
+/// are looked at too. Unsure (a filter, a coordinate that is not finite,
+/// more layers than `budget`): yes.
+fn reaches(layer: &CALayer, area: CGRect, budget: &mut u32) -> bool {
+    if !finite(area) || *budget == 0 {
+        return true;
+    }
+    *budget -= 1;
+    let Some(drawn) = drawn(layer) else {
+        return true;
+    };
+    if meets(drawn, area) {
+        return true;
+    }
+    let area = match clip_rect(layer) {
+        Some(clip) => match intersection(area, clip) {
+            Some(area) => area,
+            None => return false,
+        },
+        None => area,
+    };
+    // SAFETY: a getter; the sublayers are retained while looked at.
+    let Some(sublayers) = (unsafe { layer.sublayers() }) else {
+        return false;
+    };
+    sublayers
+        .iter()
+        .any(|l| reaches(&l, layer.convertRect_toLayer(area, Some(&l)), budget))
+}
+
+/// Where `layer` itself draws, in its space: its bounds (the contents and
+/// backing store NSH draws into), a shape layer's path with its stroke,
+/// and its shadow's reach. `None`: not known (a filter, such as a blur,
+/// draws beyond them; a shadow without a path is cast by the content of
+/// the whole tree).
+fn drawn(layer: &CALayer) -> Option<CGRect> {
+    use objc2_core_graphics::CGPath;
+    if layer.filters().is_some_and(|f| f.count() > 0) {
+        return None;
+    }
+    let bounds = layer.bounds();
+    let shape = layer
+        .downcast_ref::<objc2_quartz_core::CAShapeLayer>()
+        .and_then(|s| {
+            let path = s.path()?;
+            // A miter reaches `miterLimit` half widths out.
+            let stroke = s.lineWidth() * s.miterLimit().max(1.0) / 2.0;
+            Some(grow(CGPath::bounding_box(Some(&*path)), stroke))
+        });
+    let own = shape.map_or(bounds, |s| union(bounds, s));
+    if layer.shadowOpacity() <= 0.0 {
+        return Some(own);
+    }
+    let path = layer.shadowPath()?;
+    let cast = CGPath::bounding_box(Some(&*path));
+    let offset = layer.shadowOffset();
+    let cast = CGRect::new(
+        CGPoint::new(cast.origin.x + offset.width, cast.origin.y + offset.height),
+        cast.size,
+    );
+    Some(union(own, grow(cast, shadow_reach(layer.shadowRadius()))))
+}
+
+/// How far beyond its path a shadow of `radius` may draw: Core Animation
+/// blurs it over about twice the radius; this keeps a margin past that.
+fn shadow_reach(radius: CGFloat) -> CGFloat {
+    4.0 * radius.max(0.0) + 2.0
+}
+
+/// Where `layer` clips its tree (its sublayers and contents), in its
+/// space: its bounds with `masksToBounds`, its mask's frame (a shadow
+/// caster's mask reaches beyond the box), or both; `None`: it does not
+/// clip.
+fn clip_rect(layer: &CALayer) -> Option<CGRect> {
+    let mask = layer.mask().map(|m| m.frame());
+    if !layer.masksToBounds() {
+        return mask;
+    }
+    let bounds = layer.bounds();
+    Some(match mask {
+        Some(mask) => intersection(bounds, mask)
+            .unwrap_or_else(|| CGRect::new(bounds.origin, CGSize::new(0.0, 0.0))),
+        None => bounds,
+    })
+}
+
+/// Whether `a` and `b` are the same layer.
+fn same(a: &CALayer, b: &CALayer) -> bool {
+    std::ptr::eq(a, b)
+}
+
+/// Whether `parent`'s sublayer `a` draws before (under) its sublayer `b`
+/// ([`draws_over`]); yes when either is not one of them.
+fn stacks_before(parent: &CALayer, a: &CALayer, b: &CALayer) -> bool {
+    // SAFETY: a getter; the sublayers are retained while looked at.
+    let Some(sublayers) = (unsafe { parent.sublayers() }) else {
+        return true;
+    };
+    let (mut at_a, mut at_b) = (None, None);
+    for (i, l) in sublayers.iter().enumerate() {
+        if same(&l, a) {
+            at_a = Some(i);
+        } else if same(&l, b) {
+            at_b = Some(i);
+        }
+    }
+    match (at_a, at_b) {
+        (Some(i), Some(j)) => draws_over((b.zPosition(), j), (a.zPosition(), i)),
+        _ => true,
+    }
+}
+
+/// Whether a sublayer at `a` (its `zPosition`, its index) draws over one
+/// at `b` of the same layer: Core Animation composites sublayers by
+/// `zPosition`, in their order where it is equal.
+fn draws_over(a: (CGFloat, usize), b: (CGFloat, usize)) -> bool {
+    a.0.partial_cmp(&b.0)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then(a.1.cmp(&b.1))
+        .is_gt()
+}
+
+/// Whether the node whose way up is `changed` draws before (under) the
+/// one whose way up is `reader` (each itself first, the top of its tree
+/// last), as core's `Core::draws_before` decides: an ancestor of the
+/// reader does (its own box is behind it), the reader and what it holds
+/// do not, and of two subtrees of one parent the one `before(parent, a,
+/// b)` puts first does. `None`: they are in no tree together.
+fn order<N>(
+    changed: &[N],
+    reader: &[N],
+    same: impl Fn(&N, &N) -> bool,
+    before: impl Fn(&N, &N, &N) -> bool,
+) -> Option<bool> {
+    for (j, node) in changed.iter().enumerate() {
+        if let Some(i) = reader.iter().position(|r| same(r, node)) {
+            return Some(match (i, j) {
+                (0, _) => false,
+                (_, 0) => true,
+                _ => before(node, &changed[j - 1], &reader[i - 1]),
+            });
+        }
+    }
+    None
+}
+
+/// `r` grown by `by` on each side.
+fn grow(r: CGRect, by: CGFloat) -> CGRect {
+    CGRect::new(
+        CGPoint::new(r.origin.x - by, r.origin.y - by),
+        CGSize::new(r.size.width + 2.0 * by, r.size.height + 2.0 * by),
+    )
+}
+
+/// Whether `r`'s coordinates are all finite (a transform that flattens a
+/// layer makes conversions through it infinite or NaN).
+fn finite(r: CGRect) -> bool {
+    [r.origin.x, r.origin.y, r.size.width, r.size.height]
+        .iter()
+        .all(|v| v.is_finite())
+}
+
+/// `r` as `(x0, y0, x1, y1)`, with a negative size taken from the other
+/// side, as Core Graphics does.
+fn span(r: CGRect) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+    let (x0, x1) = (r.origin.x, r.origin.x + r.size.width);
+    let (y0, y1) = (r.origin.y, r.origin.y + r.size.height);
+    (x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1))
+}
+
+/// Where `a` and `b` overlap; `None`: they do not (touching edges do not).
+fn intersection(a: CGRect, b: CGRect) -> Option<CGRect> {
+    let (a, b) = (span(a), span(b));
+    let (x0, y0, x1, y1) = (a.0.max(b.0), a.1.max(b.1), a.2.min(b.2), a.3.min(b.3));
+    (x1 > x0 && y1 > y0).then(|| CGRect::new(CGPoint::new(x0, y0), CGSize::new(x1 - x0, y1 - y0)))
+}
+
+/// Whether `a` and `b` overlap; yes when either is not finite.
+fn meets(a: CGRect, b: CGRect) -> bool {
+    !finite(a) || !finite(b) || intersection(a, b).is_some()
+}
+
+/// The smallest rectangle holding `a` and `b`.
+fn union(a: CGRect, b: CGRect) -> CGRect {
+    let (a, b) = (span(a), span(b));
+    let (x0, y0, x1, y1) = (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3));
+    CGRect::new(CGPoint::new(x0, y0), CGSize::new(x1 - x0, y1 - y0))
+}
+
+/// A picture's hash ([`ShaderState::backdrop_hash`]), never 0.
+fn picture_hash((pixels, width, height, stride): Pixels<'_>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    (width, height, stride).hash(&mut hasher);
+    pixels.hash(&mut hasher);
+    hasher.finish() | 1
+}
+
 /// A bitmap context and the pixels it draws into, kept so that a picture
 /// taken again at the same size draws into them again: a picture as large
 /// as the renderer draws is 64 MB, too much to allocate on every display
@@ -650,10 +1129,19 @@ impl Canvas {
         origin: (f64, f64),
         draw: impl FnOnce(&objc2_core_graphics::CGContext),
     ) -> Pixels<'_> {
+        display_tree(layer);
+        self.draw(origin, draw)
+    }
+
+    /// As [`Canvas::render`], the layers due to draw drawn by the caller.
+    fn draw(
+        &mut self,
+        origin: (f64, f64),
+        draw: impl FnOnce(&objc2_core_graphics::CGContext),
+    ) -> Pixels<'_> {
         use objc2_core_graphics::{
             CGBitmapContextGetBytesPerRow, CGBitmapContextGetData, CGContext,
         };
-        display_tree(layer);
         let (pw, ph, scale) = self.size;
         let context = &self.context;
         CGContext::clear_rect(
@@ -714,12 +1202,17 @@ fn take_pictures(surface: &Surface, view: &NshView, renderer: &Renderer, now: In
     let size = host.state().frame.size;
     // The canvases leave the state while they draw (rendering lays out
     // and draws views, which may look at it).
-    let (mut canvas, mut backdrop_canvas) = {
+    let (mut canvas, mut backdrop_canvas, mut over, mut backdrop_hash) = {
         let mut state = view.state_mut();
         let Some(shader) = state.shader.as_mut() else {
             return;
         };
-        (shader.canvas.take(), shader.backdrop_canvas.take())
+        (
+            shader.canvas.take(),
+            shader.backdrop_canvas.take(),
+            std::mem::take(&mut shader.over),
+            shader.backdrop_hash,
+        )
     };
     let mut pictures = Vec::new();
     if stale
@@ -737,18 +1230,15 @@ fn take_pictures(surface: &Surface, view: &NshView, renderer: &Renderer, now: In
         && let (Some(root), Some(layer)) = (root.ns().layer(), view.ns().layer())
         && let Some(picture) = picture_size(size, overflow, scale)
         && let Some(backdrop) = Canvas::of(&mut backdrop_canvas, picture)
+        && let Some(pixels) = backdrop_picture(backdrop, &root, &layer, overflow, &mut over)
     {
-        // What is behind: the surface without the view (and what it holds),
-        // where the view's layer is.
-        let at = layer.convertRect_toLayer(layer.bounds(), Some(&root));
-        let origin = (at.origin.x - overflow as f64, at.origin.y - overflow as f64);
-        let pixels = backdrop.render(&root, origin, |context| {
-            let hidden = layer.isHidden();
-            layer.setHidden(true);
-            root.renderInContext(context);
-            layer.setHidden(hidden);
-        });
-        pictures.push((ShaderInput::Backdrop, pixels));
+        // The pixels of the last (a change under an opaque view, one that
+        // came back where it was) are not uploaded or rendered again.
+        let hash = picture_hash(pixels);
+        if hash != backdrop_hash {
+            backdrop_hash = hash;
+            pictures.push((ShaderInput::Backdrop, pixels));
+        }
     }
     let mut state = view.state_mut();
     let Some(shader) = state.shader.as_mut() else {
@@ -759,6 +1249,8 @@ fn take_pictures(surface: &Surface, view: &NshView, renderer: &Renderer, now: In
     }
     shader.canvas = canvas;
     shader.backdrop_canvas = backdrop_canvas;
+    shader.over = over;
+    shader.backdrop_hash = backdrop_hash;
 }
 
 /// The values of the layer's animated slots. The animator is borrowed
@@ -964,8 +1456,25 @@ fn frame(surface: &Rc<Surface>) -> bool {
 }
 
 /// Renders and collects `view`'s frame, showing one that came back;
-/// whether it has more to render.
-fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Instant) -> bool {
+/// whether it has more to render. A frame that showed (or a transition's
+/// that went) changes what the backdrop readers over it read where it
+/// draws ([`behind`]): they picture it again.
+fn render_view(surface: &Rc<Surface>, view: &NshView, renderer: &Renderer, now: Instant) -> bool {
+    let (more, showed) = show_frame(surface, view, renderer, now);
+    if showed {
+        ui_changed_in(surface, view, true);
+    }
+    more
+}
+
+/// [`render_view`]'s frame: whether it has more to render, and whether
+/// what its layer shows changed.
+fn show_frame(
+    surface: &Surface,
+    view: &NshView,
+    renderer: &Renderer,
+    now: Instant,
+) -> (bool, bool) {
     let role = view
         .state()
         .shader
@@ -976,7 +1485,7 @@ fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Inst
     let size = host.state().frame.size;
     let mut state = view.state_mut();
     let Some(shader) = state.shader.as_mut() else {
-        return false;
+        return (false, false);
     };
     shader.view.set_size(size, scale);
     if role != ShaderRole::Fill {
@@ -992,7 +1501,8 @@ fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Inst
             ));
         });
     }
-    if shader.view.render(renderer, now) {
+    let showed = shader.view.render(renderer, now);
+    if showed {
         let image = frame_image(shader.view.frame());
         let contents = image.as_deref().map(crate::decor::image_object);
         // SAFETY: a CGImage is a valid `contents` object (none clears it).
@@ -1009,9 +1519,10 @@ fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Inst
         crate::surface::quiet(|| unsafe { shader.layer.setContents(None) });
         drop(state);
         sync_mask(surface, &host);
-        return false;
+        return (false, true);
     }
-    shader.view.wants_frame() || shader.stale || shader.backdrop_stale
+    let more = shader.view.wants_frame() || shader.stale || shader.backdrop_stale;
+    (more, showed)
 }
 
 /// A frame's premultiplied sRGB RGBA pixels as a CGImage (`None` when it is
@@ -1292,6 +1803,7 @@ mod tests {
     use std::time::Duration;
 
     use nsh_core::shader::Shader;
+    use objc2_quartz_core::CATransform3D;
 
     use super::*;
 
@@ -1440,5 +1952,409 @@ mod tests {
         assert_eq!(&pixels[..4], &[255, 0, 0, 255], "the drawing, top-left");
         let (pixels, ..) = other.render(&layer, (0.0, 0.0), |_| {});
         assert!(pixels.iter().all(|&b| b == 0), "cleared before drawing");
+    }
+
+    #[test]
+    fn sublayers_composite_by_z_then_order() {
+        assert!(draws_over((0.0, 2), (0.0, 1)), "later, same z");
+        assert!(!draws_over((0.0, 1), (0.0, 2)));
+        assert!(!draws_over((0.0, 1), (0.0, 1)), "itself");
+        assert!(draws_over((OVER, 0), (0.0, 5)), "higher z, earlier");
+        assert!(
+            !draws_over((crate::decor::BEHIND, 9), (0.0, 0)),
+            "lower z, later"
+        );
+    }
+
+    /// A tree of `parent` links (`None`: a top) and per-node `z`, for
+    /// [`order`]: a parent's children composite by z, then by number.
+    struct Tree {
+        parent: Vec<Option<usize>>,
+        z: Vec<f64>,
+    }
+
+    impl Tree {
+        fn way(&self, node: usize) -> Vec<usize> {
+            std::iter::successors(Some(node), |&n| self.parent[n]).collect()
+        }
+
+        fn before(&self, changed: usize, reader: usize) -> Option<bool> {
+            order(
+                &self.way(changed),
+                &self.way(reader),
+                |a, b| a == b,
+                |_, &a, &b| draws_over((self.z[b], b), (self.z[a], a)),
+            )
+        }
+    }
+
+    #[test]
+    fn what_draws_before_a_reader_is_what_core_says_draws_before_it() {
+        // 0 root: 1 page (2 list, 3 row in it), 4 bar (the reader; 5 its
+        // child), 6 controls over the bar; 7 a top of its own.
+        let mut t = Tree {
+            parent: vec![
+                None,
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(0),
+                Some(4),
+                Some(0),
+                None,
+            ],
+            z: vec![0.0; 8],
+        };
+        let reader = 4;
+        assert_eq!(t.before(0, reader), Some(true), "the root, under it");
+        assert_eq!(t.before(1, reader), Some(true), "an earlier sibling");
+        assert_eq!(t.before(3, reader), Some(true), "in an earlier sibling");
+        assert_eq!(t.before(reader, reader), Some(false), "itself");
+        assert_eq!(t.before(5, reader), Some(false), "what it holds");
+        assert_eq!(t.before(6, reader), Some(false), "a later sibling");
+        assert_eq!(t.before(7, reader), None, "another tree");
+        // A higher z puts the page over the bar, a lower one the controls
+        // under it.
+        t.z[1] = 1.0;
+        assert_eq!(t.before(3, reader), Some(false));
+        t.z[6] = -1.0;
+        assert_eq!(t.before(6, reader), Some(true));
+    }
+
+    #[test]
+    fn rectangles_meet_only_where_they_overlap() {
+        let r = |x, y, w, h| CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        assert!(meets(r(0.0, 0.0, 10.0, 10.0), r(5.0, 5.0, 10.0, 10.0)));
+        assert!(
+            !meets(r(0.0, 0.0, 10.0, 10.0), r(10.0, 0.0, 10.0, 10.0)),
+            "touching"
+        );
+        assert!(!meets(r(0.0, 0.0, 10.0, 10.0), r(0.0, 20.0, 10.0, 10.0)));
+        assert!(
+            meets(r(0.0, 0.0, 10.0, -10.0), r(0.0, -5.0, 1.0, 1.0)),
+            "negative size"
+        );
+        assert!(
+            meets(r(f64::NAN, 0.0, 1.0, 1.0), r(50.0, 50.0, 1.0, 1.0)),
+            "unsure"
+        );
+        assert_eq!(
+            intersection(r(0.0, 0.0, 10.0, 10.0), r(5.0, 2.0, 10.0, 4.0)),
+            Some(r(5.0, 2.0, 5.0, 4.0))
+        );
+        assert_eq!(
+            union(r(0.0, 0.0, 1.0, 1.0), r(5.0, 5.0, 1.0, 1.0)),
+            r(0.0, 0.0, 6.0, 6.0)
+        );
+        assert_eq!(grow(r(1.0, 1.0, 2.0, 2.0), 1.0), r(0.0, 0.0, 4.0, 4.0));
+    }
+
+    /// A layer at `(x, y, w, h)` in `parent` (added on top).
+    fn sublayer(parent: Option<&CALayer>, (x, y, w, h): (f64, f64, f64, f64)) -> Retained<CALayer> {
+        let layer = CALayer::new();
+        layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
+        layer.setFrame(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)));
+        if let Some(parent) = parent {
+            parent.addSublayer(&layer);
+        }
+        layer
+    }
+
+    #[test]
+    fn a_backdrop_is_marked_only_by_what_draws_under_it_where_it_reads() {
+        crate::surface::quiet(|| {
+            // A 100-point window: a page with a scroll view (0..80) of
+            // rows, and the bar floating over its bottom (70..100), the
+            // bar's controls over it.
+            let root = sublayer(None, (0.0, 0.0, 100.0, 100.0));
+            let page = sublayer(Some(&root), (0.0, 0.0, 100.0, 100.0));
+            let scroll = sublayer(Some(&page), (0.0, 0.0, 100.0, 80.0));
+            scroll.setMasksToBounds(true);
+            let near = sublayer(Some(&scroll), (0.0, 60.0, 100.0, 20.0));
+            let far = sublayer(Some(&scroll), (0.0, 0.0, 100.0, 20.0));
+            let below = sublayer(Some(&scroll), (0.0, 120.0, 100.0, 20.0));
+            let header = sublayer(Some(&page), (0.0, 0.0, 100.0, 20.0));
+            let bar = sublayer(Some(&root), (0.0, 70.0, 100.0, 30.0));
+            let label = sublayer(Some(&bar), (10.0, 5.0, 50.0, 20.0));
+            let controls = sublayer(Some(&root), (0.0, 70.0, 100.0, 30.0));
+            let elsewhere = sublayer(None, (0.0, 0.0, 100.0, 100.0));
+
+            assert!(layer_behind(&near, &bar, 0.0), "a row under the bar");
+            assert!(!layer_behind(&far, &bar, 0.0), "a row elsewhere");
+            assert!(
+                !layer_behind(&below, &bar, 0.0),
+                "a row the scroll view clips away"
+            );
+            assert!(
+                layer_behind(&scroll, &bar, 0.0),
+                "the scroll view, scrolling"
+            );
+            assert!(layer_behind(&page, &bar, 0.0), "the page under it");
+            assert!(layer_behind(&root, &bar, 0.0), "the root, its ancestor");
+            assert!(!layer_behind(&bar, &bar, 0.0), "the reader");
+            assert!(!layer_behind(&label, &bar, 0.0), "what it holds");
+            assert!(!layer_behind(&controls, &bar, 0.0), "what draws over it");
+            assert!(
+                layer_behind(&elsewhere, &bar, 0.0),
+                "no tree in common: unsure"
+            );
+            // The header reaches the bar only with the bar's overflow.
+            assert!(!layer_behind(&header, &bar, 0.0));
+            assert!(layer_behind(&header, &bar, 60.0), "within the overflow");
+
+            // Scrolled 50 points (as NSH scrolls: the content's
+            // sublayerTransform): the far row leaves, the one below comes.
+            scroll.setSublayerTransform(CATransform3D::new_translation(0.0, -50.0, 0.0));
+            assert!(!layer_behind(&far, &bar, 0.0));
+            assert!(layer_behind(&below, &bar, 0.0), "clipped to 70..80");
+
+            // A shadow reaches beyond the box; a child beyond its parent
+            // (which does not clip) shows there too.
+            let card = sublayer(Some(&page), (0.0, 50.0, 100.0, 15.0));
+            assert!(!layer_behind(&card, &bar, 0.0));
+            // Core Animation's default offset is 3 points up; a shadow
+            // cast by the content has no known reach.
+            card.setShadowOpacity(0.5);
+            card.setShadowRadius(2.0);
+            assert!(layer_behind(&card, &bar, 0.0), "a shadow without a path");
+            card.setShadowPath(Some(&rect_path((0.0, 0.0, 100.0, 15.0))));
+            card.setShadowRadius(0.5);
+            assert!(!layer_behind(&card, &bar, 0.0), "a short shadow");
+            card.setShadowRadius(2.0);
+            assert!(layer_behind(&card, &bar, 0.0), "its shadow");
+            let anchor = sublayer(Some(&page), (0.0, 0.0, 10.0, 10.0));
+            let _overflowing = sublayer(Some(&anchor), (0.0, 75.0, 10.0, 10.0));
+            assert!(layer_behind(&anchor, &bar, 0.0), "its child");
+
+            // Over the bar in the array but under it by z.
+            controls.setZPosition(-1.0);
+            assert!(layer_behind(&controls, &bar, 0.0));
+        });
+    }
+
+    #[test]
+    fn a_backdrop_leaves_out_the_reader_and_what_draws_over_it() {
+        fn paint(layer: &CALayer, (r, g, b): (f64, f64, f64)) {
+            let color = objc2_core_graphics::CGColor::new_srgb(r, g, b, 1.0);
+            layer.setBackgroundColor(Some(&*color));
+        }
+        let full = (0.0, 0.0, 100.0, 100.0);
+        let root = sublayer(None, full);
+        // Over everything by z though first in the array (an effect's
+        // frames around the reader).
+        let front = sublayer(Some(&root), full);
+        front.setZPosition(OVER);
+        paint(&front, (1.0, 1.0, 0.0));
+        let page = sublayer(Some(&root), full);
+        paint(&page, (1.0, 0.0, 0.0));
+        let strip = sublayer(Some(&root), (0.0, 0.0, 50.0, 100.0));
+        paint(&strip, (0.0, 1.0, 0.0));
+        let holder = sublayer(Some(&root), full);
+        let reader = sublayer(Some(&holder), (10.0, 60.0, 80.0, 30.0));
+        paint(&reader, (1.0, 1.0, 1.0));
+        let inner = sublayer(Some(&reader), (0.0, 0.0, 80.0, 30.0));
+        paint(&inner, (0.0, 0.0, 0.0));
+        let over = sublayer(Some(&holder), (10.0, 60.0, 80.0, 30.0));
+        paint(&over, (0.0, 0.0, 1.0));
+        let hidden = sublayer(Some(&holder), full);
+        paint(&hidden, (1.0, 0.0, 1.0));
+        hidden.setHidden(true);
+        let later = sublayer(Some(&root), full);
+        paint(&later, (0.0, 1.0, 1.0));
+
+        let mut list = Vec::new();
+        assert!(over_reader(&reader, &root, &mut list));
+        let listed = |l: &CALayer| list.iter().any(|o| same(o, l));
+        for (layer, name) in [
+            (&reader, "reader"),
+            (&over, "over"),
+            (&hidden, "hidden"),
+            (&front, "front"),
+            (&later, "later"),
+        ] {
+            assert!(listed(layer), "{name} left out");
+        }
+        for (layer, name) in [(&page, "page"), (&strip, "strip"), (&holder, "holder")] {
+            assert!(!listed(layer), "{name} drawn");
+        }
+        assert!(
+            !over_reader(&reader, &sublayer(None, full), &mut list),
+            "another root"
+        );
+
+        let mut slot = None;
+        let canvas = Canvas::of(&mut slot, (80, 30, 1.0)).unwrap();
+        let (pixels, w, h, stride) =
+            backdrop_picture(canvas, &root, &reader, 0.0, &mut list).expect("a picture");
+        assert_eq!((w, h), (80, 30));
+        assert!(list.is_empty(), "nothing kept between pictures");
+        let at = |x: usize, y: usize| {
+            let i = y * stride as usize + x * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        assert_eq!(at(5, 5), [0, 255, 0, 255], "the strip under it");
+        assert_eq!(at(60, 5), [255, 0, 0, 255], "the page under it");
+        // Shown again as they were.
+        assert!(!reader.isHidden() && !over.isHidden() && !front.isHidden() && !later.isHidden());
+        assert!(hidden.isHidden(), "hidden before, hidden after");
+    }
+
+    #[test]
+    fn equal_pictures_hash_equal() {
+        let a = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let mut b = a;
+        assert_eq!(
+            picture_hash((&a[..], 2, 1, 8)),
+            picture_hash((&b[..], 2, 1, 8))
+        );
+        b[7] = 9;
+        assert_ne!(
+            picture_hash((&a[..], 2, 1, 8)),
+            picture_hash((&b[..], 2, 1, 8))
+        );
+        assert_ne!(
+            picture_hash((&a[..], 2, 1, 8)),
+            picture_hash((&a[..], 1, 2, 4)),
+            "its size"
+        );
+        assert_ne!(picture_hash((&[][..], 0, 0, 0)), 0, "0 is no picture");
+    }
+
+    /// A rectangle `(x, y, w, h)` as a path.
+    fn rect_path((x, y, w, h): (f64, f64, f64, f64)) -> CFRetained<objc2_core_graphics::CGPath> {
+        let rect = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        // SAFETY: no transform.
+        unsafe { objc2_core_graphics::CGPath::with_rect(rect, std::ptr::null()) }
+    }
+
+    /// `layer`'s background, opaque.
+    fn fill(layer: &CALayer, (r, g, b): (f64, f64, f64)) {
+        let color = objc2_core_graphics::CGColor::new_srgb(r, g, b, 1.0);
+        layer.setBackgroundColor(Some(&*color));
+    }
+
+    /// A 100-point window: a page with a header, a card whose shadow
+    /// reaches down to 66, a zero-size anchor whose child overflows to
+    /// 70..80, and a scroll view (0..80, clipping) of 20 rows of 10 points,
+    /// each with a label, scrolled `offset` points; the bar (60..100) over
+    /// them: the root, the bar, the rows.
+    fn page(offset: f64) -> (Retained<CALayer>, Retained<CALayer>, Vec<Retained<CALayer>>) {
+        let root = sublayer(None, (0.0, 0.0, 100.0, 100.0));
+        let page = sublayer(Some(&root), (0.0, 0.0, 100.0, 100.0));
+        fill(&page, (0.2, 0.2, 0.2));
+        let header = sublayer(Some(&page), (0.0, 0.0, 100.0, 20.0));
+        fill(&header, (1.0, 1.0, 0.0));
+        let card = sublayer(Some(&page), (10.0, 30.0, 80.0, 20.0));
+        fill(&card, (1.0, 1.0, 1.0));
+        card.setShadowPath(Some(&rect_path((0.0, 0.0, 80.0, 20.0))));
+        card.setShadowOpacity(1.0);
+        card.setShadowRadius(4.0);
+        card.setShadowOffset(CGSize::new(0.0, 4.0));
+        let anchor = sublayer(Some(&page), (90.0, 0.0, 0.0, 0.0));
+        let overflowing = sublayer(Some(&anchor), (0.0, 70.0, 10.0, 10.0));
+        fill(&overflowing, (1.0, 0.0, 1.0));
+        let scroll = sublayer(Some(&page), (0.0, 20.0, 100.0, 60.0));
+        scroll.setMasksToBounds(true);
+        scroll.setSublayerTransform(CATransform3D::new_translation(0.0, -offset, 0.0));
+        let rows = (0..20)
+            .map(|i| {
+                let row = sublayer(Some(&scroll), (0.0, i as f64 * 10.0, 90.0, 10.0));
+                let shade = i as f64 / 20.0;
+                fill(&row, (shade, 0.5, 1.0 - shade));
+                let label = sublayer(Some(&row), (2.0, 2.0, 40.0, 6.0));
+                fill(&label, (0.0, 0.0, 0.0));
+                row
+            })
+            .collect();
+        let bar = sublayer(Some(&root), (0.0, 60.0, 100.0, 40.0));
+        fill(&bar, (0.0, 1.0, 0.0));
+        let _controls = sublayer(Some(&root), (0.0, 60.0, 100.0, 40.0));
+        (root, bar, rows)
+    }
+
+    #[test]
+    fn a_backdrop_leaves_out_the_trees_that_draw_nothing_where_it_reads() {
+        let (root, bar, rows) = page(0.0);
+        let mut hide = Vec::new();
+        assert!(over_reader(&bar, &root, &mut hide));
+        let listed = hide.len();
+        let area = grow(bar.convertRect_toLayer(bar.bounds(), Some(&root)), 0.0);
+        assert_eq!(cull(&root, area, &mut hide, listed), Reach::Shows);
+        let culled = |l: &CALayer| hide[listed..].iter().any(|h| same(h, l));
+        // SAFETY: getters.
+        let children = |l: &CALayer| unsafe { l.sublayers() }.unwrap().to_vec();
+        let top = children(&root);
+        let content = &top[0];
+        let parts = children(content);
+        let [header, card, anchor, scroll] = &parts[..] else {
+            panic!("the page's layers");
+        };
+        assert!(culled(header), "the header, away from the bar");
+        assert!(
+            !culled(card),
+            "the card, whose shadow reaches under the bar"
+        );
+        assert!(
+            !culled(anchor),
+            "the anchor, whose child overflows under it"
+        );
+        assert!(!culled(scroll));
+        // The scroll view shows 20..80 of the window: rows 4 and 5 (60..80)
+        // are under the bar; the rest is hidden row by row (not their
+        // labels: a row that misses goes whole).
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(culled(row), !(4..6).contains(&i), "row {i}");
+            assert!(!culled(&children(row)[0]), "row {i}'s label");
+        }
+        assert!(!culled(&root) && !culled(content));
+        // Scrolled 25 points: rows 6 to 8 (55..85 in the window, clipped to
+        // 80) show.
+        let (root, bar, rows) = page(25.0);
+        let mut hide = Vec::new();
+        over_reader(&bar, &root, &mut hide);
+        let listed = hide.len();
+        let area = bar.convertRect_toLayer(bar.bounds(), Some(&root));
+        cull(&root, area, &mut hide, listed);
+        for (i, row) in rows.iter().enumerate() {
+            let culled = hide[listed..].iter().any(|h| same(h, row));
+            assert_eq!(culled, !(6..9).contains(&i), "row {i}, scrolled");
+        }
+    }
+
+    #[test]
+    fn a_culled_backdrop_has_the_pixels_of_the_whole_tree() {
+        for offset in [0.0, 25.0, 113.0] {
+            for overflow in [0.0, 12.0] {
+                let (root, bar, rows) = page(offset);
+                let picture = picture_size(
+                    nsh_core::Size::new(nsh_core::Points(100.0), nsh_core::Points(40.0)),
+                    overflow,
+                    2.0,
+                )
+                .unwrap();
+                // Everything but the bar and what draws over it.
+                let mut over = Vec::new();
+                over_reader(&bar, &root, &mut over);
+                let mut slot = None;
+                let origin = (-(overflow as f64), 60.0 - overflow as f64);
+                let whole = Canvas::of(&mut slot, picture)
+                    .unwrap()
+                    .render(&root, origin, |context| {
+                        over.iter().for_each(|l| l.setHidden(true));
+                        root.renderInContext(context);
+                        over.iter().for_each(|l| l.setHidden(false));
+                    })
+                    .0
+                    .to_vec();
+                let mut slot = None;
+                let canvas = Canvas::of(&mut slot, picture).unwrap();
+                let (culled, ..) =
+                    backdrop_picture(canvas, &root, &bar, overflow, &mut over).unwrap();
+                assert!(whole == culled, "offset {offset}, overflow {overflow}");
+                assert!(whole.iter().any(|&b| b != 0), "something drawn");
+                assert!(over.is_empty());
+                assert!(rows.iter().all(|r| !r.isHidden()), "shown again");
+            }
+        }
     }
 }
