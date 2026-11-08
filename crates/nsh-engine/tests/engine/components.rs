@@ -1312,15 +1312,15 @@ fn haptics_reach_the_platform() {
         }
         shows(batch, "refused TypeError")
     });
-    use nsh_core::Haptic;
+    use nsh_core::{Haptic, HapticImpact, HapticNotification};
     assert_eq!(
         played,
         [
             Haptic::Selection,
-            Haptic::Medium,
-            Haptic::Rigid,
-            Haptic::Error,
-            Haptic::Success
+            Haptic::Impact(HapticImpact::Medium),
+            Haptic::Impact(HapticImpact::Rigid),
+            Haptic::Notification(HapticNotification::Error),
+            Haptic::Notification(HapticNotification::Success),
         ]
     );
 }

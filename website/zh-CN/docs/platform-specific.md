@@ -157,8 +157,8 @@ function Player() {
 | Rust | TSX | 说明 |
 |---|---|---|
 | `haptic(Haptic::Selection)` | `Haptics.selection()` | 选择发生变化时的触感。 |
-| `haptic(Haptic::Light)` 到 `Rigid` | `Haptics.impact(style)` | 元素碰撞时的触感，按它的分量（默认 `"medium"`）。 |
-| `haptic(Haptic::Success)`、`Warning`、`Error` | `Haptics.notification(kind)` | 任务结束时的触感（默认 `"success"`）。 |
+| `haptic(Haptic::Impact(HapticImpact::…))` | `Haptics.impact(style)` | 元素碰撞时的触感，按它的分量（默认 `"medium"`）。 |
+| `haptic(Haptic::Notification(HapticNotification::…))` | `Haptics.notification(kind)` | 任务结束时的触感（默认 `"success"`）。 |
 
 见 [nsh/mobile](../modules/nsh-mobile.md#haptics)。
 

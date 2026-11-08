@@ -2064,30 +2064,51 @@ pub enum Command {
     },
 }
 
-/// A haptic the device plays ([`Command::Haptic`]): iOS's feedback
-/// generators (`UISelectionFeedbackGenerator`, `UIImpactFeedbackGenerator`,
-/// `UINotificationFeedbackGenerator`), Android's haptic feedback constants.
-/// What the user feels follows the device and its settings: none with
-/// haptics turned off, or on hardware without them.
+/// A haptic the device plays ([`Command::Haptic`], TS: `Haptics` of
+/// `nsh/mobile`): grouped as UIKit's feedback generators and Expo's API —
+/// a selection that changed, an impact by weight, a task's outcome. On
+/// Android it is the view's haptic feedback. What the user feels follows
+/// the device and its settings: none with haptics turned off, or on
+/// hardware without them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Haptic {
-    /// A selection changed: a picker's value, a segment, a slider's step.
+    /// A selection changed: a picker's value, a segment, a slider's step
+    /// (`Haptics.selection()`).
     Selection,
-    /// A light, small element collided (an impact).
+    /// An element collided; the style is its weight (`Haptics.impact`).
+    Impact(HapticImpact),
+    /// A task ended (`Haptics.notification`).
+    Notification(HapticNotification),
+}
+
+/// The weight of an impact ([`Haptic::Impact`], TS: `Haptics.impact`'s
+/// argument: `"light"` … `"rigid"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum HapticImpact {
+    /// A small, light element.
     Light,
-    /// A moderate element collided.
+    /// A moderate element.
     Medium,
-    /// A heavy, large element collided.
+    /// A large, heavy element.
     Heavy,
-    /// A soft, flexible element collided.
+    /// A soft, flexible element.
     Soft,
-    /// A hard, inflexible element collided.
+    /// A hard, inflexible element.
     Rigid,
-    /// A task succeeded.
+}
+
+/// How a task ended ([`Haptic::Notification`], TS: `Haptics.notification`'s
+/// argument: `"success"`, `"warning"`, `"error"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum HapticNotification {
+    /// It succeeded.
     Success,
-    /// A task produced a warning.
+    /// It produced a warning.
     Warning,
-    /// A task failed.
+    /// It failed.
     Error,
 }
 

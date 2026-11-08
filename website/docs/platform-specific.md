@@ -159,8 +159,8 @@ The back button is handled by the top dialog first, then the back listeners (mos
 | Rust | TSX | Description |
 |---|---|---|
 | `haptic(Haptic::Selection)` | `Haptics.selection()` | The haptic of a selection that changed. |
-| `haptic(Haptic::Light)`, ... `Rigid` | `Haptics.impact(style)` | The haptic of an element that collided, by its weight (`"medium"` by default). |
-| `haptic(Haptic::Success)`, `Warning`, `Error` | `Haptics.notification(kind)` | The haptic of a task that ended (`"success"` by default). |
+| `haptic(Haptic::Impact(HapticImpact::…))` | `Haptics.impact(style)` | The haptic of an element that collided, by its weight (`"medium"` by default). |
+| `haptic(Haptic::Notification(HapticNotification::…))` | `Haptics.notification(kind)` | The haptic of a task that ended (`"success"` by default). |
 
 See [nsh/mobile](../modules/nsh-mobile.md#haptics).
 

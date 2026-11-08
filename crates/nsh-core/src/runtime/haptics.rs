@@ -4,35 +4,9 @@
 //! happens.
 
 use crate::{
-    Haptic,
-    element::{ModuleCx, PropEnum, module},
+    Haptic, HapticImpact, HapticNotification,
+    element::{ModuleCx, module},
 };
-
-/// The weight of an impact (`Haptics.impact`'s argument).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub(crate) enum HapticImpact {
-    /// A small, light element.
-    Light,
-    /// A moderate element.
-    Medium,
-    /// A large, heavy element.
-    Heavy,
-    /// A soft, flexible element.
-    Soft,
-    /// A hard, inflexible element.
-    Rigid,
-}
-
-/// How a task ended (`Haptics.notification`'s argument).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub(crate) enum HapticNotification {
-    /// It succeeded.
-    Success,
-    /// It produced a warning.
-    Warning,
-    /// It failed.
-    Error,
-}
 
 /// Haptics: a selection changing, an impact, a task's outcome.
 #[module]
@@ -49,22 +23,14 @@ impl Haptics {
     /// Plays the haptic of an element colliding: `style` is its weight
     /// (`"medium"` by default).
     pub(crate) fn impact(style: Option<HapticImpact>, cx: &mut ModuleCx) {
-        cx.haptic(match style.unwrap_or(HapticImpact::Medium) {
-            HapticImpact::Light => Haptic::Light,
-            HapticImpact::Medium => Haptic::Medium,
-            HapticImpact::Heavy => Haptic::Heavy,
-            HapticImpact::Soft => Haptic::Soft,
-            HapticImpact::Rigid => Haptic::Rigid,
-        });
+        cx.haptic(Haptic::Impact(style.unwrap_or(HapticImpact::Medium)));
     }
 
     /// Plays the haptic of a task that ended: `"success"` (the default),
     /// `"warning"` or `"error"`.
     pub(crate) fn notification(kind: Option<HapticNotification>, cx: &mut ModuleCx) {
-        cx.haptic(match kind.unwrap_or(HapticNotification::Success) {
-            HapticNotification::Success => Haptic::Success,
-            HapticNotification::Warning => Haptic::Warning,
-            HapticNotification::Error => Haptic::Error,
-        });
+        cx.haptic(Haptic::Notification(
+            kind.unwrap_or(HapticNotification::Success),
+        ));
     }
 }

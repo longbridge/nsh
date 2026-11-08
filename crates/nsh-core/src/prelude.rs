@@ -63,6 +63,8 @@ pub use crate::element::{
     FontWeight,
     GestureEvent,
     Haptic,
+    HapticImpact,
+    HapticNotification,
     HintReason,
     Hsla,
     // The network.

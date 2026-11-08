@@ -2094,6 +2094,12 @@ final class Mounter {
      * `Haptics` of `nsh/mobile`: the haptic feedback constant closest to
      * `haptic` (`nsh_core::Haptic`, in the order `encode.rs` writes), which
      * the view plays when the user's touch feedback setting allows it.
+     * API levels: {@link HapticFeedbackConstants#CONFIRM} /
+     * {@link HapticFeedbackConstants#REJECT} from 30 (else
+     * {@link HapticFeedbackConstants#VIRTUAL_KEY} /
+     * {@link HapticFeedbackConstants#LONG_PRESS});
+     * {@link HapticFeedbackConstants#SEGMENT_TICK} from 34 (else
+     * {@link HapticFeedbackConstants#CLOCK_TICK} for selection).
      */
     private static void haptic(View view, int haptic) {
         boolean api30 = Build.VERSION.SDK_INT >= 30;

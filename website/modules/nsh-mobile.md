@@ -314,8 +314,8 @@ The device plays a haptic under the user's finger: a selection that changed, an 
 | Member | Rust | Description |
 |---|---|---|
 | `selection()` | `haptic(Haptic::Selection)` | A selection changed: a picker's value, a segment, a slider's step. |
-| `impact(style)` | `haptic(Haptic::Medium)`, ... | An element collided; `style` is its weight, `"medium"` by default. |
-| `notification(kind)` | `haptic(Haptic::Success)`, ... | A task succeeded, produced a warning or failed; `"success"` by default. |
+| `impact(style)` | `haptic(Haptic::Impact(HapticImpact::Medium))`, ... | An element collided; `style` is its weight, `"medium"` by default. |
+| `notification(kind)` | `haptic(Haptic::Notification(HapticNotification::Success))`, ... | A task succeeded, produced a warning or failed; `"success"` by default. |
 
 A name it does not know throws a `TypeError`. Android has no constant for every haptic: it plays the closest one (`CONFIRM` and `REJECT` for success and error, from Android 11; a long press for a warning and, before Android 11, for an error).
 
@@ -326,7 +326,11 @@ fn save_button() -> impl IntoElement {
     view().child(text("Save")).on_press(|_| {
         spawn(async {
             let saved = save().await;
-            haptic(if saved.is_ok() { Haptic::Success } else { Haptic::Error });
+            haptic(if saved.is_ok() {
+                Haptic::Notification(HapticNotification::Success)
+            } else {
+                Haptic::Notification(HapticNotification::Error)
+            });
         });
     })
 }

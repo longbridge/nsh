@@ -290,8 +290,8 @@ const Haptics: {
 | 成员 | Rust | 说明 |
 |---|---|---|
 | `selection()` | `haptic(Haptic::Selection)` | 选择发生了变化：选择器的值、分段、滑块的一个刻度。 |
-| `impact(style)` | `haptic(Haptic::Medium)` 等 | 一个元素发生了碰撞；`style` 是它的分量，默认 `"medium"`。 |
-| `notification(kind)` | `haptic(Haptic::Success)` 等 | 一个任务成功、产生警告或失败；默认 `"success"`。 |
+| `impact(style)` | `haptic(Haptic::Impact(HapticImpact::Medium))` 等 | 一个元素发生了碰撞；`style` 是它的分量，默认 `"medium"`。 |
+| `notification(kind)` | `haptic(Haptic::Notification(HapticNotification::Success))` 等 | 一个任务成功、产生警告或失败；默认 `"success"`。 |
 
 传入不认识的名称会抛出 `TypeError`。Android 并不是每种触感都有对应的常量，它会播放最接近的一种：成功和失败从 Android 11 起用 `CONFIRM` 和 `REJECT`；警告，以及 Android 11 之前的失败，用长按的触感。
 
@@ -302,7 +302,11 @@ fn save_button() -> impl IntoElement {
     view().child(text("Save")).on_press(|_| {
         spawn(async {
             let saved = save().await;
-            haptic(if saved.is_ok() { Haptic::Success } else { Haptic::Error });
+            haptic(if saved.is_ok() {
+                Haptic::Notification(HapticNotification::Success)
+            } else {
+                Haptic::Notification(HapticNotification::Error)
+            });
         });
     })
 }
