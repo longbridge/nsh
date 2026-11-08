@@ -6,7 +6,7 @@ import { AlertDialog, Dialog, NavPage, Input } from "nsh/base";
 import { safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, isDark, mono, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
+import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
 import { TitleBar } from "../TitleBar";
 
 const edges = ["top", "bottom", "left", "right"] as const;
@@ -109,7 +109,7 @@ function Transparent() {
       headerStyle={{ tintColor: colors.text, color: colors.text }}
       header={<PageHeader title="Transparent" transparent tint={colors.text} />}
     >
-      <View style={{ flex: 1, backgroundColor: isDark() ? "#11170c" : "#eef3e2", overflow: "hidden", padding: 16, paddingBottom: 56, justifyContent: "flex-end", gap: 16 }}>
+      <View style={{ flex: 1, backgroundColor: colors.background, overflow: "hidden", padding: 16, paddingBottom: 56, justifyContent: "flex-end", gap: 16 }}>
         <View style={{ position: "absolute", top: -90, right: -70, width: 320, height: 320, borderRadius: 160, backgroundColor: tints.accent }} />
         <View style={{ position: "absolute", top: 150, left: -110, width: 260, height: 260, borderRadius: 130, backgroundColor: tints.info }} />
         <Appear>

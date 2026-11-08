@@ -1,7 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh";
-import { button, buttonText, desktop, focusRing, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Inspector, Panel, Stage, ui, wide } from "./palette";
 
 const TRACK = 250;
 // Read when they render, so they follow the theme.

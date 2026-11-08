@@ -1,6 +1,6 @@
-import { platform, signal, Text, View } from "nsh";
+import { platform, Scroll, signal, Text, View } from "nsh";
 import { Menu, MenuItem, Pagination, type PaginationItemState } from "nsh/base";
-import { Appear, backdrop, Button, Caption, Card, colors, DemoPage, density, desktop, Icon, menuItemLabel, menuItemLook, menuSheet, mono, PopIn, popupSurface, Segmented, terminal, Toggle, paginationArrows, paginationItemClass } from "../ui";
+import { Appear, backdrop, Button, Caption, Card, colors, DemoPage, density, desktop, Icon, menuItemLabel, menuItemLook, MenuPanel, menuSheet, mono, Segmented, terminal, Toggle, paginationArrows, paginationItemClass } from "../ui";
 
 // `nsh/base`'s `Pagination` owns which pages show (the first and the last,
 // the current one's neighbours, ellipses for the rest), the presses,
@@ -32,7 +32,9 @@ function hiddenPages(start: number, end: number, current: number) {
   return Array.from({ length: to - from }, (_, i) => from + i);
 }
 
-/** An ellipsis that opens a menu of the pages it hides (`gpui-component`'s dropdown). */
+/** An ellipsis that opens a menu of the pages it hides (`gpui-component`'s
+ * dropdown): up to 100 rows, so the menu scrolls (as the Menu demo's long
+ * menu), the arrow keys moving through its rows and into view. */
 function JumpMenu(props: { start: number; end: number; current: number; onPick: (page: number) => void }) {
   const pages = () => hiddenPages(props.start, props.end, props.current);
   const list = (
@@ -53,17 +55,18 @@ function JumpMenu(props: { start: number; end: number; current: number; onPick: 
       trigger={
         <View
           accessibilityLabel={`Pages ${grouped(props.start)} to ${grouped(props.end - 1)}`}
-          class="min-w-8 h-8 items-center justify-center rounded-md hover:bg-hover"
+          // The whole item, its padding too, opens the menu: 44 points on a touch screen.
+          class={`${pointer ? "min-w-8" : "min-w-11"} -mx-2 self-stretch items-center justify-center rounded-md px-2 hover:bg-hover`}
         >
           <Text style={{ color: colors.muted, fontSize: density.body }}>…</Text>
         </View>
       }
     >
-      {pointer ? (
-        <PopIn style={{ ...popupSurface(), minWidth: 80, maxHeight: 240 }}>{list}</PopIn>
-      ) : (
-        <View style={{ maxHeight: 360 }}>{list}</View>
-      )}
+      <MenuPanel flush minWidth={80}>
+        <Scroll style={{ maxHeight: pointer ? 240 : 360 }} contentStyle={pointer ? { padding: 4 } : undefined}>
+          {list}
+        </Scroll>
+      </MenuPanel>
     </Menu>
   );
 }

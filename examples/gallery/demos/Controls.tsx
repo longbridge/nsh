@@ -23,8 +23,8 @@ import { play as sound } from "../../nsh-gallery-ui/sound";
 const size = controlSize;
 const pointer = platform.desktop;
 
-/** A row of values or of a field (`plainRow`): no presses, a hairline above all but the first. */
-const row = (first: boolean) => plainRow({ first });
+/** A row of values or of a field (`plainRow`): no presses, a hairline above all but the first; a `wide` control (a combobox) goes under its label on a touch screen. */
+const row = (first: boolean, wide = false) => plainRow({ first, wide });
 
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
@@ -1531,7 +1531,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     return (
       <Card icon="controls" title="Combobox" subtitle="Several values from a list: the app owns them">
         <View>
-          <View style={row(true)}>
+          <View style={row(true, true)}>
             <RowLabel label="Topics" detail="Several at once, with search; the list stays open" />
             <Combobox
               items={TOPICS}
@@ -1544,7 +1544,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
               onOpenChange={opened((open) => topicsOpen.set(open))}
               accessibilityLabel="Topics"
-              {...comboboxLook(() => topicsOpen())}
+              {...comboboxLook(() => topicsOpen(), { filled: () => topics().length > 0 })}
               placeholder={topics().length ? topicsTitle() : "Add topics"}
               triggerButton={<ComboToggle id="topics-toggle" open={topicsOpen()} />}
               empty={<ListboxEmpty label="No topic matches" />}
@@ -1563,7 +1563,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               renderGroup={(group) => <ListboxHeader group={group} />}
             />
           </View>
-          <View style={row(false)}>
+          <View style={row(false, true)}>
             <RowLabel label="Reviewer" detail="One person: a choice replaces the last" />
             <Combobox
               items={REVIEWERS}
@@ -1609,7 +1609,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     };
     return (
       <Card title="Assignees" subtitle="People with their faces, up to four; each pops in as a chip" right={<Badge label={`${people().length} of ${MAX_PEOPLE}`} tone={full() ? "warn" : "neutral"} />}>
-        <View style={row(true)}>
+        <View style={row(true, true)}>
           <RowLabel label="Assignees" detail={full() ? "A task takes four people at most" : "Who works on the task"} />
           <Combobox
             items={items()}
@@ -1618,7 +1618,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             onChange={({ value }) => set(value)}
             onOpenChange={opened((o) => open.set(o))}
             accessibilityLabel="Assignees"
-            {...comboboxLook(() => open())}
+            {...comboboxLook(() => open(), { filled: () => people().length > 0 })}
             placeholder={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
             triggerButton={<ComboToggle id="assignees-toggle" open={open()} />}
             prefix={
@@ -1681,7 +1681,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     };
     return (
       <Card title="Labels" subtitle="Type a label that does not exist yet and Return creates it">
-        <View style={row(true)}>
+        <View style={row(true, true)}>
           <RowLabel label="Labels" detail="Search them, or create one" />
           <Combobox
             items={items()}
@@ -2215,7 +2215,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   }
 
   /** The always-visible row that flips a section: the app's trigger, which tells screen readers whether it is expanded. */
-  function Summary(props: { label: string; detail?: string; open: boolean; set: (open: boolean) => void; first?: boolean }) {
+  function Summary(props: { label: string; detail?: string; open: boolean; set: (open: boolean) => void; first?: boolean; accordion?: boolean }) {
     return (
       <View
         role="button"
@@ -2229,8 +2229,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       >
         <RowDivider show={!props.first} />
         <RowLabel label={props.label} detail={props.detail} />
-        {/* A lane as wide as the chevron's stroke, so the chevron ends where the values below it end. */}
-        <DisclosureChevron open={props.open} />
+        {/* A lane as wide as the chevron's stroke, so the chevron ends where the values below it end;
+            an accordion's turns over as the Accordion demo's does. */}
+        <DisclosureChevron open={props.open} accordion={props.accordion} />
       </View>
     );
   }
@@ -2309,7 +2310,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             </View>
           }
         >
-          <Summary first={props.first} label={props.q} detail="" open={open() === props.q} set={(next) => open.set(next ? props.q : null)} />
+          <Summary first={props.first} accordion label={props.q} detail="" open={open() === props.q} set={(next) => open.set(next ? props.q : null)} />
         </Collapsible>
       );
     }
