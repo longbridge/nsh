@@ -127,8 +127,9 @@ pub enum Error {
         /// The estimate, in pixels.
         pixels: u64,
     },
-    /// Drawing it would visit more nodes than a document may hold: shared
-    /// patterns, masks and clip paths count each time they are drawn.
+    /// Walking or drawing it would visit more nodes than a document may
+    /// hold: a `<use>` target counts at each use, and shared patterns, masks
+    /// and clip paths count each time they are drawn.
     TooManyNodes,
     /// The parser or the renderer panicked on it.
     Panicked,
@@ -159,7 +160,7 @@ impl fmt::Display for Error {
             ),
             Error::TooManyNodes => write!(
                 f,
-                "drawing the SVG would visit more than {} nodes",
+                "walking or drawing the SVG would visit more than {} nodes",
                 layers::MAX_VISITS
             ),
             Error::Panicked => write!(f, "the SVG renderer panicked on this document"),
@@ -348,11 +349,9 @@ fn options(with_text: bool) -> usvg::Options<'static> {
 /// the document actually lays out text.
 fn parse(bytes: &[u8]) -> Result<usvg::Tree, Error> {
     let text = text_of(bytes)?;
-    let has_text = {
-        let doc = xml(&text)?;
-        check_text(&doc)?
-    };
-    parse_text(&text, &options(has_text))
+    let doc = xml(&text)?;
+    let has_text = check_text(&doc)?;
+    parse_tree(doc, &text, &options(has_text))
 }
 
 /// Parses an SVG for a canvas drawing, which drops text, without loading the
@@ -384,6 +383,15 @@ fn parse_with(bytes: &[u8], options: &usvg::Options<'_>) -> Result<usvg::Tree, E
 fn parse_text(text: &str, options: &usvg::Options<'_>) -> Result<usvg::Tree, Error> {
     let doc = xml(text)?;
     check_text(&doc)?;
+    parse_tree(doc, text, options)
+}
+
+/// Converts a checked document, completing a one-sided root first.
+fn parse_tree(
+    doc: roxmltree::Document<'_>,
+    text: &str,
+    options: &usvg::Options<'_>,
+) -> Result<usvg::Tree, Error> {
     let Some(side) = OneSide::of(&doc, text) else {
         return convert(&doc, options);
     };
@@ -410,8 +418,11 @@ fn parse_text(text: &str, options: &usvg::Options<'_>) -> Result<usvg::Tree, Err
 ///
 /// `<use>` copies its target subtree and `<tref>` takes the text of another
 /// element, so counting only the source `<text>` nodes undercounts what usvg
-/// lays out. This walk expands both references: each `<use>` instance counts
-/// its target again, and a stack of ids stops cycles.
+/// lays out. This walk expands both references, memoising a target's
+/// expansion by (id, inside text) so a fan-out is counted once per target
+/// rather than once per path, and stops cycles with a stack of ids. Every
+/// visited node also counts against [`layers::MAX_VISITS`], the bound usvg
+/// itself lays a document out under.
 fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
     let mut ids: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
     for node in doc.descendants().filter(roxmltree::Node::is_element) {
@@ -421,105 +432,177 @@ fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
     }
     let mut scan = TextScan {
         ids,
-        chars: 0,
-        has_text: false,
+        memo: HashMap::new(),
+        text_memo: HashMap::new(),
+        visits: 0,
     };
+    let mut total = Expansion::default();
     let mut visiting = Vec::new();
     for child in doc.root().children() {
-        scan.node(child, false, false, &mut visiting)?;
+        total.add(scan.expand(child, false, false, &mut visiting)?)?;
     }
-    Ok(scan.has_text)
+    Ok(total.has_text)
 }
 
-/// The text a document lays out, as usvg expands its references.
-struct TextScan<'a, 'input> {
-    ids: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+/// What a rendered subtree expands to: its text, and the elements usvg
+/// creates for it (a `<use>` copies its target).
+#[derive(Clone, Copy, Default)]
+struct Expansion {
     chars: usize,
+    nodes: u64,
     has_text: bool,
 }
 
-impl<'a, 'input> TextScan<'a, 'input> {
-    fn add(&mut self, chars: usize) -> Result<(), Error> {
-        self.chars = self.chars.saturating_add(chars);
+impl Expansion {
+    fn add(&mut self, other: Expansion) -> Result<(), Error> {
+        self.chars = self.chars.saturating_add(other.chars);
         if self.chars > MAX_TEXT_CHARS {
             return Err(Error::TooMuchText);
         }
+        self.nodes = self.nodes.saturating_add(other.nodes);
+        if self.nodes > u64::from(layers::MAX_VISITS) {
+            return Err(Error::TooManyNodes);
+        }
+        self.has_text |= other.has_text;
         Ok(())
     }
+}
 
-    fn node(
+struct TextScan<'a, 'input> {
+    ids: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+    /// A referenced subtree's expansion by (id, inside text): a `<use>` chain
+    /// that fans out is counted once per target, not once per path.
+    memo: HashMap<(&'a str, bool), Expansion>,
+    /// The text content of a `<tref>` target, by id.
+    text_memo: HashMap<&'a str, usize>,
+    visits: u32,
+}
+
+impl<'a, 'input> TextScan<'a, 'input> {
+    fn expand_ref(
+        &mut self,
+        id: &'a str,
+        in_text: bool,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        if visiting.contains(&id) {
+            return Ok(Expansion::default());
+        }
+        if let Some(expansion) = self.memo.get(&(id, in_text)) {
+            return Ok(*expansion);
+        }
+        let Some(target) = self.ids.get(id).copied() else {
+            return Ok(Expansion::default());
+        };
+        visiting.push(id);
+        let expansion = self.expand(target, in_text, true, visiting);
+        visiting.pop();
+        let expansion = expansion?;
+        self.memo.insert((id, in_text), expansion);
+        Ok(expansion)
+    }
+
+    fn expand(
         &mut self,
         node: roxmltree::Node<'a, 'input>,
         in_text: bool,
         expanded: bool,
         visiting: &mut Vec<&'a str>,
-    ) -> Result<(), Error> {
+    ) -> Result<Expansion, Error> {
+        self.visits = self.visits.saturating_add(1);
+        if self.visits > layers::MAX_VISITS {
+            return Err(Error::TooManyNodes);
+        }
         if node.is_text() {
-            if in_text {
-                self.add(node.text().unwrap_or_default().chars().count())?;
+            if !in_text {
+                return Ok(Expansion::default());
             }
-            return Ok(());
+            let mut out = Expansion::default();
+            out.add(Expansion {
+                chars: node.text().unwrap_or_default().chars().count(),
+                nodes: 0,
+                has_text: true,
+            })?;
+            return Ok(out);
         }
         if !node.is_element() {
-            return Ok(());
+            return Ok(Expansion::default());
         }
         match node.tag_name().name() {
             // Definitions are not drawn where they are written; `<use>`
             // reaches them from its own position.
             "defs" | "clipPath" | "mask" | "pattern" | "marker" | "linearGradient"
             | "radialGradient" | "filter" | "style" | "title" | "desc" | "metadata" | "script" => {
-                Ok(())
+                Ok(Expansion::default())
             }
-            "symbol" if !expanded => Ok(()),
+            "symbol" if !expanded => Ok(Expansion::default()),
             "text" => {
-                self.has_text = true;
-                self.children(node, true, visiting)
+                let mut out = Expansion {
+                    nodes: 1,
+                    has_text: true,
+                    ..Expansion::default()
+                };
+                for child in node.children() {
+                    out.add(self.expand(child, true, false, visiting)?)?;
+                }
+                Ok(out)
             }
             "tref" => {
-                self.has_text = true;
-                if let Some(id) = href(node)
-                    && !visiting.contains(&id)
-                    && let Some(target) = self.ids.get(id).copied()
-                {
-                    visiting.push(id);
-                    let chars = target
-                        .descendants()
-                        .filter(|node| node.is_text())
-                        .filter_map(|node| node.text())
-                        .map(|text| text.chars().count())
-                        .sum();
-                    let result = self.add(chars);
-                    visiting.pop();
-                    result?;
+                let Some(id) = href(node) else {
+                    return Ok(Expansion::default());
+                };
+                if visiting.contains(&id) {
+                    return Ok(Expansion::default());
                 }
-                Ok(())
+                let chars = self.text_chars(id)?;
+                Ok(Expansion {
+                    chars,
+                    nodes: 1,
+                    has_text: chars > 0,
+                })
             }
             "use" => {
-                if let Some(id) = href(node)
-                    && !visiting.contains(&id)
-                    && let Some(target) = self.ids.get(id).copied()
-                {
-                    visiting.push(id);
-                    let result = self.node(target, in_text, true, visiting);
-                    visiting.pop();
-                    result?;
-                }
-                Ok(())
+                let Some(id) = href(node) else {
+                    return Ok(Expansion::default());
+                };
+                let mut out = self.expand_ref(id, in_text, visiting)?;
+                out.add(Expansion {
+                    nodes: 1,
+                    ..Expansion::default()
+                })?;
+                Ok(out)
             }
-            _ => self.children(node, in_text, visiting),
+            _ => {
+                let mut out = Expansion {
+                    nodes: 1,
+                    ..Expansion::default()
+                };
+                for child in node.children() {
+                    out.add(self.expand(child, in_text, false, visiting)?)?;
+                }
+                Ok(out)
+            }
         }
     }
 
-    fn children(
-        &mut self,
-        node: roxmltree::Node<'a, 'input>,
-        in_text: bool,
-        visiting: &mut Vec<&'a str>,
-    ) -> Result<(), Error> {
-        for child in node.children() {
-            self.node(child, in_text, false, visiting)?;
+    /// The characters a `<tref>` to `id` lays out: every text node under the
+    /// referenced element.
+    fn text_chars(&mut self, id: &'a str) -> Result<usize, Error> {
+        if let Some(chars) = self.text_memo.get(id) {
+            return Ok(*chars);
         }
-        Ok(())
+        let Some(target) = self.ids.get(id).copied() else {
+            return Ok(0);
+        };
+        let mut chars = 0usize;
+        for node in target.descendants().filter(roxmltree::Node::is_text) {
+            chars = chars.saturating_add(node.text().unwrap_or_default().chars().count());
+            if chars > MAX_TEXT_CHARS {
+                return Err(Error::TooMuchText);
+            }
+        }
+        self.text_memo.insert(id, chars);
+        Ok(chars)
     }
 }
 

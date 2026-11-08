@@ -637,6 +637,25 @@ fn svg_safety_text_references_under_the_bound_still_parse() {
 }
 
 #[test]
+fn svg_safety_text_reference_fan_out_is_bounded() {
+    // Ten uses of each of g1..g8, with no text: counting every path is 10^8
+    // visits. The memo counts each target once, and the expanded node count
+    // refuses the document before usvg expands it.
+    let groups: String = (1..=8)
+        .map(|i| {
+            let uses = format!(r##"<use href="#g{}"/>"##, i - 1).repeat(10);
+            format!(r#"<g id="g{i}">{uses}</g>"#)
+        })
+        .collect();
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><rect id="g0" width="1" height="1"/>{groups}</defs><use href="#g8"/></svg>"##
+    );
+    let tree = xml(&doc).unwrap();
+    assert_eq!(check_text(&tree), Err(Error::TooManyNodes));
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooManyNodes));
+}
+
+#[test]
 fn svg_text_draws_with_the_font_database() {
     // The machine's fonts are not part of this test: the document's family
     // comes from the database it is given.
