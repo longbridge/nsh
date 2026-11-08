@@ -32446,3 +32446,104 @@ fn overlays_with_a_cover_follow_its_size_changing() {
         Some(rect(8.0, 608.0, 1904.0, 464.0))
     );
 }
+
+/// A backdrop reader (2, holding 6) between a view under it (5) and one
+/// over it (7, holding 8), all children of the root.
+fn backdrop_between() -> Core<FakeEngine> {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_backdrop(uv); }";
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(100.0)),
+                ("height", StyleValue::Number(50.0)),
+            ],
+        )
+    };
+    let mut ops = Vec::new();
+    for (id, tag) in [
+        (5, Tag::View),
+        (2, Tag::ShaderEffect),
+        (6, Tag::View),
+        (7, Tag::View),
+        (8, Tag::View),
+    ] {
+        ops.push(Op::Create { id, tag });
+        ops.push(size(id));
+    }
+    ops.push(Op::SetProp {
+        id: 2,
+        prop: Prop::ShaderSource(Some(source.into())),
+    });
+    for (parent, child) in [(ROOT_ID, 5), (2, 6), (ROOT_ID, 2), (7, 8), (ROOT_ID, 7)] {
+        ops.push(Op::Insert {
+            parent,
+            child,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    c
+}
+
+fn pictures_backdrop_again(c: &mut Core<FakeEngine>, id: NodeId, color: &'static str) -> bool {
+    apply(
+        c,
+        vec![style_op(id, &[("backgroundColor", StyleValue::Str(color))])],
+    );
+    let batch = c.commit().unwrap();
+    batch
+        .items
+        .iter()
+        .any(|i| matches!(i, MountItem::ShaderInput { id: 2 }))
+}
+
+#[test]
+fn a_backdrop_is_pictured_again_only_when_what_is_under_it_changes() {
+    let mut c = backdrop_between();
+    // Over it, or in what draws over it: not in its backdrop.
+    assert!(!pictures_backdrop_again(&mut c, 8, "red"));
+    assert!(!pictures_backdrop_again(&mut c, 7, "red"));
+    // Under it, and its ancestor's own box.
+    assert!(pictures_backdrop_again(&mut c, 5, "red"));
+    assert!(pictures_backdrop_again(&mut c, ROOT_ID, "red"));
+}
+
+#[test]
+fn a_backdrop_follows_the_order_views_draw_in() {
+    let mut c = backdrop_between();
+    // Later in order but drawn under it by its `zIndex`.
+    apply(
+        &mut c,
+        vec![style_op(7, &[("zIndex", StyleValue::Number(-1.0))])],
+    );
+    c.commit().unwrap();
+    assert!(pictures_backdrop_again(&mut c, 8, "blue"));
+    // A view leaving what draws over it does not change what is under it.
+    apply(
+        &mut c,
+        vec![style_op(7, &[("zIndex", StyleValue::Number(0.0))])],
+    );
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 7,
+                child: 8,
+            },
+            Op::Release { id: 8 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
+    );
+}
