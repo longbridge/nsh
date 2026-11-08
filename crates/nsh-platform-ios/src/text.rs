@@ -1622,8 +1622,10 @@ mod hit_regressions {
     fn short_box_keeps_first_scaled_line_at_its_normal_position() {
         let engine = CoreTextEngine::default();
         for scale in [1.0, 23.0 / 17.0, 3.0] {
-            let mut text = AttributedText::default();
-            text.max_lines = 1;
+            let mut text = AttributedText {
+                max_lines: 1,
+                ..Default::default()
+            };
             text.push(
                 "Hello",
                 ResolvedTextStyle {
@@ -1654,8 +1656,10 @@ mod hit_regressions {
             EllipsizeMode::Middle,
             EllipsizeMode::Clip,
         ] {
-            let mut text = AttributedText::default();
-            text.ellipsize = mode;
+            let mut text = AttributedText {
+                ellipsize: mode,
+                ..Default::default()
+            };
             text.push(
                 "Hello world, another line of text",
                 ResolvedTextStyle {
