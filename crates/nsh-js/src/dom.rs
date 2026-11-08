@@ -77,6 +77,13 @@ pub(crate) struct Dom {
     /// The tags (bits by `Tag as u32`; 63: the root) text was put in
     /// without being shown, each reported once.
     unshown_text: Cell<u64>,
+    /// `<Each>` leaves new rows past its first as placeholders, which the
+    /// core asks it to render as they come near (`Host::set_lazy_rows`).
+    pub(crate) lazy_rows: Cell<bool>,
+    /// The placeholders of rows not rendered yet and the each objects
+    /// whose they are (not owned: a row taken out of its `each`, or the
+    /// object's finalizer, takes its entry out).
+    pending_rows: RefCell<FxHashMap<NodeId, JsValue>>,
 }
 
 #[derive(Clone, Copy)]
@@ -250,6 +257,8 @@ impl Dom {
             env_rtl: Cell::new(false),
             unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
+            lazy_rows: Cell::new(false),
+            pending_rows: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -2588,24 +2597,42 @@ impl Key {
     }
 }
 
+/// How many rows an `<Each>` renders as it is made wherever they are: a
+/// short one is never lazy, and a long one's first rows need no request.
+const EAGER_ROWS: usize = 32;
+
 /// A row of `each`.
 struct Row {
     key: Key,
     /// The key value (owned: an object key stays alive while it names the
     /// row).
     key_value: JsValue,
-    /// Signals of the row's item and index (owned).
+    /// Signals of the row's item and index (owned); a pending row's item
+    /// and index themselves.
     item: JsValue,
     index: JsValue,
     /// The row's owner.
     owner: u32,
-    /// What the row rendered (owned).
+    /// What the row rendered, or its placeholder (owned).
     output: JsValue,
+    /// Not rendered yet: the id of its placeholder ([`Op::Placeholder`]),
+    /// in [`Dom::pending_rows`]; 0 once rendered.
+    placeholder: NodeId,
 }
 
-#[derive(Default)]
 struct EachData {
     rows: Vec<Row>,
+    /// The render function (owned), for the rows rendered later.
+    render: JsValue,
+    /// Read by what shows the rows, bumped when pending rows were rendered
+    /// (a signal, owned).
+    version: JsValue,
+    /// The rows' memo and its error boundary's handle: what rows rendered
+    /// later are owned under.
+    owner: u32,
+    boundary: (u32, u32),
+    /// Runs of the rows' memo: what it returns.
+    runs: u32,
 }
 
 unsafe extern "C" fn each_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
@@ -2615,10 +2642,24 @@ unsafe extern "C" fn each_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
         return;
     }
     let data = unsafe { Box::from_raw(p) };
+    if let Some(state) = crate::state::of_runtime(rt) {
+        // SAFETY: a projection of the live state's renderer.
+        let d = unsafe { &(*state).dom };
+        let mut pending = d.pending_rows.borrow_mut();
+        for row in data.rows.iter().filter(|r| r.placeholder != 0) {
+            if pending.get(&row.placeholder).is_some_and(|&e| same(e, obj)) {
+                pending.remove(&row.placeholder);
+            }
+        }
+    }
     for row in data.rows {
         for v in [row.key_value, row.item, row.index, row.output] {
             unsafe { qjs::JS_FreeValueRT(rt, v) };
         }
+    }
+    unsafe {
+        qjs::JS_FreeValueRT(rt, data.render);
+        qjs::JS_FreeValueRT(rt, data.version);
     }
 }
 
@@ -2628,30 +2669,43 @@ unsafe extern "C" fn each_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs:
     if p.is_null() {
         return;
     }
-    for row in unsafe { &(*p).rows } {
+    let data = unsafe { &*p };
+    for row in &data.rows {
         for v in [row.key_value, row.item, row.index, row.output] {
             unsafe { qjs::JS_MarkValue(rt, v, mark) };
         }
+    }
+    unsafe {
+        qjs::JS_MarkValue(rt, data.render, mark);
+        qjs::JS_MarkValue(rt, data.version, mark);
     }
 }
 
 /// `each(list, render, key)`: `render(item, index)` for each item of
 /// `list()` (both accessors), one row per key (`key(item, index)`, the
 /// index for `key` `"index"`, or the item itself) kept while the key
-/// stays.
+/// stays. With lazy rows ([`Dom::lazy_rows`]) a new row past the first
+/// [`EAGER_ROWS`] is a placeholder until the core asks for it
+/// ([`render_rows`]).
 pub(crate) unsafe extern "C" fn each(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
+    let version = reactive::new_signal(cx, qjs::JS_NewFloat64(0.0));
     // SAFETY: a new object of the each class owning its boxed data.
     let rows = unsafe {
         let obj = qjs::JS_NewObjectClass(cx, dom(cx).classes.each as _);
-        qjs::JS_SetOpaque(
-            obj,
-            Box::into_raw(Box::<EachData>::default()) as *mut c_void,
-        );
+        let data = EachData {
+            rows: Vec::new(),
+            render: qjs::JS_DupValue(cx, arg(argc, argv, 1)),
+            version,
+            owner: 0,
+            boundary: (0, 0),
+            runs: 0,
+        };
+        qjs::JS_SetOpaque(obj, Box::into_raw(Box::new(data)) as *mut c_void);
         obj
     };
     // The rows go with the owner `each` is called under.
@@ -2672,7 +2726,16 @@ pub(crate) unsafe extern "C" fn each(
         rows,
     ];
     let func = unsafe { qjs::JS_NewCFunctionData(cx, Some(each_run), 0, 0, 4, data.as_mut_ptr()) };
-    unsafe { qjs::JS_FreeValue(cx, rows) };
+    let rows_memo = reactive::memo(cx, func, false);
+    // What shows the rows: their outputs, read again when pending rows
+    // are rendered, without keying the items again.
+    let mut data = [rows_memo, rows];
+    let func =
+        unsafe { qjs::JS_NewCFunctionData(cx, Some(each_outputs), 0, 0, 2, data.as_mut_ptr()) };
+    unsafe {
+        qjs::JS_FreeValue(cx, rows_memo);
+        qjs::JS_FreeValue(cx, rows);
+    }
     let memo = reactive::memo(cx, func, false);
     reactive::finish_value(cx, memo)
 }
@@ -2684,7 +2747,11 @@ fn each_data(cx: *mut JsContext, rows: JsValue) -> *mut EachData {
 
 /// Disposes a row (taken).
 fn dispose_row(cx: *mut JsContext, row: Row) {
-    reactive::dispose_owner(cx, row.owner);
+    if row.placeholder == 0 {
+        reactive::dispose_owner(cx, row.owner);
+    } else {
+        dom(cx).pending_rows.borrow_mut().remove(&row.placeholder);
+    }
     for v in [row.key_value, row.item, row.index, row.output] {
         // SAFETY: values the row owned.
         unsafe { qjs::JS_FreeValue(cx, v) };
@@ -2710,6 +2777,23 @@ unsafe extern "C" fn each_dispose(
     UNDEFINED
 }
 
+/// The placeholder of a row of `rows` (borrowed) not rendered yet, and its
+/// id (owned).
+fn placeholder(cx: *mut JsContext, rows: JsValue) -> Result<(JsValue, NodeId), JsValue> {
+    let node = create_element(cx, Tag::View)?;
+    let id = node_id(cx, node).unwrap_or(DETACHED);
+    if let Err(e) = push_op(cx, Op::Placeholder { id }) {
+        // SAFETY: ours.
+        unsafe { qjs::JS_FreeValue(cx, node) };
+        return Err(e);
+    }
+    dom(cx).pending_rows.borrow_mut().insert(id, rows);
+    Ok((node, id))
+}
+
+/// The rows' memo: keys the items, keeps the rows of the keys that stay,
+/// renders the new ones (or makes their placeholders); returns its count of
+/// runs.
 unsafe extern "C" fn each_run(
     cx: *mut JsContext,
     _this: JsValue,
@@ -2731,6 +2815,15 @@ unsafe extern "C" fn each_run(
     let by_index = !keyed
         && unsafe { qjs::JS_IsString(key_fn) }
         && to_string(cx, key_fn).as_deref() == Some("index");
+    let lazy = dom(cx).lazy_rows.get();
+    {
+        let p = each_data(cx, rows);
+        // SAFETY: live data, reached briefly.
+        unsafe {
+            (*p).owner = reactive::current_owner(cx);
+            (*p).boundary = reactive::owner_handle(cx);
+        }
+    }
     let result = reactive::untracked_with(cx, || {
         let p = each_data(cx, rows);
         let old = std::mem::take(unsafe { &mut (*p).rows });
@@ -2764,6 +2857,16 @@ unsafe extern "C" fn each_run(
                 .and_then(|v| v.pop())
                 .and_then(|at| old[at].take());
             match reused {
+                // Not rendered yet: its item and index as they are now.
+                Some(mut row) if row.placeholder != 0 => {
+                    unsafe {
+                        qjs::JS_FreeValue(cx, key_value);
+                        qjs::JS_FreeValue(cx, row.item);
+                    }
+                    row.item = unsafe { qjs::JS_DupValue(cx, item) };
+                    row.index = qjs::JS_NewFloat64(i as f64);
+                    new_rows.push(row);
+                }
                 Some(row) => {
                     unsafe { qjs::JS_FreeValue(cx, key_value) };
                     if !unsafe { qjs::JS_IsStrictEqual(cx, reactive::peek(cx, row.item), item) } {
@@ -2775,6 +2878,22 @@ unsafe extern "C" fn each_run(
                     }
                     new_rows.push(row);
                 }
+                None if lazy && i >= EAGER_ROWS => match placeholder(cx, rows) {
+                    Ok((output, placeholder)) => new_rows.push(Row {
+                        key,
+                        key_value,
+                        item: unsafe { qjs::JS_DupValue(cx, item) },
+                        index: qjs::JS_NewFloat64(i as f64),
+                        owner: 0,
+                        output,
+                        placeholder,
+                    }),
+                    Err(e) => {
+                        unsafe { qjs::JS_FreeValue(cx, key_value) };
+                        failed = Some(e);
+                        break;
+                    }
+                },
                 None => {
                     let item_signal = reactive::new_signal(cx, item);
                     let index_signal = reactive::new_signal(cx, qjs::JS_NewFloat64(i as f64));
@@ -2789,6 +2908,7 @@ unsafe extern "C" fn each_run(
                         index: index_signal,
                         owner,
                         output: UNDEFINED,
+                        placeholder: 0,
                     };
                     if unsafe { qjs::JS_IsException(output) } {
                         dispose_row(cx, row);
@@ -2802,23 +2922,200 @@ unsafe extern "C" fn each_run(
         for row in old.into_iter().flatten() {
             dispose_row(cx, row);
         }
-        let outputs: Vec<JsValue> = new_rows
-            .iter()
-            // SAFETY: dups for the returned array.
-            .map(|r| unsafe { qjs::JS_DupValue(cx, r.output) })
-            .collect();
         let p = each_data(cx, rows);
-        unsafe { (*p).rows = new_rows };
-        match failed {
-            Some(e) => {
-                free_values(cx, outputs);
-                e
-            }
-            None => new_array(cx, outputs),
-        }
+        // SAFETY: live data, reached briefly.
+        let runs = unsafe {
+            (*p).rows = new_rows;
+            (*p).runs = (*p).runs.wrapping_add(1);
+            (*p).runs
+        };
+        failed.unwrap_or(qjs::JS_NewFloat64(runs as f64))
     });
     free_values(cx, items_v);
     result
+}
+
+/// What shows the rows of `each`: their outputs (placeholders for rows not
+/// rendered yet), after the rows' memo and whenever pending rows were
+/// rendered.
+unsafe extern "C" fn each_outputs(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (`each`); calls of live functions, the values
+    // got freed.
+    unsafe {
+        let (rows_memo, rows) = (*data, *data.add(1));
+        let r = qjs::JS_Call(cx, rows_memo, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(r) {
+            return r;
+        }
+        qjs::JS_FreeValue(cx, r);
+        let p = each_data(cx, rows);
+        if p.is_null() {
+            return new_array(cx, Vec::new());
+        }
+        let version = qjs::JS_DupValue(cx, (*p).version);
+        let r = qjs::JS_Call(cx, version, UNDEFINED, 0, ptr::null_mut());
+        qjs::JS_FreeValue(cx, version);
+        if qjs::JS_IsException(r) {
+            return r;
+        }
+        qjs::JS_FreeValue(cx, r);
+        let p = each_data(cx, rows);
+        let outputs: Vec<JsValue> = (*p)
+            .rows
+            .iter()
+            .map(|r| qjs::JS_DupValue(cx, r.output))
+            .collect();
+        new_array(cx, outputs)
+    }
+}
+
+/// Renders the rows whose placeholders the core would make now
+/// (`JsEvent::Rows`), in one batch: each `<Each>` shows its new rows in
+/// their placeholders' places once, at the end. A row's failure goes to
+/// the error boundary around its `<Each>`; `Err` (pending) when none
+/// catches it.
+pub(crate) fn render_rows(cx: *mut JsContext, ids: &[NodeId]) -> Result<(), JsValue> {
+    // The each objects and the placeholders of theirs asked for.
+    let mut groups: Vec<(JsValue, Vec<NodeId>)> = Vec::new();
+    {
+        let mut pending = dom(cx).pending_rows.borrow_mut();
+        for &id in ids {
+            let Some(each) = pending.remove(&id) else {
+                continue;
+            };
+            match groups.iter_mut().find(|(e, _)| same(*e, each)) {
+                Some((_, ids)) => ids.push(id),
+                None => groups.push((each, vec![id])),
+            }
+        }
+    }
+    for (each, _) in &groups {
+        // SAFETY: kept alive while its rows render.
+        unsafe { qjs::JS_DupValue(cx, *each) };
+    }
+    // Failures with the boundaries that may catch them, taken at once so
+    // the other rows render.
+    let mut failures = Vec::new();
+    reactive::batch_with(cx, || {
+        for (each, ids) in &groups {
+            for &id in ids {
+                if let Err(boundary) = render_pending(cx, *each, id) {
+                    // SAFETY: the exception pending, taken.
+                    failures.push((unsafe { qjs::JS_GetException(cx) }, boundary));
+                }
+            }
+            let p = each_data(cx, *each);
+            if !p.is_null() {
+                // SAFETY: live data; the signal is the each object's.
+                let version = unsafe { (*p).version };
+                let n = reactive::peek_number(cx, version).unwrap_or(0.0);
+                reactive::set_signal(cx, version, qjs::JS_NewFloat64(n + 1.0));
+            }
+        }
+    });
+    free_values(cx, groups.into_iter().map(|(each, _)| each).collect());
+    let r = reactive::finish_value(cx, UNDEFINED);
+    if unsafe { qjs::JS_IsException(r) } {
+        free_values(cx, failures.into_iter().map(|(e, _)| e).collect());
+        return Err(r);
+    }
+    let mut uncaught = None;
+    for (e, boundary) in failures {
+        if uncaught.is_some() {
+            // SAFETY: ours; the first one uncaught is pending.
+            unsafe { qjs::JS_FreeValue(cx, e) };
+            continue;
+        }
+        // SAFETY: the throw takes the exception.
+        let thrown = unsafe { qjs::JS_Throw(cx, e) };
+        if !reactive::catch_pending(cx, boundary) {
+            uncaught = Some(thrown);
+        }
+    }
+    uncaught.map_or(Ok(()), Err)
+}
+
+/// Renders the row of `each` (borrowed) whose placeholder is `id`, if it
+/// is still there; `Err`: its render threw (the exception pending), with
+/// the handle of the boundary that may catch it.
+fn render_pending(cx: *mut JsContext, each: JsValue, id: NodeId) -> Result<(), (u32, u32)> {
+    let p = each_data(cx, each);
+    if p.is_null() {
+        return Ok(());
+    }
+    // SAFETY: live data, reached briefly; the values got are dups.
+    let (item, index, render, owner, boundary) = unsafe {
+        let d = &*p;
+        let Some(row) = d.rows.iter().find(|r| r.placeholder == id) else {
+            return Ok(());
+        };
+        (
+            qjs::JS_DupValue(cx, row.item),
+            qjs::JS_DupValue(cx, row.index),
+            qjs::JS_DupValue(cx, d.render),
+            d.owner,
+            d.boundary,
+        )
+    };
+    let item_signal = reactive::new_signal(cx, item);
+    let index_signal = reactive::new_signal(cx, index);
+    // SAFETY: dups the signals hold their own of.
+    unsafe {
+        qjs::JS_FreeValue(cx, item);
+        qjs::JS_FreeValue(cx, index);
+    }
+    let (root, output) = reactive::untracked_with(cx, || {
+        reactive::with_root_under(cx, owner, || {
+            let mut args = [item_signal, index_signal];
+            // SAFETY: a call of the live render function.
+            unsafe { qjs::JS_Call(cx, render, UNDEFINED, 2, args.as_mut_ptr()) }
+        })
+    });
+    unsafe { qjs::JS_FreeValue(cx, render) };
+    let failed = unsafe { qjs::JS_IsException(output) };
+    // The row as it is now: what the render ran may have changed the rows.
+    let p = each_data(cx, each);
+    // SAFETY: live data, reached briefly; what it held is freed after.
+    let replaced = unsafe {
+        (*p).rows
+            .iter_mut()
+            .find(|r| r.placeholder == id)
+            .filter(|_| !failed)
+            .map(|row| {
+                row.placeholder = 0;
+                row.owner = root;
+                [
+                    std::mem::replace(&mut row.item, item_signal),
+                    std::mem::replace(&mut row.index, index_signal),
+                    std::mem::replace(&mut row.output, output),
+                ]
+            })
+    };
+    match replaced {
+        Some(old) => {
+            free_values(cx, old.to_vec());
+            Ok(())
+        }
+        None => {
+            reactive::dispose_owner(cx, root);
+            // SAFETY: ours (the output an exception value when it failed).
+            unsafe {
+                qjs::JS_FreeValue(cx, item_signal);
+                qjs::JS_FreeValue(cx, index_signal);
+                if !failed {
+                    qjs::JS_FreeValue(cx, output);
+                }
+            }
+            if failed { Err(boundary) } else { Ok(()) }
+        }
+    }
 }
 
 // --- Context ----------------------------------------------------------------------
@@ -3613,7 +3910,7 @@ unsafe extern "C" fn font(
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{EventKind, EventPayload, Op};
+    use nsh_core::{EventKind, EventPayload, NodeId, Op};
 
     use crate::Host;
 
@@ -4066,6 +4363,98 @@ mod tests {
             "{grown:?}"
         );
         assert!(!grown.iter().any(|l| l.starts_with("remove")), "{grown:?}");
+    }
+
+    /// Lazy rows: past the first 32, new rows are placeholders until the
+    /// core asks for them; asked, they render in their places, and the
+    /// array's changes move and drop rows rendered and waiting alike.
+    #[test]
+    fn lazy_rows_render_when_asked() {
+        let host = Host::new().unwrap();
+        host.set_lazy_rows(true);
+        host.eval_source(
+            r#"
+            import { mount, signal } from "nsh";
+            import { element, insert, each } from "nsh:rt";
+            const items = signal(Array.from({ length: 40 }, (_, i) => `r${i}`));
+            globalThis.update = (f) => items.set(f(items()));
+            mount(() => {
+                const v = element("view");
+                insert(v, each(() => items(), (item) => {
+                    const t = element("text");
+                    insert(t, () => item());
+                    return t;
+                }));
+                return v;
+            });
+            "#,
+        )
+        .unwrap();
+        let made = ops(&host, false);
+        let placeholders: Vec<NodeId> = made
+            .iter()
+            .filter_map(|l| {
+                l.strip_prefix("Placeholder { id: ")
+                    .and_then(|r| r.strip_suffix(" }"))
+                    .map(|id| id.parse().unwrap())
+            })
+            .collect();
+        assert_eq!(placeholders.len(), 8, "{made:?}");
+        assert!(made.iter().any(|l| l.ends_with("\"r31\"")));
+        assert!(!made.iter().any(|l| l.ends_with("\"r32\"")));
+        // Two asked for: rendered in their placeholders' places.
+        host.deliver(nsh_core::element::JsEvent::Rows(vec![
+            placeholders[0],
+            placeholders[1],
+        ]));
+        let rendered = ops(&host, false);
+        assert!(
+            rendered.iter().any(|l| l.ends_with("\"r32\"")),
+            "{rendered:?}"
+        );
+        assert!(rendered.iter().any(|l| l.ends_with("\"r33\"")));
+        assert!(!rendered.iter().any(|l| l.ends_with("\"r34\"")));
+        for p in &placeholders[..2] {
+            assert!(
+                rendered
+                    .iter()
+                    .any(|l| l.starts_with(&format!("remove {p} from"))),
+                "{rendered:?}"
+            );
+        }
+        // r39 (waiting) to the front, r32 (rendered) out: r39 stays a
+        // placeholder, moved; nothing is rendered again.
+        host.eval_script(
+            "update.js",
+            "update((a) => [a[39], ...a.slice(0, 32), ...a.slice(33, 39)])",
+        )
+        .unwrap();
+        let changed = ops(&host, false);
+        assert!(
+            changed
+                .iter()
+                .any(|l| l.starts_with(&format!("insert {} into", placeholders[7]))),
+            "{changed:?}"
+        );
+        assert!(
+            !changed.iter().any(|l| l.starts_with("text ")),
+            "{changed:?}"
+        );
+        assert!(changed.iter().any(|l| l.starts_with("remove ")));
+        // Asked for at the front: rendered there; a row gone is ignored.
+        host.deliver(nsh_core::element::JsEvent::Rows(vec![
+            placeholders[7],
+            placeholders[0],
+        ]));
+        let rendered = ops(&host, false);
+        assert!(
+            rendered.iter().any(|l| l.ends_with("\"r39\"")),
+            "{rendered:?}"
+        );
+        assert_eq!(
+            rendered.iter().filter(|l| l.starts_with("text ")).count(),
+            1
+        );
     }
 
     /// Rows of repeated values (keyed by value, by index and by a key

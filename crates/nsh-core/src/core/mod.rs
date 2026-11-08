@@ -630,6 +630,10 @@ struct Node {
     /// Held back in a scroll view's content, out of its window: no native
     /// view, its frame computed all the same (`cull.rs`).
     culled: bool,
+    /// The stand-in of an `<Each>` row not rendered yet
+    /// ([`Op::Placeholder`]); `row_asked`: JS was asked to render it.
+    placeholder: bool,
+    row_asked: bool,
     /// Last frame sent to the platform.
     frame: Bounds<Points>,
     /// The area descendants cover outside the bounds, as last mounted
@@ -894,6 +898,8 @@ impl Node {
             pan_enabled: true,
             created: false,
             culled: false,
+            placeholder: false,
+            row_asked: false,
             frame: Bounds::UNSET,
             overflow: None,
             attached: Vec::new(),
@@ -1111,6 +1117,15 @@ pub struct Core<M: TextEngine> {
     cull_made: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer.
     cull_scratch: Vec<(Key, f32, f32)>,
+    /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
+    /// ids (a key may be another node's by now).
+    placeholders: Vec<(Key, NodeId)>,
+    /// The placeholders whose rows JS is asked to render next
+    /// ([`crate::element::JsEvent::Rows`]).
+    asked_rows: Vec<NodeId>,
+    /// Placeholders were sized again in this round: laid out again
+    /// before culling looks at them.
+    placeholders_resized: bool,
     /// The scroll views such lists asked to scroll in this commit.
     outer_asked: Vec<Key>,
     /// The views whose lists' sticky cells changed in this commit.
@@ -1382,6 +1397,9 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             cull_made: false,
             cull_scratch: Vec::new(),
+            placeholders: Vec::new(),
+            asked_rows: Vec::new(),
+            placeholders_resized: false,
             outer_asked: Vec::new(),
             sticky_views: Vec::new(),
             sticky_nodes: Vec::new(),
@@ -1996,6 +2014,10 @@ impl<M: TextEngine> Core<M> {
     /// `onLoadMore` and `onLayout`, Rust components' events, calls'
     /// results) into `out`, in order.
     pub fn take_events(&mut self, out: &mut Vec<crate::element::JsEvent>) {
+        if !self.asked_rows.is_empty() {
+            let rows = std::mem::take(&mut self.asked_rows);
+            self.events.push(crate::element::JsEvent::Rows(rows));
+        }
         out.append(&mut self.events);
         // The caller hands them to JS before the next commit: what waits for
         // the app's answer to them runs there ([`crate::element::after_answer`]).
@@ -2257,6 +2279,11 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Release { id } => self.release(id),
+            Op::Placeholder { id } => {
+                let key = self.key(id)?;
+                self.placeholder(key);
+                Ok(())
+            }
             Op::Animation(op) => {
                 self.mount.push(MountItem::Animation(op));
                 Ok(())
@@ -2634,6 +2661,7 @@ impl<M: TextEngine> Core<M> {
                 && !std::mem::take(&mut self.extent_changed)
                 && !watched
                 && !std::mem::take(&mut self.cull_made)
+                && !std::mem::take(&mut self.placeholders_resized)
                 && self.scrollbars_pending.is_empty()
             {
                 break;
@@ -2786,8 +2814,12 @@ impl<M: TextEngine> Core<M> {
             }
             self.keep_resize_anchors(anchors);
         }
-        // The views a scroll view culls that came within its window.
-        if self.cull_dirty || (relayout && !self.culling.is_empty()) {
+        // Placeholders sized again are laid out again, in another round,
+        // before culling looks at them.
+        if relayout && !self.placeholders.is_empty() && self.size_placeholders() {
+            self.cull_dirty = true;
+        } else if self.cull_dirty || (relayout && !self.culling.is_empty()) {
+            // The views a scroll view culls that came within its window.
             self.sync_culled();
         }
         self.update_lists(relayout);
@@ -5567,6 +5599,9 @@ impl<M: TextEngine> Core<M> {
         }
 
         if inline {
+            if self.nodes[child as usize].placeholder {
+                self.ask_row(child);
+            }
             self.mark_text_block(parent);
             return Ok(());
         }
@@ -5689,6 +5724,9 @@ impl<M: TextEngine> Core<M> {
         }
         let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
+        // Replaced by its row, of another size: the scroll views keep what
+        // they show in place (`resize_anchor.rs`).
+        self.resize_settling |= node.row_asked;
         if inline {
             self.mark_text_block(parent);
             return;
