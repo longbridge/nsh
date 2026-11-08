@@ -208,7 +208,7 @@ pub use crate::{
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
     EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, KeyboardAppearance,
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
-    LayoutCurve, LayoutProperty, LayoutTransition, ListAlignment, ListViewport, MacOsBackdrop,
+    LayoutCurve, LayoutProperty, LayoutSpring, LayoutTransition, ListAlignment, ListViewport, MacOsBackdrop,
     MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation,
     ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
     PastedFile, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,

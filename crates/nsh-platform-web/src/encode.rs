@@ -933,6 +933,10 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
                 LayoutCurve::Spring { damping } => spring_easing(damping),
+                LayoutCurve::PhysicalSpring(spring) => sampled_easing(|x| {
+                    // It ends on its place, even cut short by a shorter duration.
+                    if x >= 1.0 { 1.0 } else { spring.progress(x * t.duration_ms) }
+                }),
             };
             format!(
                 "{{\"duration\":{},\"delay\":{},\"easing\":{},\"property\":{}}}",
@@ -973,10 +977,16 @@ fn spring(damping: f32, x: f32) -> f32 {
 /// Samples of the spring as a CSS `linear()` easing (piecewise linear,
 /// enough points that the overshoot keeps its shape).
 fn spring_easing(damping: f32) -> String {
+    sampled_easing(|x| spring(damping, x))
+}
+
+/// Samples of `curve` (progress at a fraction of the duration, from 0 to
+/// 1) as a CSS `linear()` easing.
+fn sampled_easing(curve: impl Fn(f32) -> f32) -> String {
     const SAMPLES: usize = 48;
     let mut out = String::from("linear(0");
     for i in 1..=SAMPLES {
-        let v = spring(damping, i as f32 / SAMPLES as f32);
+        let v = curve(i as f32 / SAMPLES as f32);
         let _ = write!(out, ",{}", (v * 1000.0).round() / 1000.0);
     }
     out.push(')');

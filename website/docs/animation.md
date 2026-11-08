@@ -828,6 +828,18 @@ view()
     .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
 ```
 
+A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(LayoutSpring { stiffness, damping, mass })`: `damping` is the damping coefficient (a ratio ζ is `ζ · 2 · √(stiffness · mass)`), and the animation lasts until the spring stays within a thousandth of its target (`LayoutSpring::settle_ms`). It moves by the same physics on every platform (`LayoutCurve::PhysicalSpring`).
+
+```rust
+use nsh_core::element::{LayoutSpring, LayoutTransition};
+
+// Material 3 Expressive's fast spatial spring: stiffness 800, damping ratio 0.6, mass 1.
+let mut spring = LayoutSpring::default(); // a mass of 1
+spring.stiffness = 800.0;
+spring.damping = 0.6 * 2.0 * 800.0_f32.sqrt();
+region.animate_layout(LayoutTransition::spring(spring));
+```
+
 ## What runs where
 
 | | Runs on | Your code per frame |

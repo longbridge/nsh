@@ -104,8 +104,10 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's, 6 physical spring
         float damping;
+        /** A physical spring's progress (6), sampled evenly over the duration, ending at 1. */
+        float[] samples;
         int property; // 0 opacity, 1 scale
         long duration, delay;
 
@@ -119,6 +121,16 @@ final class Mounter {
                     // React Native's spring interpolator.
                     float d = damping;
                     return t -> (float) (1 + Math.pow(2, -10 * t) * Math.sin((t - d / 4) * Math.PI * 2 / d));
+                }
+                case 6: {
+                    float[] p = samples;
+                    int last = p.length - 1;
+                    return t -> {
+                        if (t >= 1) return 1;
+                        float x = Math.max(t, 0) * last;
+                        int i = (int) x;
+                        return p[i] + (p[i + 1] - p[i]) * (x - i);
+                    };
                 }
                 default: return new AccelerateDecelerateInterpolator();
             }
@@ -638,6 +650,10 @@ final class Mounter {
         Transition t = new Transition();
         t.curve = b.getInt();
         t.damping = b.getFloat();
+        if (t.curve == 6) {
+            t.samples = new float[b.getInt()];
+            for (int i = 0; i < t.samples.length; i++) t.samples[i] = b.getFloat();
+        }
         t.property = b.getInt();
         t.duration = (long) b.getFloat();
         t.delay = (long) b.getFloat();

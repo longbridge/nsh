@@ -1394,6 +1394,9 @@ fn role_index(role: AccessibilityRole) -> i32 {
     }
 }
 
+/// The intervals a physical spring's progress is sampled in for Java's interpolator.
+const SPRING_SAMPLES: usize = 64;
+
 fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
     let Some(t) = t else {
         return e.int(0);
@@ -1406,9 +1409,22 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::EaseInEaseOut => (3, 0.0),
         LayoutCurve::Spring { damping } => (4, damping),
         LayoutCurve::Keyboard => (5, 0.0),
+        LayoutCurve::PhysicalSpring(_) => (6, 0.0),
     };
     e.int(curve);
     e.float(damping);
+    if let LayoutCurve::PhysicalSpring(spring) = t.curve {
+        // The spring's progress, sampled evenly over the duration: Java draws it piecewise linear
+        // (`Mounter.Transition`), so the physics stays in Rust.
+        e.int(SPRING_SAMPLES as i32 + 1);
+        for i in 0..=SPRING_SAMPLES {
+            e.float(if i == SPRING_SAMPLES {
+                1.0
+            } else {
+                spring.progress(t.duration_ms * i as f32 / SPRING_SAMPLES as f32)
+            });
+        }
+    }
     e.int(match t.property {
         LayoutProperty::Opacity => 0,
         LayoutProperty::Scale => 1,

@@ -828,6 +828,18 @@ view()
     .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
 ```
 
+按物理参数给出的弹簧（设计系统通常这样给出）为 `LayoutTransition::spring(LayoutSpring { stiffness, damping, mass })`：`damping` 是阻尼系数（阻尼比 ζ 对应 `ζ · 2 · √(stiffness · mass)`），动画持续到弹簧停留在目标的千分之一以内为止（`LayoutSpring::settle_ms`）。它在每个平台上都按同样的物理规律运动（`LayoutCurve::PhysicalSpring`）。
+
+```rust
+use nsh_core::element::{LayoutSpring, LayoutTransition};
+
+// Material 3 Expressive 的快速空间弹簧：刚度 800，阻尼比 0.6，质量 1。
+let mut spring = LayoutSpring::default(); // a mass of 1
+spring.stiffness = 800.0;
+spring.damping = 0.6 * 2.0 * 800.0_f32.sqrt();
+region.animate_layout(LayoutTransition::spring(spring));
+```
+
 ## 各部分运行在哪里
 
 | | 运行于 | 每帧运行你的代码 |

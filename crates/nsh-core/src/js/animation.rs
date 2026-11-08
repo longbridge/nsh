@@ -583,6 +583,8 @@ pub fn tables() -> crate::JsonValue {
             LayoutCurve::EaseInEaseOut => ("easeInEaseOut", None),
             LayoutCurve::Spring { damping } => ("spring", Some(damping)),
             LayoutCurve::Keyboard => ("keyboard", None),
+            // No preset is one: JS configs name no physical spring.
+            LayoutCurve::PhysicalSpring(_) => ("spring", None),
         };
         let property = match t.property {
             LayoutProperty::Opacity => "opacity",

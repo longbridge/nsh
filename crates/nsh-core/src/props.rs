@@ -509,7 +509,126 @@ pub enum LayoutCurve {
     /// duration is the keyboard's, `keyboard_duration`). Where there is no
     /// software keyboard, or nothing moved it, it eases in and out.
     Keyboard,
+    /// A spring of a stiffness, a damping coefficient and a mass, as an
+    /// animated value's [`Spring`](crate::element::Spring) takes them,
+    /// moving from rest: the same physics on every platform, where
+    /// [`LayoutCurve::Spring`] fits each platform's own spring into the
+    /// duration. [`LayoutTransition::spring`] gives it the duration it
+    /// settles in; iOS times it from the spring itself (UIKit's
+    /// `UISpringTimingParameters`), the other platforms follow its
+    /// [`LayoutSpring::progress`] over the transition's duration.
+    PhysicalSpring(LayoutSpring),
 }
+
+/// The physics of [`LayoutCurve::PhysicalSpring`]: a mass on a damped
+/// spring, released at rest one unit from where it settles.
+///
+/// The default has a mass of 1 and no stiffness, so it is at its target at
+/// once: set `stiffness` and `damping`.
+///
+/// ```
+/// use nsh_core::element::{LayoutSpring, LayoutTransition};
+///
+/// // Stiffness 800 and a damping ratio of 0.6 at a mass of 1.
+/// let mut spring = LayoutSpring::default();
+/// spring.stiffness = 800.0;
+/// spring.damping = 0.6 * 2.0 * 800.0_f32.sqrt();
+/// let transition = LayoutTransition::spring(spring);
+/// assert!((transition.duration_ms - 407.0).abs() < 1.0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct LayoutSpring {
+    /// Stiffness `k`.
+    pub stiffness: f32,
+    /// Damping coefficient `c` (not a ratio: the ratio is `c / (2 √(k m))`).
+    pub damping: f32,
+    /// Mass `m`.
+    pub mass: f32,
+}
+
+impl Default for LayoutSpring {
+    fn default() -> Self {
+        Self {
+            stiffness: 0.0,
+            damping: 0.0,
+            mass: 1.0,
+        }
+    }
+}
+
+impl LayoutSpring {
+    /// How far it has gone, from 0 to 1, `ms` milliseconds after it was
+    /// released: the closed form of the damped oscillator, overshooting 1
+    /// when it is underdamped. A spring that never settles (no damping, or
+    /// a stiffness or mass that is not positive) is at 1 at once.
+    pub fn progress(self, ms: f32) -> f32 {
+        let Some((zeta, omega)) = self.oscillator() else {
+            return 1.0;
+        };
+        if ms <= 0.0 {
+            return 0.0;
+        }
+        let t = ms / 1000.0;
+        if (zeta - 1.0).abs() < CRITICAL {
+            return 1.0 - (1.0 + omega * t) * (-omega * t).exp();
+        }
+        if zeta < 1.0 {
+            let decay = zeta * omega;
+            let wd = omega * (1.0 - zeta * zeta).sqrt();
+            return 1.0 - (-decay * t).exp() * ((wd * t).cos() + decay / wd * (wd * t).sin());
+        }
+        let root = omega * (zeta * zeta - 1.0).sqrt();
+        let (slow, fast) = (zeta * omega - root, zeta * omega + root);
+        1.0 - (fast * (-slow * t).exp() - slow * (-fast * t).exp()) / (fast - slow)
+    }
+
+    /// How long it takes, in milliseconds, to settle within a thousandth of
+    /// its travel, as [`LayoutCurve::Spring`] settles by the end of its
+    /// duration: the time its decay falls to 1/1000. 0 for a spring that
+    /// never settles.
+    pub fn settle_ms(self) -> f32 {
+        let Some((zeta, omega)) = self.oscillator() else {
+            return 0.0;
+        };
+        let seconds = if (zeta - 1.0).abs() < CRITICAL {
+            // (1 + ω t) e^(-ω t) falls to 1/1000 at ω t = 9.233.
+            9.233 / omega
+        } else if zeta < 1.0 {
+            SETTLE / (zeta * omega)
+        } else {
+            // The slow root's term, whose weight is above 1, outlasts the fast one's.
+            let root = (zeta * zeta - 1.0).sqrt();
+            let weight = (zeta + root) / (2.0 * root);
+            (SETTLE + weight.ln()) / (omega * (zeta - root))
+        };
+        seconds * 1000.0
+    }
+
+    /// The damping ratio and the natural angular frequency (radians per
+    /// second); `None` when it never settles.
+    fn oscillator(self) -> Option<(f32, f32)> {
+        let LayoutSpring {
+            stiffness,
+            damping,
+            mass,
+        } = self;
+        if !(stiffness > 0.0 && mass > 0.0 && damping > 0.0)
+            || !(stiffness.is_finite() && mass.is_finite() && damping.is_finite())
+        {
+            return None;
+        }
+        let zeta = damping / (2.0 * (stiffness * mass).sqrt());
+        Some((zeta, (stiffness / mass).sqrt()))
+    }
+}
+
+/// ln(1000): a decay of e^(-x) falls to a thousandth at this x.
+const SETTLE: f32 = 6.907_755;
+
+/// How close to 1 a damping ratio is taken as critical, where the
+/// underdamped and overdamped forms divide by almost 0.
+const CRITICAL: f32 = 1e-3;
 
 /// The property animated when views appear or disappear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -554,6 +673,12 @@ impl LayoutTransition {
             duration_ms,
             delay_ms: 0.0,
         }
+    }
+
+    /// `spring`'s physics over the time it settles in
+    /// ([`LayoutSpring::settle_ms`]), appearing views fading.
+    pub fn spring(spring: LayoutSpring) -> Self {
+        Self::new(LayoutCurve::PhysicalSpring(spring), spring.settle_ms())
     }
 }
 

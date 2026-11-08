@@ -96,6 +96,14 @@
   the core leads each run of frames with the layout animation it takes, an empty one for the rest
   (`core/layout_scope.rs`), as the platforms animate a frame with the last `MountItem::LayoutAnimation` before it.
   Insertions and removals are not scoped (their animations are decided per batch on iOS, Android and the web).
+- **A physical layout spring** (`LayoutCurve::PhysicalSpring(LayoutSpring { stiffness, damping, mass })`,
+  `LayoutTransition::spring`): a spring given as a design system gives it (Material 3 Expressive's stiffness and
+  damping), with the damping a coefficient, not a ratio. `LayoutSpring::progress` is the spring's closed form
+  (underdamped, critically damped, overdamped) from rest to the target, and `settle_ms` the time it stays within a
+  thousandth of the target after, which `LayoutTransition::spring` takes as the duration. The core's `transition.rs`
+  (the desktops) and the web (a `linear()` easing of its samples) follow `progress`; Android draws its samples
+  piecewise linear (curve 6 of `Mounter.Transition`); iOS gives the physics to `UISpringTimingParameters` in a
+  `UIViewPropertyAnimator`. No JS config names one: it is for Rust components.
 - **A view that follows another** (`View::follow(target)`, `core/follow.rs`; `nsh/base`'s `Tabs` indicator): its frame
   along its parent's main axis is the target's, placed by the core after layout, with no layout of its own and no
   JS. Following another element runs its `follow_transition` as a layout animation of its own frame alone (a scope of
