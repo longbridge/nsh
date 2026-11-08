@@ -20,6 +20,8 @@ dunce.workspace = true
 semver.workspace = true
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-core = { workspace = true, features = ["declarations"] }
+# A Rust app's translations (`locales/`), compiled into its runners.
+nsh-i18n = { workspace = true, features = ["build"] }
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }

@@ -229,6 +229,44 @@ impl Runtime {
                 }
                 Ok(Value(0))
             }
+            // `nsh:rt`'s `i18n(json)`: the core's components translate with
+            // the bundle's translations too (`browser/i18n.js` keeps its own
+            // for `t`; the browser's `Intl` has every language).
+            407 => {
+                let json = args.index(0)?.as_string().unwrap_or_default();
+                let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+                let translations = value
+                    .get("translations")
+                    .map(|t| nsh_core::i18n::Translations::from_json(&t.to_string()))
+                    .and_then(Result::ok)
+                    .unwrap_or_default();
+                self.bindings.ops.borrow_mut().push(nsh_core::Op::Rust(
+                    nsh_core::element::RustOp {
+                        call: 0,
+                        run: nsh_core::element::RustCall::Op(Box::new(move |module| {
+                            module.set_translations(translations);
+                            Ok(Box::new(()))
+                        })),
+                    },
+                ));
+                Ok(Value(0))
+            }
+            // `setLocale(tag | null)`, checked by `i18n.js`: the engine shows
+            // the app in it and sends the environment again.
+            408 => {
+                let tag = args.index(0)?.as_string();
+                let locale = tag.as_deref().and_then(nsh_core::platform::Locale::parse);
+                self.bindings.ops.borrow_mut().push(nsh_core::Op::Rust(
+                    nsh_core::element::RustOp {
+                        call: 0,
+                        run: nsh_core::element::RustCall::Op(Box::new(move |module| {
+                            module.set_locale(locale);
+                            Ok(Box::new(()))
+                        })),
+                    },
+                ));
+                Ok(Value(0))
+            }
             404 => {
                 let uri = args
                     .index(0)?

@@ -332,6 +332,9 @@ pub(crate) struct RootConfig {
     url_schemes: Vec<String>,
     /// `"window"` (JSON, checked): the main window's launch options.
     window: Option<String>,
+    /// The app's translations (`locales/`) as JSON, written to the
+    /// workspace and compiled into the runners.
+    translations: Option<PathBuf>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -617,6 +620,14 @@ fn root_config(
             Some(v.to_string())
         }
     };
+    let translations = nsh_i18n::read_translations(dir).map_err(|e| anyhow::anyhow!(e))?;
+    let translations = if translations.is_empty() {
+        None
+    } else {
+        let path = workspace.join("translations.json");
+        write(&path, &nsh_i18n::translations_json(&translations))?;
+        Some(path)
+    };
     Ok(RootConfig {
         component,
         theme,
@@ -625,6 +636,7 @@ fn root_config(
         status_bar,
         url_schemes,
         window,
+        translations,
     })
 }
 
@@ -2419,6 +2431,12 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     if let Some(id) = &root.app_id {
         make.push_str(&format!("\n        .app_id({id:?})"));
     }
+    if let Some(translations) = &root.translations {
+        make.push_str(&format!(
+            "\n        .translations_json(include_str!({:?}))",
+            translations.to_string_lossy()
+        ));
+    }
     if !root.url_schemes.is_empty() {
         make.push_str(&format!("\n        .url_schemes({:?})", root.url_schemes));
     }
@@ -2779,6 +2797,7 @@ mod tests {
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                translations: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
@@ -3037,6 +3056,7 @@ mod tests {
                 window: Some(
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
+                translations: None,
             },
         );
         for line in [
@@ -3068,6 +3088,7 @@ mod tests {
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                translations: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -3681,6 +3702,7 @@ panic = \"abort\"
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                translations: None,
             }),
         );
         app.write_workspace().unwrap();

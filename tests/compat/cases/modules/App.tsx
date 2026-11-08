@@ -14,6 +14,7 @@ import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
 import ModHost from "./mod-host";
 import ModHostChannel from "./mod-host-channel";
+import ModI18n from "./mod-i18n";
 import ModIos from "./mod-ios";
 import ModKeymap from "./mod-keymap";
 import ModMobile from "./mod-mobile";
@@ -35,6 +36,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-device": ModDevice,
   "mod-host": ModHost,
   "mod-host-channel": ModHostChannel,
+  "mod-i18n": ModI18n,
   "mod-ios": ModIos,
   "mod-keymap": ModKeymap,
   "mod-mobile": ModMobile,
