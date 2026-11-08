@@ -1082,7 +1082,7 @@ pub(crate) struct ImageState {
 
 /// Sets up an image view.
 pub(crate) fn create(view: &NshView) {
-    view.state_mut().image = Some(ImageState::default());
+    view.state_mut().image = Some(Box::default());
 }
 
 /// An image view's source changed.
@@ -1097,7 +1097,7 @@ pub(crate) fn set(
         let mut guard = view.state_mut();
         let s = &mut *guard;
         s.decor.set_fit(mode, options.position);
-        let image = s.image.get_or_insert_with(ImageState::default);
+        let image = s.image.get_or_insert_with(Box::default);
         image.surface = surface.key();
         let same_source = image.source.as_ref().map(|i| &i.uri) == source.map(|i| &i.uri);
         let same_look = image.options.placeholder == options.placeholder
