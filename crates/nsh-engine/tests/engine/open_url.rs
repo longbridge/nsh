@@ -286,13 +286,13 @@ fn a_link_opens_its_href_through_the_system_or_the_app() {
     // `disabled:` class styles a link.
     for id in [docs, order] {
         for i in &first.items {
-            if let MountItem::ViewStyle { id: v, style } = i {
-                if *v == id {
-                    assert_eq!(style.cursor, nsh_core::Cursor::Pointer);
-                    let mut rest = style.clone();
-                    rest.cursor = Default::default();
-                    assert_eq!(rest, Default::default(), "no style beyond the cursor");
-                }
+            if let MountItem::ViewStyle { id: v, style } = i
+                && *v == id
+            {
+                assert_eq!(style.cursor, nsh_core::Cursor::Pointer);
+                let mut rest = style.clone();
+                rest.cursor = Default::default();
+                assert_eq!(rest, Default::default(), "no style beyond the cursor");
             }
         }
     }
