@@ -580,9 +580,7 @@ mod tests {
         io::Read as _,
     };
 
-    use super::{
-        AAR_KEEP_RULES, copy_executable, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan,
-    };
+    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan};
 
     #[test]
     fn an_aar_carries_the_rules_that_keep_the_runtime() {
@@ -667,7 +665,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let exe = std::env::current_exe().unwrap();
         let stripped = dir.join("stripped");
-        copy_executable(&exe, &stripped).unwrap();
+        super::copy_executable(&exe, &stripped).unwrap();
         let size = |p: &std::path::Path| fs::metadata(p).unwrap().len();
         assert!(
             size(&stripped) < size(&exe),
