@@ -47,14 +47,16 @@ impl Guard {
 #[cfg(unix)]
 impl Drop for Guard {
     fn drop(&mut self) {
-        // The run is over: dropped last, once the terminal is restored.
-        REQUESTED.store(false, Ordering::Relaxed);
         for (signal, previous) in &self.0 {
             // SAFETY: restores the action saved when this guard installed its handler.
             unsafe {
                 libc::sigaction(*signal, previous, std::ptr::null_mut());
             }
         }
+        // The run is over: dropped last, once the terminal is restored. Cleared after the
+        // handlers are put back, so a signal on the way out cannot leave a request for the
+        // next run.
+        REQUESTED.store(false, Ordering::Relaxed);
     }
 }
 
@@ -85,12 +87,14 @@ impl Guard {
 #[cfg(windows)]
 impl Drop for Guard {
     fn drop(&mut self) {
-        // The run is over: dropped last, once the terminal is restored.
-        REQUESTED.store(false, Ordering::Relaxed);
         // SAFETY: unregisters the handler this guard installed.
         unsafe {
             windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(request), 0);
         }
+        // The run is over: dropped last, once the terminal is restored. Cleared after the
+        // handler is removed, so a Ctrl+C on the way out cannot leave a request for the next
+        // run.
+        REQUESTED.store(false, Ordering::Relaxed);
     }
 }
 
