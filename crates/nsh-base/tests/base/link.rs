@@ -257,3 +257,67 @@ mod hit_slop {
         assert_eq!(hit_slop(&seen, widen), EdgeInsets::default());
     }
 }
+
+/// An enabled link, a disabled one, and one whose app class sets its own
+/// cursor.
+#[component]
+fn Cursors() -> impl IntoElement {
+    view()
+        .child(link().href("https://example.com").child(text("On")))
+        .child(
+            link()
+                .href("https://example.com")
+                .disabled(true)
+                .child(text("Off")),
+        )
+        .child(
+            link()
+                .href("https://example.com")
+                .app_class("cursor-default")
+                .child(text("Plain")),
+        )
+}
+
+#[test]
+fn a_link_shows_the_pointing_hand_unless_disabled_or_the_app_says_otherwise() {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    use nsh_core::{Cursor, MountItem};
+
+    let config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<Cursors>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let log = seen.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                log.lock().unwrap().insert(*id, style.cursor);
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let cursor = |app: &Headless, label: &str| {
+        let id = app
+            .screen()
+            .press_target(&format!("text:{label}"))
+            .unwrap()
+            .unwrap();
+        seen.lock().unwrap().get(&id).copied().unwrap_or_default()
+    };
+    assert_eq!(cursor(&app, "On"), Cursor::Pointer);
+    assert_eq!(cursor(&app, "Plain"), Cursor::Default);
+    // The disabled link takes no press: the one hand is the enabled link's.
+    let hands = seen
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|c| **c == Cursor::Pointer)
+        .count();
+    assert_eq!(hands, 1);
+}
