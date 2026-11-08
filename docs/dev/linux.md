@@ -248,8 +248,11 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
 the main thread's time per drawn frame from the frame clock's `before-paint` to `after-paint` and its phases
 (`update`, `layout`, `paint`, and within `paint` NSH's `snapshot` and the canvases' rasterizing), batches applied per
 drain, the engine's commits (JS and core time, mount items), its busy share, and the process' CPU and resident memory.
-A pointer-transparent panel at the top right also shows FPS, frame time and p95, JS/core time, CPU and RSS,
-with the latest 120 frame costs (newest at the right) and a horizontal refresh-budget line. It redraws twice a
+A panel at the top right, which takes only the clicks on itself, also shows the frame rate over the display's rate, two rows of readings
+(frame time and p95, JS and core time per commit, in ms; CPU, resident memory, the JS heap and the nodes alive) over
+the latest 120 frame costs as a curve along its bottom edge (newest at the right; frames within the refresh budget
+stay under the text, slow ones rise into it in amber). A click on
+the panel collapses it to a pill of the frame rate, and a click on the pill expands it again (per window, for the session). It redraws twice a
 second while mapped; disabling the monitor removes the panel and timer as well as stopping measurement.
 `examples/gallery/tools/perf.py` runs the gallery under it, idle and scrolling on every demo, and prints a table.
 
