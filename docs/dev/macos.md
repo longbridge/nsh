@@ -475,7 +475,9 @@ taken only when what they show changed:
 - a shader whose program reads its children (`sample_content`, `sample_to`) pictures them on the display frame after
   the core marks them (`MountItem::ShaderInput`) or a view in them changed or scrolled, at most once per frame; one
   that only draws over them, from `nsh.time` and its uniforms, never pictures them again;
-- a backdrop reader pictures the window behind it after any change in its surface;
+- a backdrop reader pictures what draws under it, only its box and `overflow`, after a view under it changed where
+  it reads (a scroll view under it pictures every frame it moves; an animation over it or elsewhere, none), and gives
+  the shader only pixels that differ from the last;
 - a screen effect reading the surface pictures the whole window after any change in it, so one over a spinner, a list
   that animates or a scroll pictures every frame that runs;
 - a page's or a dialog's overlay pictures both sides once, the live side on the next three frames and after a view
