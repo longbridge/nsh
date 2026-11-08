@@ -13,6 +13,8 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
+mod ime;
+#[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
 mod mount;
@@ -43,6 +45,7 @@ fn main() {
                 window_hover::run();
                 title_bar::run();
                 window_dialog::run();
+                ime::run();
                 input_hidden::run();
                 mount::run();
             }
