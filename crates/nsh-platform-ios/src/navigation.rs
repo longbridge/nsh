@@ -20,7 +20,8 @@ use std::{
 
 use block2::RcBlock;
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, HeaderSystemItem, ModalAnimation, ModalConfig,
+    Color, EdgeInsets, EventKind, EventPayload, HeaderBarLook, HeaderMenu, HeaderMenuAction,
+    HeaderMenuEntry, HeaderRightItem, HeaderSystemItem, ModalAnimation, ModalConfig,
     ModalPresentation, NavShader, NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig,
     Size,
 };
@@ -35,14 +36,15 @@ use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
-    NSForegroundColorAttributeName, UIAdaptivePresentationControllerDelegate, UIBarButtonItem,
-    UIBarButtonItemStyle, UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets,
-    UIGestureRecognizer, UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask,
-    UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance,
-    UINavigationController, UINavigationControllerDelegate, UINavigationItem,
-    UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder, UIScrollView,
-    UIView, UIViewAutoresizing, UIViewController, UIViewControllerTransitionCoordinator,
-    UIViewControllerTransitionCoordinatorContext,
+    NSForegroundColorAttributeName, UIAction, UIAdaptivePresentationControllerDelegate,
+    UIBarButtonItem, UIBarButtonItemStyle, UIBarButtonSystemItem, UIBehavioralStyle, UIColor,
+    UIEdgeInsets, UIGestureRecognizer, UIGestureRecognizerDelegate, UIImage,
+    UIInterfaceOrientationMask, UIMenu, UIMenuElement, UIMenuElementAttributes, UIMenuElementState,
+    UIMenuOptions, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
+    UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
+    UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
+    UIScrollView, UIView, UIViewAutoresizing, UIViewController,
+    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -756,6 +758,50 @@ impl BarItemTarget {
     }
 }
 
+/// The target of a trailing `ios.headerRightItems` button without a menu:
+/// reports `onHeaderItemPress` with the item's id.
+struct HeaderItemIvars {
+    mounter: SharedMounter,
+    screen: NodeId,
+    id: Arc<str>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = HeaderItemIvars]
+    struct HeaderItemTarget;
+
+    impl HeaderItemTarget {
+        #[unsafe(method(nshPress:))]
+        fn press(&self, _sender: Option<&NSObject>) {
+            let ivars = self.ivars();
+            if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.header_item_event(ivars.screen, EventKind::HeaderItemPress, &ivars.id);
+            }
+        }
+    }
+);
+
+impl HeaderItemTarget {
+    fn new(
+        mtm: MainThreadMarker,
+        screen: NodeId,
+        id: Arc<str>,
+        mounter: SharedMounter,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(HeaderItemIvars {
+            mounter,
+            screen,
+            id,
+        });
+        // SAFETY: NSObject's designated initializer.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
 /// What a UIKit bar button shows.
 #[derive(Debug, Clone, PartialEq)]
 enum BarButton {
@@ -771,6 +817,26 @@ type SystemBarItem = (
     Retained<UIBarButtonItem>,
     Retained<BarItemTarget>,
 );
+
+/// Trailing `ios.headerRightItems`: the description, buttons and press
+/// targets kept while the buttons' identity stays (UIKit holds targets
+/// weakly). Rebuilding a bar button flashes it, so menus, labels and
+/// `disabled` update in place.
+type RightItemsBar = (
+    Vec<HeaderRightItem>,
+    Vec<Retained<UIBarButtonItem>>,
+    Vec<Retained<HeaderItemTarget>>,
+);
+
+/// Whether two lists describe the same trailing buttons (count, ids, looks,
+/// and whether each has a menu). Menus' contents, labels and `disabled` can
+/// change without rebuilding the bar buttons.
+fn same_right_buttons(a: &[HeaderRightItem], b: &[HeaderRightItem]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.id == y.id && x.look == y.look && x.menu.is_some() == y.menu.is_some())
+}
 
 /// UIKit's bar button showing `kind`, pressing `target`; `None` for a
 /// symbol name SF Symbols does not have.
@@ -806,6 +872,234 @@ fn make_bar_button(
             })
         }
     }
+}
+
+/// An SF Symbol image, or `None` when the name is unknown.
+fn system_image(name: &str) -> Option<Retained<UIImage>> {
+    UIImage::systemImageNamed(&NSString::from_str(name))
+}
+
+/// Dispatches a menu action's id to the screen.
+fn menu_select(mounter: &SharedMounter, mtm: MainThreadMarker, screen: NodeId, id: Arc<str>) {
+    if let Ok(mut m) = mounter.get(mtm).try_borrow_mut()
+        && let Some(m) = m.as_mut()
+    {
+        m.header_item_event(screen, EventKind::HeaderMenuSelect, &id);
+    }
+}
+
+/// A `UIAction` for a menu entry.
+fn make_menu_action(
+    mtm: MainThreadMarker,
+    action: &HeaderMenuAction,
+    screen: NodeId,
+    mounter: SharedMounter,
+) -> Retained<UIAction> {
+    let title = NSString::from_str(&action.title);
+    let image = action.symbol.as_deref().and_then(system_image);
+    let id = Arc::clone(&action.id);
+    let handler = RcBlock::new(move |_: NonNull<UIAction>| {
+        menu_select(&mounter, mtm, screen, Arc::clone(&id));
+    });
+    // No UIKit identifier: the API lets an app reuse an action id in two
+    // menus, and UIKit may drop or merge elements that share one. The
+    // handler already carries the id.
+    // SAFETY: UIKit copies the handler; the block stays while the action does.
+    let item = unsafe {
+        UIAction::actionWithTitle_image_identifier_handler(
+            &title,
+            image.as_deref(),
+            None,
+            (&*handler as *const block2::DynBlock<_>).cast_mut(),
+            mtm,
+        )
+    };
+    let mut attrs = UIMenuElementAttributes::empty();
+    if action.disabled {
+        attrs |= UIMenuElementAttributes::Disabled;
+    }
+    if action.destructive {
+        attrs |= UIMenuElementAttributes::Destructive;
+    }
+    item.setAttributes(attrs);
+    item.setState(if action.checked {
+        UIMenuElementState::On
+    } else {
+        UIMenuElementState::Off
+    });
+    item
+}
+
+/// Builds a `UIMenu` tree from a [`HeaderMenu`].
+fn make_menu(
+    mtm: MainThreadMarker,
+    menu: &HeaderMenu,
+    screen: NodeId,
+    mounter: &SharedMounter,
+) -> Retained<UIMenu> {
+    let children = menu_children(mtm, &menu.items, screen, mounter);
+    let title = menu.title.as_deref().unwrap_or("");
+    UIMenu::menuWithTitle_children(&NSString::from_str(title), &children, mtm)
+}
+
+/// Menu children for a list of entries.
+fn menu_children(
+    mtm: MainThreadMarker,
+    entries: &[HeaderMenuEntry],
+    screen: NodeId,
+    mounter: &SharedMounter,
+) -> Retained<NSArray<UIMenuElement>> {
+    let mut children: Vec<Retained<UIMenuElement>> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry {
+            HeaderMenuEntry::Action(action) => {
+                children.push(Retained::into_super(make_menu_action(
+                    mtm,
+                    action,
+                    screen,
+                    mounter.clone(),
+                )));
+            }
+            HeaderMenuEntry::Section { title, items } => {
+                let nested = menu_children(mtm, items, screen, mounter);
+                let section = UIMenu::menuWithTitle_image_identifier_options_children(
+                    &NSString::from_str(title.as_deref().unwrap_or("")),
+                    None,
+                    None,
+                    UIMenuOptions::DisplayInline,
+                    &nested,
+                    mtm,
+                );
+                children.push(Retained::into_super(section));
+            }
+            HeaderMenuEntry::Submenu {
+                title,
+                symbol,
+                items,
+            } => {
+                let nested = menu_children(mtm, items, screen, mounter);
+                let image = symbol.as_deref().and_then(system_image);
+                let submenu = UIMenu::menuWithTitle_image_identifier_options_children(
+                    &NSString::from_str(title),
+                    image.as_deref(),
+                    None,
+                    UIMenuOptions::empty(),
+                    &nested,
+                    mtm,
+                );
+                children.push(Retained::into_super(submenu));
+            }
+            _ => {}
+        }
+    }
+    NSArray::from_retained_slice(&children)
+}
+
+/// A bar button from its look only (no menu, target or action yet).
+fn make_right_item_look(
+    mtm: MainThreadMarker,
+    look: &HeaderBarLook,
+    fallback_title: &str,
+) -> Retained<UIBarButtonItem> {
+    match look {
+        // SAFETY: UIKit's designated initializer with no target yet; the
+        // caller sets the menu or the target and action.
+        HeaderBarLook::SystemItem(system) => unsafe {
+            UIBarButtonItem::initWithBarButtonSystemItem_target_action(
+                UIBarButtonItem::alloc(mtm),
+                system_bar_item(*system),
+                None,
+                None,
+            )
+        },
+        HeaderBarLook::Symbol(name) => match system_image(name) {
+            Some(image) => unsafe {
+                UIBarButtonItem::initWithImage_style_target_action(
+                    UIBarButtonItem::alloc(mtm),
+                    Some(&image),
+                    UIBarButtonItemStyle::Plain,
+                    None,
+                    None,
+                )
+            },
+            None => unsafe {
+                UIBarButtonItem::initWithTitle_style_target_action(
+                    UIBarButtonItem::alloc(mtm),
+                    Some(&NSString::from_str(fallback_title)),
+                    UIBarButtonItemStyle::Plain,
+                    None,
+                    None,
+                )
+            },
+        },
+        HeaderBarLook::Title(title) => unsafe {
+            UIBarButtonItem::initWithTitle_style_target_action(
+                UIBarButtonItem::alloc(mtm),
+                Some(&NSString::from_str(title)),
+                UIBarButtonItemStyle::Plain,
+                None,
+                None,
+            )
+        },
+        _ => unsafe {
+            UIBarButtonItem::initWithTitle_style_target_action(
+                UIBarButtonItem::alloc(mtm),
+                Some(&NSString::from_str(fallback_title)),
+                UIBarButtonItemStyle::Plain,
+                None,
+                None,
+            )
+        },
+    }
+}
+
+/// Menu, label and enabled on an existing trailing bar button.
+fn update_right_item(
+    mtm: MainThreadMarker,
+    item: &HeaderRightItem,
+    button: &UIBarButtonItem,
+    screen: NodeId,
+    mounter: &SharedMounter,
+) {
+    if let Some(menu) = &item.menu {
+        button.setMenu(Some(&make_menu(mtm, menu, screen, mounter)));
+    }
+    button.setEnabled(!item.disabled);
+    if let Some(label) = item.label.as_deref() {
+        use objc2_ui_kit::NSObjectUIAccessibility;
+        button.setAccessibilityLabel(Some(&NSString::from_str(label)), mtm);
+    }
+}
+
+/// One trailing `ios.headerRightItems` button.
+fn make_right_item(
+    mtm: MainThreadMarker,
+    item: &HeaderRightItem,
+    screen: NodeId,
+    mounter: SharedMounter,
+    targets: &mut Vec<Retained<HeaderItemTarget>>,
+) -> Retained<UIBarButtonItem> {
+    let fallback = item.label.as_deref().unwrap_or(item.id.as_ref());
+    let button = make_right_item_look(mtm, &item.look, fallback);
+    if let Some(menu) = &item.menu {
+        // With no primary action, a tap opens the menu (iOS 14+).
+        button.setMenu(Some(&make_menu(mtm, menu, screen, &mounter)));
+    } else {
+        let target = HeaderItemTarget::new(mtm, screen, Arc::clone(&item.id), mounter);
+        // SAFETY: UIKit holds the target weakly; the caller keeps it as long
+        // as the button, and `nshPress:` is its action.
+        unsafe {
+            button.setTarget(Some(&*target));
+            button.setAction(Some(objc2::sel!(nshPress:)));
+        }
+        targets.push(target);
+    }
+    button.setEnabled(!item.disabled);
+    if let Some(label) = item.label.as_deref() {
+        use objc2_ui_kit::NSObjectUIAccessibility;
+        button.setAccessibilityLabel(Some(&NSString::from_str(label)), mtm);
+    }
+    button
 }
 
 /// The accessibility label of the first labelled view in `view` (itself
@@ -1153,6 +1447,9 @@ pub(crate) struct ScreenHost {
     /// (UIKit keeps a bar button's target weakly).
     left_system: RefCell<Option<SystemBarItem>>,
     right_system: RefCell<Option<SystemBarItem>>,
+    /// Trailing `ios.headerRightItems`: rebuilt when the description
+    /// changes (a menu item's `checked` or `title` included).
+    right_items: RefCell<Option<RightItemsBar>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
     pub(crate) config: ScreenConfig,
@@ -1172,6 +1469,7 @@ impl ScreenHost {
             config: ScreenConfig::default(),
             left_system: RefCell::new(None),
             right_system: RefCell::new(None),
+            right_items: RefCell::new(None),
         }
     }
 
@@ -1231,14 +1529,57 @@ impl ScreenHost {
         .or_else(|| custom(c.left));
         nav_item.setLeftBarButtonItem(left.as_deref());
         nav_item.setLeftItemsSupplementBackButton(true);
-        let right = system(
-            false,
-            &self.right_system,
-            c.right,
-            look(c.right_system_item, &c.right_symbol),
-        )
-        .or_else(|| custom(c.right));
-        nav_item.setRightBarButtonItem(right.as_deref());
+        // `headerRightItems` (non-empty) wins over the single system /
+        // symbol button and leaves `headerRight`'s view out of the bar.
+        if !c.right_items.is_empty() {
+            self.right_system.borrow_mut().take();
+            let mut kept = self.right_items.borrow_mut();
+            // Rebuild only when the buttons themselves change; a menu's
+            // `checked` state would otherwise flash the bar on every choice.
+            let rebuild = kept
+                .as_ref()
+                .is_none_or(|(items, ..)| !same_right_buttons(items, &c.right_items));
+            if rebuild {
+                if let Some(mounter) = press.clone() {
+                    let screen = self.controller.screen_id();
+                    let mut targets = Vec::new();
+                    let buttons: Vec<_> = c
+                        .right_items
+                        .iter()
+                        .map(|item| {
+                            make_right_item(mtm, item, screen, mounter.clone(), &mut targets)
+                        })
+                        .collect();
+                    *kept = Some((c.right_items.clone(), buttons, targets));
+                } else {
+                    *kept = None;
+                }
+            } else if let Some((cached, buttons, _)) = kept.as_mut()
+                && cached != &c.right_items
+            {
+                if let Some(mounter) = press.clone() {
+                    let screen = self.controller.screen_id();
+                    for (item, button) in c.right_items.iter().zip(buttons.iter()) {
+                        update_right_item(mtm, item, button, screen, &mounter);
+                    }
+                }
+                *cached = c.right_items.clone();
+            }
+            let array = kept
+                .as_ref()
+                .map(|(_, buttons, _)| NSArray::from_retained_slice(buttons));
+            nav_item.setRightBarButtonItems(array.as_deref());
+        } else {
+            self.right_items.borrow_mut().take();
+            let right = system(
+                false,
+                &self.right_system,
+                c.right,
+                look(c.right_system_item, &c.right_symbol),
+            )
+            .or_else(|| custom(c.right));
+            nav_item.setRightBarButtonItem(right.as_deref());
+        }
         nav_item.setHidesBackButton(!c.back_visible);
         nav_item.setBackButtonTitle(c.back_title.as_deref().map(NSString::from_str).as_deref());
         nav_item.setLargeTitleDisplayMode(if c.large_title {

@@ -17112,6 +17112,74 @@ mod views {
         );
     }
 
+    /// A screen whose trailing bar is several UIKit buttons, one with a menu.
+    #[derive(Default)]
+    struct RightItemsPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RightItemsPageProps {}
+
+    impl Component for RightItemsPage {
+        type Props = RightItemsPageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: RightItemsPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            use crate::{
+                HeaderMenu, HeaderMenuAction, HeaderMenuEntry, HeaderRightItem, HeaderSystemItem,
+            };
+            stack().flex_1().child(
+                screen()
+                    .header_right_items(vec![
+                        HeaderRightItem::system("edit", HeaderSystemItem::Edit),
+                        HeaderRightItem::symbol("more", "ellipsis.circle").menu(HeaderMenu::new([
+                            HeaderMenuEntry::action(HeaderMenuAction::new("share", "Share")),
+                            HeaderMenuEntry::section([HeaderMenuEntry::action(
+                                HeaderMenuAction::new("delete", "Delete").destructive(true),
+                            )])
+                            .titled("Danger"),
+                        ])),
+                    ])
+                    .header_right_system_item(HeaderSystemItem::Add)
+                    .header_right(view().on_press(|_: &()| {}))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// Trailing `header_right_items` reach the screen's config, including a
+    /// menu; a non-empty list leaves the single system item set too (the
+    /// platform prefers the list).
+    #[test]
+    fn trailing_header_items_reach_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RightItemsPage>(|| RightItemsPageProps {}));
+        let config = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        assert_eq!(config.right_items.len(), 2);
+        assert_eq!(config.right_items[0].id.as_ref(), "edit");
+        assert_eq!(
+            config.right_items[0].look,
+            crate::HeaderBarLook::SystemItem(crate::HeaderSystemItem::Edit)
+        );
+        assert_eq!(config.right_items[1].id.as_ref(), "more");
+        let menu = config.right_items[1].menu.as_ref().expect("a menu");
+        assert_eq!(menu.items.len(), 2);
+        assert_eq!(
+            config.right_system_item,
+            Some(crate::HeaderSystemItem::Add),
+            "the single system item stays in the config; the platform prefers the list"
+        );
+    }
+
     /// A Rust component that renders a native component.
     #[derive(Default)]
     struct NativeHost;

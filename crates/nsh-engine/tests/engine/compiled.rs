@@ -1153,6 +1153,141 @@ fn pages_keep_or_pop_by_their_flags() {
     );
 }
 
+const PAGE_HEADER_ITEMS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+const nav = createNavStack(["home"]);
+const log = signal<string[]>([]);
+const filter = signal("all");
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`log ${log().join(",")}`}</Text>
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {(route) => (
+        <NavPage
+          title={route}
+          headerRight={<Text>fallback</Text>}
+          ios={{
+            headerRightItems: [
+              { id: "edit", systemItem: "edit" },
+              {
+                id: "filter",
+                title: "Filter",
+                menu: {
+                  items: [
+                    {
+                      id: "all",
+                      title: "All",
+                      checked: filter() === "all",
+                    },
+                    {
+                      id: "open",
+                      title: "Open",
+                      checked: filter() === "open",
+                    },
+                    {
+                      section: [
+                        { id: "delete", title: "Delete", destructive: true },
+                      ],
+                    },
+                  ],
+                },
+              },
+              { id: "add", systemItem: "add" },
+            ],
+          }}
+          onHeaderItemPress={({ id }) => log.update((l) => [...l, `press ${id}`])}
+          onHeaderMenuSelect={({ id }) => {
+            if (id === "all" || id === "open") filter.set(id);
+            log.update((l) => [...l, `menu ${id}`]);
+          }}
+        >
+          <Text>{`filter ${filter()}`}</Text>
+        </NavPage>
+      )}
+    </NavStack>
+  </View>
+));
+"##;
+
+/// Trailing `ios.headerRightItems` reach the platform in the screen's
+/// config, and platform-reported presses and menu selections reach the
+/// page's listeners with the item / action ids.
+#[test]
+fn pages_report_trailing_header_item_presses_and_menu_selections() {
+    let (engine, rx) = start_app(PAGE_HEADER_ITEMS);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let (screen, config) = first
+        .items
+        .iter()
+        .rev()
+        .find_map(|i| match i {
+            MountItem::ScreenConfig { id, config } => Some((*id, (**config).clone())),
+            _ => None,
+        })
+        .expect("a page");
+    assert_eq!(config.right_items.len(), 3);
+    assert_eq!(config.right_items[0].id.as_ref(), "edit");
+    assert_eq!(
+        config.right_items[0].look,
+        nsh_core::HeaderBarLook::SystemItem(nsh_core::HeaderSystemItem::Edit)
+    );
+    assert_eq!(config.right_items[1].id.as_ref(), "filter");
+    let menu = config.right_items[1].menu.as_ref().expect("filter menu");
+    assert_eq!(menu.items.len(), 3);
+    assert!(matches!(
+        &menu.items[2],
+        nsh_core::HeaderMenuEntry::Section { items, .. } if items.len() == 1
+    ));
+    assert_eq!(config.right_items[2].id.as_ref(), "add");
+    let listens = |kind: EventKind| {
+        first.items.iter().any(|i| {
+            matches!(i, MountItem::Events { id, events } if *id == screen && events.contains(kind))
+        })
+    };
+    assert!(listens(EventKind::HeaderItemPress));
+    assert!(listens(EventKind::HeaderMenuSelect));
+    control.dispatch_event(
+        screen,
+        EventKind::HeaderItemPress,
+        EventPayload::Map(vec![("id", nsh_core::PayloadValue::Str("edit".into()))]),
+    );
+    next(&rx, |b| log_of(b).as_deref() == Some("log press edit"));
+    control.dispatch_event(
+        screen,
+        EventKind::HeaderMenuSelect,
+        EventPayload::Map(vec![("id", nsh_core::PayloadValue::Str("open".into()))]),
+    );
+    let batch = next(&rx, |b| {
+        log_of(b).as_deref() == Some("log press edit,menu open")
+    });
+    assert!(
+        texts(&batch).contains(&"filter open".to_owned()),
+        "{:?}",
+        texts(&batch)
+    );
+    let updated = batch
+        .items
+        .iter()
+        .rev()
+        .find_map(|i| match i {
+            MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+        .expect("updated page");
+    let menu = updated.right_items[1].menu.as_ref().expect("filter menu");
+    let open = match &menu.items[1] {
+        nsh_core::HeaderMenuEntry::Action(action) => action,
+        other => panic!("expected an action, got {other:?}"),
+    };
+    assert!(open.checked, "the chosen filter is checked");
+    assert_eq!(open.id.as_ref(), "open");
+}
+
 const PAGE_HEADER: &str = r#"import { mount, Text, View } from "nsh";
 import { NavPage, NavStack, createNavStack } from "nsh/base";
 

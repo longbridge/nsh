@@ -943,6 +943,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: OverlayPosition) => void",
         "The core placed the overlay (again: the anchor moved, the overlay changed size, it went to the other side).",
     ),
+    (
+        EventKind::HeaderItemPress,
+        on::SCREEN,
+        "(e: { id: string }) => void",
+        "A trailing iOS bar button without a menu was pressed (`ios.headerRightItems`); `id` is the item's.",
+    ),
+    (
+        EventKind::HeaderMenuSelect,
+        on::SCREEN,
+        "(e: { id: string }) => void",
+        "An action of a trailing iOS bar button's menu was chosen (`ios.headerRightItems`); `id` is the action's.",
+    ),
 ];
 
 /// The events no element's props declare: the root's (`BackHandler`,

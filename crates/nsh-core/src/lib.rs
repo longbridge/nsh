@@ -95,7 +95,8 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HeaderSystemItem,
+        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderBarLook, HeaderMenu,
+        HeaderMenuAction, HeaderMenuEntry, HeaderRightItem, HeaderSlot, HeaderSystemItem,
         IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle, ListViewport, ModalAnimation,
         ModalPresentation, ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp,

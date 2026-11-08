@@ -173,6 +173,104 @@ function CustomHeader() {
   );
 }
 
+/** Trailing iOS bar buttons with a native menu; other platforms keep the
+ * `headerRight` views. */
+function NativeBarButtons() {
+  const filter = signal<"all" | "open" | "done">("all");
+  const log = signal("Tap Edit, Filter or +");
+  const editing = signal(false);
+  const right = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+      <Text
+        onPress={() => {
+          editing.set(!editing());
+          log.set(editing() ? "Editing" : "Edit");
+        }}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        {editing() ? "Done" : "Edit"}
+      </Text>
+      <Text
+        onPress={() => log.set(`Filter: ${filter()}`)}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        Filter
+      </Text>
+      <Text onPress={() => log.set("Add")} hitSlop={10} style={{ color: colors.accent, fontSize: 22, fontWeight: "400" }}>
+        +
+      </Text>
+    </View>
+  );
+  return (
+    <NavPage
+      title="Bar buttons"
+      {...header}
+      headerRight={right()}
+      header={<PageHeader title="Bar buttons" right={right()} />}
+      ios={{
+        headerRightItems: [
+          {
+            id: "edit",
+            title: editing() ? "Done" : "Edit",
+          },
+          {
+            id: "filter",
+            title: "Filter",
+            menu: {
+              items: [
+                { id: "all", title: "All", checked: filter() === "all" },
+                { id: "open", title: "Open", checked: filter() === "open" },
+                { id: "done", title: "Done", checked: filter() === "done" },
+                {
+                  section: [{ id: "clear", title: "Clear filters", destructive: true }],
+                },
+              ],
+            },
+          },
+          { id: "add", systemItem: "add", label: "Add" },
+        ],
+      }}
+      onHeaderItemPress={({ id }) => {
+        if (id === "edit") {
+          editing.set(!editing());
+          log.set(editing() ? "Editing" : "Edit");
+        } else if (id === "add") {
+          log.set("Add");
+        }
+      }}
+      onHeaderMenuSelect={({ id }) => {
+        if (id === "all" || id === "open" || id === "done") {
+          filter.set(id);
+          log.set(`Filter: ${id}`);
+        } else if (id === "clear") {
+          filter.set("all");
+          log.set("Filters cleared");
+        }
+      }}
+    >
+      <Page
+        intro={hint(
+          "iOS: Edit, Filter (a native menu with a check mark) and + share one Liquid Glass group on iOS 26. Android and the desktops show the same actions as headerRight views.",
+          "The trailing actions are views here; on iOS they are UIKit bar buttons with a native Filter menu.",
+        )}
+      >
+        <Section title="Last action" note="onHeaderItemPress / onHeaderMenuSelect">
+          <Figure value={log()} />
+        </Section>
+        <Section title="Filter" note="checked menu item">
+          <View style={{ flexDirection: "row" }}>
+            <Stat width="33%" label="All" value={filter() === "all" ? "On" : "—"} tone={filter() === "all" ? "up" : "neutral"} />
+            <Stat width="33%" label="Open" value={filter() === "open" ? "On" : "—"} tone={filter() === "open" ? "up" : "neutral"} />
+            <Stat width="34%" label="Done" value={filter() === "done" ? "On" : "—"} tone={filter() === "done" ? "up" : "neutral"} />
+          </View>
+        </Section>
+      </Page>
+    </NavPage>
+  );
+}
+
 function Locked() {
   return (
     <NavPage title="No swipe back" {...header} popOnSwipe={false} header={<PageHeader title="No swipe back" />}>
@@ -415,6 +513,7 @@ export function Navigation() {
               <LinkRow first icon="text" title="Large title" note="headerLargeTitle" onPress={push(LargeTitle)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
+              <LinkRow icon="sliders" title="Native bar buttons" note="ios.headerRightItems" onPress={push(NativeBarButtons)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
               <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />

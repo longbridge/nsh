@@ -3859,6 +3859,16 @@ impl Mounter {
         }
     }
 
+    /// A trailing `ios.headerRightItems` button without a menu was pressed,
+    /// or one of its menu actions was chosen.
+    pub(crate) fn header_item_event(&self, screen: NodeId, kind: EventKind, id: &str) {
+        self.control.dispatch_event(
+            screen,
+            kind,
+            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Str(id.to_owned()))]),
+        );
+    }
+
     /// The finger lifted on a pressable view.
     pub(crate) fn pressed(&mut self, id: NodeId, at: PressAt) {
         if let Some(s) = self.slot(id)

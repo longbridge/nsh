@@ -5,9 +5,10 @@
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
-    CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop,
-    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, ScrollProp,
-    StatusBarSetting, StatusBarStyle, Viewability,
+    CellSlot, EdgeInsets, HeaderBarLook, HeaderMenu, HeaderMenuAction, HeaderMenuEntry,
+    HeaderRightItem, HeaderSystemItem, ImageScales, ImageSource, KeyboardTaps, ListContentStyle,
+    MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp,
+    Prop, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
     element::TsTypes,
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
@@ -404,6 +405,135 @@ impl HostValue for Ripple {
 
     fn ts_type(_: &mut TsTypes) -> String {
         "{ color?: ColorValue; borderless?: boolean; radius?: number; foreground?: boolean }".into()
+    }
+}
+
+/// A trailing iOS bar button: `{ id, systemItem | symbol | title, label?,
+/// menu?, disabled? }`.
+impl HostValue for HeaderRightItem {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let id = field::<std::sync::Arc<str>, _>(input, "id", cx)?;
+        let system = field::<HeaderSystemItem, _>(input, "systemItem", cx);
+        let symbol = field::<std::sync::Arc<str>, _>(input, "symbol", cx);
+        let title = field::<std::sync::Arc<str>, _>(input, "title", cx);
+        let look = match (system, symbol, title) {
+            (Some(item), None, None) => HeaderBarLook::SystemItem(item),
+            (None, Some(name), None) => HeaderBarLook::Symbol(name),
+            (None, None, Some(text)) => HeaderBarLook::Title(text),
+            _ => {
+                cx.warn("headerRightItems entry needs exactly one of systemItem, symbol, or title");
+                return None;
+            }
+        };
+        let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        Some(HeaderRightItem {
+            id,
+            look,
+            label: field(input, "label", cx),
+            menu: field(input, "menu", cx),
+            disabled: flag("disabled"),
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let menu = HeaderMenu::ts_type(types);
+        let system = HeaderSystemItem::ts_type(types);
+        types.declare("HeaderRightItem", |_| {
+            format!(
+                "/** A trailing iOS navigation-bar button (`ios.headerRightItems`). */\n\
+                 export type HeaderRightItem = {{\n  id: string;\n  label?: string;\n  \
+                 menu?: {menu};\n  disabled?: boolean;\n}} & (\n  {{ systemItem: {system}; symbol?: never; title?: never }} \
+                 | {{ symbol: string; systemItem?: never; title?: never }} \
+                 | {{ title: string; systemItem?: never; symbol?: never }}\n);"
+            )
+        })
+    }
+}
+
+impl HostValue for HeaderMenu {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let items = field::<Vec<HeaderMenuEntry>, _>(input, "items", cx).unwrap_or_default();
+        Some(HeaderMenu {
+            title: field(input, "title", cx),
+            items,
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let entry = HeaderMenuEntry::ts_type(types);
+        types.declare("HeaderMenu", |_| {
+            format!(
+                "/** A native UIMenu on a trailing iOS bar button. */\n\
+                 export interface HeaderMenu {{\n  title?: string;\n  items: {entry}[];\n}}"
+            )
+        })
+    }
+}
+
+impl HostValue for HeaderMenuEntry {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        if input.field("section").is_some() {
+            let items = field::<Vec<HeaderMenuEntry>, _>(input, "section", cx).unwrap_or_default();
+            return Some(HeaderMenuEntry::Section {
+                title: field(input, "title", cx),
+                items,
+            });
+        }
+        if input.field("items").is_some() {
+            let title = field::<std::sync::Arc<str>, _>(input, "title", cx)?;
+            let items = field::<Vec<HeaderMenuEntry>, _>(input, "items", cx).unwrap_or_default();
+            return Some(HeaderMenuEntry::Submenu {
+                title,
+                symbol: field(input, "symbol", cx),
+                items,
+            });
+        }
+        let action = HeaderMenuAction::decode(input, cx)?;
+        Some(HeaderMenuEntry::Action(action))
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let action = HeaderMenuAction::ts_type(types);
+        types.declare("HeaderMenuEntry", |_| {
+            format!(
+                "/** An entry of a trailing iOS bar button's menu. */\n\
+                 export type HeaderMenuEntry =\n  | {action}\n  \
+                 | {{ section: HeaderMenuEntry[]; title?: string }}\n  \
+                 | {{ title: string; symbol?: string; items: HeaderMenuEntry[] }};"
+            )
+        })
+    }
+}
+
+impl HostValue for HeaderMenuAction {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        Some(HeaderMenuAction {
+            id: field(input, "id", cx)?,
+            title: field(input, "title", cx)?,
+            symbol: field(input, "symbol", cx),
+            destructive: flag("destructive"),
+            disabled: flag("disabled"),
+            checked: flag("checked"),
+        })
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "{ id: string; title: string; symbol?: string; destructive?: boolean; \
+         disabled?: boolean; checked?: boolean }"
+            .into()
     }
 }
 
