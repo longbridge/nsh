@@ -118,7 +118,7 @@
   "kitNote": [
     "Building for the desktop only? ",
     "GPUI Kit",
-    ", from the same Longbridge team, offers 75+ styled components for macOS, Windows and Linux, and NSH embeds in GPUI Kit apps through its GPUI backend."
+    ", from the same Longbridge team, offers 75+ styled components for macOS, Windows and Linux, and apps built with NSH embed directly in GPUI Kit apps."
   ],
   "closeTitle": [
     "Native views and interaction,",
