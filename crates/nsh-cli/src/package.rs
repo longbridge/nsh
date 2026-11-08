@@ -248,6 +248,24 @@ pub(crate) fn app_json(
     info.to_string()
 }
 
+/// The `app.json` of a desktop package (macOS, Windows, Linux) of the app
+/// `name` with the id `id`: its version and appearance, `schemes` and
+/// nsh.json `"window"`, which the runner reads before the app's code runs
+/// (`nsh_engine::Bundle::read_trusted`).
+pub(crate) fn desktop_app_json(
+    config: &AppConfig,
+    name: &str,
+    id: &str,
+    schemes: &[String],
+) -> String {
+    let version = config.version.as_deref().unwrap_or("1.0.0");
+    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
+    if let Some(appearance) = &config.appearance {
+        info["appearance"] = appearance.as_str().into();
+    }
+    app_json(info, schemes, config.window.as_ref())
+}
+
 /// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
 /// dev server's app info carries it.
 pub(crate) fn window_json(entry: &Path) -> Option<String> {
@@ -944,17 +962,10 @@ fn package_linux(
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
-    let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({
-        "name": name,
-        "id": id,
-        "version": version,
-        "schemes": config.schemes,
-    });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
-    fs::write(resources.join("app.json"), info.to_string())?;
+    fs::write(
+        resources.join("app.json"),
+        desktop_app_json(config, name, id, &config.url_schemes()),
+    )?;
     if let Some(icon) = &config.icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
             .with_context(|| format!("copy {}", icon.display()))?;
@@ -1044,15 +1055,10 @@ fn package_macos(
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
-    let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
-        app_json(info, &schemes, config.window.as_ref()),
+        desktop_app_json(config, name, id, &schemes),
     )?;
     let icon = match &config.icon {
         Some(icon) => {
@@ -1601,6 +1607,44 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    /// Every desktop package (macOS, Windows, Linux) writes nsh.json
+    /// `"window"` into its `app.json`, which the Windows and Linux packages
+    /// once left out.
+    #[test]
+    fn a_desktop_packages_app_json_carries_the_window() {
+        let window = serde_json::json!({
+            "title": "Stage",
+            "minSize": { "width": 1100, "height": 720 },
+            "titleBar": { "style": "hidden", "height": 44 }
+        });
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "version": "0.1.0",
+            "appearance": "dark",
+            "window": window,
+        }))
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&desktop_app_json(&config, "Stage", "com.a", &[])).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "name": "Stage",
+                "id": "com.a",
+                "version": "0.1.0",
+                "appearance": "dark",
+                "window": window,
+            })
+        );
+        // Without it, none: the runner's defaults.
+        let json: serde_json::Value =
+            serde_json::from_str(&desktop_app_json(&AppConfig::default(), "A", "com.a", &[]))
+                .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "name": "A", "id": "com.a", "version": "1.0.0" })
+        );
     }
 
     #[test]

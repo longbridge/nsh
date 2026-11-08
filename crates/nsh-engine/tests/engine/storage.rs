@@ -407,3 +407,30 @@ fn a_built_bundle_carries_its_apps_id() {
     assert_eq!(bundle.app_id.as_deref(), Some("com.example.built"));
     assert_eq!(App::Js(bundle).app_id(), Some("com.example.built"));
 }
+
+/// A desktop package's `app.json` carries nsh.json `"window"`
+/// (`nsh package`): the runner reads it with the bundle and opens the main
+/// window with it, before the app's code runs.
+#[test]
+fn a_packaged_bundle_carries_its_main_windows_options() {
+    use nsh_core::desktop::TitleBarStyle;
+    let dir = scratch("window");
+    std::fs::write(dir.join("bundle.js"), "").unwrap();
+    std::fs::write(
+        dir.join("app.json"),
+        r#"{ "id": "com.example.window", "window": { "title": "Stage",
+            "minSize": { "width": 1100, "height": 720 },
+            "titleBar": { "style": "hidden", "height": 44 } } }"#,
+    )
+    .unwrap();
+    let app = App::Js(Bundle::read(&dir.join("bundle.js")).unwrap());
+    let window = app.main_window().expect("the main window's options");
+    assert_eq!(window.attributes.title.as_deref(), Some("Stage"));
+    assert_eq!(
+        window.attributes.min_size,
+        Some(Some(Size::new(px(1100.0), px(720.0))))
+    );
+    let title_bar = window.attributes.title_bar.as_ref().unwrap();
+    assert_eq!(title_bar.style, TitleBarStyle::Hidden);
+    assert_eq!(title_bar.height, Some(px(44.0)));
+}
