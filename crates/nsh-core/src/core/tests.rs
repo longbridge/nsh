@@ -32265,3 +32265,66 @@ fn only_greedy_lines_without_a_limit_share_measurements() {
     measure_text(&greedy, &mut cache, &mut cx, Some(90.0));
     assert_eq!(greedy.measures.get(), 2);
 }
+
+#[test]
+fn overlays_with_a_cover_follow_its_size_changing() {
+    use StyleValue::Number;
+    let mut c = Core::new(FakeEngine::default(), size_pt(1920.0, 1080.0));
+    c.set_tokens(crate::element::tokens::sample());
+    // A slot 1904 × 464 at (8, 608), under a pane 600 tall.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(600.0))]);
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[("flexGrow", Number(1.0)), ("padding", Number(8.0))],
+    );
+    add(&mut c, 6, Tag::View, 4, &[("flexGrow", Number(1.0))]);
+    // A view over it whose size the app sets once the slot's is known.
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(0.0)), ("height", Number(0.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(6)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Cover(Some(10))),
+        ],
+    );
+    c.commit();
+    let resize = |c: &mut Core<FakeEngine>, w: f32, h: f32| {
+        apply(
+            c,
+            vec![style_op(10, &[("width", Number(w)), ("height", Number(h))])],
+        );
+        c.commit();
+        c.measure(10).map(|m| Bounds {
+            origin: m.page,
+            size: m.frame.size,
+        })
+    };
+    // As large as the slot: on it, not where its former 0 × 0 frame put it.
+    assert_eq!(
+        resize(&mut c, 1904.0, 464.0),
+        Some(rect(8.0, 608.0, 1904.0, 464.0))
+    );
+    // Taller: its middle on the slot's, kept inside the window.
+    assert_eq!(
+        resize(&mut c, 1888.0, 720.0),
+        Some(rect(8.0, 360.0, 1888.0, 720.0))
+    );
+    // Back: on the slot again, not where its former height put it.
+    assert_eq!(
+        resize(&mut c, 1904.0, 464.0),
+        Some(rect(8.0, 608.0, 1904.0, 464.0))
+    );
+}
