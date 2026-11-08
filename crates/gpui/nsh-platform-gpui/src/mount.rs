@@ -174,7 +174,9 @@ impl Mounter {
             }
             MountItem::Frame { id, frame } => {
                 let Some(view) = &self.get(*id) else { return };
-                if *id == ROOT_ID {
+                // The window decides its root's size: the main one, and
+                // each of the app's own ([`crate::window`]).
+                if *id == ROOT_ID || crate::window::is_root(surface, *id) {
                     return;
                 }
                 let mut frame = *frame;
@@ -464,7 +466,7 @@ impl Mounter {
                 }
             }
             Command::Back => crate::navigation::default_back(surface),
-            Command::Desktop(command) => crate::chrome::command(surface, command),
+            Command::Desktop(command) => crate::window::command(surface, id, view, command),
             other => crate::system::command(surface, id, other),
         }
     }

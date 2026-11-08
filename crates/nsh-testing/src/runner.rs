@@ -115,6 +115,9 @@ pub enum Reply {
         /// The capabilities the app declares (JSON), which it runs under.
         #[serde(default)]
         capabilities: Option<String>,
+        /// The URL schemes the app claims (`nsh.json` `schemes`).
+        #[serde(default)]
+        url_schemes: Vec<String>,
     },
     /// The entry is the app's Rust root, which the runner makes.
     Root,
@@ -205,6 +208,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 bytecode,
                 source_map,
                 capabilities,
+                url_schemes,
             } => {
                 let bytes = std::fs::read(&bytecode)
                     .map_err(|e| format!("read {}: {e}", bytecode.display()))?;
@@ -218,11 +222,12 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 // SAFETY: nsh compiled it for this runner just now, for the
                 // QuickJS build it links (the request's version, checked).
                 let bundle = unsafe { Bundle::bytecode(bytes) }
-                    .with_capabilities_json(capabilities.as_deref())?;
+                    .with_capabilities_json(capabilities.as_deref())?
+                    .with_url_schemes(url_schemes);
                 Ok(Built::Js(Box::new(bundle), map))
             }
             Reply::Root => root
-                .map(|root| Built::Rust(root()))
+                .map(|root| Built::Rust(Box::new(root())))
                 .ok_or_else(|| "this app has no Rust root".to_owned()),
             Reply::Failed { message } => Err(message),
         }
@@ -301,8 +306,15 @@ mod tests {
             bytecode: "/app/.nsh/test/build/1.nshc".into(),
             source_map: None,
             capabilities: Some(r#"{"network":{"hosts":["api.test"]}}"#.into()),
+            url_schemes: vec!["myapp".into()],
         };
         let line = serde_json::to_string(&reply).unwrap();
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
+        // A reply from an nsh that sends no schemes claims none.
+        let older = r#"{"built":"js","bytecode":"/b.nshc","source_map":null}"#;
+        assert!(matches!(
+            serde_json::from_str::<Reply>(older),
+            Ok(Reply::Js { url_schemes, .. }) if url_schemes.is_empty()
+        ));
     }
 }

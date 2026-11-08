@@ -170,7 +170,8 @@ Type checks the app. An app with Rust crates of its own (`nsh.json` `"rust"`) ha
 
 NSH-generated files stay under `.nsh/`: declarations, runner sources, and default build/package outputs in
 `.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior; NSH does not
-add Cargo configuration to relocate it. `--out` still overrides the output location.
+add Cargo configuration to relocate it. `--out` still overrides the output location. With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we
+recommend, the builds live under `~/.cargo/targets/` and the binaries still land in `target/`.
 
 ## nsh build
 
@@ -236,6 +237,15 @@ nsh package my-app --target web
 
 See [Packaging](./packaging.md).
 
+## nsh update
+
+Updates an installed `nsh` to the latest build of its channel; naming one, as `rustup update nightly`
+does, switches channels ([Installation](./installation.md#updating)).
+
+```sh
+nsh update [stable|nightly]
+```
+
 ## Signing commands
 
 These commands make and check signed packages (`.nshpkg`): app bundles that apps embedding NSH download and verify before running them. [Signed packages](./signed-packages.md) explains the model (an offline root key certifies release keys for some app ids).
@@ -251,10 +261,12 @@ Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen 
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
 ```
 
-Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform: see [App Updates](/docs/app-updates).
+Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
+with `--package`, a signed package of the app's code (`nsh publish`'s), which it checks against the app's id and
+`updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 
 ### nsh certify
 

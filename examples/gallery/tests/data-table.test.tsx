@@ -97,14 +97,15 @@ test("the DataTable demo serves the rows a far scroll lands on", async () => {
   }
 });
 
-test("the DataTable demo's horizontal bar drags the columns, and back", async () => {
+test("the DataTable demo's horizontal bar scrolls the columns, and back", async () => {
   const app = await still();
-  // The desktops' bar under the table leads while it is dragged: the
-  // table follows it without sending its echoes back.
-  await app.drag("id:data-table-scrollbar", { x: -900, y: 0 });
+  // The desktops' bar under the table leads while it scrolls: the table
+  // follows it without sending its echoes back. A scroll, as a trackpad or
+  // a wheel gives it: a mouse drags no desktop scroll view's content.
+  await app.scroll("id:data-table-scrollbar", 900);
   await app.waitFor("TTM");
   expect(app.shows("Price")).toBe(false);
-  await app.drag("id:data-table-scrollbar", { x: 900, y: 0 });
+  await app.scroll("id:data-table-scrollbar", -900);
   await app.waitFor("Price");
   expect(app.shows("TTM")).toBe(false);
 });

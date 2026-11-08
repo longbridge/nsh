@@ -21,6 +21,9 @@ crypto = ["quickjs-jit-stdlib/crypto"]
 
 [dependencies]
 serde_json.workspace = true
+serde.workspace = true
+# The language data numbers and dates format with (English built in).
+nsh-i18n.workspace = true
 log.workspace = true
 nsh-core.workspace = true
 rustc-hash.workspace = true

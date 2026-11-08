@@ -162,6 +162,13 @@ pub struct Screen {
     viewport: Option<Size<Points>>,
     /// The nodes each canvas's drawing has, as views of the model.
     canvas_nodes: HashMap<NodeId, Vec<NodeId>>,
+    /// The app's windows of its own, in the order they opened: each one's
+    /// root (a modal the platform shows in a window of its own,
+    /// `DesktopCommand::OpenWindow`) and the app's id for it.
+    windows: Vec<(NodeId, String)>,
+    /// Those not on screen (minimized, hidden, closed by a policy of
+    /// theirs), as the driver keeps them: their views are not found.
+    hidden_windows: HashSet<NodeId>,
     /// The id the next canvas node gets.
     next_canvas_node: NodeId,
 }
@@ -222,6 +229,9 @@ struct View {
     /// The text a text view shows, styles included, so a step can read a
     /// span's style.
     attributed: Option<Arc<nsh_core::AttributedText>>,
+    /// Where a text view's layout goes inside it (inside padding and
+    /// border).
+    text_content: Bounds<Points>,
     /// Which touches it and its subtree receive (`pointerEvents`).
     pointer_events: PointerEvents,
     /// Its children are read in screen order along this axis (a list in
@@ -267,6 +277,75 @@ impl Clip {
             Clip::Within(clip) => Clip::Within(clip.intersect(&bounds)),
         }
     }
+}
+
+/// A view on screen as layout placed it ([`Screen::layout_nodes`]): for
+/// checks of the layout itself (what overflows, overlaps or is cut). Its
+/// boxes are in the root's points and leave transforms aside: a scaled,
+/// rotated or translated view is reported at the box layout gave it.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct LayoutNode {
+    /// The view.
+    pub id: NodeId,
+    /// Its kind.
+    pub kind: ViewKind,
+    /// Its `testID`.
+    pub test_id: Option<Arc<str>>,
+    /// The view it is in ([`ROOT_ID`](nsh_core::ROOT_ID) for one at the
+    /// top).
+    pub parent: NodeId,
+    /// Its bounds in the root's points: moved by the views around it and
+    /// the offsets of the scroll views around it; a modal's from the
+    /// window's origin.
+    pub bounds: Bounds<Points>,
+    /// It or a view around it is hidden (`visibility: hidden`).
+    pub hidden: bool,
+    /// It clips what it holds (`overflow: hidden`).
+    pub clips: bool,
+    /// Its scrolling, for a scroll view.
+    pub scroll: Option<LayoutScroll>,
+    /// Its text, for a text view.
+    pub text: Option<LayoutText>,
+}
+
+impl Default for LayoutNode {
+    fn default() -> Self {
+        LayoutNode {
+            id: NodeId::default(),
+            kind: ViewKind::View,
+            test_id: None,
+            parent: NodeId::default(),
+            bounds: Bounds::default(),
+            hidden: false,
+            clips: false,
+            scroll: None,
+            text: None,
+        }
+    }
+}
+
+/// How a scroll view of [`LayoutNode::scroll`] scrolls.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct LayoutScroll {
+    /// It scrolls horizontally (else vertically).
+    pub horizontal: bool,
+    /// The size of its content, once known.
+    pub content_size: Option<Size<Points>>,
+}
+
+/// The text of a text view of [`LayoutNode::text`], as laid out.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct LayoutText {
+    /// The text with its runs' fonts, line limit and ellipsis: measured
+    /// with the engine that laid it out, it gives the width it needs.
+    pub text: Arc<nsh_core::AttributedText>,
+    /// The box it was laid out in (inside the view's padding and border),
+    /// in the root's points as [`LayoutNode::bounds`]: its width is the
+    /// width the text was given.
+    pub content: Bounds<Points>,
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -351,6 +430,7 @@ impl Screen {
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
+                self.forget_window(*id);
             }
             MountItem::Delete { id } => {
                 self.drop_spans(*id);
@@ -360,6 +440,7 @@ impl Screen {
                 self.children.remove(id);
                 self.popped.remove(id);
                 self.closed.remove(id);
+                self.forget_window(*id);
                 if self.focused == Some(*id) {
                     self.focused = None;
                 }
@@ -370,7 +451,10 @@ impl Screen {
             MountItem::ModalConfig { id, config } => {
                 self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
             }
-            MountItem::Frame { id, frame } => self.nodes.entry(*id).or_default().frame = *frame,
+            MountItem::Frame { id, frame } => {
+                self.nodes.entry(*id).or_default().frame = *frame;
+                self.pull_back(*id);
+            }
             MountItem::ViewStyle { id, style } => {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
@@ -410,11 +494,14 @@ impl Screen {
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
             }
-            MountItem::Text { id, text, .. } => {
+            MountItem::Text {
+                id, text, content, ..
+            } => {
                 {
                     let view = self.nodes.entry(*id).or_default();
                     view.text = Some(text.text.clone());
                     view.attributed = Some(Arc::clone(text));
+                    view.text_content = *content;
                 }
                 self.set_spans(*id, text);
             }
@@ -445,6 +532,7 @@ impl Screen {
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.content = Some(*size);
                 }
+                self.pull_back(*id);
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 // Not clamped: the core knows its content.
@@ -543,11 +631,17 @@ impl Screen {
                 self.file_answers.push((*id, (**request).clone()));
             }
             Command::Back => self.back_asked = true,
-            Command::Desktop(desktop) => {
-                if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
+            Command::Desktop(desktop) => match &**desktop {
+                nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } => {
                     self.menu = Some(items.clone());
                 }
-            }
+                nsh_core::desktop::DesktopCommand::OpenWindow(open)
+                    if !self.windows.iter().any(|(root, _)| *root == id) =>
+                {
+                    self.windows.push((id, open.options.id.clone()));
+                }
+                _ => {}
+            },
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -740,7 +834,7 @@ impl Screen {
         let mut out = Vec::new();
         let mut stack = vec![ROOT];
         while let Some(id) = stack.pop() {
-            if self.closed.contains(&id) {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
             if id != ROOT {
@@ -751,6 +845,70 @@ impl Screen {
             } else if let Some(children) = self.children.get(&id) {
                 stack.extend(children.iter().rev());
             }
+        }
+        out
+    }
+
+    /// The views of [`Screen::attached`] (below the root, of a stack only
+    /// its top screen, spans of text aside), in tree order, as layout
+    /// placed them.
+    pub fn layout_nodes(&self) -> Vec<LayoutNode> {
+        let mut out = Vec::new();
+        // A view, the view it is in, the origin of that view's content in
+        // the root's points, and whether a view around it is hidden.
+        let mut stack = vec![(ROOT, ROOT, Point::default(), false)];
+        while let Some((id, parent, origin, hidden)) = stack.pop() {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
+                continue;
+            }
+            let root = View::default();
+            let view = match self.nodes.get(&id) {
+                Some(view) if view.span.is_some() => continue,
+                Some(view) => view,
+                None if id == ROOT => &root,
+                None => continue,
+            };
+            let hidden = hidden || view.hidden;
+            let origin = if view.kind == Some(ViewKind::Modal) {
+                Point::default()
+            } else {
+                origin
+            };
+            let bounds = Bounds::new(origin + view.frame.origin, view.frame.size);
+            let mut content = bounds.origin;
+            if let Some(scroll) = &view.scroll {
+                content -= Point::new(scroll.x, scroll.y);
+            }
+            if id != ROOT
+                && let Some(kind) = view.kind
+            {
+                out.push(LayoutNode {
+                    id,
+                    kind,
+                    test_id: view.test_id.clone(),
+                    parent,
+                    bounds,
+                    hidden,
+                    clips: view.clips,
+                    scroll: view.scroll.as_ref().map(|s| LayoutScroll {
+                        horizontal: s.horizontal,
+                        content_size: s.content,
+                    }),
+                    text: view.attributed.as_ref().map(|text| LayoutText {
+                        text: Arc::clone(text),
+                        content: Bounds::new(
+                            bounds.origin + view.text_content.origin,
+                            view.text_content.size,
+                        ),
+                    }),
+                });
+            }
+            let children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+                self.screens(id).last().copied().into_iter().collect()
+            } else {
+                self.children.get(&id).cloned().unwrap_or_default()
+            };
+            stack.extend(children.into_iter().rev().map(|c| (c, id, content, hidden)));
         }
         out
     }
@@ -773,7 +931,7 @@ impl Screen {
         // parent shows.
         let mut stack = vec![(ROOT, Point::default(), window, false, true)];
         while let Some((id, origin, clip, hidden, parent_shown)) = stack.pop() {
-            if self.closed.contains(&id) {
+            if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
             // The root is the platform's: no batch creates it.
@@ -785,7 +943,8 @@ impl Screen {
             };
             let hidden = hidden || view.hidden;
             // A modal is presented over the window, wherever it is in the
-            // tree.
+            // tree; a window of the app's own is a window of its own, as
+            // large as the main one (its root fills it).
             let (origin, clip) = if view.kind == Some(ViewKind::Modal) {
                 (Point::default(), window)
             } else {
@@ -913,7 +1072,7 @@ impl Screen {
             .iter()
             .rev()
             .copied()
-            .find(|id| self.kind(*id) == Some(ViewKind::Modal));
+            .find(|id| self.kind(*id) == Some(ViewKind::Modal) && !self.is_window(*id));
         let can_go_back = |stack: NodeId| {
             let screens = self.screens(stack);
             screens.len() >= 2
@@ -967,9 +1126,60 @@ impl Screen {
         self.closed.insert(modal);
     }
 
-    /// The modals presented since the last call.
+    /// The modals presented since the last call (not the windows of the
+    /// app's own: the platform shows those in windows of their own).
     pub(crate) fn take_presented(&mut self) -> Vec<NodeId> {
-        std::mem::take(&mut self.presented)
+        let mut presented = std::mem::take(&mut self.presented);
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether `id` is the root of a window of the app's own.
+    pub(crate) fn is_window(&self, id: NodeId) -> bool {
+        self.windows.iter().any(|(root, _)| *root == id)
+    }
+
+    /// The root of the window view `id` is in: a window of the app's own,
+    /// else the main window's root.
+    pub(crate) fn window_of(&self, mut id: NodeId) -> NodeId {
+        loop {
+            if self.is_window(id) {
+                return id;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return ROOT,
+            }
+        }
+    }
+
+    /// The root of the window the app calls `id` (`"main"`: the main
+    /// window's), while it is open.
+    pub(crate) fn window_root(&self, id: &str) -> Option<NodeId> {
+        if id == "main" {
+            return Some(ROOT);
+        }
+        self.windows
+            .iter()
+            .find(|(_, own)| own == id)
+            .map(|(root, _)| *root)
+    }
+
+    /// Window `root` of the app's own is on screen (`!hidden`) or not
+    /// (minimized, hidden, closed by a policy until the app removes it).
+    pub(crate) fn set_window_hidden(&mut self, root: NodeId, hidden: bool) {
+        if hidden {
+            self.hidden_windows.insert(root);
+        } else {
+            self.hidden_windows.remove(&root);
+        }
+    }
+
+    /// Node `id` left the tree: when it was a window's root, the window
+    /// closed.
+    fn forget_window(&mut self, id: NodeId) {
+        self.windows.retain(|(root, _)| *root != id);
+        self.hidden_windows.remove(&id);
     }
 
     /// Whether the app asked for a back since the last call.
@@ -1070,10 +1280,12 @@ impl Screen {
     /// topmost modal's first (the last presented), then the rest.
     fn by_layer(&self) -> Vec<NodeId> {
         let attached = self.shown();
+        // Windows of the app's own are side by side with the main one, not
+        // over it: their views are found in tree order.
         let modals: Vec<NodeId> = attached
             .iter()
             .copied()
-            .filter(|id| self.kind(*id) == Some(ViewKind::Modal))
+            .filter(|id| self.kind(*id) == Some(ViewKind::Modal) && !self.is_window(*id))
             .collect();
         let Some(top) = modals.last() else {
             return attached;
@@ -1378,7 +1590,7 @@ impl Screen {
     /// a press still reaches as before), or a view that handles presses or
     /// touches itself.
     pub(crate) fn covering(&self, target: NodeId, at: Point<Points>) -> Option<NodeId> {
-        let hit = self.hit_pointer(at);
+        let hit = self.hit_pointer(at, self.window_of(target));
         let reaches = hit == target || self.is_inside(hit, target) || self.is_inside(target, hit);
         if reaches {
             return None;
@@ -1414,11 +1626,28 @@ impl Screen {
         }
     }
 
-    /// The view a pointer at `at` (in the root) reaches: the topmost,
-    /// innermost one there that receives touches. Canvas nodes are not views.
-    fn hit_pointer(&self, at: Point<Points>) -> NodeId {
-        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
-        self.hit_in(ROOT, at, &attached).unwrap_or(ROOT)
+    /// The view a pointer at `at` (in the root of `window`, a window's
+    /// root) reaches in that window: the topmost, innermost one there that
+    /// receives touches. Canvas nodes are not views, and the windows of the
+    /// app's own are windows of their own.
+    fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
+        let order = self.attached();
+        let attached: HashSet<NodeId> = order.iter().copied().collect();
+        // The dialogs presented over this window first, the last one on
+        // top: a dialog is over its window wherever its node is in the
+        // tree, so the views around that node (a card that clips) take no
+        // part in where it is hit.
+        let dialogs = order.iter().rev().copied().filter(|id| {
+            self.kind(*id) == Some(ViewKind::Modal)
+                && !self.is_window(*id)
+                && self.window_of(*id) == window
+        });
+        for dialog in dialogs {
+            if let Some(hit) = self.hit_in(dialog, at, &attached) {
+                return hit;
+            }
+        }
+        self.hit_in(window, at, &attached).unwrap_or(window)
     }
 
     fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
@@ -1427,7 +1656,9 @@ impl Screen {
         if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
             return None;
         }
-        let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
+        let inside = id == ROOT
+            || self.is_window(id)
+            || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
         // Unclipped children can receive a pointer outside their parent's box.
         if !inside
             && (receives == PointerEvents::BoxOnly
@@ -1440,7 +1671,9 @@ impl Screen {
         {
             for &child in children.iter().rev() {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
-                if node || !attached.contains(&child) {
+                // Windows are windows of their own; dialogs were tried
+                // first ([`Screen::hit_pointer`]).
+                if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
                     continue;
                 }
                 if let Some(hit) = self.hit_in(child, at, attached) {
@@ -1459,7 +1692,7 @@ impl Screen {
         if let [id] = matches[..]
             && let Some(at) = self.canvas_node_center(id)
         {
-            let Some(target) = self.up_to(self.hit_pointer(at), |v| {
+            let Some(target) = self.up_to(self.hit_pointer(at, self.window_of(id)), |v| {
                 v.events.contains(EventKind::Press)
             }) else {
                 return Pick::None;
@@ -1722,7 +1955,12 @@ impl Screen {
         }
         let view = self.nodes.get(&id)?;
         let mut origin = view.frame.origin;
-        let mut at = view.parent;
+        // A modal (a window of the app's own too) is placed over its
+        // window, wherever it is in the tree: what it holds is where it
+        // is in it, in that window's points.
+        let mut at = (view.kind != Some(ViewKind::Modal))
+            .then_some(view.parent)
+            .flatten();
         while let Some(parent) = at {
             let Some(p) = self.nodes.get(&parent) else {
                 break;
@@ -1730,6 +1968,9 @@ impl Screen {
             origin += p.frame.origin;
             if let Some(scroll) = &p.scroll {
                 origin -= nsh_core::Point::new(scroll.x, scroll.y);
+            }
+            if p.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = p.parent;
         }
@@ -1962,6 +2203,27 @@ impl Screen {
         }
     }
 
+    /// Scroll view `id`'s content or viewport changed: an offset past the
+    /// new end comes back to it and is reported, as the platforms' scroll
+    /// views do (UIKit adjusts the offset as the content size changes, the
+    /// desktops clamp what they report), so the rows that remain show. A
+    /// pull past the start is the finger's and stays.
+    fn pull_back(&mut self, id: NodeId) {
+        let end = self.scroll_end(id);
+        let Some(scroll) = self.scroll_mut(id) else {
+            return;
+        };
+        let at = if scroll.horizontal {
+            &mut scroll.x
+        } else {
+            &mut scroll.y
+        };
+        if *at > end {
+            *at = end;
+            self.scrolled.push(id);
+        }
+    }
+
     /// The scroll views a command moved since the last call.
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
@@ -2171,6 +2433,77 @@ mod tests {
         // A line break starts a line.
         screen.input_mut(2).unwrap().text = "ab\nc".into();
         assert_eq!(caret(&screen), (4.0 + 5.5, 18.0, 12.0));
+    }
+
+    #[test]
+    fn an_offset_past_the_content_comes_back_to_its_end_and_is_reported() {
+        let mut screen = Screen::default();
+        let content = |height: f32| MountItem::ScrollContent {
+            id: 2,
+            size: Size::new(Points(390.0), Points(height)),
+        };
+        let by = |dy: f32| MountItem::ScrollBy {
+            id: 2,
+            dx: Points::ZERO,
+            dy: Points(dy),
+        };
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Scroll),
+            frame(2, 0.0, 0.0, 390.0, 800.0),
+            content(56.0),
+            insert(1, 2),
+        ]));
+        // Rows arrive above the one row: the core keeps it in place with a
+        // scroll it sends before the new content size, and the view goes
+        // as far as that size lets it.
+        screen.apply(&batch(vec![by(1176.0), content(1232.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(432.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // The content shrinks to a row again: the offset follows, so the
+        // row shows.
+        screen.apply(&batch(vec![content(56.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points::ZERO);
+        assert_eq!(screen.take_scrolled(), [2]);
+        // So does a viewport growing past the content's end.
+        screen.apply(&batch(vec![by(432.0), content(1232.0)]));
+        assert!(screen.take_scrolled().is_empty());
+        screen.apply(&batch(vec![frame(2, 0.0, 0.0, 390.0, 1000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(232.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // A pull past the start is the finger's: content changes leave it.
+        screen.scroll_mut(2).unwrap().y = Points(-40.0);
+        screen.apply(&batch(vec![content(2000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
+        assert!(screen.take_scrolled().is_empty());
+    }
+
+    #[test]
+    fn layout_nodes_hold_only_the_top_screen_of_a_stack() {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Stack),
+            create(4, ViewKind::Screen),
+            create(6, ViewKind::Text),
+            create(8, ViewKind::Screen),
+            create(10, ViewKind::Text),
+            frame(2, 0.0, 0.0, 100.0, 200.0),
+            frame(4, 0.0, 0.0, 100.0, 200.0),
+            frame(8, 0.0, 0.0, 100.0, 200.0),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            frame(10, 0.0, 0.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+            insert(2, 8),
+            insert(8, 10),
+        ]));
+        let ids = |screen: &Screen| -> Vec<NodeId> {
+            screen.layout_nodes().iter().map(|n| n.id).collect()
+        };
+        assert_eq!(ids(&screen), [2, 8, 10]);
+        // Popped: the screen under it is the one laid out.
+        screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
+        assert_eq!(ids(&screen), [2, 4, 6]);
     }
 
     #[test]

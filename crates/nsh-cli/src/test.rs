@@ -432,7 +432,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities) = match kind {
+        let (bytecode, map, capabilities, url_schemes) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -458,6 +458,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             bytecode: file,
             source_map,
             capabilities,
+            url_schemes,
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
@@ -478,12 +479,13 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     bytecode_of(entry, &sets, false)
 }
 
-/// A compiled entry: its bytecode, its source map and the capabilities its
-/// `nsh.json` declares (JSON), which the app runs under, as on a device.
-type Compiled = (Vec<u8>, Option<String>, Option<String>);
+/// A compiled entry: its bytecode, its source map, and the capabilities
+/// (JSON) and URL schemes its `nsh.json` declares, which the app runs
+/// under, as on a device.
+type Compiled = (Vec<u8>, Option<String>, Option<String>, Vec<String>);
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map and declared capabilities; `announce`: saying so.
+/// source map, declared capabilities and URL schemes; `announce`: saying so.
 fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
@@ -505,7 +507,12 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
     }
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
     let capabilities = bundle.capabilities.map(|c| c.to_json().to_string());
-    Ok((bytecode, bundle.source_map, capabilities))
+    Ok((
+        bytecode,
+        bundle.source_map,
+        capabilities,
+        bundle.url_schemes,
+    ))
 }
 
 /// Prints how a test of the file shown as `file` ended: a line, and for a
@@ -775,7 +782,7 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities) = match kind {
+        let (bytecode, map, capabilities, url_schemes) = match kind {
             Entry::App => {
                 let entry =
                     crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
@@ -803,7 +810,9 @@ fn compiler() -> nsh_testing::Compile {
         };
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }
-            .with_capabilities_json(capabilities.as_deref())?;
+            .with_capabilities_json(capabilities.as_deref())?
+            // The schemes it claims, as a packaged app's runner reads them.
+            .with_url_schemes(url_schemes);
         Ok(Built::Js(Box::new(bundle), map))
     })
 }
@@ -929,6 +938,22 @@ test src/lib.rs - App (line 3) ... ok
             dir.join("src/cart/Cart.tsx")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn apps_open_with_the_url_schemes_their_nsh_json_claims() {
+        let dir = std::env::temp_dir().join(format!("nsh-test-schemes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("nsh.json"), r#"{ "schemes": ["MyApp"] }"#).unwrap();
+        std::fs::write(dir.join("App.tsx"), "export {};\n").unwrap();
+        let built = compiler()(&dir.join("App.tsx"), Entry::App);
+        std::fs::remove_dir_all(&dir).unwrap();
+        match built {
+            Ok(Built::Js(bundle, _)) => assert_eq!(bundle.url_schemes, ["myapp"]),
+            Ok(_) => panic!("a TSX entry builds to JS"),
+            Err(e) => panic!("{e}"),
+        }
     }
 
     #[test]

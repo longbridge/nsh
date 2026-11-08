@@ -288,6 +288,15 @@ fn the_page_s_host_answers_the_apps_tests_open() {
 }
 
 #[test]
+fn headless_desktops_play_the_platform_s_windows() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/windows");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 7);
+}
+
+#[test]
 fn apps_run_under_the_capabilities_their_nsh_json_declares() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/capabilities");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();

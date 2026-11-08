@@ -19,6 +19,7 @@ slab.workspace = true
 taffy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rust-i18n.workspace = true
 nsh-macros.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }
 log.workspace = true

@@ -354,6 +354,11 @@ impl NshView {
         *self.0.invalidate.borrow_mut() = Some(invalidate);
     }
 
+    /// It is no longer a root of its own ([`NshView::set_invalidate`]).
+    pub(crate) fn clear_invalidate(&self) {
+        self.0.invalidate.borrow_mut().take();
+    }
+
     /// Something it draws changed: its surface draws again (if it is in
     /// one).
     pub(crate) fn changed(&self) {

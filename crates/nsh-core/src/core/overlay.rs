@@ -112,8 +112,8 @@ pub(super) struct OverlayState {
     /// Escape or a press hid it).
     pub(super) focus_shown: bool,
     /// Its `cover` view's frame in it, once that was laid out, with the
-    /// overlay's size and the view's origin in its parent then.
-    pub(super) covered: Option<(Bounds<Points>, Size<Points>, Point<Points>)>,
+    /// overlay's size and the view's frame in its parent then.
+    pub(super) covered: Option<(Bounds<Points>, Size<Points>, Bounds<Points>)>,
 }
 
 impl OverlayState {
@@ -1026,8 +1026,13 @@ impl<M: TextEngine> Core<M> {
         if host == ROOT_ID {
             return Some((self.viewport, self.safe_area));
         }
-        let root = self.nodes[self.key(host).ok()? as usize].root.as_ref()?;
-        Some((root.reported.unwrap_or(self.viewport), root.insets))
+        let key = self.key(host).ok()?;
+        let root = self.nodes[key as usize].root.as_ref()?;
+        // A window whose size is not known yet: as large as its content.
+        let size = self
+            .root_view_size(key)
+            .unwrap_or(self.nodes[key as usize].frame.size);
+        Some((size, root.insets))
     }
 
     /// Lays out shown overlay `key` in a box the size of its root view,
@@ -1464,9 +1469,9 @@ impl<M: TextEngine> Core<M> {
 
     /// Where overlay `key`'s `cover` view is in it: taken once both are
     /// laid out and kept while the overlay keeps its size `size` and the
-    /// view its place in its parent, so its content scrolling moves
+    /// view its frame in its parent, so its content scrolling moves
     /// nothing (a new width once the trigger's is known, a row inserted
-    /// before it, take it again).
+    /// before it, the view growing or shrinking, take it again).
     fn covering(
         &mut self,
         key: Key,
@@ -1476,8 +1481,11 @@ impl<M: TextEngine> Core<M> {
         let cover = config.cover?;
         let inner = self.measure(cover)?;
         // Its frame in its parent: a scroll moves the parent's content,
-        // not this; a row inserted before it does.
-        let place = inner.frame.origin;
+        // not this; a row inserted before it does. Its size too: placed
+        // while the overlay's own frame is out, the view still has its
+        // former one (its frame comes out after), and the end of the
+        // commit, which places the overlay again, must not keep that.
+        let place = inner.frame;
         if let Some((at, kept, was)) = self.overlay(key)?.covered
             && kept == size
             && was == place

@@ -54,6 +54,7 @@ fn config() -> EngineConfig {
         picker: None,
         speech: None,
         audio: None,
+        windows: None,
     }
 }
 

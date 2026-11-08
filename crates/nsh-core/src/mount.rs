@@ -83,6 +83,10 @@ pub struct WebProps {
     /// HTTP cache and no saved form data). Read when the platform makes the
     /// web view: the core keeps it from changing afterwards.
     pub incognito: bool,
+    /// The URL schemes the page loads from the app
+    /// ([`crate::web_resource`]). Read when the platform makes the web
+    /// view, as `incognito`.
+    pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
 }
 
 impl Default for WebProps {
@@ -98,6 +102,7 @@ impl Default for WebProps {
             javascript_enabled: true,
             back_forward_gestures: false,
             incognito: false,
+            url_schemes: Vec::new(),
         }
     }
 }
@@ -502,6 +507,12 @@ pub struct ModalConfig {
     pub close_on_backdrop_press: bool,
     /// Swiping a sheet down closes it natively (`closeOnSwipe`).
     pub close_on_swipe: bool,
+    /// The window it shows in (desktops): [`crate::ROOT_ID`], the main
+    /// window, or the root of the app's window of its own that holds it
+    /// (a dialog opened from a `<Window>`'s content shows over that
+    /// window, not the main one). For a window's own root: the window
+    /// holding its node. The core works it out from where the node is.
+    pub window: NodeId,
 }
 
 impl Default for ModalConfig {
@@ -514,6 +525,7 @@ impl Default for ModalConfig {
             close_on_escape: true,
             close_on_backdrop_press: true,
             close_on_swipe: true,
+            window: crate::ROOT_ID,
         }
     }
 }

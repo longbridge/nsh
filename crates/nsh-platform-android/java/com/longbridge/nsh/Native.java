@@ -84,6 +84,7 @@ final class Native {
     static final int NOTIFICATION = 72;
     static final int URL_SCHEME = 73;
     static final int AUDIO = 74;
+    static final int WINDOW = 75;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -139,6 +140,9 @@ final class Native {
      */
     static native String setThemeOverrides(long handle, String json);
 
+    /** Registers a font file; returns an error, or null. */
+    static native String registerFont(long handle, byte[] data);
+
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
 
@@ -156,7 +160,7 @@ final class Native {
     static native byte[] imageBytes(long handle, String uri);
 
     /** {@code capabilities}: the app's declaration (JSON), {@code app}: its {@code app.json} ({@code id}); null for none. */
-    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app);
+    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app, String updater);
 
     static native boolean connectDevServer(long handle, String url);
 

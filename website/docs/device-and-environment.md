@@ -223,29 +223,21 @@ The text size scales text: every text and input that allows font scaling, and th
 
 ## Language and region
 
-`locale()` is the user's locale, as a BCP 47 tag (`locale().as_str()` in Rust). In TSX, `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
+`locale()` is the user's locale, as a BCP 47 tag (`locale().as_str()` in Rust). In TSX, `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. What reads it updates when it changes.
+
+The app's own text in each language comes from its translations: `t("hello")` (`nsh/i18n`; Rust `t!("hello")`) shows a key in the user's language, and `setLocale` shows the app in another one. See [I18n](./i18n.md).
 
 ```rust tabs
 use nsh_core::prelude::*;
 
-fn greeting() -> &'static str {
-    match locale().as_str().split('-').next() {
-        Some("de") => "Willkommen",
-        Some("zh") => "欢迎",
-        _ => "Welcome",
-    }
-}
-
-text(greeting)
+text(move || t!("welcome"))
 ```
 
 ```tsx tabs
 import { Text } from "nsh";
-import { locale } from "nsh";
+import { t } from "nsh/i18n";
 
-const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
-
-<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+<Text>{t("welcome")}</Text>
 ```
 
 ## Locale settings
@@ -283,30 +275,7 @@ others ([Testing](./testing-and-trace.md#steps)).
 
 ### Preferred languages
 
-`languages` is the user's list of preferred languages, most preferred first, as BCP 47 tags: the system's (Settings' language list on a phone, the UI languages of a desktop, the browser's on the web). Show the app's text in the first one it has a translation for, and fall back along the list: a user who prefers Swiss German, then German, then English gets German text from an app that has German and English. `locale()` is something else, the region format numbers and dates follow, which can be another (English text, German dates). The list is never empty, and what read it updates when the user changes it.
-
-```rust tabs
-use nsh_core::prelude::*;
-
-const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
-
-fn text_language() -> &'static str {
-    locale_settings()
-        .languages
-        .iter()
-        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
-        .unwrap_or("en")
-}
-```
-
-```tsx tabs
-import { localeSettings } from "nsh";
-
-const TRANSLATED = ["en", "de", "zh"];
-
-const textLanguage = () =>
-  localeSettings().languages.map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
-```
+`languages` is the user's list of preferred languages, most preferred first, as BCP 47 tags: the system's (Settings' language list on a phone, the UI languages of a desktop, the browser's on the web). An app's text shows in the first one it has a translation for, falling back along the list: a user who prefers Swiss German, then German, then English gets German text from an app that has German and English. `t` (`nsh/i18n`) picks it so ([I18n](./i18n.md)). `locale()` is something else, the region format numbers and dates follow, which can be another (English text, German dates). The list is never empty, and what read it updates when the user changes it.
 
 An app shown inside a native app that sets its own language has that language first.
 

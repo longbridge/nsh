@@ -41,6 +41,8 @@ nsh run                        # 本机的后端；--target ios、android、web�
 nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows
 ```
 
+推荐用 [huacnlee/cargo](https://github.com/huacnlee/cargo) 构建，NSH 自己的开发也用它：一个可以直接替换官方 Cargo 的分支，每个依赖只为你所有的项目和 Git worktree 构建一次，构建目录自己控制在大小限制之内，不需要任何配置（[安装](./installation.md#用-rust-编写的应用)）。
+
 `src/lib.rs` 包含整个应用：组件、状态、事件处理和任务。
 
 ```rust
@@ -129,8 +131,8 @@ iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。
 
 ## 桌面标题栏
 
-Rust 应用通过 `nsh_core::element::desktop` 绘制自定义标题栏。调用
-`set_title_bar(TitleBarStyle::Hidden, Some(height))`，将背景设为
+Rust 应用通过 `nsh_core::element::desktop` 绘制自定义标题栏。用
+`current_window().set(..)` 把窗口的 `title_bar` 属性设为 `TitleBarStyle::Hidden`，将背景设为
 `.window_drag(true)`，并通过 `title_bar()` 为系统窗口按钮留出空间。
 返回值的 `top` 是标题栏高度，`left` 和 `right` 是两侧系统按钮占用的宽度。
 读取会订阅变化，包括进入和退出全屏。平台负责窗口拖动和用户设置的标题栏双击行为；
@@ -138,12 +140,18 @@ Rust 应用通过 `nsh_core::element::desktop` 绘制自定义标题栏。调用
 
 ```rust
 use nsh_core::{
-    desktop::TitleBarStyle,
-    element::{desktop::{close_window, set_title_bar, title_bar}}, prelude::*,
+    desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes, WindowControl},
+    element::desktop::{current_window, title_bar},
+    prelude::*,
 };
 
 fn window_bar() -> impl IntoElement {
-    set_title_bar(TitleBarStyle::Hidden, Some(px(42.0)));
+    let mut bar = TitleBarOptions::default();
+    bar.style = TitleBarStyle::Hidden;
+    bar.height = Some(px(42.0));
+    let mut attributes = WindowAttributes::default();
+    attributes.title_bar = Some(bar);
+    current_window().set(attributes);
     view()
         .h(px(42.0))
         .flex_row()
@@ -152,14 +160,14 @@ fn window_bar() -> impl IntoElement {
         .pl(move || title_bar().left + px(12.0))
         .pr(move || title_bar().right + px(12.0))
         .child(text("My app").flex_1())
-        .child(text("Close").window_drag(false).on_press(close_window))
+        .child(text("Close").window_control(WindowControl::Close))
 }
 ```
 
-`set_title_bar(TitleBarStyle::Default, None)` 恢复系统标题栏。
-`close_window()` 遵循宿主的正常窗口关闭行为。
-这个模块还有窗口的其他函数（`set_title`、`minimize`、`toggle_full_screen`……）
-和菜单（`set_application_menu`、`popup_menu`）：见 [nsh/desktop](../modules/nsh-desktop.md)。
+`TitleBarStyle::Default` 的标题栏恢复系统标题栏。带 `.window_control(..)` 的视图就是窗口的最小化、
+最大化或关闭按钮：平台执行它的按下动作，关闭遵循窗口的 `close_on_press`。`WindowRef`
+有窗口的其他请求（`set_mode`、`minimize`、`set_bounds`、`close`……），`window()` 打开应用自己的窗口，
+这个模块还有菜单（`set_application_menu`、`popup_menu`）：见 [nsh/desktop](../modules/nsh-desktop.md)。
 
 ## 文件和文件夹
 
@@ -437,6 +445,12 @@ test("a tap counts", async () => {
   expect(app.texts()).toContain("Count: 1");
 });
 ```
+
+文字默认按估算宽度排版（每个字符为字号的 `0.55 ×`）；测试用 `Headless::start_with_text_engine` 启动应用时，传入一个在引擎线程上
+创建平台文字引擎的函数（`nsh_platform_macos::CoreTextEngine`、`nsh_platform_windows::DWriteTextEngine`），文字就按屏幕上的宽度量。
+`app.screen().layout_nodes()` 按树的顺序返回屏幕上的视图及布局给出的位置（`LayoutNode`：种类、test id、父视图、
+根视图坐标下未计变换的边界、是否隐藏、是否裁剪，`scroll` 里是滚动视图的方向和内容尺寸，`text` 里是文字视图的文字及其排版所用的框），
+测试据此检查有没有视图超出父视图、被裁剪的视图截掉，或文字放不下。两者都是 `nsh_testing` 给 `cargo test` 用的 Rust API。
 
 TSX 入口用 `nsh-testing` 的特性 `bundle` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由
 `#[native_module]` 生成的 `registry()`：

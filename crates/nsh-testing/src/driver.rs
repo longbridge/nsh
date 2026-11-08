@@ -149,6 +149,14 @@ pub(crate) trait Driver: Send {
     fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Err(headless_only("reading the storage this way"))
     }
+    /// The state of the app's window `id` as the platform reports it;
+    /// `None` while it is not open.
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String>;
+    /// The user presses the close button of the app's window `id`.
+    fn press_window_close(&mut self, id: &str) -> Result<(), String>;
+    /// A picture of the app's window `id`, as [`Driver::screenshot`] is of
+    /// the main window: PNG bytes of its content.
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String>;
 }
 
 impl Driver for Headless {
@@ -345,6 +353,18 @@ impl Driver for Headless {
                 .into(),
         )
     }
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        Headless::window_state(self, id)
+    }
+    fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        Headless::press_window_close(self, id)
+    }
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String> {
+        if Headless::window_state(self, id)?.is_none() {
+            return Err(format!("no window {id:?} is open"));
+        }
+        self.screenshot()
+    }
 }
 
 /// A real platform's host running an app for a test (`nsh test --target`):
@@ -449,6 +469,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::HostSend { name, .. } => format!("host.send({name})"),
         TestStep::Back => "back".to_owned(),
+        TestStep::PressWindowClose { id } => format!("window({id}).pressClose"),
         TestStep::Wait { ms } => format!("wait({ms})"),
         TestStep::Clock {
             change: ClockChange::RunFor { ms },
@@ -728,6 +749,20 @@ impl Driver for Remote {
         self.query(TestStep::Scene {
             query: nsh_dev::protocol::SceneQuery::Storage,
         })
+    }
+    fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
+        let value = self.take(TestStep::WindowState { id: id.into() })?;
+        crate::window_json::from_json(value)
+    }
+    fn press_window_close(&mut self, id: &str) -> Result<(), String> {
+        self.action(TestStep::PressWindowClose { id: id.into() })
+    }
+    fn window_screenshot(&mut self, id: &str) -> Result<Vec<u8>, String> {
+        use base64::Engine as _;
+        let png: String = self.query(TestStep::WindowScreenshot { id: id.into() })?;
+        base64::engine::general_purpose::STANDARD
+            .decode(png)
+            .map_err(|e| format!("the host sent a broken picture: {e}"))
     }
 }
 

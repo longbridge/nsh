@@ -121,15 +121,17 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
-    "openUrl": { "schemes": ["https", "mailto"] }
+    "openUrl": { "schemes": ["https", "mailto"] },
+    "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
 }
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
 restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, and the host's functions
-through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
-build errors, so a typo is caught when you build instead of becoming a missing permission at runtime. A [signed
+through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. A key or value NSH
+cannot read grants nothing: the build warns of it, so a typo shows up when you build instead of as a missing permission
+at runtime. A [signed
 package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
 runtime does not know: they are not granted there.
 
@@ -154,7 +156,10 @@ An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
-`https://api.example.com@evil.io/` is checked as `evil.io`.
+`https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
+granted only by `*` in `hosts` (or a `*` rule with no port or path): one with a backslash before its query (write
+`%5C`), a control character, or a host with percent-encoding or a character hosts cannot contain (a space, `<`, `>`,
+`^`, `|`, or `[` / `]` outside an IPv6 address).
 
 A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
@@ -173,7 +178,8 @@ paths.
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
 `about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
-allows them without allowing any remote page.
+allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
+web views, so the base URL needs the grant a page there would: its host in `hosts`.
 
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
@@ -215,6 +221,21 @@ Lets the app open URLs outside it ([`openUrl`](../modules/nsh.md#openurl), a `Te
 listed. A URL whose scheme is not granted rejects with `ERR_ACCESS_DENIED` (`permission` `"openUrl"`, `resource` the
 URL). URLs that would run code or reach the app's own data
 (`javascript:`, `data:`, `file:`, ...) are never opened, whatever the capability.
+
+### `windows`
+
+Lets the app open windows of its own on the desktops ([`Window`](../modules/nsh-desktop.md#windows)): `"windows": true`
+for every kind but overlays, or an object that narrows it:
+
+| Key | Type | Description |
+|---|---|---|
+| `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
+| `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
+| `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
+| `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
+
+`overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
+The main window needs no grant.
 
 ### Storage
 
@@ -261,6 +282,7 @@ if (host.available()) {
 | Files (`fs/promises`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"fs"` and `resource` the path; the disk is never touched. |
 | Processes (`process`) | `run` rejects, and `spawn` and `exit` throw, with `ERR_ACCESS_DENIED`, `permission` `"process"` and `resource` the command (`"exit"` for `exit`); no child starts. |
 | TCP socket (`net.connect`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the `"host:port"`, before any DNS lookup. |
+| Window (`Window.open`, `<Window>`) | Throws `ERR_ACCESS_DENIED`, `permission` `"windows"` and `resource` the window's id; nothing opens. An attribute of `set()` not granted is left as it is, with a warning. |
 | WebSocket | The `websocket` module's `connect` rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the URL; the global `WebSocket` fires `error` and then `close` (code 1006), as a connection that fails does. |
 
 The errors of the [standard modules](../modules/standard-modules.md#failures) carry `code` `"ERR_ACCESS_DENIED"`, so an
@@ -340,7 +362,7 @@ them.
 |---|---|---|
 | Limits (heap, stack, time, nodes) | the runtime, per VM | the host app per view (embedded apps) |
 | Hardening | the runtime, on load | always on outside development |
-| Capabilities | the runtime (fetch, images, video, web views, status bar, files, processes, sockets) | the app (`nsh.json`) and the host app (grant) |
+| Capabilities | the runtime (fetch, images, video, web views, status bar, windows, files, processes, sockets) | the app (`nsh.json`) and the host app (grant) |
 | Code integrity | signature verification | `nsh publish`; the host app's trusted roots |
 
 ## See also

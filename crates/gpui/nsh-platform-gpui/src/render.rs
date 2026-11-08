@@ -804,6 +804,7 @@ impl Element for SurfaceElement {
         // would hear keys only while focus is inside the component.
         crate::events::install(
             &surface,
+            None,
             &self.focus,
             &self.view,
             hitbox,

@@ -13,7 +13,9 @@ export { createAnimation } from "./animation.js";
 export { createNavigation } from "./navigation.js";
 export { createKeymap } from "./keymap.js";
 export { createEnvironment } from "./environment.js";
+export { createI18n } from "./i18n.js";
 export { installTesting } from "./testing.js";
+export { installFetch } from "./fetch.js";
 export { createHot } from "./hot.js";
 
 
@@ -26,8 +28,28 @@ export function configureAPIs(nsh, modules, dom, active, env) {
   const process = modules.exports.get("process");
   if (process) { process.nextTick = nsh.nextTick; if (process.default) process.default.nextTick = nsh.nextTick; }
   const desktop = modules.exports.get("nsh/desktop");
+  // The browser keeps its own window: the page is the main window, which
+  // apps cannot move or change; `<Window>` renders nothing and
+  // `Window.open` throws, as on mobile.
+  const main = Object.freeze({
+    id: "main", main: true, parent: null,
+    state: () => null, titleBar: env.titleBar, set() {},
+    show() {}, hide() {}, focus() {}, close() {}, minimize() {}, restore() {},
+    setMode() {}, setBounds() {}, setPlacement() {}, center() {}, requestAttention() {},
+    on: () => () => {},
+  });
+  const Window = Object.assign(() => null, {
+    open() {
+      const error = new Error("Window.open: windows of the app's own open on the desktops (`isAvailable`)");
+      error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+      throw error;
+    },
+    get: id => (id === "main" ? main : null),
+  });
   if (desktop) Object.assign(desktop, {
     isAvailable: false, titleBar: env.titleBar,
+    Window, currentWindow: () => main, windows: () => [main], focusedWindow: () => null,
+    windowState: () => null, displays: () => [],
     Menu: { setApplicationMenu() {}, popup: () => Promise.resolve() },
     Tray: { set() {} },
     GlobalShortcut: { register: () => Promise.resolve(false), unregister() {}, unregisterAll() {} },

@@ -111,14 +111,15 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
-    "openUrl": { "schemes": ["https", "mailto"] }
+    "openUrl": { "schemes": ["https", "mailto"] },
+    "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
 }
 ```
 
 **没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
 `network.sockets`；宿主的函数也一样，即 `host`。**有 `"capabilities"` 的应用
-只能做其中列出的事**：其他一律拒绝。未知的键会导致构建错误，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
+只能做其中列出的事**：其他一律拒绝。NSH 读不懂的键或值不授予任何权限，构建时会给出警告，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
 [签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
 ### `network`
@@ -142,7 +143,9 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 
 主机模式可以是 `*`（任意主机）、`*.example.com`（`example.com` 的任意子域名，不包括 `example.com` 本身）或一个确切的
 主机名。匹配时忽略大小写和端口。主机取最后一个 `@` 之后的部分，因此 `https://api.example.com@evil.io/` 会按 `evil.io`
-检查。
+检查。各平台可能解析出不同主机或路径的 URL 只有 `hosts` 中的 `*`（或不限定端口和路径的 `*` 规则）能授权：查询之前含反斜杠
+（应写成 `%5C`）、含控制字符，或主机含百分号编码或主机不能包含的字符（空格、`<`、`>`、`^`、`|`，以及 IPv6 地址之外的
+`[`、`]`）。
 
 WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https://` 检查，因此允许以 GET 访问该 URL 的主机和
 `http` 授权也允许这个 WebSocket。原始 socket 不经过任何 HTTP 规则，所以 `sockets` 精确列出每个主机和端口，也只有
@@ -159,7 +162,8 @@ WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
 不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
-允许它们，但不允许任何远程页面。
+允许它们，但不允许任何远程页面。在原生 web view 中，`baseUrl` 让内联 HTML 获得该 URL 的源，
+所以基准 URL 需要与该地址的页面相同的授权：它的主机在 `hosts` 中。
 
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
@@ -192,6 +196,20 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 ### `openUrl`
 
 允许应用在应用之外打开 URL（[`openUrl`](../modules/nsh.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme。scheme 未被授予的 URL 以 `ERR_ACCESS_DENIED` reject（`permission` 为 `"openUrl"`，`resource` 为该 URL）。会执行代码或访问应用自身数据的 URL（`javascript:`、`data:`、`file:` 等）无论能力如何都不会打开。
+
+### `windows`
+
+允许应用在桌面平台上打开自己的窗口（[`Window`](../modules/nsh-desktop.md#窗口)）：`"windows": true` 允许除浮层外的所有种类，
+也可以写成一个对象来缩小范围：
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `kinds` | `string[]` | 可以打开的种类：`"normal"`、`"dialog"`、`"panel"`、`"popup"`、`"overlay"`。缺省：除 `"overlay"` 外的所有种类。 |
+| `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
+| `max` | `number` | 同时可以打开的自己的窗口数。缺省：不限。 |
+| `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+
+`overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。主窗口不需要授权。
 
 ### 存储
 
@@ -238,6 +256,7 @@ if (host.available()) {
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |
 | 进程（`process`） | `run` 被 reject，`spawn` 和 `exit` 抛出，错误为 `ERR_ACCESS_DENIED`，`permission` 为 `"process"`，`resource` 为该命令（`exit` 为 `"exit"`）；不会启动子进程。 |
 | TCP socket（`net.connect`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为 `"host:port"`；发生在任何 DNS 查询之前。 |
+| 窗口（`Window.open`、`<Window>`） | 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"windows"`，`resource` 为窗口的 id；不会打开任何窗口。`set()` 中未授权的属性保持不变，并给出警告。 |
 | WebSocket | `websocket` 模块的 `connect` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为该 URL；全局 `WebSocket` 像连接失败时那样先触发 `error`，再触发 `close`（code 为 1006）。 |
 
 [标准模块](../modules/standard-modules.md#失败)的错误带有 `code` `"ERR_ACCESS_DENIED"`，应用借此区分被拒绝与操作失败；
@@ -313,7 +332,7 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 |---|---|---|
 | 限制（堆、栈、时间、节点） | 运行时，按 VM | 宿主应用按视图设定（嵌入的应用） |
 | 加固 | 运行时，在加载时 | 开发环境之外始终开启 |
-| 能力 | 运行时（fetch、图片、视频、web view、状态栏、文件、进程、socket） | 应用（`nsh.json`）和宿主应用（授权） |
+| 能力 | 运行时（fetch、图片、视频、web view、状态栏、窗口、文件、进程、socket） | 应用（`nsh.json`）和宿主应用（授权） |
 | 代码完整性 | 签名验证 | `nsh publish`；宿主应用信任的根密钥 |
 
 ## 另请参阅

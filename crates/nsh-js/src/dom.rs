@@ -1258,7 +1258,7 @@ fn set_prop(
         }
         // SAFETY: live node data.
         "component" | "componentSlot" => unsafe { (*p).places = true },
-        "ios" | "android" | "desktop" | "web" => {
+        "ios" | "android" | "macos" | "desktop" | "web" => {
             return platform_props(cx, node, name, value, prev);
         }
         "contentStyle" | "contentClass" if unsafe { (*p).tag } == Some(Tag::Scroll) => {
@@ -1503,9 +1503,10 @@ pub(crate) fn is_ancestor_of(cx: *mut JsContext, node: NodeId, of: NodeId) -> bo
     is_ancestor(cx, node, of)
 }
 
-/// `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}`: the
-/// props of this platform only, each set (or cleared) on its own. Desktop
-/// props apply on the desktop OSes and in desktop-class browsers.
+/// `ios={{…}}` / `android={{…}}` / `macos={{…}}` / `web={{…}}` /
+/// `desktop={{…}}`: the props of this platform only, each set (or cleared)
+/// on its own. Desktop props apply on the desktop OSes and in
+/// desktop-class browsers.
 fn platform_props(
     cx: *mut JsContext,
     node: JsValue,
@@ -3109,10 +3110,10 @@ unsafe extern "C" fn setup(
     {
         crate::env::take_theme(cx, &json);
     }
-    // Checked by the bundler; a hand-made bundle's wrong value is ignored.
+    // What this runtime cannot read (a newer NSH's) is left out.
     let status_bar = string_arg(cx, arg(argc, argv, 3))
         .and_then(|json| serde_json::from_str(&json).ok())
-        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok());
+        .map(|v| nsh_core::StatusBarSetting::from_json(&v));
     if let Some(setting) = status_bar
         && let Err(e) = push_op(
             cx,
@@ -3549,6 +3550,11 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("merge", Export::Function(merge, 2), Ts::Internal),
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
     ("setup", Export::Function(setup, 4), Ts::Internal),
+    (
+        "i18n",
+        Export::Function(crate::i18n::setup, 1),
+        Ts::Internal,
+    ),
     ("font", Export::Function(font, 2), Ts::Internal),
     ("metaUrl", Export::Function(meta_url, 1), Ts::Internal),
     ("ref", Export::Function(ref_, 3), Ts::Internal),
@@ -3695,6 +3701,33 @@ mod tests {
             [
                 r#"["effect 2 1","cleanup","effect 4 2","cleanup","effect 6 3","cleanup","effect 8 4","function","function",true,false]"#
             ]
+        );
+    }
+
+    #[test]
+    fn a_signals_methods_passed_on_their_own_write_it() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ signal }} from "nsh";
+            const n = signal(1);
+            const other = signal(0);
+            const {{ set, update }} = n;
+            [5].forEach(n.set);
+            const first = n();
+            update((x) => x + 1);
+            const second = n();
+            set.call(other, 9);
+            const proto = Object.getPrototypeOf(n);
+            let thrown = "";
+            try {{ Reflect.get(proto, "set", proto)(1); }} catch (e) {{ thrown = e.message; }}
+            report([first, second, n(), other(), n.set === n.set, n.set === other.set, n.set.name, thrown]);
+            "#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [r#"[5,6,9,0,true,false,"set","not a live signal"]"#]
         );
     }
 

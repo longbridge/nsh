@@ -250,6 +250,14 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
         })
+        .on_scroll_drag_start({
+            let dt = dt.clone();
+            move |offset: &Point<Points>| dt.drag_started(false, *offset)
+        })
+        .on_scroll_drag_end({
+            let dt = dt.clone();
+            move |offset: &Point<Points>| dt.drag_ended(false, *offset)
+        })
         .on_scroll_end({
             let dt = dt.clone();
             move |_: &Point<Points>| dt.rest()
@@ -274,6 +282,18 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                         .flex_1()
                         .scrollbar(false)
                         .bounces(move || props.bounces.get())
+                        .on_scroll_drag_start({
+                            let dt = dt.clone();
+                            move |offset: &Point<Points>| dt.drag_started(true, *offset)
+                        })
+                        .on_scroll_drag_end({
+                            let dt = dt.clone();
+                            move |offset: &Point<Points>| dt.drag_ended(true, *offset)
+                        })
+                        .on_scroll_end({
+                            let dt = dt.clone();
+                            move |_: &Point<Points>| dt.rest()
+                        })
                         .on_scroll(move |e: &ScrollEvent| {
                             hscroll_dt.scroll_x.set(e.offset.x);
                             // The desktops' bar follows, unless it leads.
@@ -391,6 +411,14 @@ fn strip(dt: Dt, lead: Lead) -> impl IntoElement {
             .right_0()
             .bottom_0()
             .h(px(STRIP))
+            .on_scroll_drag_start({
+                let dt = dt.clone();
+                move |offset: &Point<Points>| dt.drag_started(true, *offset)
+            })
+            .on_scroll_drag_end({
+                let dt = dt.clone();
+                move |offset: &Point<Points>| dt.drag_ended(true, *offset)
+            })
             .on_scroll(move |e: &ScrollEvent| {
                 // The table follows the bar, unless the table leads (the bar
                 // following it): sending that back would fight a drag.
@@ -907,6 +935,7 @@ fn cell(
     };
     let left_dt = dt.clone();
     let width_dt = dt.clone();
+    let height_dt = dt.clone();
     let col_dt = dt.clone();
     let el = column_parts(
         view()
@@ -915,9 +944,11 @@ fn cell(
                 selected: flags.get().selected || flags.get().column_selected,
                 ..AccessibilityState::default()
             })
+            // Out of flow at a size of fixed points, as the row is: a text
+            // that changes as the table scrolls lays out its cell alone.
             .absolute()
             .top_0()
-            .bottom_0()
+            .h(move || Length::from(px(height_dt.row_height())))
             .style_when(move || def.get().is_none(), |s| s.hidden())
             .left(move || {
                 left_dt.layout_rev.get();
@@ -985,14 +1016,28 @@ fn cell(
         }))
     } else {
         let text_dt = dt;
-        el.child(
-            text(move || match (row.get(), def.get()) {
-                (Some(row), Some(def)) => text_dt.cell_text(row, def),
-                _ => SharedString::default(),
-            })
-            .number_of_lines(1)
-            .min_w(px(0.0)),
+        let line_dt = text_dt.clone();
+        let label = text(move || match (row.get(), def.get()) {
+            (Some(row), Some(def)) => text_dt.cell_text(row, def),
+            _ => SharedString::default(),
+        })
+        .number_of_lines(1)
+        // The cell's whole box, its one line as tall as the row: a text
+        // never resizes it, so a cell whose text changes as the table
+        // scrolls is neither measured nor laid out again, only drawn.
+        .w_full()
+        .h_full()
+        .min_w(px(0.0))
+        .line_height(move || nsh_core::LineHeight::from(px(line_dt.row_height())))
+        .style_when(
+            move || align.get() == DataTableAlign::Center,
+            |s| s.text_center(),
         )
+        .style_when(
+            move || align.get() == DataTableAlign::End,
+            |s| s.text_right(),
+        );
+        el.child(label)
     }
 }
 

@@ -48,6 +48,8 @@ pollster = { workspace = true, optional = true }
 # WebAssembly has no threads: `LocalEngine` drives the engine there.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+# A packaged app's update configuration (`updates`).
+nsh-updater.workspace = true
 
 # Thread priority (Apple), process CPU and memory (`perf`).
 [target.'cfg(unix)'.dependencies]
@@ -58,6 +60,8 @@ libc.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
+# The shader tests compile the apps' WGSL (nsh-core `shader`).
+nsh-core = { workspace = true, features = ["shader"] }
 # The typed API check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
 nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor", "term"] }
@@ -65,6 +69,8 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
+# The language data an app ships (`locale_and_font_scale_follow_the_environment`).
+nsh-i18n.workspace = true
 crossbeam-channel.workspace = true
 # A WebSocket server for `tests/engine/websocket.rs`.
 tokio-tungstenite.workspace = true

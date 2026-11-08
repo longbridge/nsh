@@ -24,6 +24,7 @@ bundle = [
   "dep:rolldown_error",
   "dep:rolldown_sourcemap",
   "dep:string_wizard",
+  "dep:nsh-i18n",
   "dep:imagesize",
   "dep:resvg",
   "nsh-core/svg",
@@ -31,6 +32,10 @@ bundle = [
   "dep:tokio",
   "oxc/minifier",
 ]
+
+[[example]]
+name = "browser_bootstrap"
+required-features = ["bundle"]
 
 [dependencies]
 dunce.workspace = true
@@ -53,3 +58,5 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 nsh-js = { workspace = true, optional = true, features = ["zlib", "crypto"] }
 serde_json.workspace = true
 log.workspace = true
+# The app's translations and the language data it ships (nsh.json `locales`).
+nsh-i18n = { workspace = true, features = ["build"], optional = true }
