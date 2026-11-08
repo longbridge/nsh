@@ -540,6 +540,12 @@ Things that were found the hard way. Read the section of the area you change bef
   an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
   one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
+- **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
+  makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its
+  `NSToolbarView` is what `hitTest:` finds across the title bar's whole width (macOS 26 finds the content there):
+  it does not accept the first mouse, so in a window that never becomes key (a background test host) a press there
+  is lost, while a key window hands it on to the content under it. The test hosts' window does that too
+  (`window.rs` `NshWindow`).
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
   when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
   agent's input posts to the application's queue (`synth.rs`).
