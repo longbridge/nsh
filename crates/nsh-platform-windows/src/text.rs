@@ -833,7 +833,7 @@ fn line_metrics(layout: &IDWriteTextLayout, buf: &mut Vec<DWRITE_LINE_METRICS>) 
 }
 
 /// What [`DWriteTextEngine::prepare`] makes.
-pub(crate) struct Prepared {
+pub struct Prepared {
     text: Vec<u16>,
     /// The layout every measurement re-breaks (engine thread only).
     layout: Option<IDWriteTextLayout>,
@@ -863,8 +863,9 @@ pub(crate) struct Prepared {
 /// What resolves a family: `(fontFamily, weight, italic)`.
 type FaceKey = (Option<FontFamily>, u16, bool);
 
-/// The text engine of a surface (one per engine thread).
-pub(crate) struct DWriteTextEngine {
+/// The text engine of a surface (one per engine thread). Made without a
+/// window, it measures text as a surface does (headless layout checks).
+pub struct DWriteTextEngine {
     factory: IDWriteFactory2,
     system: Option<IDWriteFontCollection>,
     ui_family: Arc<str>,
@@ -1618,6 +1619,14 @@ impl DWriteTextEngine {
             }
         }
         make(lo).map(|(cut, _)| cut)
+    }
+}
+
+impl Default for DWriteTextEngine {
+    /// An engine whose default family is the system's UI font, as a
+    /// surface's.
+    fn default() -> Self {
+        DWriteTextEngine::new(ui_family())
     }
 }
 
