@@ -138,6 +138,9 @@ pub(crate) struct ViewState {
     pub(crate) shader: Option<Box<crate::shader::ShaderState>>,
     /// Text field (input views).
     pub(crate) input: Option<std::rc::Rc<crate::text_input::InputState>>,
+    /// Inputs in this subtree, including this view: their drawing needs
+    /// AppKit's scroll geometry to follow the live offset.
+    pub(crate) input_count: usize,
     /// Hosted AppKit views.
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
@@ -171,6 +174,7 @@ impl ViewState {
             canvas: None,
             shader: None,
             input: None,
+            input_count: usize::from(kind == ViewKind::Input),
             natives: Vec::new(),
             overflow: None,
             live: None,
@@ -1840,12 +1844,36 @@ impl NshView {
             ),
             None => container.addSubview(self.ns()),
         }
+        let inputs = self.state().input_count;
+        parent.track_inputs(inputs, true);
         self.place();
+        if inputs != 0 {
+            crate::scroll::commit_ancestors(self);
+        }
     }
 
     /// Takes it out of its parent.
     pub(crate) fn unparent(&self) {
+        if let Some(parent) = self.parent_view() {
+            parent.track_inputs(self.state().input_count, false);
+        }
         self.ns().removeFromSuperview();
+    }
+
+    /// Keeps subtree counts through attachment, removal and reparenting,
+    /// so scrolling never searches the descendants for inputs.
+    fn track_inputs(&self, count: usize, attached: bool) {
+        if count == 0 {
+            return;
+        }
+        for view in std::iter::successors(Some(self.clone()), NshView::parent_view) {
+            let mut s = view.state_mut();
+            if attached {
+                s.input_count += count;
+            } else {
+                s.input_count -= count;
+            }
+        }
     }
 
     /// Hosts `view` at `rect` (or moves it there).
