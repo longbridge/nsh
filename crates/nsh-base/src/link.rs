@@ -69,8 +69,10 @@ pub enum LinkEvent {
 /// A link: content that goes somewhere when pressed (a page, a site, a
 /// route of the app). It owns its behavior (presses, keyboard activation
 /// with Return or Space, a stop of the keyboard focus, the disabled state,
-/// the link role for screen readers) and leaves its look to the app: no
-/// color, underline, cursor or label of its own. `href` is where it goes,
+/// the link role for screen readers, the pointing hand over it while it is
+/// enabled, as a web `<a href>` has) and leaves its look to the app: no
+/// color, underline or label of its own; a `cursor-*` class of the app's
+/// replaces the hand. `href` is where it goes,
 /// data rather than text; `openWith` says who opens it (the system, or the
 /// app's `onOpen`). The app's `class` and `style` style it, its states with
 /// `hover:`, `active:`, `focus:` and `disabled:` classes or `hoverStyle`,
@@ -84,6 +86,7 @@ pub enum LinkEvent {
 pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
     let (view, disabled) = bar_item(view(), None, props.disabled);
     view.disabled(disabled)
+        .style_when(move || !disabled.get(), |s| s.cursor(Cursor::Pointer))
         .role(AccessibilityRole::Link)
         .optional_label(props.accessibility_label)
         .accessibility_state(move || AccessibilityState {
