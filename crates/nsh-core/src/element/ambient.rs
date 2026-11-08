@@ -1180,14 +1180,23 @@ pub fn after_answer(f: impl FnOnce() + 'static) {
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
-/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
-/// that should also run on the web uses the engine's services instead
-/// ([`fetch`], [`timer`]).
+/// its result; `tokio::task::spawn_blocking`), starting at once, whether
+/// called from a task, a render, an effect or a handler. Not in
+/// WebAssembly: code that should also run on the web uses the engine's
+/// services instead ([`fetch`], [`timer`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,
 ) -> tokio::task::JoinHandle<R> {
-    tokio::task::spawn_blocking(f)
+    // Tasks are polled in the runtime's context; outside a task the
+    // surface's runtime is the one they would be.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => runtime.spawn_blocking(f),
+        Err(_) => match executor().runtime() {
+            Some(runtime) => runtime.spawn_blocking(f),
+            None => tokio::task::spawn_blocking(f),
+        },
+    }
 }
 
 /// Runs `future` on the runtime's threads (in a task: await its result;
