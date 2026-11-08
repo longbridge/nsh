@@ -42,13 +42,13 @@ irm https://nsh.dev/install.ps1 | iex
 
 It installs to `%LOCALAPPDATA%\nsh` and adds its `bin` to your user `PATH` (open a new terminal afterwards). `$env:NSH_VERSION` and `$env:NSH_INSTALL_DIR` work as above.
 
-**Homebrew** (macOS and Linux):
+**Homebrew** (Apple silicon Macs and x86_64 Linux):
 
 ```sh
 brew install longbridge/tap/nsh
 ```
 
-**Scoop** (Windows):
+**Scoop** (x86_64 Windows):
 
 ```powershell
 scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json

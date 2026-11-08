@@ -203,14 +203,18 @@ pub(crate) fn dist() -> anyhow::Result<()> {
 
     // Android runtimes. Windows machines often have no Android SDK: the
     // distribution is then made without them. The NDK has no toolchain that
-    // runs on arm64 Linux: there it never has them.
-    let ndk_host = !cfg!(all(target_os = "linux", not(target_arch = "x86_64")));
-    let android = ndk_host && (!cfg!(windows) || android::Sdk::find().is_ok());
-    if !ndk_host {
-        term::warn("the NDK does not run on this machine: the distribution has no Android runtime");
-    } else if !android {
-        term::warn("no Android SDK (ANDROID_HOME): the distribution has no Android runtime");
+    // runs on arm64 Linux: there it never has them. `NSH_DIST_NO_ANDROID`
+    // leaves them out anywhere: the release's builds that don't publish the
+    // `android` component set it, so they skip it even where an SDK is found.
+    let skip_android = android_skip(
+        env::var_os("NSH_DIST_NO_ANDROID").is_some_and(|value| !value.is_empty()),
+        !cfg!(all(target_os = "linux", not(target_arch = "x86_64"))),
+        || !cfg!(windows) || android::Sdk::find().is_ok(),
+    );
+    if let Some(reason) = skip_android {
+        term::warn(format!("{reason}: the distribution has no Android runtime"));
     }
+    let android = skip_android.is_none();
     let abis: Vec<String> = android::ABIS.iter().map(|a| a.to_string()).collect();
     for (dev, name) in [(false, "release"), (true, "dev")]
         .into_iter()
@@ -281,6 +285,26 @@ fn web_runtimes_plan(configured: bool, compiles: bool, compiler: &OsStr) -> anyh
         );
     }
     Ok(false)
+}
+
+/// Why the distribution is made without the Android runtimes, or `None` to
+/// build them: not when `NSH_DIST_NO_ANDROID` opts out, not where the NDK has
+/// no toolchain (`ndk_host`), and not without an SDK where one is optional
+/// (`sdk`, asked last because it searches the disk).
+fn android_skip(
+    opted_out: bool,
+    ndk_host: bool,
+    sdk: impl FnOnce() -> bool,
+) -> Option<&'static str> {
+    if opted_out {
+        Some("NSH_DIST_NO_ANDROID is set")
+    } else if !ndk_host {
+        Some("the NDK does not run on this machine")
+    } else if !sdk() {
+        Some("no Android SDK (ANDROID_HOME)")
+    } else {
+        None
+    }
 }
 
 /// Whether `compiler` can actually produce a wasm32 object. `clang
@@ -591,7 +615,9 @@ mod tests {
         io::Read as _,
     };
 
-    use super::{AAR_KEEP_RULES, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan};
+    use super::{
+        AAR_KEEP_RULES, android_skip, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan,
+    };
 
     #[test]
     fn an_aar_carries_the_rules_that_keep_the_runtime() {
@@ -693,5 +719,24 @@ mod tests {
             String::from_utf8_lossy(&output.stdout).contains("a_stripped_executable_still_runs")
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn android_is_left_out_when_opted_out_or_unbuildable() {
+        assert_eq!(android_skip(false, true, || true), None);
+        assert_eq!(
+            android_skip(true, true, || true),
+            Some("NSH_DIST_NO_ANDROID is set")
+        );
+        assert_eq!(
+            android_skip(false, false, || true),
+            Some("the NDK does not run on this machine")
+        );
+        assert_eq!(
+            android_skip(false, true, || false),
+            Some("no Android SDK (ANDROID_HOME)")
+        );
+        // The opt-out wins without searching for an SDK.
+        assert!(android_skip(true, true, || panic!("searched for an SDK")).is_some());
     }
 }

@@ -42,13 +42,13 @@ irm https://nsh.dev/install.ps1 | iex
 
 它安装到 `%LOCALAPPDATA%\nsh`，并把其中的 `bin` 加入用户 `PATH`（之后打开新的终端）。`$env:NSH_VERSION` 和 `$env:NSH_INSTALL_DIR` 的用法同上。
 
-**Homebrew**（macOS 和 Linux）：
+**Homebrew**（Apple silicon Mac 和 x86_64 Linux）：
 
 ```sh
 brew install longbridge/tap/nsh
 ```
 
-**Scoop**（Windows）：
+**Scoop**（x86_64 Windows）：
 
 ```powershell
 scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json
