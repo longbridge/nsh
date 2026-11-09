@@ -8151,6 +8151,64 @@ fn media_sources_load_the_url_the_check_granted() {
     );
 }
 
+/// A placeholder loads the URL the check granted, as the image's source
+/// does, and shows nothing when its host is not granted.
+#[test]
+fn placeholders_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let placeholder = |id, uri: &str| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Image(ImageProp::Placeholder(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                }))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = placeholder(2, "//docs.example.com/a/../p.png");
+    ops.extend(placeholder(4, "//bank.example/p.png"));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let placeholders: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, options, .. } => {
+                Some((*id, options.placeholder.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        placeholders,
+        [
+            (2, Some("https://docs.example.com/p.png".to_owned())),
+            (4, None),
+        ]
+    );
+}
+
 /// A local image loads its canonical path when `capabilities.fs.read` holds
 /// it, in the form it was written, and nothing when it leaves the root.
 #[cfg(unix)]
