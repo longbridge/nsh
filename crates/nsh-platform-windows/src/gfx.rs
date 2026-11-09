@@ -230,12 +230,23 @@ const MAX_DEVICE_LATENCY: u32 = 16;
 pub(crate) const SWAP_CHAIN_FLAGS: DXGI_SWAP_CHAIN_FLAG =
     DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
+/// How much a window's buffers grow by at a time (pixels), so that a drag
+/// resizes them about once every this many pixels ([`SwapChain::resize`]).
+const BUFFER_STEP: u32 = 256;
+
+/// How much bigger than the window its buffers may stay (pixels).
+const BUFFER_SLACK: u32 = 2 * BUFFER_STEP;
+
 /// A window's swap chain and the bitmap of its back buffer.
 pub(crate) struct SwapChain {
     swap: IDXGISwapChain1,
     target: Option<ID2D1Bitmap1>,
-    /// Size in pixels.
+    /// Size in pixels: what the window shows of the buffers.
     pub(crate) size: (u32, u32),
+    /// The buffers' size in pixels, at least [`Self::size`]: a window
+    /// resized within them only changes the size it shows
+    /// ([`Self::resize`]).
+    buffers: (u32, u32),
     /// The generation of the device it was made on.
     generation: u64,
     /// What the last frame presented changed (pixels); `None`: all of it
@@ -462,6 +473,7 @@ impl SwapChain {
             swap,
             target: None,
             size: (size.0.max(1), size.1.max(1)),
+            buffers: (size.0.max(1), size.1.max(1)),
             generation: generation(),
             last: None,
             shown: false,
@@ -507,20 +519,47 @@ impl SwapChain {
         self.generation != generation()
     }
 
-    /// Resizes the buffers to `size` pixels.
+    /// Shows `size` pixels of the window.
+    ///
+    /// `ResizeBuffers` waits for the GPU to finish with the buffers and
+    /// makes them again, on every size of a drag. A window's own swap chain
+    /// grows its buffers by [`BUFFER_STEP`] pixels instead, and a size within
+    /// them changes nothing but what the frames draw: the chain does not
+    /// scale (`DXGI_SCALING_NONE`), so DWM shows the buffers' top left at
+    /// the window's size. Buffers more than [`BUFFER_SLACK`] pixels too big
+    /// shrink again. A composed (transparent) chain is sized exactly:
+    /// DirectComposition shows all of it.
     pub(crate) fn resize(&mut self, gfx: &Gfx, size: (u32, u32)) -> Result<()> {
         let size = (size.0.max(1), size.1.max(1));
         if size == self.size {
             return Ok(());
         }
+        let fits = |have: u32, want: u32| have >= want && have - want <= BUFFER_SLACK;
+        if !self.premultiplied && fits(self.buffers.0, size.0) && fits(self.buffers.1, size.1) {
+            self.size = size;
+            self.last = None;
+            return Ok(());
+        }
+        let buffers = if self.premultiplied {
+            size
+        } else {
+            let grow = |v: u32| v.div_ceil(BUFFER_STEP) * BUFFER_STEP;
+            (grow(size.0), grow(size.1))
+        };
         self.target = None;
         // SAFETY: the back buffer is not referenced anymore (the target
         // bitmap is dropped and unset).
         unsafe {
             gfx.dc.SetTarget(None);
-            self.swap
-                .ResizeBuffers(0, size.0, size.1, DXGI_FORMAT_UNKNOWN, SWAP_CHAIN_FLAGS)?;
+            self.swap.ResizeBuffers(
+                0,
+                buffers.0,
+                buffers.1,
+                DXGI_FORMAT_UNKNOWN,
+                SWAP_CHAIN_FLAGS,
+            )?;
         }
+        self.buffers = buffers;
         self.size = size;
         self.last = None;
         self.shown = false;
