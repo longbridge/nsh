@@ -491,6 +491,13 @@ impl Drop for Callback {
     }
 }
 
+impl Callback {
+    fn call(&self, message: &CStr) {
+        // SAFETY: the contract of `nsh_app_set_error_handler`.
+        unsafe { (self.handler)(self.context, message.as_ptr()) };
+    }
+}
+
 /// Receives fatal app errors (load failures, uncaught JS exceptions) on the
 /// main thread, replacing the previous handler. `context` is passed back
 /// unchanged; `release` (optional) is called with it when the handler is
@@ -518,16 +525,23 @@ pub unsafe extern "C" fn nsh_app_set_error_handler(
         }
         return;
     };
-    let callback = Callback {
+    app.view.set_error_handler(error_handler(Callback {
         handler,
         context,
         release,
-    };
-    app.view.set_error_handler(move |message| {
+    }));
+}
+
+/// The handler [`nsh_app_set_error_handler`] installs: it owns `callback`,
+/// so `release` runs once, when the handler is replaced or the app destroyed.
+/// It calls a method of the whole `callback`: a closure using only its `Copy`
+/// fields would copy those, and `callback` (its `release`) would be dropped
+/// here.
+fn error_handler(callback: Callback) -> impl Fn(&str) + 'static {
+    move |message| {
         let message = CString::new(message.replace('\0', " ")).unwrap_or_default();
-        // SAFETY: guaranteed by the caller of `nsh_app_set_error_handler`.
-        unsafe { (callback.handler)(callback.context, message.as_ptr()) };
-    });
+        callback.call(&message);
+    }
 }
 
 /// The status bar style the app asked for, for a host view controller's
@@ -1616,5 +1630,100 @@ pub unsafe extern "C" fn nsh_host_call_free(call: *mut NshHostCall) {
     if !call.is_null() {
         // SAFETY: guaranteed by the caller.
         drop(unsafe { Box::from_raw(call) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        cell::RefCell,
+        ffi::{CStr, c_char, c_void},
+        rc::Rc,
+    };
+
+    use super::{Callback, error_handler};
+
+    /// What a handler's context saw: the messages and how often it was released.
+    #[derive(Default)]
+    struct Probe {
+        messages: RefCell<Vec<String>>,
+        releases: RefCell<u32>,
+    }
+
+    /// The context as `NshAppView.onError` passes it (a retained box the
+    /// release frees), so a handler called after its release reads freed
+    /// memory (`MallocScribble=1` makes that visible at once).
+    struct HandlerBox(Rc<Probe>);
+
+    unsafe extern "C" fn handler(context: *mut c_void, message: *const c_char) {
+        // SAFETY: `context` is a live `HandlerBox` until `release`.
+        let probe = unsafe { &(*context.cast::<HandlerBox>()).0 };
+        // SAFETY: a C string from `error_handler`.
+        let message = unsafe { CStr::from_ptr(message) }
+            .to_string_lossy()
+            .into_owned();
+        probe.messages.borrow_mut().push(message);
+    }
+
+    unsafe extern "C" fn release(context: *mut c_void) {
+        // SAFETY: `context` came from `Box::into_raw` in `callback`.
+        let handler_box = unsafe { Box::from_raw(context.cast::<HandlerBox>()) };
+        *handler_box.0.releases.borrow_mut() += 1;
+    }
+
+    fn callback(probe: &Rc<Probe>) -> Callback {
+        Callback {
+            handler,
+            context: Box::into_raw(Box::new(HandlerBox(probe.clone()))).cast(),
+            release: Some(release),
+        }
+    }
+
+    /// Stored as `AppView::set_error_handler` stores a handler.
+    type Slot = Option<Rc<dyn Fn(&str)>>;
+
+    #[test]
+    fn an_error_handler_keeps_its_context_until_it_is_dropped() {
+        let probe = Rc::new(Probe::default());
+        let slot: Slot = Some(Rc::new(error_handler(callback(&probe))));
+        assert_eq!(*probe.releases.borrow(), 0, "released while installed");
+        (slot.as_ref().unwrap())("boom\0two");
+        (slot.as_ref().unwrap())("again");
+        assert_eq!(*probe.messages.borrow(), ["boom two", "again"]);
+        assert_eq!(*probe.releases.borrow(), 0);
+        drop(slot);
+        assert_eq!(*probe.releases.borrow(), 1);
+    }
+
+    #[test]
+    fn replacing_or_clearing_an_error_handler_releases_it_once() {
+        let first = Rc::new(Probe::default());
+        let second = Rc::new(Probe::default());
+        let mut slot: Slot = Some(Rc::new(error_handler(callback(&first))));
+        drop(slot.replace(Rc::new(error_handler(callback(&second)))));
+        assert_eq!(*first.releases.borrow(), 1);
+        assert_eq!(*second.releases.borrow(), 0);
+        (slot.as_ref().unwrap())("to the second");
+        assert!(first.messages.borrow().is_empty());
+        assert_eq!(*second.messages.borrow(), ["to the second"]);
+        drop(slot.take());
+        assert_eq!(*first.releases.borrow(), 1);
+        assert_eq!(*second.releases.borrow(), 1);
+    }
+
+    #[test]
+    fn an_error_handler_without_release_still_dispatches() {
+        let probe = Rc::new(Probe::default());
+        let context = Box::into_raw(Box::new(HandlerBox(probe.clone())));
+        let handle = error_handler(Callback {
+            handler,
+            context: context.cast(),
+            release: None,
+        });
+        handle("no release");
+        drop(handle);
+        assert_eq!(*probe.messages.borrow(), ["no release"]);
+        // SAFETY: never released by the handler (no `release`).
+        drop(unsafe { Box::from_raw(context) });
     }
 }
