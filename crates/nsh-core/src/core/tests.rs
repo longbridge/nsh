@@ -14,6 +14,8 @@ struct FakeEngine {
     prepares: Cell<u32>,
     measures: Cell<u32>,
     layouts: Cell<u32>,
+    /// [`TextEngine::draws_colors_from_text`].
+    colors_at_draw: bool,
 }
 
 /// [`FakeEngine`]'s layout: the characters laid out and where its
@@ -42,6 +44,10 @@ impl TextEngine for FakeEngine {
             Some(max) if w > max && max > 0.0 => size_pt(max, (w / max).ceil() * 16.0),
             _ => size_pt(w, 16.0),
         }
+    }
+
+    fn draws_colors_from_text(&self) -> bool {
+        self.colors_at_draw
     }
 
     fn layout(&self, (chars, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
@@ -1414,6 +1420,134 @@ fn color_change_skips_layout_and_identical_texts_share_measurements() {
         "no re-measure"
     );
     assert_eq!(c.text_engine.layouts.get(), 4);
+}
+
+#[test]
+fn colors_drawn_from_the_text_keep_its_typesetting() {
+    let mut c = Core::new(
+        FakeEngine {
+            colors_at_draw: true,
+            ..FakeEngine::default()
+        },
+        size_pt(320.0, 480.0),
+    );
+    // A block of three words, each a span of its own.
+    let mut ops = vec![Op::Create {
+        id: 10,
+        tag: Tag::Text,
+    }];
+    for (i, word) in ["fade ", "in ", "words"].into_iter().enumerate() {
+        let (span, raw) = (12 + i as u32 * 2, 13 + i as u32 * 2);
+        ops.extend([
+            Op::Create {
+                id: span,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: raw,
+                text: word.into(),
+            },
+            Op::Insert {
+                parent: span,
+                child: raw,
+                before: None,
+            },
+            Op::Insert {
+                parent: 10,
+                child: span,
+                before: None,
+            },
+        ]);
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 10,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let mounted = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text {
+                id: 10,
+                text,
+                layout,
+                content,
+            } => Some((text.clone(), layout.clone(), *content)),
+            _ => None,
+        })
+    };
+    let (_, first, content) = mounted(&c.commit().unwrap()).expect("mounted");
+    let counts = |c: &Core<FakeEngine>| {
+        let e = &c.text_engine;
+        (e.prepares.get(), e.measures.get(), e.layouts.get())
+    };
+    let before = counts(&c);
+    let color = |c: &mut Core<FakeEngine>, id, color| {
+        c.apply(style_op(id, &[("color", StyleValue::Str(color))]))
+            .unwrap();
+        c.commit().unwrap()
+    };
+    // A word fading in: a new color, the same span boundaries.
+    let batch = color(&mut c, 14, "rgba(255, 0, 0, 0.5)");
+    assert_eq!(batch.items.len(), 1, "only the text: {:?}", batch.items);
+    let (text, layout, moved) = mounted(&batch).expect("the new text mounted");
+    assert_eq!(text.spans[1].style.color, Color(0xff00_0080));
+    assert!(Arc::ptr_eq(&layout.0, &first.0), "the layout drawn before");
+    assert_eq!(moved, content);
+    assert_eq!(counts(&c), before, "no typesetting, measuring or layout");
+    // Its neighbors take its color: the three spans merge into one.
+    color(&mut c, 12, "rgba(255, 0, 0, 0.5)");
+    let batch = color(&mut c, 16, "rgba(255, 0, 0, 0.5)");
+    let (text, layout, _) = mounted(&batch).expect("the new text mounted");
+    assert_eq!(text.spans.len(), 1);
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    assert_eq!(counts(&c), before);
+    // A change of size is typeset again.
+    c.apply(style_op(14, &[("fontSize", StyleValue::Number(20.0))]))
+        .unwrap();
+    let (_, layout, _) = mounted(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    assert!(c.text_engine.prepares.get() > before.0);
+}
+
+#[test]
+fn spans_differing_only_in_colors_are_told_apart_from_other_changes() {
+    let style = ResolvedTextStyle::default();
+    let red = ResolvedTextStyle {
+        color: Color(0xff00_00ff),
+        ..style
+    };
+    let text = |words: &[(&str, ResolvedTextStyle)]| {
+        let mut t = AttributedText::default();
+        for &(w, s) in words {
+            t.push(w, s);
+        }
+        t
+    };
+    let plain = text(&[("ab", style), ("cd", style)]);
+    let split = text(&[("ab", style), ("cd", red)]);
+    assert_eq!((plain.spans.len(), split.spans.len()), (1, 2));
+    assert!(plain.same_but_colors(&split) && split.same_but_colors(&plain));
+    let bold = ResolvedTextStyle {
+        font_weight: 700,
+        ..red
+    };
+    assert!(!plain.same_but_colors(&text(&[("ab", style), ("cd", bold)])));
+    assert!(!plain.same_but_colors(&text(&[("ab", style), ("ce", red)])));
+    let underlined = ResolvedTextStyle {
+        decoration: crate::TextDecoration {
+            underline: true,
+            ..Default::default()
+        },
+        ..style
+    };
+    assert!(!plain.same_but_colors(&text(&[("abcd", underlined)])));
+    let lined = |color| ResolvedTextStyle {
+        decoration_color: color,
+        ..underlined
+    };
+    let green = Some(Color(0x00ff_00ff));
+    assert!(text(&[("ab", lined(None))]).same_but_colors(&text(&[("ab", lined(green))])));
 }
 
 #[test]

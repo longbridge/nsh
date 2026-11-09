@@ -101,6 +101,10 @@
   responder clears, so a surface shows one selection. Android (`selectable_view.rs`, `SelectableView.java`): the
   shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
   then handles and a floating `ActionMode` (Copy, Select all, Share).
+- **Color changes**: a text whose spans change only their colors (text, decoration and background) keeps its
+  typesetting, measurements and layout where the platform draws colors from the text it mounts
+  (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI): only the new text is mounted with the layout,
+  so a word fading in costs one draw, not a new layout of its paragraph. The other backends typeset it again.
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
