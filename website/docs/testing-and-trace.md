@@ -473,7 +473,7 @@ that only a real platform can do:
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
-- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
+- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
 
 ### The page's host

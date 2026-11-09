@@ -20,7 +20,8 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    ApproxTextEngine, MountBatch,
+    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, PayloadValue,
+    ROOT_ID,
     element::{Callback, Registry, Root},
     geometry::{Points, Size},
     platform::{Idiom, Locale, LocaleSettings, Os},
@@ -28,7 +29,8 @@ use nsh_core::{
 };
 use nsh_dev::protocol::TestIdiom;
 use nsh_engine::{
-    AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
+    AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, EngineControl, Environment,
+    MountSink,
 };
 
 use crate::{
@@ -319,11 +321,14 @@ fn drive(
         ui_sets,
         ..EngineConfig::new(bundle)
     };
+    let images = Arc::new(Mutex::new(VmImages::default()));
     let sink = VmSink {
         events: events.clone(),
+        images: images.clone(),
     };
-    let _vm = Engine::start(config, || ApproxTextEngine, sink)
+    let vm = Engine::start(config, || ApproxTextEngine, sink)
         .map_err(|e| format!("the test file's engine did not start: {e}"))?;
+    images.lock().unwrap().start(vm.control());
     let mut out = Vec::new();
     loop {
         match results.recv() {
@@ -417,13 +422,58 @@ enum Event {
     Error(AppError),
 }
 
-/// The test file's VM renders nothing; its errors are the run's.
+/// The test file's VM renders nothing; its errors are the run's. It loads
+/// no images either: an `Image.getSize` / `Image.prefetch` of the test
+/// itself fails, as a headless app's does, rather than waiting forever.
 struct VmSink {
     events: Sender<Event>,
+    images: Arc<Mutex<VmImages>>,
+}
+
+/// The test file's VM's control, and the image requests made before the
+/// sink had it (the VM starts before [`Engine::start`] returns).
+#[derive(Default)]
+struct VmImages {
+    control: Option<EngineControl>,
+    waiting: Vec<u32>,
+}
+
+impl VmImages {
+    fn answer(&mut self, id: u32) {
+        let Some(control) = &self.control else {
+            self.waiting.push(id);
+            return;
+        };
+        let fields = vec![
+            ("id", PayloadValue::Number(f64::from(id))),
+            (
+                "error",
+                PayloadValue::Str("headless runs load no images".into()),
+            ),
+        ];
+        control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
+    }
+
+    fn start(&mut self, control: EngineControl) {
+        self.control = Some(control);
+        for id in std::mem::take(&mut self.waiting) {
+            self.answer(id);
+        }
+    }
 }
 
 impl MountSink for VmSink {
-    fn submit(&self, _batch: MountBatch) {}
+    fn submit(&self, batch: MountBatch) {
+        for item in &batch.items {
+            if let MountItem::Command {
+                command: Command::ImageInfo { id, .. },
+                ..
+            } = item
+            {
+                self.images.lock().unwrap().answer(*id);
+            }
+        }
+    }
 
     fn report(&self, error: &AppError) {
         let _ = self.events.send(Event::Error(error.clone()));
