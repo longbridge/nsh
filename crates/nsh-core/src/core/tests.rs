@@ -33611,3 +33611,369 @@ fn a_backdrop_follows_the_order_views_draw_in() {
         batch.items
     );
 }
+
+mod each_order {
+    use super::*;
+    use crate::{
+        element::{Component, Props, Root, Scope},
+        prelude::*,
+    };
+
+    #[derive(Clone, PartialEq)]
+    struct Item {
+        key: u32,
+        label: &'static str,
+        visible: bool,
+    }
+
+    fn item(key: u32, label: &'static str, visible: bool) -> Item {
+        Item {
+            key,
+            label,
+            visible,
+        }
+    }
+
+    fn caption(item: &Item, index: usize) -> String {
+        format!("{}:{}@{index}", item.key, item.label)
+    }
+
+    thread_local! {
+        static ITEMS: Cell<Option<Signal<Vec<Item>>>> = const { Cell::new(None) };
+        static FOOTER: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+        static MADE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[derive(Default)]
+    struct Holder;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct HolderProps {
+        children: Children,
+    }
+
+    impl Component for Holder {
+        type Props = HolderProps;
+        type Event = NoEvent;
+
+        fn view(props: HolderProps, _: Scope<NoEvent>) -> impl IntoElement {
+            view().child(props.children)
+        }
+    }
+
+    #[derive(Default)]
+    struct RowsFixture;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FixtureProps {
+        nested: bool,
+        regions: bool,
+    }
+
+    impl Component for RowsFixture {
+        type Props = FixtureProps;
+        type Event = NoEvent;
+
+        fn view(props: FixtureProps, _: Scope<NoEvent>) -> impl IntoElement {
+            MADE.with(|made| made.set(0));
+            let items = signal(vec![
+                item(1, "one", true),
+                item(2, "two", !props.regions),
+                item(3, "three", true),
+            ]);
+            let footer = signal(false);
+            ITEMS.with(|saved| saved.set(Some(items)));
+            FOOTER.with(|saved| saved.set(Some(footer)));
+            let rows = each(
+                items,
+                |item: &Item| item.key,
+                move |item, index| {
+                    MADE.with(|made| made.set(made.get() + 1));
+                    if props.regions {
+                        dynamic(move || {
+                            let item = item.get();
+                            item.visible.then(|| text(caption(&item, index.get())))
+                        })
+                    } else {
+                        text(move || caption(&item.get(), index.get())).into_element()
+                    }
+                },
+            );
+            let children = vec![
+                text("prefix").into_element(),
+                rows,
+                when(footer, || text("anchor")).into_element(),
+                text("suffix").into_element(),
+            ];
+            if props.nested {
+                view()
+                    .child(
+                        Holder::element(HolderProps {
+                            children: Children::default(),
+                        })
+                        .children(children),
+                    )
+                    .into_element()
+            } else {
+                view().children(children).into_element()
+            }
+        }
+    }
+
+    fn children(c: &Core<FakeEngine>, parent: NodeId) -> Vec<NodeId> {
+        let key = c.key(parent).unwrap();
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&child| c.nodes[child as usize].id)
+            .collect()
+    }
+
+    fn order(c: &Core<FakeEngine>, parent: NodeId) -> Vec<String> {
+        children(c, parent)
+            .into_iter()
+            .filter_map(|id| {
+                let node = &c.nodes[c.key(id).unwrap() as usize];
+                node.children
+                    .first()
+                    .map(|&raw| c.nodes[raw as usize].text.clone())
+            })
+            .collect()
+    }
+
+    fn mounted(nested: bool, regions: bool) -> (Core<FakeEngine>, NodeId) {
+        let mut c = core();
+        c.set_content_culling(false);
+        c.mount_root(&Root::new::<RowsFixture>(move || FixtureProps {
+            nested,
+            regions,
+        }));
+        let batch = c.commit().unwrap();
+        let prefix = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "prefix" => Some(*id),
+                _ => None,
+            })
+            .expect("prefix mounted");
+        let parent = c.nodes[c.key(prefix).unwrap() as usize].parent;
+        let parent = c.nodes[parent as usize].id;
+        (c, parent)
+    }
+
+    fn update(c: &mut Core<FakeEngine>, items: Vec<Item>, footer: bool) -> MountBatch {
+        {
+            let _entered = c.components.runtime.enter();
+            ITEMS.with(Cell::get).unwrap().set(items);
+            FOOTER.with(Cell::get).unwrap().set(footer);
+        }
+        c.commit().unwrap()
+    }
+
+    #[test]
+    fn same_order_values_update_existing_nodes_and_repair_an_external_gap() {
+        let (mut c, parent) = mounted(false, false);
+        let original = children(&c, parent);
+        let batch = update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:ONE@0", "2:two@1", "3:three@2", "suffix"]
+        );
+        assert_eq!(children(&c, parent), original);
+        assert_eq!(MADE.with(Cell::get), 3);
+        assert_eq!(
+            batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Text { text, .. } => Some(text.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ["1:ONE@0"]
+        );
+        assert!(
+            !batch.items.iter().any(|item| matches!(
+                item,
+                MountItem::Create { .. }
+                    | MountItem::Delete { .. }
+                    | MountItem::Insert { .. }
+                    | MountItem::Remove { .. }
+            )),
+            "same-order values must not remount or move rows"
+        );
+
+        // Equal keys alone do not prove physical placement: an unrelated
+        // sibling now splits the region. Its rows must become contiguous.
+        c.apply(Op::Create {
+            id: 4000,
+            tag: Tag::View,
+        })
+        .unwrap();
+        // Public apply routes a component host's Insert to its passed
+        // children. Perturb the physical tree directly for this check.
+        c.insert(parent, 4000, Some(original[2])).unwrap();
+        let split = [
+            original[0],
+            original[1],
+            4000,
+            original[2],
+            original[3],
+            original[4],
+        ];
+        assert_eq!(children(&c, parent), split, "the physical gap was inserted");
+        c.commit();
+        assert_eq!(
+            children(&c, parent),
+            split,
+            "the gap persists until reconciliation"
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "one", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            children(&c, parent),
+            [
+                original[0],
+                4000,
+                original[1],
+                original[2],
+                original[3],
+                original[4]
+            ]
+        );
+    }
+
+    #[test]
+    fn same_order_region_rows_follow_empty_and_populated_anchors() {
+        let (mut c, parent) = mounted(false, true);
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:one@0", "3:three@2", "suffix"]
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "one", true),
+                item(2, "TWO", true),
+                item(3, "three", true),
+            ],
+            true,
+        );
+        assert_eq!(
+            order(&c, parent),
+            [
+                "prefix",
+                "1:one@0",
+                "2:TWO@1",
+                "3:three@2",
+                "anchor",
+                "suffix"
+            ]
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", false),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:ONE@0", "3:three@2", "suffix"]
+        );
+        assert_eq!(MADE.with(Cell::get), 3, "the dynamic row owners stay");
+    }
+
+    #[test]
+    fn reordered_added_and_removed_rows_keep_the_retained_node_ids() {
+        let (mut c, parent) = mounted(false, false);
+        let original = children(&c, parent);
+        update(
+            &mut c,
+            vec![
+                item(3, "THREE", true),
+                item(1, "ONE", true),
+                item(4, "four", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "3:THREE@0", "1:ONE@1", "4:four@2", "suffix"]
+        );
+        let reordered = children(&c, parent);
+        assert_eq!(&reordered[1..3], &[original[3], original[1]]);
+        assert!(c.key(original[2]).is_err(), "the removed row was released");
+        assert_eq!(MADE.with(Cell::get), 4);
+        update(&mut c, vec![], false);
+        assert_eq!(order(&c, parent), ["prefix", "suffix"]);
+    }
+
+    #[test]
+    fn nested_component_content_keeps_its_existing_placement_path() {
+        let (mut c, parent) = mounted(true, false);
+        let original = children(&c, parent);
+        assert!(
+            c.is_host(parent)
+                && c.components
+                    .regions
+                    .values()
+                    .any(|state| state.host != parent
+                        && state
+                            .children
+                            .iter()
+                            .any(|element| element.id == original[1])),
+            "the rows belong to the outer view and are children of a nested host"
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            true,
+        );
+        assert_eq!(
+            order(&c, parent),
+            [
+                "prefix",
+                "1:ONE@0",
+                "2:two@1",
+                "3:three@2",
+                "anchor",
+                "suffix"
+            ]
+        );
+        update(
+            &mut c,
+            vec![item(3, "three", true), item(1, "one", true)],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "3:three@0", "1:one@1", "suffix"]
+        );
+        let reordered = children(&c, parent);
+        assert_eq!(&reordered[1..3], &[original[3], original[1]]);
+        assert_eq!(MADE.with(Cell::get), 3);
+    }
+}
