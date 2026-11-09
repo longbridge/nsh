@@ -1293,6 +1293,52 @@ pub enum KeyboardDismissMode {
     Interactive,
 }
 
+/// The HTML element the web draws a view or text as (`web={{ element }}`),
+/// for what `role` cannot say: paragraphs, landmarks, lists, emphasis, ...
+/// Headings come from `role="header"` with `accessibilityLevel` and links
+/// from a `Link` with an `href`, everywhere. Only the web reads it; the
+/// layout, styles and events stay the view's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum WebElement {
+    /// A paragraph (`<p>`).
+    P,
+    /// Navigation links (`<nav>`).
+    Nav,
+    /// The header of the page or a section (`<header>`), a landmark; a
+    /// heading is `role="header"`.
+    Header,
+    /// The footer of the page or a section (`<footer>`).
+    Footer,
+    /// The page's main content (`<main>`).
+    Main,
+    /// A self-contained composition (`<article>`).
+    Article,
+    /// A section of a document (`<section>`).
+    Section,
+    /// Content aside from the main content (`<aside>`).
+    Aside,
+    /// An unordered list (`<ul>`).
+    Ul,
+    /// An ordered list (`<ol>`).
+    Ol,
+    /// An item of a list (`<li>`).
+    Li,
+    /// Strong importance (`<strong>`).
+    Strong,
+    /// Emphasis (`<em>`).
+    Em,
+    /// A quotation (`<blockquote>`).
+    Blockquote,
+    /// A figure (`<figure>`).
+    Figure,
+    /// A figure's caption (`<figcaption>`).
+    Figcaption,
+    /// A date or time (`<time>`).
+    Time,
+    /// Contact information (`<address>`).
+    Address,
+}
+
 /// Which point of a page a snapping scroll view aligns to its start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum SnapAlignment {
@@ -2690,6 +2736,11 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `web={{ element }}`: the HTML element the web draws the view or text
+    /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
+    /// the other platforms keep the view as it is.
+    #[prop(web = "element")]
+    WebElement(Option<WebElement>),
     /// `windowDrag` (desktops): pressing the view drags the window, as its
     /// title bar would (double-clicking maximizes it); `false` keeps a part
     /// of a draggable view clickable. The nearest view that sets it

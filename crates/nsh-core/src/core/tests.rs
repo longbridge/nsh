@@ -14936,6 +14936,49 @@ fn window_drag_is_a_view_prop() {
     ));
 }
 
+/// `web={{ element }}` reaches the platform in the view's props (the web
+/// draws the view as that HTML element), and clearing it sends the props
+/// again.
+#[test]
+fn web_element_is_a_view_prop() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::WebElement(Some(crate::WebElement::Nav)),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element == Some(crate::WebElement::Nav)
+    )));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::WebElement(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element.is_none()
+    )));
+}
+
 /// `focusable={false}` reaches the platform in the view's props.
 #[test]
 fn focusable_is_a_view_prop() {

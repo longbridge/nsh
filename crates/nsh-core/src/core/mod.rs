@@ -5069,6 +5069,13 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::WebElement(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.web_element != value {
+                    props.web_element = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::WindowDrag(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.window_drag != value {

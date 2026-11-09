@@ -1844,6 +1844,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The HTML element the web draws the view as (a paragraph, a
+    /// landmark, a list), for search engines and readers of the page's
+    /// markup, where `role` cannot say it: headings are
+    /// `role(AccessibilityRole::Header)` with a level, links `Link`s. The
+    /// other platforms ignore it.
+    fn web_element(mut self, element: crate::WebElement) -> Self {
+        super::host::set(self.node(), Prop::WebElement(Some(element)));
+        self
+    }
+
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.
