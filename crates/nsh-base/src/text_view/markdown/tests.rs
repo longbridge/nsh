@@ -145,6 +145,20 @@ fn emphasis_beside_cjk_text() {
             }),
         ]
     );
+    // Full-width brackets inside, punctuation after; plain CJK letters.
+    assert_eq!(
+        blocks("说明**（可选）**为"),
+        vec![p(vec![t("说明"), strong(vec![t("（可选）")]), t("为")])]
+    );
+    assert_eq!(
+        blocks("**注意**：这里，中文**加粗**中文"),
+        vec![p(vec![
+            strong(vec![t("注意")]),
+            t("：这里，中文"),
+            strong(vec![t("加粗")]),
+            t("中文"),
+        ])]
+    );
     // `_` reads as in CommonMark: not inside words.
     assert_eq!(blocks("中_“x”_中"), vec![p(vec![t("中_“x”_中")])]);
     // Code, HTML and links keep their text as written.
@@ -278,6 +292,16 @@ fn bare_urls_end_at_cjk_text() {
             t("。后面"),
         ])]
     );
+    // Emphasis after the CJK text that ends the URL.
+    assert_eq!(
+        blocks("访问https://a.dev获取**数据**"),
+        vec![p(vec![
+            t("访问"),
+            url("https://a.dev"),
+            t("获取"),
+            strong(vec![t("数据")]),
+        ])]
+    );
     // A path with CJK characters ends there; angle brackets and links keep
     // the whole URL.
     assert_eq!(
@@ -354,6 +378,15 @@ fn emphasis_beside_latin_text_is_commonmarks() {
         ])])]
     );
     assert_eq!(blocks("naïve**“q”**x"), vec![p(vec![t("naïve**“q”**x")])]);
+    assert_eq!(
+        blocks("**bold**text a*b*c"),
+        vec![p(vec![
+            strong(vec![t("bold")]),
+            t("text a"),
+            em(vec![t("b")]),
+            t("c"),
+        ])]
+    );
 }
 
 #[test]
