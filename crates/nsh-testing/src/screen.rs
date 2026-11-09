@@ -160,6 +160,9 @@ pub struct Screen {
     /// The edit menu an input opened (`Command::OpenEditMenu`) and what it
     /// offers, until it is chosen from or closed.
     edit_menu: Option<(NodeId, Vec<nsh_core::EditAction>)>,
+    /// The application menu the app set (`Menu.setApplicationMenu`), whose
+    /// shortcuts the keyboard chooses.
+    app_menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
     /// The window's size, when the driver knows it: what lies outside it
     /// (and no scroll view brings in) is not on screen.
     viewport: Option<Size<Points>>,
@@ -638,6 +641,9 @@ impl Screen {
             Command::Desktop(desktop) => match &**desktop {
                 nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } => {
                     self.menu = Some(items.clone());
+                }
+                nsh_core::desktop::DesktopCommand::SetMenu(items) => {
+                    self.app_menu = items.clone();
                 }
                 nsh_core::desktop::DesktopCommand::OpenWindow(open)
                     if !self.windows.iter().any(|(root, _)| *root == id) =>
@@ -2100,6 +2106,11 @@ impl Screen {
     /// The context menu the app shows (`Menu.popup`), if one is open.
     pub(crate) fn menu(&self) -> Option<&[nsh_core::desktop::MenuItem]> {
         self.menu.as_deref()
+    }
+
+    /// The application menu the app set, if it set one.
+    pub(crate) fn app_menu(&self) -> Option<&[nsh_core::desktop::MenuItem]> {
+        self.app_menu.as_deref()
     }
 
     /// The open context menu was chosen from or closed.
