@@ -53,6 +53,12 @@ pub struct ResolvedTextStyle {
     pub font_variant: FontVariant,
     /// The background of the nested text this run is in (drawing only).
     pub background: Option<TextBackground>,
+    /// Hidden but laid out (`visibility: "hidden"` on the nested text this
+    /// run is in, or on one around it): its characters keep their place in
+    /// the lines, are not drawn (the core makes the run transparent, with
+    /// no background) and are left out of copies and of what screen readers
+    /// read ([`AttributedText::copied_text`], [`AttributedText::shown_text`]).
+    pub hidden: bool,
 }
 
 /// The background of a nested `<Text>` (`backgroundColor` and
@@ -185,6 +191,7 @@ impl Default for ResolvedTextStyle {
             transform: TextTransform::None,
             font_variant: FontVariant(0),
             background: None,
+            hidden: false,
         }
     }
 }
@@ -231,6 +238,20 @@ impl ResolvedTextStyle {
             transform: style.transform.unwrap_or(self.transform),
             font_variant: style.font_variant.unwrap_or(self.font_variant),
             background: self.background,
+            hidden: self.hidden,
+        }
+    }
+
+    /// The style hidden ([`Self::hidden`]): nothing of it is drawn, glyphs,
+    /// decoration lines and background alike, and its metrics stay.
+    #[must_use]
+    pub fn hide(self) -> Self {
+        Self {
+            color: Color::TRANSPARENT,
+            decoration_color: None,
+            background: None,
+            hidden: true,
+            ..self
         }
     }
 
@@ -456,6 +477,26 @@ fn is_emoji_presentation(c: &str) -> bool {
         })
 }
 
+/// The length of `s` in UTF-16 units.
+fn utf16_len(s: &str) -> u32 {
+    s.chars().map(|c| c.len_utf16() as u32).sum()
+}
+
+/// The byte offset in `s` of the UTF-16 offset `to` and the UTF-16 offset
+/// it is at, counting on from byte `byte`, which is at UTF-16 offset `at`:
+/// the end of `s` past it, the start of a character whose surrogate pair
+/// `to` splits.
+fn seek(s: &str, mut byte: usize, mut at: u32, to: u32) -> (usize, u32) {
+    for c in s[byte..].chars() {
+        let next = at + c.len_utf16() as u32;
+        if next > to {
+            break;
+        }
+        (at, byte) = (next, byte + c.len_utf8());
+    }
+    (byte, at)
+}
+
 /// The character standing for an attachment.
 pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 
@@ -515,11 +556,65 @@ impl AttributedText {
         self.spans
             .iter()
             .all(|s| {
-                s.style.color == color
+                // A transition would draw a hidden run in its color.
+                !s.style.hidden
+                    && s.style.color == color
                     && (s.style.decoration.is_none()
                         || s.style.decoration_color.is_none_or(|c| c == color))
             })
             .then_some(color)
+    }
+
+    /// Whether a run is hidden ([`ResolvedTextStyle::hidden`]).
+    pub fn has_hidden(&self) -> bool {
+        self.spans.iter().any(|s| s.style.hidden)
+    }
+
+    /// The text a screen reader reads: all of it but its hidden runs
+    /// ([`ResolvedTextStyle::hidden`]); borrowed when none is.
+    pub fn shown_text(&self) -> std::borrow::Cow<'_, str> {
+        if !self.has_hidden() {
+            return std::borrow::Cow::Borrowed(&self.text);
+        }
+        let mut out = String::with_capacity(self.text.len());
+        self.each_shown(0..self.len_utf16(), |s| out.push_str(s));
+        std::borrow::Cow::Owned(out)
+    }
+
+    /// The characters of the UTF-16 range `range` as a copy gives them:
+    /// without attachments' placeholders ([`ATTACHMENT_CHAR`]) and hidden
+    /// runs ([`ResolvedTextStyle::hidden`]). The range is clamped to the
+    /// text; offsets inside a surrogate pair round down.
+    pub fn copied_text(&self, range: Range<u32>) -> String {
+        let mut out = String::new();
+        self.each_shown(range, |s| {
+            out.extend(s.chars().filter(|&c| c != ATTACHMENT_CHAR));
+        });
+        out
+    }
+
+    /// Calls `f` with each piece of `range` (UTF-16 units) that no hidden
+    /// run covers, in order. Characters past the runs (a text built without
+    /// them) count as shown.
+    fn each_shown(&self, range: Range<u32>, mut f: impl FnMut(&str)) {
+        let end = range.end.min(self.len_utf16().max(utf16_len(&self.text)));
+        let (mut byte, mut at) = seek(&self.text, 0, 0, range.start.min(end));
+        // The first span ending after `at`.
+        let mut spans = self.spans[self.spans.partition_point(|s| s.end <= at)..].iter();
+        while at < end {
+            let (to, hidden) = match spans.next() {
+                Some(s) => (s.end.min(end), s.style.hidden),
+                None => (end, false),
+            };
+            let (next, reached) = seek(&self.text, byte, at, to);
+            if !hidden {
+                f(&self.text[byte..next]);
+            }
+            if reached == at {
+                break;
+            }
+            (byte, at) = (next, reached);
+        }
     }
 
     /// The span containing the UTF-16 offset `index` (the last one past the

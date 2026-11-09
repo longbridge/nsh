@@ -2221,19 +2221,12 @@ pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {
     true
 }
 
-/// The selected text, without attachments' placeholders.
+/// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
     let drawn = state.text.as_ref()?;
     let (a, b) = drawn.selection.as_ref()?.range.get()?;
-    let units: Vec<u16> = drawn
-        .text
-        .text
-        .encode_utf16()
-        .skip(a as usize)
-        .take((b - a) as usize)
-        .collect();
-    Some(String::from_utf16_lossy(&units).replace(nsh_core::ATTACHMENT_CHAR, ""))
+    Some(drawn.text.copied_text(a..b))
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.

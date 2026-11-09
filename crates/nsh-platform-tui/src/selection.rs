@@ -108,6 +108,15 @@ impl SelectionTexts for Texts<'_> {
             .unwrap()
             .text
     }
+    fn copied(&self, i: usize, range: std::ops::Range<u32>) -> String {
+        self.tree
+            .get(self.geometry[i].id)
+            .unwrap()
+            .text_content
+            .as_ref()
+            .unwrap()
+            .copied_text(range)
+    }
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.geometry[i].text_frame.expect("text geometry")
     }

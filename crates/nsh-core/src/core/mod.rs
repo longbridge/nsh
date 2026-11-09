@@ -3731,11 +3731,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             node.view_style != view
         };
-        // A span's background is part of its block's text.
-        let span_background_changed = node.inline
+        // A span's background and visibility are part of its block's text.
+        let span_drawing_changed = node.inline
             && node.kind == Kind::Text
-            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
-        let text_changed = node.text_style != text || span_background_changed;
+            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
+                || node.view_style.hidden != view.hidden);
+        let text_changed = node.text_style != text || span_drawing_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
@@ -6930,6 +6931,11 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
+                    // `visibility: "hidden"` on a span hides its characters,
+                    // and those of the spans inside it, where they stand.
+                    if inner.hidden || child.view_style.hidden {
+                        inner = inner.hide();
+                    }
                     let press = pressable(child.events);
                     let hinted = child.overlay_watched & overlay::watch::HINT != 0;
                     self.collect_text(c, inner, out, alignments, in_press || press);
@@ -6940,7 +6946,9 @@ impl<M: TextEngine> Core<M> {
                     // its hint: no press, no stop of Tab. Inside a span that
                     // takes presses it is none, so that span, the innermost
                     // link there, keeps the press of those characters.
-                    if press || (hinted && !in_press) {
+                    // Hidden characters take no presses, as CSS's hidden
+                    // elements take no pointer events.
+                    if !inner.hidden && (press || (hinted && !in_press)) {
                         let mut events = child.events;
                         if hinted {
                             events.set(EventKind::MouseEnter, true);

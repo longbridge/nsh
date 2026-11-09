@@ -23,9 +23,8 @@ use std::{
 
 use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
-    ATTACHMENT_CHAR, Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode,
-    EventKind, Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine,
-    TextPosition, TextSpan,
+    Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, Points,
+    ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition, TextSpan,
 };
 use rustc_hash::FxHashMap;
 
@@ -1902,14 +1901,11 @@ fn copy(view: &NshView) {
     }
 }
 
-/// The selected text, without attachments' placeholders.
+/// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let s = state.text.as_ref()?.text.text.as_str();
-    let start = utf16_to_byte(s, (0, 0), a);
-    let end = utf16_to_byte(s, (start, a), b);
-    Some(s[start..end].replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b))
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.

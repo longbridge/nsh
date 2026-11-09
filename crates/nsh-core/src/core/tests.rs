@@ -1107,6 +1107,167 @@ fn span_backgrounds_style_their_characters() {
     assert!(!text.has_backgrounds());
 }
 
+/// `<Text>a <Text visibility={hidden} red pressable>b<Text bold>c</Text></Text> d</Text>`.
+fn hidden_span_ops(hidden: bool) -> Vec<Op> {
+    let visibility = if hidden { "hidden" } else { "visible" };
+    vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 3,
+            text: "a ".into(),
+        },
+        Op::Create {
+            id: 4,
+            tag: Tag::Text,
+        },
+        style_op(
+            4,
+            &[
+                ("visibility", StyleValue::Str(visibility)),
+                ("color", StyleValue::Str("#ff0000")),
+                ("backgroundColor", StyleValue::Str("#00ff00")),
+            ],
+        ),
+        Op::Listen {
+            id: 4,
+            event: EventKind::Press,
+            enabled: true,
+        },
+        Op::CreateText {
+            id: 5,
+            text: "b".into(),
+        },
+        Op::Create {
+            id: 6,
+            tag: Tag::Text,
+        },
+        style_op(6, &[("fontWeight", StyleValue::Str("bold"))]),
+        Op::CreateText {
+            id: 7,
+            text: "c".into(),
+        },
+        Op::CreateText {
+            id: 8,
+            text: " d".into(),
+        },
+        Op::Insert {
+            parent: 6,
+            child: 7,
+            before: None,
+        },
+        Op::Insert {
+            parent: 4,
+            child: 5,
+            before: None,
+        },
+        Op::Insert {
+            parent: 4,
+            child: 6,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 8,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ]
+}
+
+#[test]
+fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
+    let mut shown = core();
+    apply(&mut shown, hidden_span_ops(false));
+    let batch = shown.commit().unwrap();
+    let visible = text_item(&batch).unwrap();
+    let visible_frame = frame_of(&batch, 2).unwrap();
+    assert!(!visible.has_hidden());
+
+    let mut c = core();
+    apply(&mut c, hidden_span_ops(true));
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    // The characters stay in the text and lay out as visible ones.
+    assert_eq!(text.text, "a bc d");
+    assert!(text.layout_eq(&visible));
+    assert_eq!(frame_of(&batch, 2), Some(visible_frame));
+    // The span and the one inside it are hidden: nothing of them is drawn.
+    let hidden: Vec<_> = text.spans.iter().map(|s| s.style.hidden).collect();
+    assert_eq!(hidden, [false, true, true, false]);
+    for s in &text.spans[1..3] {
+        assert_eq!(s.style.color, Color::TRANSPARENT);
+        assert_eq!(s.style.background, None);
+    }
+    assert_eq!(text.spans[2].style.font_weight, 700);
+    // No press for hidden characters, nor a color transition over them.
+    assert!(text.links.is_empty());
+    assert_eq!(visible.links.len(), 1);
+    assert_eq!(text.uniform_color(), None);
+    // Copies and screen readers leave them out.
+    assert_eq!(text.shown_text(), "a  d");
+    assert_eq!(text.copied_text(0..6), "a  d");
+    assert_eq!(text.copied_text(2..4), "");
+    assert_eq!(text.copied_text(1..5), "  ");
+    assert_eq!(visible.copied_text(1..5), " bc ");
+    assert_eq!(visible.shown_text(), "a bc d");
+
+    // Shown again: drawn again, without measuring or moving anything.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[
+                ("visibility", StyleValue::Str("visible")),
+                ("color", StyleValue::Str("#ff0000")),
+                ("backgroundColor", StyleValue::Str("#00ff00")),
+            ],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert!(!text.has_hidden());
+    assert_eq!(text.spans[1].style.color, Color(0xff00_00ff));
+    assert_eq!(text.links.len(), 1);
+    assert!(frame_of(&batch, 2).is_none());
+}
+
+#[test]
+fn copied_text_skips_hidden_runs_and_attachments() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("a\u{1F600}", plain);
+    t.push("bc", plain.hide());
+    t.push_attachment(crate::geometry::size_pt(4.0, 4.0), plain);
+    t.push("d\u{1F600}e", plain);
+    // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
+    assert_eq!(t.len_utf16(), 10);
+    assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
+    assert_eq!(t.shown_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.copied_text(1..4), "\u{1F600}");
+    assert_eq!(t.copied_text(3..7), "d");
+    // A range past the end is clamped; one inside a surrogate pair starts
+    // at the pair.
+    assert_eq!(t.copied_text(8..99), "\u{1F600}e");
+    assert_eq!(t.copied_text(12..20), "");
+}
+
 #[test]
 fn background_boxes_join_pieces_of_one_span() {
     let mut t = AttributedText::default();
