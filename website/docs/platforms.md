@@ -76,8 +76,10 @@ view and applies changes from the next load; a running engine keeps the runtime 
 
 The application retains ownership and keeps its IO/time-enabled runtime running until the views stop. Disposing
 or recreating a view leaves that runtime available to the host. `None` selects NSH's shared default runtime.
-See the [Rust-linked mobile example](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)
-for both platforms.
+For minified Android builds, preserve the NSH fields and your custom JNI bridge's names with keep rules;
+the distributed AARs already supply the NSH package's consumer rule. See the
+[Rust-linked mobile example](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)
+for both platforms, the complete JNI entry point and the custom-packaging rules.
 
 ## Writing for every platform
 

@@ -74,7 +74,8 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 Android 的配置属于单个视图，后续更改从下一次加载起生效；运行中的引擎继续使用启动时的运行时。
 
 应用保留运行时的所有权，并保持启用了 IO 和时间驱动的运行时运转，直到视图停止。销毁或重建视图后，宿主仍可继续使用该运行时。
-`None` 选择 NSH 共享的默认运行时。两个平台的代码见
+`None` 选择 NSH 共享的默认运行时。Android 开启混淆时，使用 keep 规则保留 NSH 字段和自定义 JNI 桥接类的名称；
+分发的 AAR 已包含保留 NSH 包的消费者规则。两个平台的代码、完整 JNI 入口和自定义打包规则见
 [Rust 链接移动宿主示例](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)。
 
 ## 为每个平台编写
