@@ -1,11 +1,11 @@
 # Platforms built outside NSH
 
 NSH ships the backends of iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web. A platform beyond
-them is built and maintained outside this repository, by the community, on the same public API NSH's own backends
+them is built and maintained outside this repository, by whoever needs it, on the same public API NSH's own backends
 use: the engine (`nsh-engine`), the mount items and text engine of the core (`nsh-core`), and the command line's
 external targets. This page is the reference for those extension points. Its worked example is
-[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), a community platform that runs
-NSH apps in WeChat Mini Programs; each section points at the part of it that uses the extension point.
+[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), a demonstration platform that
+runs NSH apps in WeChat Mini Programs; each section points at the part of it that uses the extension point.
 User-facing page: `website/docs/platform-extensions.md`.
 
 ## What NSH provides
@@ -97,7 +97,7 @@ name (`ios`, `web`, ...) on NSH's own platforms (`Environment::platform_name`). 
 `Os`'s; it is the same name as the command line's `--target`. A Mini Program is a platform that runs on an operating
 system, so the environment holds both: the platform's name and the OS beneath it.
 
-`Environment::os` is always the device's real OS (`platform.os`, `os()`), so a community platform picks the `Os` it
+`Environment::os` is always the device's real OS (`platform.os`, `os()`), so a platform built outside NSH picks the `Os` it
 runs on: the Mini Program platform reports iOS or Android from `wx.getDeviceInfo().platform`, and in WeChat DevTools
 the simulated device's `system`. The OS's props (`ios={{…}}`, `android={{…}}`) then apply as they do on that OS, and
 the backend skips the mount items it does not show. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`)
@@ -162,12 +162,13 @@ platform that runs no TSX: its module then links only the base components the ap
 
 ## The worked example: WeChat Mini Programs
 
-[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) is maintained by the community,
-outside NSH. Its layout:
+[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) is a demonstration, built outside
+NSH to show the extension points at work, and open to a maintainer who wants to take it further (its README). Its
+layout:
 
 | Part | What it does | Extension points |
 |---|---|---|
-| `crates/nsh-platform-miniprogram` | The backend, a library built for `wasm32-unknown-unknown`: `Runtime` (a `LocalEngine`), `encode.rs` (mount items → JSON operations), `text.rs` (a `TextEngine` on the host's `measureText`), `ffi.rs` (the module's exports and imports) | The engine, mount batches, text, input, `Environment::platform` (`"miniprogram"`) with the device's `Os`, the WebAssembly host imports |
+| `crates/nsh-platform-miniprogram` | The backend, a library built for `wasm32-unknown-unknown`: `Runtime` (a `LocalEngine`), `encode.rs` (mount items → JSON operations), `text.rs` (a `TextEngine` on the host's `measureText`), `effects.rs` (styles as CSS), `anim.rs` (the core's `Animator`, ticked on the host's frames), `ffi.rs` (the module's exports and imports) | The engine, mount batches, text, input, `Environment::platform` (`"miniprogram"`) with the device's `Os`, the WebAssembly host imports |
 | `crates/nsh-platform-miniprogram-cli` | `nsh-platform-miniprogram`: `package`, `run` / `dev`; writes the runner, builds it, checks its imports, writes the Mini Program project with the module brotli-compressed | External targets, `nsh_rust_app` |
 | `runtime/` | The Mini Program's side: `nsh/nsh-mp.js` (loads the module, timers, events), `nsh/tree.js` (the tree and its `setData` paths), the recursive `nsh-node` component, the page | — |
 

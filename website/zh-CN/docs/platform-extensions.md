@@ -7,11 +7,11 @@ group: platforms
 
 # 构建平台
 
-Native Shell 的 iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web 后端都构建在一个公开的引擎之上，其他平台也一样。社区构建的平台放在自己的仓库里，使用的正是 NSH 自己的后端所用的 API：引擎运行应用（组件、布局、响应式和文本测量），后端用平台自己的界面显示引擎提交的内容，并把用户的输入送回引擎。`nsh` 命令行按名字运行这样的平台：`nsh package --target miniprogram` 会运行程序 `nsh-platform-miniprogram`。
+Native Shell 的 iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web 后端都构建在一个公开的引擎之上，其他平台也一样。在 NSH 之外构建的平台放在自己的仓库里，使用的正是 NSH 自己的后端所用的 API：引擎运行应用（组件、布局、响应式和文本测量），后端用平台自己的界面显示引擎提交的内容，并把用户的输入送回引擎。`nsh` 命令行按名字运行这样的平台：`nsh package --target miniprogram` 会运行程序 `nsh-platform-miniprogram`。
 
-本页借一个完整的例子逐一讲解后端的各个部分：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram)。它在微信小程序中运行用 Rust 编写的 NSH 应用，由社区维护。
+本页借一个完整的例子逐一讲解后端的各个部分：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram)。它在微信小程序中运行用 Rust 编写的 NSH 应用，用于演示这些扩展能力；有意继续发展它的维护者可以按其 README 联系作者接手。
 
-## 使用社区平台
+## 使用在 NSH 之外构建的平台
 
 平台以名为 `nsh-platform-<name>` 的程序发布。安装它并确保它在 `PATH` 上，然后把它的名字当作 target 使用：
 

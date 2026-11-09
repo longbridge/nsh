@@ -7,11 +7,11 @@ group: platforms
 
 # Building a platform
 
-Native Shell's backends for iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web are built on a public engine, and so is any other platform. A platform built by the community lives in a repository of its own, on the API NSH's own backends use: the engine runs the app (its components, layout, reactivity and text measurement), and the backend shows what the engine commits with the platform's own UI and sends the user's input back. The `nsh` command line runs such a platform by its name: `nsh package --target miniprogram` runs the program `nsh-platform-miniprogram`.
+Native Shell's backends for iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web are built on a public engine, and so is any other platform. A platform built outside NSH lives in a repository of its own, on the API NSH's own backends use: the engine runs the app (its components, layout, reactivity and text measurement), and the backend shows what the engine commits with the platform's own UI and sends the user's input back. The `nsh` command line runs such a platform by its name: `nsh package --target miniprogram` runs the program `nsh-platform-miniprogram`.
 
-This page walks through the parts of a backend with a complete example, [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), which runs NSH apps written in Rust in WeChat Mini Programs and is maintained by its community.
+This page walks through the parts of a backend with a complete example, [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), which runs NSH apps written in Rust in WeChat Mini Programs. It is a demonstration of the extension points, and its README invites a maintainer who wants to take it further.
 
-## Using a community platform
+## Using a platform built outside NSH
 
 A platform ships as a program named `nsh-platform-<name>`. Install it so that it is on your `PATH`, then use its name as a target:
 
