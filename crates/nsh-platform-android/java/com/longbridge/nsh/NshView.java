@@ -482,6 +482,35 @@ public class NshView extends FrameLayout {
         mounter.components.put(name, factory);
     }
 
+    /** Hears a scroll view the host watches ({@link #watchScroll}) come and go, on the UI thread. */
+    public interface ScrollWatcher {
+        /**
+         * The scroll view is there: at once when it already is, and again
+         * with a new handle when the app replaces the element or reloads.
+         *
+         * @param handle follows and drives it
+         */
+        void onAttached(NshScrollHandle handle);
+
+        /** The scroll view is gone (deleted, its {@code testID} changed or its app stopped): its handle is dead. */
+        void onDetached();
+    }
+
+    /**
+     * Watches the app's {@code <Scroll>} whose {@code testID} is
+     * {@code testId}, for native UI of the host that follows or drives the
+     * app's scrolling in the frame of the scroll, without JS (a sheet under
+     * the content, say): {@code watcher} gets a {@link NshScrollHandle} when
+     * the scroll view is there. With several of the same {@code testID}, the
+     * newest one is watched. One watcher per {@code testID}.
+     *
+     * @param testId the scroll view's {@code testID}
+     * @param watcher the watcher (UI thread), or null to stop watching
+     */
+    public void watchScroll(String testId, ScrollWatcher watcher) {
+        mounter.watchScroll(testId, watcher);
+    }
+
     /**
      * The launch parameters of the apps loaded from now on: what the app
      * reads synchronously at start as {@code host.params} ({@code nsh/host}),

@@ -646,6 +646,10 @@ pub(crate) struct Mounter {
     sticky: rustc_hash::FxHashMap<NodeId, Vec<StickyCell>>,
     /// The native components the app registered.
     components: crate::component::Components,
+    /// The scroll views the embedding app watches, by `testID`
+    /// ([`crate::scroll_watch`]), and those of this surface it may watch.
+    scroll_watchers: crate::ScrollWatchers,
+    scrolls: crate::scroll_watch::SurfaceScrolls,
     /// Selectable views (`ViewProps::selectable_view`) and their selections.
     areas: Vec<(NodeId, Retained<crate::selectable_view::AreaResponder>)>,
     /// The performance monitor, while it measures ([`Mounter::measure`]).
@@ -676,7 +680,8 @@ impl Mounter {
         access: std::sync::Arc<nsh_engine::Access>,
         components: crate::component::Components,
     ) -> Self {
-        let target = EventTarget::new(mtm, control.clone(), shared.clone());
+        let scrolls = crate::scroll_watch::SurfaceScrolls::default();
+        let target = EventTarget::new(mtm, control.clone(), shared.clone(), scrolls.clone());
         let target_for_link = target.clone();
         let mut views = Vec::with_capacity(256);
         views.resize_with(2, || None);
@@ -742,6 +747,8 @@ impl Mounter {
             frames_applied: false,
             rtl: false,
             components,
+            scroll_watchers: crate::ScrollWatchers::default(),
+            scrolls,
             areas: Vec::new(),
             fps: None,
             mtm,
@@ -1090,6 +1097,7 @@ impl Mounter {
                 // must not find the id, which a new view may take.
                 self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
+                self.scrolls.remove(&self.scroll_watchers, id);
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
                     self.areas.remove(i).1.delete();
                 }
@@ -1345,6 +1353,7 @@ impl Mounter {
                     if vertical {
                         self.content_sizes.push((id, size.height));
                     }
+                    self.scrolls.resized(id);
                 }
             }
             MountItem::ScrollBy { id, dx, dy } => {
@@ -2840,6 +2849,11 @@ impl Mounter {
 
     /// What the image loader reports.
     /// The disk cache the images it loads go through.
+    /// The scroll views the embedding app watches ([`crate::AppView::watch_scroll`]).
+    pub(crate) fn watch_scrolls(&mut self, watchers: crate::ScrollWatchers) {
+        self.scroll_watchers = watchers;
+    }
+
     pub(crate) fn set_image_cache(&mut self, cache: Option<nsh_core::image::DiskCache>) {
         self.images.set_disk_cache(cache);
     }
@@ -3684,6 +3698,7 @@ impl Mounter {
     /// Touch, accessibility and test properties.
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
         let (control, mtm) = (self.control.clone(), self.mtm);
+        let test_id = props.test_id.clone();
         let Some(s) = self.slot_mut(id) else { return };
         s.long_press_delay = props.long_press_delay;
         s.pan_scroll_handoff = props.pan_scroll_handoff;
@@ -3763,6 +3778,16 @@ impl Mounter {
                 }
             }
             _ => {}
+        }
+        // A scroll view the host may watch by its `testID`.
+        if let Some(Slot {
+            native: Native::Scroll(scroll),
+            ..
+        }) = self.slot(id)
+        {
+            let scroll = scroll.clone();
+            self.scrolls
+                .props(&self.scroll_watchers, id, &scroll, &self.target, test_id);
         }
     }
 
@@ -4468,6 +4493,8 @@ impl Mounter {
 
 impl Drop for Mounter {
     fn drop(&mut self) {
+        // The app stopped: the host's handles to its scroll views die.
+        self.scrolls.clear(&self.scroll_watchers);
         // The link retains its target; invalidating breaks the cycle.
         self.frame_link.invalidate();
     }

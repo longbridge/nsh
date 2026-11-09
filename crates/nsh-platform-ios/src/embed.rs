@@ -1043,6 +1043,265 @@ pub unsafe extern "C" fn nsh_component_context_free(context: *mut NshComponentCo
     }
 }
 
+/// A scroll view the host watches (opaque to C): a [`crate::ScrollHandle`].
+/// Free with [`nsh_scroll_handle_free`].
+pub struct NshScrollHandle(crate::ScrollHandle);
+
+/// What nsh calls on a watcher of [`nsh_app_watch_scroll`], with its
+/// context, on the main thread.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NshScrollWatcherCallbacks {
+    /// The scroll view is there (again: a new handle). The handle is the
+    /// caller's to free with [`nsh_scroll_handle_free`].
+    pub attached: unsafe extern "C" fn(context: *mut c_void, handle: *mut NshScrollHandle),
+    /// The scroll view is gone: the handle is dead.
+    pub detached: unsafe extern "C" fn(context: *mut c_void),
+    /// The watcher is replaced, removed or the app destroyed: release
+    /// `context` (`NULL`: nothing to release).
+    pub release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+}
+
+struct CScrollWatcher {
+    context: *mut c_void,
+    callbacks: NshScrollWatcherCallbacks,
+}
+
+impl crate::ScrollWatcher for CScrollWatcher {
+    fn attached(&self, handle: crate::ScrollHandle) {
+        let handle = Box::into_raw(Box::new(NshScrollHandle(handle)));
+        // SAFETY: the contract of `nsh_app_watch_scroll`.
+        unsafe { (self.callbacks.attached)(self.context, handle) };
+    }
+
+    fn detached(&self) {
+        // SAFETY: the contract of `nsh_app_watch_scroll`.
+        unsafe { (self.callbacks.detached)(self.context) };
+    }
+}
+
+impl Drop for CScrollWatcher {
+    fn drop(&mut self) {
+        if let Some(release) = self.callbacks.release {
+            // SAFETY: the contract of `nsh_app_watch_scroll`.
+            unsafe { release(self.context) };
+        }
+    }
+}
+
+/// Watches the app's `<Scroll>` whose `testID` is `test_id`, for native UI
+/// of the host that follows or drives the app's scrolling in the frame of the
+/// scroll, without JS: `callbacks.attached` gets a handle when the scroll
+/// view is there (at once when it already is). One watcher per `testID`;
+/// `callbacks` `NULL` stops watching. Main thread.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`], `test_id` be NUL-terminated and
+/// `callbacks` (if not `NULL`) safe to call with `context` on the main thread
+/// until its `release` is called (or, without `release`, until `app` is
+/// destroyed).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_watch_scroll(
+    app: *mut NshApp,
+    test_id: *const c_char,
+    context: *mut c_void,
+    callbacks: *const NshScrollWatcherCallbacks,
+) {
+    // SAFETY: guaranteed by the caller.
+    let (app, test_id, callbacks) =
+        unsafe { (&*app, CStr::from_ptr(test_id), callbacks.as_ref().copied()) };
+    let Ok(test_id) = test_id.to_str() else {
+        return log::error!("scroll view test id is not UTF-8");
+    };
+    let watcher = callbacks.map(|callbacks| {
+        std::rc::Rc::new(CScrollWatcher { context, callbacks })
+            as std::rc::Rc<dyn crate::ScrollWatcher>
+    });
+    app.view.watch_scroll(test_id, watcher);
+}
+
+/// Whether the scroll view is still the app's, with the watched `testID`.
+///
+/// # Safety
+///
+/// `handle` must be a handle from `attached`, not yet freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_is_alive(handle: *const NshScrollHandle) -> bool {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.is_alive()
+}
+
+/// The vertical offset (points, from the top of the content); 0 once dead.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_offset_y(handle: *const NshScrollHandle) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.content_offset_y()
+}
+
+/// The content's height (points, at least the viewport's); 0 once dead.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_content_height(handle: *const NshScrollHandle) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.content_height()
+}
+
+/// The visible height (points); 0 once dead.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_viewport_height(handle: *const NshScrollHandle) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.viewport_height()
+}
+
+/// The view the app's content is laid out in (not retained: valid while the
+/// handle is alive); `NULL` once dead.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_content_view(
+    handle: *const NshScrollHandle,
+) -> *const UIView {
+    // SAFETY: guaranteed by the caller.
+    let view = unsafe { &*handle }.0.content_view();
+    // The view hierarchy keeps it while the handle is alive.
+    view.as_deref()
+        .map_or(std::ptr::null(), |v| v as *const UIView)
+}
+
+/// Scrolls by `dy` points, clamped to the content, as the user's scroll
+/// would; `animated` uses UIKit's animation.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_scroll_by(
+    handle: *const NshScrollHandle,
+    dy: f64,
+    animated: bool,
+) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.scroll_by(dy, animated);
+}
+
+/// Ends a fling or an animated scroll where it is; nothing at rest.
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_stop(handle: *const NshScrollHandle) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.stop_deceleration();
+}
+
+/// Releases a listener's context when the listener goes.
+struct ListenerContext {
+    context: *mut c_void,
+    release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+}
+
+impl Drop for ListenerContext {
+    fn drop(&mut self) {
+        if let Some(release) = self.release {
+            // SAFETY: the contract of `nsh_scroll_handle_on_scroll`.
+            unsafe { release(self.context) };
+        }
+    }
+}
+
+/// Calls `on_scroll(context, offset_y, dy)` on every offset change (points;
+/// `dy` positive: the content moved up), on the main thread in the frame of
+/// the scroll. Returns an id for [`nsh_scroll_handle_remove_listener`] (0:
+/// the handle is dead, and `release` was called).
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`]; `on_scroll` must be safe to call with
+/// `context` until `release` is called (when the listener is removed or the
+/// handle dies).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_on_scroll(
+    handle: *const NshScrollHandle,
+    on_scroll: unsafe extern "C" fn(context: *mut c_void, offset_y: f64, dy: f64),
+    context: *mut c_void,
+    release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+) -> u64 {
+    let listener = ListenerContext { context, release };
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.on_scroll(move |y, dy| {
+        // The whole context, not just its pointer: it releases with the
+        // listener.
+        let listener = &listener;
+        // SAFETY: the contract above.
+        unsafe { on_scroll(listener.context, y, dy) };
+    })
+}
+
+/// Calls `on_size(context, content_height)` when the content gets taller or
+/// shorter without a scroll. As [`nsh_scroll_handle_on_scroll`].
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_on_scroll`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_on_content_size(
+    handle: *const NshScrollHandle,
+    on_size: unsafe extern "C" fn(context: *mut c_void, content_height: f64),
+    context: *mut c_void,
+    release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+) -> u64 {
+    let listener = ListenerContext { context, release };
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.on_content_size_change(move |height| {
+        // As in `nsh_scroll_handle_on_scroll`: the closure keeps the context.
+        let listener = &listener;
+        // SAFETY: the contract above.
+        unsafe { on_size(listener.context, height) };
+    })
+}
+
+/// Removes listener `id` (its `release` is called).
+///
+/// # Safety
+///
+/// As [`nsh_scroll_handle_is_alive`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_remove_listener(
+    handle: *const NshScrollHandle,
+    id: u64,
+) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { &*handle }.0.remove_listener(id);
+}
+
+/// Frees a handle (its listeners stay while the scroll view is alive).
+///
+/// # Safety
+///
+/// `handle` must be `NULL` or a handle from `attached`, not yet freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_scroll_handle_free(handle: *mut NshScrollHandle) {
+    if !handle.is_null() {
+        // SAFETY: guaranteed by the caller.
+        drop(unsafe { Box::from_raw(handle) });
+    }
+}
+
 /// JSON text from C (`NULL`: `null`), or why it is not JSON.
 ///
 /// # Safety

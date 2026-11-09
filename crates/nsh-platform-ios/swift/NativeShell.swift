@@ -734,3 +734,137 @@ extension NshAppView {
         nsh_app_register_component_with_animation(app, name, factory, &callbacks, &animated)
     }
 }
+
+/// Hears a scroll view the host watches (`NshAppView.watchScroll`) come and
+/// go, on the main thread.
+public protocol NshScrollWatcher: AnyObject {
+    /// The scroll view is there: at once when it already is, and again with a
+    /// new handle when the app replaces the element or another app loads.
+    @MainActor func scrollAttached(_ handle: NshScrollHandle)
+    /// The scroll view is gone (deleted, its `testID` changed or its app
+    /// stopped): its handle is dead.
+    @MainActor func scrollDetached()
+}
+
+/// A `<Scroll>` of the app, for native UI of the host that follows or drives
+/// the app's vertical scrolling in the frame of the scroll, without a round
+/// trip through JS: a sheet under the content that the end of the content
+/// pulls up, say. Lengths are points, offsets from the top of the content.
+/// Main thread.
+///
+/// Once the scroll view is deleted, loses its `testID` or its app stops,
+/// `isAlive` is false, reads give 0 and the rest does nothing.
+@MainActor
+public final class NshScrollHandle {
+    private let handle: OpaquePointer
+
+    init(_ handle: OpaquePointer) { self.handle = handle }
+
+    deinit { nsh_scroll_handle_free(handle) }
+
+    /// Whether the scroll view is still the app's, with the watched `testID`.
+    public var isAlive: Bool { nsh_scroll_handle_is_alive(handle) }
+    /// The vertical offset.
+    public var contentOffsetY: CGFloat { nsh_scroll_handle_offset_y(handle) }
+    /// The content's height (at least the viewport's).
+    public var contentHeight: CGFloat { nsh_scroll_handle_content_height(handle) }
+    /// The visible height.
+    public var viewportHeight: CGFloat { nsh_scroll_handle_viewport_height(handle) }
+    /// The view the app's content is laid out in: the positions of the views
+    /// inside are relative to it. `nil` once the scroll view is gone.
+    public var contentView: UIView? { nsh_scroll_handle_content_view(handle) }
+
+    /// Scrolls by `dy`, clamped to the content, as the user's scroll would
+    /// (the app's `onScroll` hears it); `animated` uses UIKit's animation.
+    public func scroll(by dy: CGFloat, animated: Bool) {
+        nsh_scroll_handle_scroll_by(handle, dy, animated)
+    }
+
+    /// Ends a fling or an animated scroll where it is; nothing at rest.
+    public func stopDeceleration() { nsh_scroll_handle_stop(handle) }
+
+    /// Calls `f(offsetY, dy)` on every offset change (`dy` positive: the
+    /// content moved up), in the frame of the scroll. Returns a function that
+    /// stops it.
+    @discardableResult
+    public func onScroll(_ f: @escaping @MainActor (_ offsetY: CGFloat, _ dy: CGFloat) -> Void) -> () -> Void {
+        let box = Unmanaged.passRetained(ScrollListenerBox(f)).toOpaque()
+        let id = nsh_scroll_handle_on_scroll(
+            handle,
+            { context, y, dy in
+                let box = Unmanaged<ScrollListenerBox>.fromOpaque(context!).takeUnretainedValue()
+                // nsh calls it on the main thread.
+                MainActor.assumeIsolated { box.onScroll(y, dy) }
+            },
+            box,
+            { context in Unmanaged<ScrollListenerBox>.fromOpaque(context!).release() }
+        )
+        return { [weak self] in
+            guard let self else { return }
+            nsh_scroll_handle_remove_listener(self.handle, id)
+        }
+    }
+
+    /// Calls `f(contentHeight)` when the content gets taller or shorter
+    /// without a scroll. Returns a function that stops it.
+    @discardableResult
+    public func onContentSizeChange(_ f: @escaping @MainActor (_ contentHeight: CGFloat) -> Void) -> () -> Void {
+        let box = Unmanaged.passRetained(ContentSizeListenerBox(f)).toOpaque()
+        let id = nsh_scroll_handle_on_content_size(
+            handle,
+            { context, height in
+                let box = Unmanaged<ContentSizeListenerBox>.fromOpaque(context!).takeUnretainedValue()
+                MainActor.assumeIsolated { box.onSize(height) }
+            },
+            box,
+            { context in Unmanaged<ContentSizeListenerBox>.fromOpaque(context!).release() }
+        )
+        return { [weak self] in
+            guard let self else { return }
+            nsh_scroll_handle_remove_listener(self.handle, id)
+        }
+    }
+}
+
+private final class ScrollListenerBox {
+    let onScroll: @MainActor (CGFloat, CGFloat) -> Void
+    init(_ f: @escaping @MainActor (CGFloat, CGFloat) -> Void) { onScroll = f }
+}
+
+private final class ContentSizeListenerBox {
+    let onSize: @MainActor (CGFloat) -> Void
+    init(_ f: @escaping @MainActor (CGFloat) -> Void) { onSize = f }
+}
+
+/// Holds a scroll watcher for the C callbacks.
+private final class ScrollWatcherBox {
+    let watcher: NshScrollWatcher
+    init(_ watcher: NshScrollWatcher) { self.watcher = watcher }
+}
+
+extension NshAppView {
+    /// Watches the app's `<Scroll>` whose `testID` is `testID`, for native UI
+    /// of the host that follows or drives the app's scrolling in the frame of
+    /// the scroll, without JS (a sheet under the content, say): `watcher`
+    /// gets an `NshScrollHandle` when the scroll view is there. With several
+    /// of the same `testID`, the newest one is watched. One watcher per
+    /// `testID`, retained until replaced; `nil` stops watching.
+    public func watchScroll(_ testID: String, _ watcher: NshScrollWatcher?) {
+        guard let watcher else {
+            return nsh_app_watch_scroll(app, testID, nil, nil)
+        }
+        let box = Unmanaged.passRetained(ScrollWatcherBox(watcher)).toOpaque()
+        var callbacks = NshScrollWatcherCallbacks(
+            attached: { context, handle in
+                let box = Unmanaged<ScrollWatcherBox>.fromOpaque(context!).takeUnretainedValue()
+                MainActor.assumeIsolated { box.watcher.scrollAttached(NshScrollHandle(handle)) }
+            },
+            detached: { context in
+                let box = Unmanaged<ScrollWatcherBox>.fromOpaque(context!).takeUnretainedValue()
+                MainActor.assumeIsolated { box.watcher.scrollDetached() }
+            },
+            release: { context in Unmanaged<ScrollWatcherBox>.fromOpaque(context!).release() }
+        )
+        nsh_app_watch_scroll(app, testID, box, &callbacks)
+    }
+}

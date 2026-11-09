@@ -188,6 +188,7 @@ setContentView(column);
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
+| `watchScroll(String testId, ScrollWatcher watcher)` | 在 UI 线程、滚动的同一帧跟随并驱动应用中带该 `testID` 的 `<Scroll>`（[跟随滚动视图](#跟随滚动视图)）；传 `null` 停止。 |
 | `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。不是 JSON 对象时返回 `false`。 |
 | `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用；`destroy()` 后返回 `false`。 |
 | `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
@@ -245,6 +246,41 @@ nsh.handle("user.profile") { data, reply ->
 ```
 
 处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
+## 跟随滚动视图
+
+宿主的原生界面有时要逐帧跟着应用的内容移动：页面下方一个由内容末尾拉起的面板，或随内容收起的页头。把 `onScroll` 经 JS
+转给宿主会晚一帧，所以宿主按 `testID` 监听应用的 `<Scroll>`，拿到它的 `NshScrollHandle`。一切都在 UI 线程、滚动的同一帧里进行，
+不经过 JS：
+
+```java
+nsh.watchScroll("page", new NshView.ScrollWatcher() {
+    @Override
+    public void onAttached(NshScrollHandle handle) {   // 已存在时立即回调；重新加载后再次回调
+        handle.addScrollListener(new NshScrollListener() {
+            @Override
+            public void onScroll(int scrollY, int dy) { sheet.follow(handle); }
+
+            @Override
+            public void onContentSizeChanged(int contentHeight) { sheet.follow(handle); }
+        });
+    }
+
+    @Override
+    public void onDetached() { sheet.reset(); }        // 被删除、testID 改变或应用停止
+});
+```
+
+| `NshScrollHandle` | |
+|---|---|
+| `getScrollY()`、`getContentHeight()`、`getViewportHeight()` | 纵向偏移、内容高度（至少为视口高度）和可见高度，单位 px。 |
+| `getContentView()` | 承载内容的视图：应用里各视图的位置相对于它。 |
+| `scrollBy(int dy)`、`smoothScrollBy(int dy)` | 立即或以平台动画滚动，按内容范围夹取，与用户滚动一样：应用的 `onScroll` 会收到。 |
+| `stopFling()` | 让惯性滚动或平滑滚动停在当前位置；静止时什么也不做。 |
+| `addScrollListener(NshScrollListener l)`、`removeScrollListener(…)` | 每次偏移变化调用 `onScroll(scrollY, dy)`；内容未经滚动变高或变矮时调用 `onContentSizeChanged(contentHeight)`。 |
+| `isAlive()` | 滚动视图是否仍在且仍是该 `testID`；不在之后，读取返回 0，其余操作不起作用。 |
+
+同一 `testID` 有多个滚动视图时，监听最新的那个。
+
 ## 主题覆盖
 
 嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：

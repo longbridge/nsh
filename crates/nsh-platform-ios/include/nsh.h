@@ -231,6 +231,59 @@ void nsh_component_set_size(const NshComponentContext *context, double width, do
 /// Frees a component's context.
 void nsh_component_context_free(NshComponentContext *_Nullable context);
 
+/// A scroll view of the app the host watches (`nsh_app_watch_scroll`).
+typedef struct NshScrollHandle NshScrollHandle;
+
+/// What nsh calls on a scroll watcher, with its context. Main thread.
+typedef struct {
+    /// The scroll view is there (again: a new handle). Free the handle with
+    /// `nsh_scroll_handle_free`.
+    void (*_Nonnull attached)(void *_Nullable context, NshScrollHandle *handle);
+    /// The scroll view is gone (deleted, `testID` changed or the app
+    /// stopped): its handle is dead.
+    void (*_Nonnull detached)(void *_Nullable context);
+    /// The watcher is replaced, removed or the app destroyed: release `context`.
+    void (*_Nullable release)(void *_Nullable context);
+} NshScrollWatcherCallbacks;
+
+/// Watches the app's `<Scroll>` whose `testID` is `test_id`, for native UI
+/// that follows or drives its scrolling in the frame of the scroll, without
+/// JS: `attached` gets a handle when it is there (at once when it already
+/// is). One watcher per `testID`; NULL `callbacks` stops watching.
+void nsh_app_watch_scroll(NshApp *app, const char *test_id, void *_Nullable context,
+                          const NshScrollWatcherCallbacks *_Nullable callbacks);
+
+/// Whether the scroll view is still the app's, with that `testID`. Once it is
+/// not, reads give 0 and the rest does nothing.
+bool nsh_scroll_handle_is_alive(const NshScrollHandle *handle);
+/// The vertical offset (points, from the top of the content).
+double nsh_scroll_handle_offset_y(const NshScrollHandle *handle);
+/// The content's height (points, at least the viewport's).
+double nsh_scroll_handle_content_height(const NshScrollHandle *handle);
+/// The visible height (points).
+double nsh_scroll_handle_viewport_height(const NshScrollHandle *handle);
+/// The view the app's content is laid out in (not retained: valid while alive).
+UIView *_Nullable nsh_scroll_handle_content_view(const NshScrollHandle *handle);
+/// Scrolls by `dy` points, clamped, as the user's scroll would.
+void nsh_scroll_handle_scroll_by(const NshScrollHandle *handle, double dy, bool animated);
+/// Ends a fling or an animated scroll where it is; nothing at rest.
+void nsh_scroll_handle_stop(const NshScrollHandle *handle);
+/// Calls `on_scroll` on every offset change (`dy` positive: the content moved
+/// up). Returns an id (0: the handle is dead and `release` was called);
+/// `release` runs when the listener is removed or the handle dies.
+uint64_t nsh_scroll_handle_on_scroll(const NshScrollHandle *handle,
+                                     void (*_Nonnull on_scroll)(void *_Nullable context, double offset_y, double dy),
+                                     void *_Nullable context, void (*_Nullable release)(void *_Nullable context));
+/// Calls `on_size` when the content gets taller or shorter without a scroll.
+/// As `nsh_scroll_handle_on_scroll`.
+uint64_t nsh_scroll_handle_on_content_size(const NshScrollHandle *handle,
+                                           void (*_Nonnull on_size)(void *_Nullable context, double content_height),
+                                           void *_Nullable context, void (*_Nullable release)(void *_Nullable context));
+/// Removes a listener (its `release` runs).
+void nsh_scroll_handle_remove_listener(const NshScrollHandle *handle, uint64_t id);
+/// Frees a handle.
+void nsh_scroll_handle_free(NshScrollHandle *_Nullable handle);
+
 /// The launch parameters of the apps `app` loads from now on (`host.params`,
 /// read when an app starts): a JSON object, or NULL for none. Returns why
 /// `json` is not a JSON object, or NULL.

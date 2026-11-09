@@ -87,6 +87,16 @@ final class ScrollBox extends FrameLayout implements Node {
      */
     int frames;
 
+    // The host's handle (`NshScrollHandle`, `NshView.watchScroll`).
+    /** The {@code testID} the host watches it by (null: none). */
+    String hostKey;
+    /** It was deleted, or its app stopped. */
+    boolean unmounted;
+    /** Hear every offset and content size change. */
+    final java.util.List<NshScrollListener> hostListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** A smooth scroll of the host's may still be running. */
+    private boolean hostAnimating;
+
     /** The scrolled content, sized by the core (`ScrollContent`). */
     static final class Content extends Box {
         int contentWidth, contentHeight;
@@ -167,6 +177,7 @@ final class ScrollBox extends FrameLayout implements Node {
             mounter.scroll(id, x / d, y / d, applied);
             removeCallbacks(settled);
             postDelayed(settled, 120);
+            if (y != oy) for (NshScrollListener l : hostListeners) l.onScroll(y, y - oy);
         });
         addView(scroller, 0, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }
@@ -186,19 +197,21 @@ final class ScrollBox extends FrameLayout implements Node {
             rescaledContent = true;
             requestLayout();
         }
+        int oldHeight = content.contentHeight;
         content.contentWidth = width;
         content.contentHeight = height;
         if (scroller instanceof ZScroll) {
             // Exactly the core's size: the zoom scales it.
             ((ZScroll) scroller).placeContent();
-            return;
+        } else {
+            // Sized right away: scrolling in the same batch (anchoring, a
+            // jump to an item) is clamped to the content's current size.
+            int w = Math.max(width, scroller.getWidth()), h = Math.max(height, scroller.getHeight());
+            content.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
+            content.layout(0, 0, w, h);
+            content.requestLayout();
         }
-        // Sized right away: scrolling in the same batch (anchoring, a
-        // jump to an item) is clamped to the content's current size.
-        int w = Math.max(width, scroller.getWidth()), h = Math.max(height, scroller.getHeight());
-        content.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
-        content.layout(0, 0, w, h);
-        content.requestLayout();
+        if (height != oldHeight) for (NshScrollListener l : hostListeners) l.onContentSizeChanged(hostContentHeight());
     }
 
     /** Sticky cells: node ids and their travel (px), from `StickyCells`. */
@@ -591,8 +604,59 @@ final class ScrollBox extends FrameLayout implements Node {
         }
     }
 
+    // --- The host's handle (`NshScrollHandle`) ---------------------------
+
+    int hostScrollY() {
+        return scroller.getScrollY();
+    }
+
+    int hostContentHeight() {
+        return Math.max(content.contentHeight, scroller.getHeight());
+    }
+
+    int hostViewportHeight() {
+        return scroller.getHeight();
+    }
+
+    /** Scrolls as the user would: not one of the core's scrolls (`applied`). */
+    void hostScrollBy(int dy, boolean animated) {
+        if (scroller instanceof ZScroll) {
+            ((ZScroll) scroller).scrollToPx(scroller.getScrollX(), scroller.getScrollY() + dy, animated);
+        } else if (animated && scroller instanceof ScrollView) {
+            hostAnimating = true;
+            ((ScrollView) scroller).smoothScrollBy(0, dy);
+        } else {
+            scroller.scrollBy(0, dy);
+        }
+    }
+
+    /** Ends a fling or a smooth scroll where it is; nothing when at rest. */
+    void hostStop() {
+        if (!momentum && !hostAnimating) return;
+        hostAnimating = false;
+        if (scroller instanceof ZScroll) {
+            ((ZScroll) scroller).stop();
+        } else {
+            // The first empty smooth scroll replaces the animation with one
+            // that still runs (a scroll view that sees a touch down then
+            // takes the whole gesture, a horizontal scroll view inside never
+            // gets it); the second, within the platform's gap between
+            // animated scrolls, aborts it. A zero fling (`stopMotion`) would
+            // leave the running one.
+            for (int i = 0; i < 2; i++) {
+                if (scroller instanceof ScrollView) ((ScrollView) scroller).smoothScrollBy(0, 0);
+                else if (scroller instanceof HorizontalScrollView) ((HorizontalScrollView) scroller).smoothScrollBy(0, 0);
+            }
+        }
+        if (momentum) {
+            momentum = false;
+            emit(Native.MOMENTUM_END);
+        }
+    }
+
     /** Scrolling came to rest (no API for it: no change for a moment). */
     private void settled() {
+        hostAnimating = false;
         if (touching) {
             postDelayed(settled, 120);
             return;
