@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use nsh_bundler::{BundleError, BundleOptions};
+use nsh_bundler::{AppVersion, BundleError, BundleOptions};
 
 use crate::ui;
 
@@ -195,19 +195,44 @@ impl BuildError {
 /// Bundles `entry` and compiles it to bytecode: one bundle, holding what
 /// `import()` loads too (native packages).
 pub(crate) fn compile(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, false, release.into())
+    compile_with(entry, release, false, release.into(), AppVersion::default())
+}
+
+/// [`compile`] in release mode for a package of `config`'s app (`split`:
+/// as [`compile_split`] does, for web apps), giving it `config`'s version
+/// and build number (`--version`, `--build`).
+pub(crate) fn compile_package(
+    entry: &Path,
+    split: bool,
+    config: &crate::package::AppConfig,
+) -> Result<Built, BuildError> {
+    compile_with(entry, true, split, true.into(), app_version(config))
 }
 
 /// [`compile`], with what `import()` loads split into chunks
 /// ([`Built::chunks`]) loaded on demand (web apps).
 pub(crate) fn compile_split(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, true, release.into())
+    compile_with(entry, release, true, release.into(), AppVersion::default())
 }
 
 /// [`compile`] in release mode (minified), with the bytecode stripped as
-/// `strip` says (signed packages keep their line tables by default).
-pub(crate) fn compile_release(entry: &Path, strip: nsh_js::Strip) -> Result<Built, BuildError> {
-    compile_with(entry, true, false, strip)
+/// `strip` says (signed packages keep their line tables by default), giving
+/// the app `config`'s version and build number.
+pub(crate) fn compile_release(
+    entry: &Path,
+    strip: nsh_js::Strip,
+    config: &crate::package::AppConfig,
+) -> Result<Built, BuildError> {
+    compile_with(entry, true, false, strip, app_version(config))
+}
+
+/// The version and build number `config` gives the app (`nsh.json`'s, or
+/// the command line's), as `appInfo()` reports them.
+fn app_version(config: &crate::package::AppConfig) -> AppVersion {
+    let mut version = AppVersion::default();
+    version.version = config.version.clone();
+    version.build = config.build.map(u64::from);
+    version
 }
 
 fn compile_with(
@@ -215,13 +240,16 @@ fn compile_with(
     release: bool,
     split: bool,
     strip: nsh_js::Strip,
+    app: AppVersion,
 ) -> Result<Built, BuildError> {
     let start = Instant::now();
     let mut bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: release,
+        development: !release,
         split,
         ui_sets: crate::ui_sets().to_vec(),
+        app,
     })?;
     let dir = dunce::canonicalize(entry)
         .ok()

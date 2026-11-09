@@ -81,6 +81,19 @@ pub(crate) struct Env {
     built_theme: RefCell<Option<String>>,
     /// The displays the platform reported last.
     displays: RefCell<Vec<Display>>,
+    /// What `appInfo()` reports: the build's ([`set_app_info`]).
+    app: RefCell<AppInfo>,
+}
+
+/// The app as it was built (`appInfo()`), from the JSON the bundler writes.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct AppInfo {
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    build: Option<f64>,
+    development: bool,
 }
 
 impl Default for Env {
@@ -97,9 +110,53 @@ impl Default for Env {
             theme: RefCell::new(ThemeTokens::default()),
             built_theme: RefCell::default(),
             displays: RefCell::default(),
+            app: RefCell::default(),
         }
     }
 }
+
+/// Takes in the app's information as the build wrote it (`setup`'s fifth
+/// argument); what this runtime cannot read is left out.
+pub(crate) fn set_app_info(cx: *mut JsContext, json: &str) {
+    match serde_json::from_str(json) {
+        Ok(info) => *env(cx).app.borrow_mut() = info,
+        Err(e) => log::warn!("appInfo: {e}, ignored"),
+    }
+}
+
+/// `appInfo()`: the app as it was built.
+unsafe extern "C" fn app_info(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+) -> JsValue {
+    let app = env(cx).app.borrow();
+    let text = |value: &Option<String>| match value {
+        Some(value) => string(cx, value),
+        None => qjs::JS_NULL,
+    };
+    object(
+        cx,
+        &[
+            (c"id", text(&app.id)),
+            (c"name", text(&app.name)),
+            (c"version", text(&app.version)),
+            (c"build", app.build.map_or(qjs::JS_NULL, qjs::JS_NewFloat64)),
+            (c"development", boolean(app.development)),
+        ],
+    )
+}
+
+/// `appInfo` of `nsh`.
+pub(crate) const APP_INFO_EXPORT: crate::modules::Item = (
+    "appInfo",
+    Export::Function(app_info, 0),
+    Ts::function(
+        "The app as it was built: its id and name, the version and build\nnumber the build gave it (`nsh.json`'s, or `nsh package`'s and `nsh\npublish`'s `--version` and `--build`), and whether it is a development\nbuild (`nsh run`, `nsh test`, `nsh build` without `--release`). A\nsigned package's code reports the package's version and build;\n`nsh/updater`'s `shellInfo()` the installed app's.",
+        &["(): AppInfo"],
+    ),
+);
 
 fn env<'a>(cx: *mut JsContext) -> &'a Env {
     // SAFETY: a projection of the state's field, reached by shared

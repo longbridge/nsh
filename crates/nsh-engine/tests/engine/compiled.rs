@@ -52,6 +52,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         minify: true,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     assert!(!bundle.code.contains("solid"), "only the app's code");
@@ -214,6 +215,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
             nsh_base::registry().into(),
             crate::test_ui::registry().into(),
         ],
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(

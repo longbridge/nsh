@@ -126,6 +126,8 @@ fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>),
         minify: false,
         split: false,
         ui_sets: sets.clone(),
+        development: true,
+        ..Default::default()
     })
     .map_err(|e| format!("{}: {e}", entry.display()))?;
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &sets)
