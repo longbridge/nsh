@@ -112,6 +112,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     };
     let own = root.ns() != surface.root.ns();
+    let window_root = root.id();
     if crate::window::blocked(surface, own.then_some(&root)) {
         return false;
     }
@@ -129,7 +130,8 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     if cfg!(feature = "dev") && keystroke.reloads(Os::MacOs) {
         return false;
     }
-    let found = table.find(keystroke, editing, event.isARepeat());
+    // Only the bindings of the window the key is in (and JS's) take it.
+    let found = table.find_in(window_root, keystroke, editing, event.isARepeat());
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,

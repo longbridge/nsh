@@ -140,6 +140,12 @@ impl Windows {
         self.own.iter().find(|w| w.root == root).map(|w| w.state)
     }
 
+    /// The root of the window with the keyboard focus (`ROOT_ID`: the
+    /// main window), if one has it.
+    pub(crate) fn focused(&self) -> Option<NodeId> {
+        self.focused
+    }
+
     /// The main window's content size the app asked for
     /// (`SetContentSize` on it), taken.
     pub(crate) fn take_main_resize(&mut self) -> Option<Size<Points>> {
