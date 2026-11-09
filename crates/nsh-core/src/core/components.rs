@@ -4813,6 +4813,10 @@ impl<M: TextEngine> Core<M> {
     }
 
     fn dispatch_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        // A cancelled press's release reaches no one, JS included.
+        if self.drop_cancelled_press(id, kind, payload) {
+            return true;
+        }
         // Touches come on the root with the listening nodes around each
         // finger: the components hear theirs, JS its own.
         if kind == EventKind::Touch && id == ROOT_ID {

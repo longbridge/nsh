@@ -147,6 +147,14 @@ impl ElementRef {
         self.send(Command::Focus);
     }
 
+    /// Ends the press going on in the element (or inside it) without its
+    /// release: no `on_press_up` or `on_press` follow, and its `active:`
+    /// styles reset (`nsh-base`'s context menu opened by a held finger).
+    #[doc(hidden)]
+    pub fn cancel_press(&self) {
+        self.send(Command::CancelPress);
+    }
+
     /// Unfocuses an input, or takes the keyboard focus off a view that
     /// takes presses.
     pub fn blur(&self) {
