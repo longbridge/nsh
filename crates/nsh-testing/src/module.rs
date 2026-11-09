@@ -2045,6 +2045,13 @@ impl App {
         step(&this, |app| app.back()).await
     }
 
+    /// Goes forward in the browser's history, as its forward button does.
+    /// Only `nsh test --target web` has one; elsewhere it rejects
+    /// (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub async fn forward(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.forward()).await
+    }
+
     /// Answers the dialogs the app shows from now on (`AlertDialog.show`, action
     /// sheets): `handler` returns the text of the button to press, or
     /// `null` to close it without one. Without a handler, a dialog's cancel

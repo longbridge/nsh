@@ -1177,6 +1177,11 @@ pub trait Native: Send + Sync {
     /// Goes back as the user does (a back gesture, the back button,
     /// Escape): an error when the platform has none.
     fn back(&self) -> Result<(), String>;
+    /// Goes forward in the browser's history: the web's; the other
+    /// platforms have no forward.
+    fn forward(&self) -> Result<(), String> {
+        Err(crate::failure::web_only("forward"))
+    }
     /// Answers the dialog the app shows now (the oldest): presses its
     /// button with the text `button`, or closes it without one.
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
@@ -1505,6 +1510,7 @@ impl Agent {
                 done(self.native.press_keys(&keys).and_then(|()| self.settled()))
             }
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
+            TestStep::Forward => done(self.native.forward().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
@@ -2642,6 +2648,13 @@ mod tests {
             agent.take(TestStep::Back),
             StepOutcome::Failed {
                 message: "no back here".into()
+            }
+        );
+        // Only the web's native goes forward.
+        assert_eq!(
+            agent.take(TestStep::Forward),
+            StepOutcome::Failed {
+                message: crate::failure::web_only("forward")
             }
         );
         // No input to type into.
