@@ -980,7 +980,8 @@ export interface LocaleSettings {
 
 export interface PlatformInfo {
   /** The operating system (`"ios"`, `"android"`, `"macos"`, `"windows"`,
-   * `"linux"`, `"web"`). */
+   * `"linux"`, `"web"`), or the name of a platform implemented outside NSH
+   * (`"miniprogram"`): handle a name you do not know. */
   readonly os: OS;
   /** iOS and desktops: the OS version (`"17.5"`); Android: the API level
    * (`"35"`); the web: `"0.0"`. */

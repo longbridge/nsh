@@ -68,6 +68,12 @@ pub enum Os {
     /// A web browser (the WebAssembly runtime): phone, tablet or desktop
     /// by [`Idiom`].
     Web,
+    /// A platform NSH does not ship, implemented outside it (a third-party
+    /// backend on NSH's engine: `docs/dev/platforms.md`), by its name in
+    /// `platform.os`: lower case, a name none of the others has
+    /// (`"miniprogram"`). Mobile or desktop by [`Idiom`]; it has none of
+    /// the other OSes' props (`ios={{…}}`, `android={{…}}`).
+    External(&'static str),
 }
 
 impl Os {
@@ -80,6 +86,7 @@ impl Os {
             Os::Windows => "windows",
             Os::Linux => "linux",
             Os::Web => "web",
+            Os::External(name) => name,
         }
     }
 

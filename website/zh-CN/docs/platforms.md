@@ -29,6 +29,8 @@ NSH 运行在手机、桌面、终端和网页上：iOS、Android、macOS、Wind
 - **[Web](./web.md)** 把应用渲染成浏览器页面里的 HTML：`nsh package --target web` 发布一个静态网站，可部署到任意 Web 服务器或 CDN，Rust 应用的引擎和 crate 编译为 WebAssembly；你自己的网页可以用 `createPlayer` 或 iframe 嵌入应用。本站的在线示例和 [Playground](/playground) 也由它运行。
 - **Mac Catalyst** 在 Mac 上用 iPhone 尺寸的窗口（390×844）运行 iOS 后端，用于开发。用 `--target catalyst` 选择它，快速查看应用在手机上的样子。
 
+社区还在同一个引擎上构建了更多平台，每个平台有自己的仓库，`nsh` 命令行按名字运行它们：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) 在微信小程序中运行应用（`--target miniprogram`）。[构建平台](./platform-extensions.md)介绍了如何构建一个平台。
+
 ## 开发与打包
 
 不传 `--target` 时，`nsh run` 选择本机的平台：macOS 上是 AppKit，Linux 上是 GTK 窗口，Windows 上是 Win32 窗口。手机要从电脑上连接：iOS 需要装有 Xcode 的 Mac，Android 可以在装有 Android SDK 的 macOS、Linux 或 Windows 上开发（[安装](./installation.md#各平台可用的命令)）。
@@ -122,3 +124,4 @@ function TabLayout() {
 - [用 Rust 开发](./rust.md)：完全用 Rust 编写的应用，以及 Rust 加 TSX。
 - [安装](./installation.md)：每个平台需要的工具。
 - [架构](./architecture.md)：哪些部分共享，每个后端做什么。
+- [构建平台](./platform-extensions.md)：在 NSH 的引擎上构建你自己的平台。
