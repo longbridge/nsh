@@ -5334,10 +5334,12 @@ class Player {
       // at those depths included; a level that has no entry left gets one
       // once the traversal lands.
       const to = this.entryAtDepth(depth);
-      this.ignoredPops++;
-      history.go(to - this.historyIndex);
+      const delta = to - this.historyIndex;
+      // Where it lands, before it may (a browser lands later).
       this.historyIndex = to;
       this.historyDepth = Math.min(depth, this.historyDepths[to] ?? 0);
+      this.ignoredPops++;
+      history.go(delta);
     } else {
       this.historyDepth = depth;
     }
@@ -5351,7 +5353,7 @@ class Player {
         // page has one.
         history.replaceState(history.state, "", url);
         this.shownUrl = url;
-        if (!this.historyDepth) this.firstUrl = url;
+        if (!this.historyIndex) this.firstUrl = url;
       } catch (error) {
         this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
       }

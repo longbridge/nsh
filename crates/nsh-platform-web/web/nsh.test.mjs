@@ -1976,6 +1976,13 @@ test("an address typed over a pushed page stays at its depth, and the app's own 
   assert.equal(player.historyIndex, 0);
 });
 
+test("an address the app sets on an entry the user typed is not its first entry's", (t) => {
+  const { player, type } = historyPlayer(t);
+  type("https://a.test/inbox#archive");
+  player.setPageUrl("https://a.test/inbox#archive?sort=new");
+  assert.equal(player.firstUrl, "https://a.test/inbox");
+});
+
 test("a back that pops a page whose address the app does not set moves the app's address once the page is dismissed", (t) => {
   const { player, calls, app, user, type } = historyPlayer(t);
   type("https://a.test/inbox?tab=b");
