@@ -11,7 +11,10 @@ mod parts;
 mod selection;
 mod view;
 
-use nsh_core::prelude::*;
+use nsh_core::{
+    element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, TsTypes},
+    prelude::*,
+};
 
 use self::controller::Dt;
 pub use self::{
@@ -29,6 +32,54 @@ pub enum DataTableAlign {
     Center,
     /// At the end: numbers.
     End,
+}
+
+/// Where a column stays while the others scroll sideways (`fixed`): JS's
+/// `true` is [`DataTableFixed::Start`], `false` [`DataTableFixed::None`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DataTableFixed {
+    /// It scrolls with the others.
+    #[default]
+    None,
+    /// It stays at the start (the left in left-to-right text), with the
+    /// other columns fixed there, before them in their order.
+    Start,
+    /// It stays at the end, with the other columns fixed there, after
+    /// them in their order: right after the scrolling columns while they
+    /// fit in the table, at its end edge once they overflow it.
+    End,
+}
+
+impl From<bool> for DataTableFixed {
+    fn from(fixed: bool) -> Self {
+        if fixed { Self::Start } else { Self::None }
+    }
+}
+
+impl JsValue for DataTableFixed {
+    fn ts_type(_: &mut TsTypes) -> String {
+        r#"boolean | "start" | "end""#.into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        match value.kind() {
+            JsKind::Bool => bool::from_js(value).map(Self::from),
+            JsKind::String => match value.as_string().as_deref() {
+                Some("start") => Ok(Self::Start),
+                Some("end") => Ok(Self::End),
+                _ => Err(value.expected(r#"true, false, "start" or "end""#)),
+            },
+            _ => Err(value.expected(r#"true, false, "start" or "end""#)),
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Self::None => false.to_js(host),
+            Self::Start => "start".to_owned().to_js(host),
+            Self::End => "end".to_owned().to_js(host),
+        }
+    }
 }
 
 /// Which way a column is sorted.
@@ -71,10 +122,11 @@ pub struct DataTableColumn {
     /// (`onSortChange`; the app sorts its data and sets `sort`).
     #[prop(default)]
     pub sortable: bool,
-    /// It stays at the left while the other columns scroll under it. Fixed
-    /// columns lead the others, in their order.
+    /// Where it stays while the other columns scroll under it: at the
+    /// start (`true` or `"start"`), leading the others, or at the end
+    /// (`"end"`), after them; fixed columns keep their order.
     #[prop(default)]
-    pub fixed: bool,
+    pub fixed: DataTableFixed,
     /// Whether a drag of its edge resizes it (default the table's
     /// `resizableColumns`).
     #[prop(skip_none)]

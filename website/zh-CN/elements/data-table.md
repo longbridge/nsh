@@ -7,7 +7,7 @@ demo: el-data-table
 
 # DataTable
 
-`DataTable` 像电子表格那样显示行和列，并向两个方向滚动，行数和列数都不限。只创建视野中的单元格，所以一百万行、一万列的表格滚动起来与小表格一样流畅。行、列或单元格可以用指针和键盘选择；列有固定的宽度，拖动边缘调整宽度，拖动标题移动，可以在其他列滚动时固定在左侧，也可以排序。标题可以位于分组标签之下，单元格和标题都可以由应用绘制。
+`DataTable` 像电子表格那样显示行和列，并向两个方向滚动，行数和列数都不限。只创建视野中的单元格，所以一百万行、一万列的表格滚动起来与小表格一样流畅。行、列或单元格可以用指针和键盘选择；列有固定的宽度，拖动边缘调整宽度，拖动标题移动，可以在其他列滚动时固定在左侧或右侧，也可以排序。标题可以位于分组标签之下，单元格和标题都可以由应用绘制。
 
 `DataTable` 提供布局、对齐、虚拟化和交互。应用通过 `classes` 和 `styles` 设置各部件的内边距、颜色、边框和选中态外观。Rust 用 `nsh_base::data_table()` 创建它，TSX 用 `nsh/base` 中的 `<DataTable>`。
 
@@ -69,7 +69,7 @@ mount(App);
 | `fitPadding` | 应用的内边距、图标或徽标需要的额外宽度，适配列宽时加到最宽的标题或单元格文字上。 |
 | `align` | `"start"`（默认）、`"center"` 或 `"end"`（用于数字），单元格和标题一致。 |
 | `sortable` | 标题末端有一个排序按钮，按下会请求排序（见[排序](#sorting)）。 |
-| `fixed` | 其他列在它下面滚动时，它固定在左侧。固定列排在其他列之前，保持各自的顺序。 |
+| `fixed` | 其他列在它下面滚动时它固定在哪一侧：`true` 或 `"start"` 固定在左侧，排在其他列之前；`"end"` 固定在右侧，排在其他列之后（滚动列放得下时紧跟在它们后面，放不下时贴住表格右边缘）。固定列保持各自的顺序。 |
 | `resizable`、`movable` | 拖动它的边缘是否调整宽度，拖动它的标题是否移动。默认取表格的 `resizableColumns` 和 `movableColumns`。 |
 | `selectable` | 是否参与选择。按钮或复选框所在的列设为 `false`。默认 `true`。 |
 | `cellClass` | 该列单元格的 classes，排在 `cell` 部件之后：单列的内边距或对齐。 |
@@ -183,7 +183,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 调整和移动列
 
-拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
+拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize({ key, width })` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在同一侧的固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
 
 <a id="live-data"></a>
 
@@ -302,7 +302,7 @@ const columns: DataTableColumn[] = [
 | `cellColumnSelected` | 被选中列的单元格，排在 `cell` 之后 |
 | `rowHeader` | 行号单元格 |
 | `rowHeaderCorner` | 行号上方的角落 |
-| `fixedEdge` | 固定列尾部边缘的线，位于在其下滚动的列之上 |
+| `fixedEdge` | 固定列和在其下滚动的列之间的线：左侧固定列的尾部边缘，右侧固定列的起始边缘 |
 | `empty` | `empty` 插槽的盒子 |
 
 <a id="props"></a>
@@ -311,7 +311,7 @@ const columns: DataTableColumn[] = [
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `columns` | `.columns(..)` | `DataTableColumn[]` | `[]` | 从左到右的列。固定列排在前面。 |
+| `columns` | `.columns(..)` | `DataTableColumn[]` | `[]` | 从左到右的列。左侧固定列排在最前，右侧固定列排在最后。 |
 | `data` | `.data(..)` | `Row[]` | `[]` | 行：按列 `key` 取字段的对象，或按位置索引的数组。 |
 | `rowCount` | `.row_count(..)` | `number` | 已持有的行数 | 行的总数。 |
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |

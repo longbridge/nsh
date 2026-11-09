@@ -163,9 +163,9 @@ pub use crate::{
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
-        DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress,
-        DataTableProps, DataTableRange, DataTableRows, DataTableSelection, DataTableSort,
-        DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
+        DataTableElement, DataTableEvent, DataTableFixed, DataTableHeaderCell, DataTablePart,
+        DataTablePress, DataTableProps, DataTableRange, DataTableRows, DataTableSelection,
+        DataTableSort, DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
     },
     date_picker::{
         DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,

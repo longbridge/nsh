@@ -25,8 +25,10 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 The table is a body, a hit layer over it and a header (`view.rs`), from the bottom:
 
 - the *body* receives no pointer and draws the cells of the rows and columns in view, placed where the table last
-  scrolled to. Its regions are the row headers, the fixed columns (which move with the rows only) and the scrolling
-  columns (which move both ways). The cells a scroll needs come with the next commit, which moves the body with them;
+  scrolled to. Its regions are the row headers, the columns fixed at the start and at the end (which move with the
+  rows only) and the scrolling columns between them (which move both ways). Those fixed at the end stand right after
+  the scrolling columns while these fit, at the view's end once they overflow it (`Columns::end_left`, as CSS's
+  `sticky`). The cells a scroll needs come with the next commit, which moves the body with them;
 - the *hit layer* over it is a vertical scroll view of a horizontal one of an empty box of the content's size. The
   platforms scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses,
   hovers and the context menu. It draws nothing but its scroll bars (the platform's indicator, or the built-in
