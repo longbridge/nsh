@@ -25,6 +25,8 @@ mod script;
 #[cfg_attr(not(feature = "shader"), path = "shader_off.rs")]
 pub mod shader;
 mod shader_frame;
+#[cfg(all(feature = "shader", target_vendor = "apple"))]
+mod shader_surfaces;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js-core")]
@@ -904,6 +906,10 @@ pub struct EngineConfig {
     pub viewport: Size<Points>,
     /// Log per-commit timings (target `nsh::perf`, level info).
     pub trace: bool,
+    /// Scroll views make the native views of their content only near
+    /// their viewport (the platforms' apps); off, they make all of it
+    /// (tests, which read whole pages). [`EngineConfig::new`]: off.
+    pub content_culling: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
     pub network: Option<Arc<dyn Network>>,
     /// The host transport for WebSockets, including the browser WebSocket API.
@@ -1091,6 +1097,7 @@ impl EngineConfig {
             app: app.into(),
             viewport: Size::new(Points(390.0), Points(844.0)),
             trace: false,
+            content_culling: false,
             network: None,
             websocket: None,
             refuse_connections: None,
@@ -1172,6 +1179,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("app", &self.app)
             .field("viewport", &self.viewport)
             .field("trace", &self.trace)
+            .field("content_culling", &self.content_culling)
             .field("network", &self.network.is_some())
             .field("assets", &self.assets.is_some())
             .field("environment", &self.environment)
@@ -1205,6 +1213,7 @@ enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
     Kept(Vec<NodeId>),
+    ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
@@ -1317,6 +1326,14 @@ impl EngineControl {
     /// the last call's; none releases them.
     pub fn keep_rendered(&self, nodes: Vec<NodeId>) {
         let _ = self.tx.send(Message::Kept(nodes));
+    }
+
+    /// Whether scroll views make the native views of their content as it
+    /// comes near their viewport (the default), or all of it
+    /// (`Core::set_content_culling`): a test driver's, whose steps reach
+    /// every view of a page.
+    pub fn set_content_culling(&self, enabled: bool) {
+        let _ = self.tx.send(Message::ContentCulling(enabled));
     }
 
     /// Reports how far a multiline input's text scrolled: its offset, the
@@ -1840,6 +1857,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
         // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
@@ -2056,6 +2074,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             let _ = system_tx.send(Message::Wake);
                         }),
                         host: Rc::new(host_bridge),
+                        lazy_rows: config.content_culling,
                     }
                 };
                 #[cfg(not(any(
@@ -3479,6 +3498,12 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Kept(nodes) => state.core.set_kept(&nodes),
+        Message::ContentCulling(enabled) => {
+            state.core.set_content_culling(enabled);
+            if let Some(script) = script {
+                script.set_lazy_rows(enabled);
+            }
+        }
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }

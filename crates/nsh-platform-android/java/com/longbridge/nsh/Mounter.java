@@ -9,6 +9,8 @@ import android.graphics.Rect;
 import android.text.Layout;
 import android.util.SparseArray;
 import android.util.SparseLongArray;
+import android.os.Build;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.AccelerateInterpolator;
@@ -2083,6 +2085,43 @@ final class Mounter {
         if (f.getRootView() == host.getRootView()) host.requestFocus();
     }
 
+    /**
+     * `Haptics` of `nsh/mobile`: the haptic feedback constant closest to
+     * `haptic` (`nsh_core::Haptic`, in the order `encode.rs` writes), which
+     * the view plays when the user's touch feedback setting allows it.
+     * API levels: {@link HapticFeedbackConstants#CONFIRM} /
+     * {@link HapticFeedbackConstants#REJECT} from 30 (else
+     * {@link HapticFeedbackConstants#VIRTUAL_KEY} /
+     * {@link HapticFeedbackConstants#LONG_PRESS});
+     * {@link HapticFeedbackConstants#SEGMENT_TICK} from 34 (else
+     * {@link HapticFeedbackConstants#CLOCK_TICK} for selection).
+     */
+    private static void haptic(View view, int haptic) {
+        boolean api30 = Build.VERSION.SDK_INT >= 30;
+        int feedback;
+        switch (haptic) {
+            case 0: // selection
+                feedback = Build.VERSION.SDK_INT >= 34
+                        ? HapticFeedbackConstants.SEGMENT_TICK
+                        : HapticFeedbackConstants.CLOCK_TICK;
+                break;
+            case 1: feedback = HapticFeedbackConstants.KEYBOARD_TAP; break; // light
+            case 2: feedback = HapticFeedbackConstants.VIRTUAL_KEY; break; // medium
+            case 3: feedback = HapticFeedbackConstants.LONG_PRESS; break; // heavy
+            case 4: feedback = HapticFeedbackConstants.CLOCK_TICK; break; // soft
+            case 5: feedback = HapticFeedbackConstants.CONTEXT_CLICK; break; // rigid
+            case 6: // success
+                feedback = api30 ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.VIRTUAL_KEY;
+                break;
+            case 7: feedback = HapticFeedbackConstants.LONG_PRESS; break; // warning: no constant of its own
+            case 8: // error
+                feedback = api30 ? HapticFeedbackConstants.REJECT : HapticFeedbackConstants.LONG_PRESS;
+                break;
+            default: return;
+        }
+        view.performHapticFeedback(feedback);
+    }
+
     private void command(ByteBuffer b, Object[] objects) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);
@@ -2299,6 +2338,10 @@ final class Mounter {
             case 17: {
                 String text = (String) objects[b.getInt()];
                 (v != null ? v : host).announceForAccessibility(text);
+                break;
+            }
+            case 48: {
+                haptic(host, b.getInt());
                 break;
             }
             case 18: {

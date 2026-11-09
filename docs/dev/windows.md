@@ -229,7 +229,7 @@ keeps the apps' data there (`nsh test` gives each app a fresh one). Timers are W
 ## Performance: `--fps`
 
 `nsh-windows-host --fps` (`nsh run --target windows --fps`, `nsh test --target windows --fps`; `AppOptions::fps`, `NSH_FPS=1`, the app's `setFpsEnabled`)
-logs one `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`), in the Linux and macOS
+logs one `nsh::fps` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`), in the Linux and macOS
 backends' shape: frames shown over the compositor's rate (`DwmGetCompositionTimingInfo`), the main thread's time per
 shown frame and its phases (`tick`: the ticker's animations and frame callbacks; `drain`: batches applied as they
 arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:

@@ -30,7 +30,7 @@
   dropped by its last waiter cancels the read in its queue or between two chunks of its download. Limits:
   `MAX_BYTES` (64 MiB) a response or file, `TIMEOUT` (60 s) a request, `MAX_REDIRECTS` (20) redirects, each checked
   by `Access::media_redirect` and never from `https` to `http`. A failed read is answered from memory for
-  `FAILURE_TTL` (30 s). L3: the encoded bytes of the last reads, so a decode at another size, an SVG parsed again or `getSize` reads nothing again.
+  `FAILURE_TTL` (30 s). L3: the encoded bytes of the last reads (`ENCODED_BYTES`, 32 MiB on the desktops and 16 MiB on the phones, or the app's own with `loader().set_encoded_limit`), so a decode at another size, an SVG parsed again or `getSize` reads nothing again.
   Decoded images (L4, `Images<V>`: the backend gives it its decoder, bytes to its picture at a `Target`) are decoded
   at the size their view shows them: `Want` (the box in points, the device scale, the resize mode; an empty box: the
   natural size; one side alone scales by that side) gives the longest side the fitted image needs in pixels, rounded

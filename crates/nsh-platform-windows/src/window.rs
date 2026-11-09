@@ -793,9 +793,28 @@ pub(crate) fn modifiers() -> Modifiers {
     }
 }
 
+/// The [`WindowData`] of `hwnd`, when it is one of this process's windows
+/// of [`CLASS`]: callers pass windows they did not make too (the foreground
+/// window, which may be another app's), whose `GWLP_USERDATA` is theirs,
+/// not a `WindowData`.
 fn data(hwnd: HWND) -> Option<&'static WindowData> {
-    // SAFETY: the pointer was stored by `WM_NCCREATE` and is freed only in
-    // `WM_NCDESTROY`, after which the slot is cleared.
+    use windows::Win32::{
+        System::Threading::GetCurrentProcessId,
+        UI::WindowsAndMessaging::{GCLP_WNDPROC, GetClassLongPtrW, GetWindowThreadProcessId},
+    };
+    let mut process = 0;
+    // SAFETY: plain queries; an out value for the process id.
+    let ours = unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut process)) != 0
+            && process == GetCurrentProcessId()
+            && GetClassLongPtrW(hwnd, GCLP_WNDPROC) == window_proc as *const () as usize
+    };
+    if !ours {
+        return None;
+    }
+    // SAFETY: a window of `CLASS` in this process: the pointer was stored by
+    // `WM_NCCREATE` and is freed only in `WM_NCDESTROY`, after which the
+    // slot is cleared.
     unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowData).as_ref() }
 }
 
@@ -1872,5 +1891,56 @@ mod tests {
         assert_eq!(held_buttons(WPARAM(0x10)), 0b100);
         assert_eq!(held_buttons(WPARAM(0x20)), 0b1000);
         assert_eq!(held_buttons(WPARAM(0x40)), 0b1_0000);
+    }
+
+    unsafe extern "system" fn plain_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        // SAFETY: default handling.
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    /// A window the app did not make (the foreground window can be another
+    /// app's) keeps what it likes in `GWLP_USERDATA`: it is never read as a
+    /// `WindowData`, which crashed the test agent's typing on Windows on Arm.
+    #[test]
+    fn a_window_of_another_class_has_no_window_data() {
+        // SAFETY: a class registered and a window made on this thread, never
+        // shown, destroyed at the end; its user data is set and never read.
+        unsafe {
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(plain_proc),
+                hInstance: instance(),
+                lpszClassName: w!("NshTestForeign"),
+                ..Default::default()
+            };
+            RegisterClassExW(&class);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("NshTestForeign"),
+                w!(""),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                100,
+                100,
+                None,
+                None,
+                Some(instance()),
+                None,
+            )
+            .unwrap();
+            // An address nothing is mapped at, as another app's pointer is.
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0x0000_7FFF_FFFF_0000);
+            assert!(surface_of(hwnd).is_none());
+            assert_eq!(app_window_root(hwnd), None);
+            assert!(shell(hwnd).is_none());
+            DestroyWindow(hwnd).unwrap();
+        }
+        assert!(surface_of(HWND::default()).is_none());
     }
 }

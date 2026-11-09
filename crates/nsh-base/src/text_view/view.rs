@@ -1226,10 +1226,9 @@ impl Cx {
         // The Cells the text is wide, once laid out: the columns fit them
         // (their cells wrapping), or the table scrolls.
         let room = signal(0usize);
-        let widths = move || fit_columns(&natural, room.get());
+        let widths = computed(move || fit_columns(&natural, room.get()));
         let ruled = |ends: [char; 3]| {
-            let widths = widths.clone();
-            text(move || SharedString::from(table_rule(&widths(), ends)))
+            text(move || widths.with(|widths| SharedString::from(table_rule(widths, ends))))
                 .number_of_lines(1u32)
                 .text_color(move || theme().border)
                 .into_element()
@@ -1269,8 +1268,9 @@ impl Cx {
                 let end = tail && r == last_row && c + span == columns;
                 let key = format!("{key}.{r}.{c}");
                 // The columns it spans and the ` │ ` between them.
-                let widths = widths.clone();
-                let cells = move || widths()[c..c + span].iter().sum::<usize>() + 3 * (span - 1);
+                let cells = move || {
+                    widths.with(|widths| widths[c..c + span].iter().sum::<usize>() + 3 * (span - 1))
+                };
                 let t = self.paragraph(content, &key, end);
                 let t = match align(c) {
                     ColumnAlign::Center => t.text_center(),

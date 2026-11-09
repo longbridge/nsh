@@ -106,7 +106,7 @@ pub enum AppSource {
 pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
-    /// Logs the performance monitor's readings once a second (`nsh::perf`:
+    /// Logs the performance monitor's readings once a second (`nsh::fps`:
     /// frame rate, frame and commit costs, CPU, memory).
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
@@ -311,6 +311,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(nsh_engine::net::network()),
             websocket: None,
             refuse_connections: None,

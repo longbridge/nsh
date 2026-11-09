@@ -631,6 +631,27 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.string(text);
                     }
                     Command::AccessibilityFocus => e.int(18),
+                    // `Mounter.haptic` reads the haptic in this order.
+                    // API levels of the constants it maps to: CONFIRM /
+                    // REJECT from 30 (else VIRTUAL_KEY / LONG_PRESS),
+                    // SEGMENT_TICK from 34 (else CLOCK_TICK for selection).
+                    Command::Haptic(haptic) => {
+                        use nsh_core::{Haptic, HapticImpact, HapticNotification};
+                        e.int(48);
+                        e.int(match haptic {
+                            Haptic::Selection => 0,
+                            Haptic::Impact(HapticImpact::Light) => 1,
+                            Haptic::Impact(HapticImpact::Medium) => 2,
+                            Haptic::Impact(HapticImpact::Heavy) => 3,
+                            Haptic::Impact(HapticImpact::Soft) => 4,
+                            Haptic::Impact(HapticImpact::Rigid) => 5,
+                            Haptic::Notification(HapticNotification::Success) => 6,
+                            Haptic::Notification(HapticNotification::Warning) => 7,
+                            Haptic::Notification(HapticNotification::Error) => 8,
+                            // `Haptic*` are non-exhaustive; Mounter ignores.
+                            _ => -1,
+                        });
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);

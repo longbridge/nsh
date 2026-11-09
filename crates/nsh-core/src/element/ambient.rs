@@ -519,6 +519,12 @@ pub fn announce_for_accessibility(message: impl Into<String>) {
     act(super::services::announce(message.into()));
 }
 
+/// The device plays `haptic` (TS: `Haptics` of `nsh/mobile`): iOS and
+/// Android; elsewhere nothing happens.
+pub fn haptic(haptic: crate::Haptic) {
+    act(super::services::haptic(haptic));
+}
+
 /// Runs `f` with the app's storage (`nsh/storage`, [`crate::storage::Storage`]):
 /// the one the engine was given, or one in memory when it was given none.
 pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R {
@@ -1543,7 +1549,7 @@ pub fn fps_enabled() -> bool {
 }
 
 /// Turns the platform's performance monitor on or off (TS:
-/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::fps`
 /// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {

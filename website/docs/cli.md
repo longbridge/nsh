@@ -96,10 +96,10 @@ On the native window and mobile targets, a Rust app (`nsh.json` `"root"`, [Build
 | `--target <TARGET>` | `macos` on macOS, `linux` on Linux, `windows` on Windows | `catalyst`: the Mac Catalyst host, an iPhone-sized window (390×844). `ios`: the host in an iOS simulator. `android`: the host on an Android device or emulator. `macos`: the AppKit host, a 1200×800 window ([macOS](./macos.md)). `linux`: the GTK host, a 390×844 window ([Linux](./linux.md)). `windows`: the Win32 host, a 1200×800 window ([Windows](./windows.md)). `gpui`: the GPUI host, a 1200×800 window, on macOS, Windows or Linux, showing a TSX app as GPUI apps that embed it show it ([GPUI](./gpui.md)). `tui`: the host in the current terminal ([TUI](./tui.md)). `web`: the dev server's page, at the address it prints ([Web](./web.md#develop-in-the-browser)). |
 | `--device <DEVICE>` | | iOS simulator to use, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
 | `--port <PORT>` | The app's last port, else the first free one from `8790` | Dev server port. Replaces the previous NSH development session on this port after its cleanup completes. |
-| `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. |
+| `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. An app with a Rust crate also gets an optimized (`--release`) development host, with its crates and NSH's built as in a package. |
 | `--limits [<LIMITS>]` | | Runs the app as an app embedded in another one, within the limits its host app sets: `memory` and `stack` (in `KB`, `MB` or `GB`), `load` and `call` (in `ms` or `s`) and `nodes`, such as `--limits memory=128MB,call=500ms`. The ones left out keep the embedding defaults, which `--limits` alone runs with ([Sandbox and capabilities](./sandbox-and-capabilities.md#limits)). Without it the app runs on its own, as a packaged app does. TSX entries. |
 | `--trace` | | The host logs the timing of every commit (JS, layout, mount items) to the terminal. |
-| `--fps` | | The performance monitor: frame rate, what frames and commits cost, CPU, GPU and memory, shown over the app on macOS ([macOS](./macos.md#performance-monitor)) and logged once a second on macOS, Linux, Windows and iOS. On `tui`, a corner line shows FPS/idle, frame p95, apply/draw/flush times, bytes and changed Cells; `C-h p` toggles it. |
+| `--fps` | | The performance monitor: frame rate, what frames and commits cost, CPU, GPU and memory, shown over the app on macOS ([macOS](./macos.md#performance-monitor)) and logged once a second on macOS, Linux, Windows and iOS, shown with `-v`. On `tui`, a corner line shows FPS/idle, frame p95, apply/draw/flush times, bytes and changed Cells; `C-h p` toggles it. |
 | `--name <NAME>` | `nsh.json` name | Application display name in the menu bar and initial window title (`--target macos`, TSX entries). |
 | `--points-per-cell <WIDTHxHEIGHT>` | `nsh.json` `tui.pointsPerCell`, otherwise `8x16` | Terminal Cell width and height in points (`--target tui`). |
 | `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
@@ -244,6 +244,16 @@ does, switches channels ([Installation](./installation.md#updating)).
 
 ```sh
 nsh update [stable|nightly]
+```
+
+## nsh component
+
+Adds, removes or lists the runtimes installed next to an installed `nsh`: those of the platforms other than the one it runs on (`android`, `android-symbols`, `ios`, `web`, `gpui`, `tui`). A command that needs one adds it itself the first time ([Installation](./installation.md#components)).
+
+```sh
+nsh component list
+nsh component add <NAME>...
+nsh component remove <NAME>...
 ```
 
 ## Signing commands

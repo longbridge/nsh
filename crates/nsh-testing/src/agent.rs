@@ -312,6 +312,9 @@ impl Model {
     /// The engine [`Model::set_up_engine`] set up started: the test moves
     /// its clock through it.
     pub fn engine_started(&self, engine: nsh_engine::EngineControl) {
+        // Steps reach every view of a page, below its fold too, as the
+        // headless driver's do.
+        engine.set_content_culling(false);
         if let Some(setup) = &mut *self.setup.lock().unwrap_or_else(|e| e.into_inner()) {
             setup.engine = Some(engine);
         }

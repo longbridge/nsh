@@ -99,7 +99,8 @@ step, the details only when something fails. Every command prints through it:
 - Log lines (`logger.rs`): the library crates and the devices log through `log`; normally warnings and errors are shown
   without targets (a device's after its name: `warn iOS Simulator: …`), `js` lines and a device's lines from other
   crates (the app's Rust code) plainly (with the device's name when several are connected), `nsh::perf` as `perf …`;
-  NSH's own info lines (a device's "loading build 3") are not shown: the CLI's steps say what happens. The dev server
+  NSH's own info lines (a device's "loading build 3") and the performance monitor's line a second (`--fps`, `nsh::fps`)
+  are not shown: the CLI's steps say what happens. The dev server
   reports hosts connecting and leaving (`nsh_dev::ClientEvent`) rather than logging it, so the CLI prints
   `• Mac Catalyst connected, build 1`, and a host that cannot run the app as one `warn` line
   (`warn Android Emulator: its host has no gallery/native (it was built for another app): nsh run examples/gallery-rs
@@ -972,6 +973,13 @@ host on every `nsh run`. The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
+In an installed distribution, a runtime other than this machine's own is a component (`crates/nsh-cli/src/component.rs`):
+when the runtime is missing, `runtime.rs` asks `component::ensure` to download the component's archive from the
+CLI's own release (`v<version>`, or `nightly`), check its `.sha256` and its record (`components/<name>.json`, the
+version and commit it was built at, which must be the CLI's), and move its paths into place; `nsh component
+list|add|remove` does the same by hand, and `nsh update` adds the installed components again after replacing the
+directory. A checkout's build never downloads: it builds its runtimes with cargo.
+
 The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
 is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
 are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
@@ -981,7 +989,12 @@ are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon: the iOS, Mac Catalyst and macOS
 runtimes and the iOS SDK), Linux and Windows (x86_64), each with the GPUI development host of its OS and the Android runtime, checks that the packaged CLI
 makes and bundles a new app, and archives `dist/nsh` as one directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on
-Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), each with a `.sha256`. Asset
+Windows) with the CLI and that machine's runtime only. The embedding SDKs are archives of their own
+(`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack` moves every other runtime into its
+component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and `nsh-web.tar.gz` from Linux's build,
+`nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`, `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
+`xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
+than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
@@ -1033,7 +1046,8 @@ How users get it (`website/docs/installation.md`):
   `.github/packages/nsh.rb` with the archives' checksums and pushes it to `longbridge/homebrew-tap` as
   `Formula/nsh.rb`. It validates the tag and checksum sidecars, downloads and verifies both archives, then installs
   and tests the formula on Apple silicon before updating the tap. The formula supports Apple-silicon macOS and
-  x86_64 Linux, keeps the whole distribution in `libexec`, and tests web packaging through the installed symlink.
+  x86_64 Linux, keeps the whole distribution in `libexec` (components are added there when needed), and tests a
+  release build and `nsh component list` through the installed symlink.
   Pull requests and pushes to `main` that change the package files run these checks without writing to the tap.
 - Scoop: the release job fills in `.github/packages/nsh.json` and attaches it as `nsh.json`; Scoop installs from
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
