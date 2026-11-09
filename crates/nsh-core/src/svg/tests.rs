@@ -656,6 +656,189 @@ fn svg_safety_text_reference_fan_out_is_bounded() {
 }
 
 #[test]
+fn svg_safety_text_reference_spelling_matches_usvg() {
+    // usvg takes `xlink:href` before `href`, and its IRI parser ignores spaces
+    // around the `#id`. The walk must resolve the same references, or 100 uses
+    // of a 1000-character text lay out 100 000 characters uncounted.
+    let text = "a".repeat(1000);
+    let doc = |uses: &str| {
+        format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10"><defs><text id="t">{text}</text><g id="e"/></defs>{uses}</svg>"##
+        )
+    };
+    for uses in [
+        r##"<use href=" #t"/>"##.repeat(100),
+        r##"<use href="#t "/>"##.repeat(100),
+        r##"<use href="#e" xlink:href="#t"/>"##.repeat(100),
+    ] {
+        assert_eq!(size(doc(&uses).as_bytes()), Err(Error::TooMuchText));
+    }
+}
+
+#[test]
+fn svg_safety_text_tref_does_not_stop_at_a_cycle() {
+    // A `tref` reads the referenced element's text nodes without expanding
+    // it, so the target being on the walk's stack is not a reason to count
+    // nothing: each of the 100 uses lays out the 1000 characters under `A`.
+    let text = "a".repeat(1000);
+    let uses = r##"<use href="#A"/>"##.repeat(100);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><g id="A">{text}<text x="0" y="9"><tref href="#A"/></text></g></defs>{uses}</svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_clip_paths_is_bounded() {
+    // An objectBoundingBox clip path is converted for every element that
+    // references it, so 100 references lay out the text 100 times.
+    let text = "a".repeat(1000);
+    let rects = r#"<rect width="10" height="10" clip-path="url(#c)"/>"#.repeat(100);
+    let doc = |units: &str| {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><clipPath id="c" clipPathUnits="{units}"><text x="0" y="9">{text}</text></clipPath></defs>{rects}</svg>"#
+        )
+    };
+    assert_eq!(
+        size(doc("objectBoundingBox").as_bytes()),
+        Err(Error::TooMuchText)
+    );
+    // A userSpaceOnUse clip path is converted once, so the same text is under
+    // the bound however many elements reference it.
+    assert!(size(doc("userSpaceOnUse").as_bytes()).is_ok());
+    // One clip path over the bound is refused even with a single reference.
+    let big = "a".repeat(super::MAX_TEXT_CHARS + 1);
+    let one = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><clipPath id="c"><text x="0" y="9">{big}</text></clipPath></defs><rect width="10" height="10" clip-path="url(#c)"/></svg>"#
+    );
+    assert_eq!(size(one.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_markers_is_bounded() {
+    // A middle marker is drawn at every vertex of the path; a 100-vertex
+    // path lays out the marker's 1000 characters 100 times.
+    let text = "a".repeat(1000);
+    let path: String = (0..100).map(|i| format!("L{i} 0")).collect();
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><marker id="m" markerWidth="1" markerHeight="1"><text x="0" y="9">{text}</text></marker></defs><path d="M0 0{path}" fill="none" stroke="black" marker-mid="url(#m)"/></svg>"#
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_inherited_markers_are_bounded() {
+    // Marker properties inherit: a `<g marker-mid>` draws the marker at every
+    // vertex of every descendant path, not once for the group.
+    let text = "a".repeat(1000);
+    let paths: String = (0..100)
+        .map(|i| format!(r#"<path d="M0 0L{i} 0L{i} {i}"/>"#))
+        .collect();
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><marker id="m" markerWidth="1" markerHeight="1"><text x="0" y="9">{text}</text></marker></defs><g marker-mid="url(#m)">{paths}</g></svg>"#
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_linked_resources_are_bounded() {
+    // A clip path can name another one; usvg converts the linked clip path,
+    // including its text, so the walk follows that link too.
+    let big = "a".repeat(super::MAX_TEXT_CHARS + 1);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><clipPath id="b"><text x="0" y="9">{big}</text></clipPath><clipPath id="a" clip-path="url(#b)"/></defs><rect width="10" height="10" clip-path="url(#a)"/></svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_masks_is_bounded() {
+    // An objectBoundingBox mask (the default) is converted for every element
+    // that references it.
+    let text = "a".repeat(1000);
+    let rects = r#"<rect width="10" height="10" mask="url(#m)"/>"#.repeat(100);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><mask id="m"><text x="0" y="9">{text}</text></mask></defs>{rects}</svg>"#
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_filters_is_bounded_per_reference() {
+    // A filter's units default to objectBoundingBox, so usvg converts it for
+    // every element that references it, laying out its `feImage` text each
+    // time.
+    let text = "a".repeat(1000);
+    let rects = r#"<rect width="10" height="10" filter="url(#f)"/>"#.repeat(100);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><filter id="f"><feImage href="#t"/></filter><text id="t" x="0" y="9">{text}</text></defs>{rects}</svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_patterns_is_bounded() {
+    // A pattern is converted once, so a small text stays under the bound
+    // however many elements fill with it; a pattern over the bound is refused
+    // even with one reference.
+    let small = "a".repeat(1000);
+    let fills = r#"<rect width="10" height="10" fill="url(#p)"/>"#.repeat(100);
+    let small_doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><pattern id="p" patternUnits="userSpaceOnUse" width="10" height="10"><text x="0" y="9">{small}</text></pattern></defs>{fills}</svg>"#
+    );
+    assert!(size(small_doc.as_bytes()).is_ok());
+    let big = "a".repeat(super::MAX_TEXT_CHARS + 1);
+    let big_doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><pattern id="p" patternUnits="userSpaceOnUse" width="10" height="10"><text x="0" y="9">{big}</text></pattern></defs><rect width="10" height="10" fill="url(#p)"/></svg>"#
+    );
+    assert_eq!(size(big_doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_in_filters_is_bounded() {
+    // `feImage` can reference an element and draw it, including its text.
+    let big = "a".repeat(super::MAX_TEXT_CHARS + 1);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><filter id="f"><feImage href="#t"/></filter><text id="t" x="0" y="9">{big}</text></defs><rect width="10" height="10" filter="url(#f)"/></svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_only_in_a_clip_path_asks_for_fonts() {
+    // usvg lays out this text, so the walk must report it and the parse must
+    // load the font database; otherwise the clip path comes out empty.
+    let doc = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><clipPath id="c"><text x="0" y="9">SALE</text></clipPath></defs><rect width="10" height="10" clip-path="url(#c)"/></svg>"#;
+    let tree = xml(doc).unwrap();
+    assert_eq!(check_text(&tree), Ok(true));
+}
+
+#[test]
+fn svg_safety_use_chains_do_not_overflow_the_stack() {
+    // usvg refuses a chain deeper than 1024 elements; the walk must stop at
+    // the same depth instead of recursing through all 50 000 links.
+    let chain: String = (1..50_000)
+        .map(|i| format!(r##"<g id="g{i}"><use href="#g{}"/></g>"##, i - 1))
+        .collect();
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><rect id="g0" width="1" height="1"/>{chain}</defs><use href="#g49999"/></svg>"##
+    );
+    assert!(doc.len() < super::MAX_BYTES);
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooManyNodes));
+}
+
+#[test]
+fn svg_safety_whitespace_is_not_a_visited_node() {
+    // usvg builds no node for a whitespace text node. Counting them makes a
+    // document of 500 001 paths fail a bound usvg itself accepts.
+    let paths = "<path/>\n".repeat(500_001);
+    let doc =
+        format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{paths}</svg>"#);
+    let tree = xml(&doc).unwrap();
+    assert_eq!(check_text(&tree), Ok(false));
+}
+
+#[test]
 fn svg_text_draws_with_the_font_database() {
     // The machine's fonts are not part of this test: the document's family
     // comes from the database it is given.

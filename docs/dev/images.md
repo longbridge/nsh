@@ -235,11 +235,12 @@
   nothing; the default resolver reads files and parses nested SVGs). `<text>` uses the system font database the
   platform's text engine uses, and raster `data:` images are decoded by resvg's `raster-images` feature. A nested SVG
   is refused rather than drawn because its tree and images would sit outside `MAX_BYTES` and the layer budget below.
-  A document is at most `svg::MAX_BYTES` (16 MiB; a `.svgz` inflates that far and no further), and its `<text>` is at
-  most `svg::MAX_TEXT_CHARS` (64 Ki) characters as usvg expands `<use>` and `<tref>` (each reference counts what it
-  copies): usvg lays out and outlines every glyph while parsing, before the
-  layer estimate runs. The system font database is scanned only when a document actually lays out text; an icon
-  without `<text>` parses without it. A raster is at most
+  A document is at most `svg::MAX_BYTES` (16 MiB; a `.svgz` inflates that far and no further), its `<text>` is at
+  most `svg::MAX_TEXT_CHARS` (64 Ki) characters as usvg expands `<use>`, `<tref>` and resource references (each
+  reference counts what it copies; a clip path, mask, pattern, marker or filter lays out its text where it is used,
+  and a marker once per vertex), and it is nested at most 1024 elements deep: usvg lays out and outlines every glyph
+  while parsing, before the layer estimate runs. The system font database is scanned only when a document actually
+  lays out text; an icon without `<text>` parses without it. A raster is at most
   `svg::MAX_SIDE` (8192) pixels a side and `svg::MAX_PIXELS` (16 Mi, 64 MiB of RGBA: a full-screen image on a 5K
   display fits) in all; a larger one is drawn smaller. resvg draws each isolated group (opacity, a mask, a clip path,
   filters, a blend mode) into a layer of its own, up to 5 × the canvas each way, and nested layers live at once, so a

@@ -19,8 +19,8 @@
 //!
 //! An SVG from the network is untrusted input, so what drawing one takes is
 //! bounded: a document of at most [`MAX_BYTES`] (a `.svgz` once inflated),
-//! text of at most [`MAX_TEXT_CHARS`] characters as `<use>` and `<tref>`
-//! expand it, a raster of at most
+//! text of at most [`MAX_TEXT_CHARS`] characters as `<use>`, `<tref>` and
+//! resource references expand it, a raster of at most
 //! [`MAX_SIDE`] pixels a side and [`MAX_PIXELS`] in all, and layers (resvg
 //! draws every group with opacity, a mask, a clip path, filters or a blend
 //! mode into a pixmap of its own, and nested ones coexist) of at most
@@ -35,7 +35,13 @@
 //! else its `viewBox`) is one point. Icons and logos carry a `viewBox`; one
 //! without a size and a `viewBox` reaches as far as what it draws.
 
-use std::{borrow::Cow, collections::HashMap, fmt, io::Read, panic};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fmt,
+    io::Read,
+    panic,
+};
 
 use resvg::{
     tiny_skia,
@@ -67,6 +73,13 @@ pub const MAX_BYTES: usize = 16 << 20;
 /// length; a document over this is refused rather than stalling a decode
 /// thread or exhausting memory.
 pub const MAX_TEXT_CHARS: usize = 64 * 1024;
+
+/// The deepest nesting usvg parses: its `parse_xml_node` refuses a document
+/// past this depth, and the text walk stops at the same depth.
+const MAX_DEPTH: u32 = 1024;
+
+/// The xlink namespace: `<use>` and `<tref>` take `xlink:href` over `href`.
+const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
 /// The longest side of a raster, in pixels: a sanity limit, as large as
 /// the textures GPUs take.
@@ -160,7 +173,8 @@ impl fmt::Display for Error {
             ),
             Error::TooManyNodes => write!(
                 f,
-                "walking or drawing the SVG would visit more than {} nodes",
+                "walking or drawing the SVG would visit more than {} nodes, or nest more than \
+                 {MAX_DEPTH} elements deep",
                 layers::MAX_VISITS
             ),
             Error::Panicked => write!(f, "the SVG renderer panicked on this document"),
@@ -420,27 +434,49 @@ fn parse_tree(
 /// element, so counting only the source `<text>` nodes undercounts what usvg
 /// lays out. This walk expands both references, memoising a target's
 /// expansion by (id, inside text) so a fan-out is counted once per target
-/// rather than once per path, and stops cycles with a stack of ids. Every
-/// visited node also counts against [`layers::MAX_VISITS`], the bound usvg
-/// itself lays a document out under.
+/// rather than once per path. Text in a resource (a clip path, mask, pattern,
+/// marker or filter) is laid out when the resource is converted, not where it
+/// is written, so a reference from an element adds the resource's expansion;
+/// a marker is laid out once per vertex. The document is also walked no deeper
+/// than usvg parses it, so a deep `<use>` chain is refused before it can
+/// overflow the stack. Every visited element also counts against
+/// [`layers::MAX_VISITS`], the bound usvg itself lays a document out under.
 fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
     let mut ids: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
+    let mut shapes = 0u64;
+    let mut vertices = 0u64;
     for node in doc.descendants().filter(roxmltree::Node::is_element) {
         if let Some(id) = node.attribute("id") {
             ids.entry(id).or_insert(node);
         }
+        if is_marker_shape(node) {
+            shapes = shapes.saturating_add(1);
+        }
+        vertices = vertices.saturating_add(vertex_bound(node));
+    }
+    let mut resources = HashMap::new();
+    for (&id, &node) in &ids {
+        if let Some(kind) = ResourceKind::of(node.tag_name().name()) {
+            resources.insert(id, Resource { kind, node });
+        }
     }
     let mut scan = TextScan {
         ids,
+        resources,
         memo: HashMap::new(),
         text_memo: HashMap::new(),
+        resource_memo: HashMap::new(),
+        counted: HashSet::new(),
+        shapes,
+        vertices,
         visits: 0,
     };
     let mut total = Expansion::default();
     let mut visiting = Vec::new();
     for child in doc.root().children() {
-        total.add(scan.expand(child, false, false, &mut visiting)?)?;
+        total.add(scan.expand(child, false, false, 0, &mut visiting)?)?;
     }
+    scan.stylesheet_references(doc, &mut total, &mut visiting)?;
     Ok(total.has_text)
 }
 
@@ -466,15 +502,115 @@ impl Expansion {
         self.has_text |= other.has_text;
         Ok(())
     }
+
+    /// The expansion repeated `multiplier` times: a marker is laid out once
+    /// per vertex of the shape that uses it.
+    fn scaled(self, multiplier: u64) -> Result<Self, Error> {
+        let chars = (self.chars as u64).saturating_mul(multiplier);
+        if chars > MAX_TEXT_CHARS as u64 {
+            return Err(Error::TooMuchText);
+        }
+        let nodes = self.nodes.saturating_mul(multiplier);
+        if nodes > u64::from(layers::MAX_VISITS) {
+            return Err(Error::TooManyNodes);
+        }
+        Ok(Self {
+            chars: chars as usize,
+            nodes,
+            has_text: self.has_text,
+        })
+    }
+}
+
+/// The resource elements whose content usvg lays out away from where it is
+/// written.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResourceKind {
+    ClipPath,
+    Mask,
+    Pattern,
+    Marker,
+    Filter,
+}
+
+impl ResourceKind {
+    fn of(tag: &str) -> Option<Self> {
+        Some(match tag {
+            "clipPath" => Self::ClipPath,
+            "mask" => Self::Mask,
+            "pattern" => Self::Pattern,
+            "marker" => Self::Marker,
+            "filter" => Self::Filter,
+            _ => return None,
+        })
+    }
+
+    /// The presentation attribute or style property naming this resource.
+    /// CSS property names are case-insensitive.
+    fn property(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("clip-path") {
+            Some(Self::ClipPath)
+        } else if name.eq_ignore_ascii_case("mask") {
+            Some(Self::Mask)
+        } else if name.eq_ignore_ascii_case("filter") {
+            Some(Self::Filter)
+        } else if name.eq_ignore_ascii_case("fill") || name.eq_ignore_ascii_case("stroke") {
+            Some(Self::Pattern)
+        } else if name.eq_ignore_ascii_case("marker-start")
+            || name.eq_ignore_ascii_case("marker-mid")
+            || name.eq_ignore_ascii_case("marker-end")
+        {
+            Some(Self::Marker)
+        } else {
+            None
+        }
+    }
+
+    /// Whether usvg converts the resource once and caches it for every
+    /// reference, rather than converting it once per reference.
+    fn cached(self, node: roxmltree::Node<'_, '_>) -> bool {
+        match self {
+            Self::ClipPath => node.attribute("clipPathUnits") != Some("objectBoundingBox"),
+            // `maskContentUnits` defaults to userSpaceOnUse, so only an
+            // explicit objectBoundingBox makes the mask uncacheable.
+            Self::Mask => {
+                node.attribute("maskUnits") == Some("userSpaceOnUse")
+                    && node.attribute("maskContentUnits") != Some("objectBoundingBox")
+            }
+            // `filterUnits` defaults to objectBoundingBox and
+            // `primitiveUnits` to userSpaceOnUse.
+            Self::Filter => {
+                node.attribute("filterUnits") == Some("userSpaceOnUse")
+                    && node.attribute("primitiveUnits") != Some("objectBoundingBox")
+            }
+            Self::Pattern => true,
+            Self::Marker => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Resource<'a, 'input> {
+    kind: ResourceKind,
+    node: roxmltree::Node<'a, 'input>,
 }
 
 struct TextScan<'a, 'input> {
     ids: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+    resources: HashMap<&'a str, Resource<'a, 'input>>,
     /// A referenced subtree's expansion by (id, inside text): a `<use>` chain
     /// that fans out is counted once per target, not once per path.
     memo: HashMap<(&'a str, bool), Expansion>,
     /// The text content of a `<tref>` target, by id.
     text_memo: HashMap<&'a str, usize>,
+    /// A resource's own content, before references multiply it.
+    resource_memo: HashMap<&'a str, Expansion>,
+    /// Resources usvg converts once and reuses.
+    counted: HashSet<&'a str>,
+    /// The document's path-like shapes and their vertex bound, for a marker
+    /// inherited by a subtree (or a `<use>` whose target is elsewhere).
+    shapes: u64,
+    vertices: u64,
     visits: u32,
 }
 
@@ -483,8 +619,12 @@ impl<'a, 'input> TextScan<'a, 'input> {
         &mut self,
         id: &'a str,
         in_text: bool,
+        depth: u32,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
+        if depth > MAX_DEPTH {
+            return Err(Error::TooManyNodes);
+        }
         if visiting.contains(&id) {
             return Ok(Expansion::default());
         }
@@ -495,7 +635,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
             return Ok(Expansion::default());
         };
         visiting.push(id);
-        let expansion = self.expand(target, in_text, true, visiting);
+        let expansion = self.expand(target, in_text, true, depth, visiting);
         visiting.pop();
         let expansion = expansion?;
         self.memo.insert((id, in_text), expansion);
@@ -507,86 +647,309 @@ impl<'a, 'input> TextScan<'a, 'input> {
         node: roxmltree::Node<'a, 'input>,
         in_text: bool,
         expanded: bool,
+        depth: u32,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
-        self.visits = self.visits.saturating_add(1);
-        if self.visits > layers::MAX_VISITS {
+        if depth > MAX_DEPTH {
             return Err(Error::TooManyNodes);
         }
         if node.is_text() {
-            if !in_text {
-                return Ok(Expansion::default());
-            }
-            let mut out = Expansion::default();
-            out.add(Expansion {
-                chars: node.text().unwrap_or_default().chars().count(),
-                nodes: 0,
-                has_text: true,
-            })?;
-            return Ok(out);
+            return self.text_node(node, in_text);
         }
         if !node.is_element() {
             return Ok(Expansion::default());
         }
+        self.visits = self.visits.saturating_add(1);
+        if self.visits > layers::MAX_VISITS {
+            return Err(Error::TooManyNodes);
+        }
         match node.tag_name().name() {
             // Definitions are not drawn where they are written; `<use>`
-            // reaches them from its own position.
+            // reaches them from its own position, and a presentation
+            // attribute reaches a resource from the element that names it.
             "defs" | "clipPath" | "mask" | "pattern" | "marker" | "linearGradient"
             | "radialGradient" | "filter" | "style" | "title" | "desc" | "metadata" | "script" => {
                 Ok(Expansion::default())
             }
             "symbol" if !expanded => Ok(Expansion::default()),
-            "text" => {
-                let mut out = Expansion {
-                    nodes: 1,
-                    has_text: true,
-                    ..Expansion::default()
-                };
-                for child in node.children() {
-                    out.add(self.expand(child, true, false, visiting)?)?;
-                }
-                Ok(out)
-            }
-            "tref" => {
-                let Some(id) = href(node) else {
-                    return Ok(Expansion::default());
-                };
-                if visiting.contains(&id) {
-                    return Ok(Expansion::default());
-                }
-                let chars = self.text_chars(id)?;
-                Ok(Expansion {
-                    chars,
-                    nodes: 1,
-                    has_text: chars > 0,
-                })
-            }
-            "use" => {
-                let Some(id) = href(node) else {
-                    return Ok(Expansion::default());
-                };
-                let mut out = self.expand_ref(id, in_text, visiting)?;
-                out.add(Expansion {
-                    nodes: 1,
-                    ..Expansion::default()
-                })?;
-                Ok(out)
-            }
-            _ => {
-                let mut out = Expansion {
-                    nodes: 1,
-                    ..Expansion::default()
-                };
-                for child in node.children() {
-                    out.add(self.expand(child, in_text, false, visiting)?)?;
-                }
-                Ok(out)
-            }
+            // The branches are separate functions so the recursive walk
+            // keeps its frames small: a document at the depth limit must not
+            // overflow the stack of the thread parsing it.
+            "text" => self.expand_text(node, depth, visiting),
+            "tref" => self.expand_tref(node, depth, visiting),
+            "use" => self.expand_use(node, in_text, depth, visiting),
+            _ => self.expand_children(node, in_text, depth, visiting),
         }
     }
 
+    fn text_node(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        in_text: bool,
+    ) -> Result<Expansion, Error> {
+        if !in_text {
+            return Ok(Expansion::default());
+        }
+        let mut out = Expansion::default();
+        out.add(Expansion {
+            chars: node.text().unwrap_or_default().chars().count(),
+            nodes: 0,
+            has_text: true,
+        })?;
+        Ok(out)
+    }
+
+    fn expand_text(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let mut out = Expansion {
+            nodes: 1,
+            has_text: true,
+            ..Expansion::default()
+        };
+        for child in node.children() {
+            out.add(self.expand(child, true, false, depth + 1, visiting)?)?;
+        }
+        out.add(self.references(node, depth, visiting)?)?;
+        Ok(out)
+    }
+
+    fn expand_tref(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let Some(id) = href(node) else {
+            return Ok(Expansion::default());
+        };
+        let chars = self.text_chars(id)?;
+        let mut out = Expansion {
+            chars,
+            nodes: 1,
+            has_text: chars > 0,
+        };
+        out.add(self.references(node, depth, visiting)?)?;
+        Ok(out)
+    }
+
+    fn expand_use(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        in_text: bool,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let Some(id) = href(node) else {
+            return Ok(Expansion::default());
+        };
+        // `parse_svg_use_element` parses the target one level deeper than
+        // the element that referred to it, so a use counts two.
+        let mut out = self.expand_ref(id, in_text, depth + 2, visiting)?;
+        out.add(Expansion {
+            nodes: 1,
+            ..Expansion::default()
+        })?;
+        out.add(self.references(node, depth, visiting)?)?;
+        Ok(out)
+    }
+
+    fn expand_children(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        in_text: bool,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let mut out = Expansion {
+            nodes: 1,
+            ..Expansion::default()
+        };
+        for child in node.children() {
+            out.add(self.expand(child, in_text, false, depth + 1, visiting)?)?;
+        }
+        out.add(self.references(node, depth, visiting)?)?;
+        Ok(out)
+    }
+
+    /// The text a node draws through its own attributes: a clip path, mask,
+    /// filter, pattern or marker it names, and an `<feImage>` it embeds.
+    fn references(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let mut out = Expansion::default();
+        if node.tag_name().name() == "feImage"
+            && let Some(id) = href(node)
+        {
+            out.add(self.expand_ref(id, false, depth + 2, visiting)?)?;
+        }
+        for attribute in node.attributes() {
+            match attribute.name() {
+                "style" => {
+                    out.add(self.inline_style(attribute.value(), node, depth, visiting)?)?;
+                }
+                name => {
+                    let Some(kind) = ResourceKind::property(name) else {
+                        continue;
+                    };
+                    let Some(id) = func_iri(attribute.value()) else {
+                        continue;
+                    };
+                    out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn inline_style(
+        &mut self,
+        style: &'a str,
+        node: roxmltree::Node<'a, 'input>,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let mut out = Expansion::default();
+        for declaration in style.split(';') {
+            let Some((name, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let name = name.trim();
+            let Some(kind) = ResourceKind::property(name) else {
+                continue;
+            };
+            let Some(id) = func_iri(value) else {
+                continue;
+            };
+            out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+        }
+        Ok(out)
+    }
+
+    fn resource_use(
+        &mut self,
+        id: &'a str,
+        kind: ResourceKind,
+        user: roxmltree::Node<'a, 'input>,
+        property: &str,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let Some(resource) = self.resources.get(id).copied() else {
+            return Ok(Expansion::default());
+        };
+        if resource.kind != kind {
+            return Ok(Expansion::default());
+        }
+        if resource.kind.cached(resource.node) && !self.counted.insert(id) {
+            return Ok(Expansion::default());
+        }
+        let body = self.resource_body(id, resource, depth, visiting)?;
+        let multiplier = if kind == ResourceKind::Marker {
+            marker_multiplier(user, property, self.shapes, self.vertices)
+        } else {
+            1
+        };
+        body.scaled(multiplier)
+    }
+
+    fn resource_body(
+        &mut self,
+        id: &'a str,
+        resource: Resource<'a, 'input>,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        if let Some(body) = self.resource_memo.get(id) {
+            return Ok(*body);
+        }
+        if visiting.contains(&id) {
+            return Ok(Expansion::default());
+        }
+        if depth > MAX_DEPTH {
+            return Err(Error::TooManyNodes);
+        }
+        visiting.push(id);
+        let mut body = Expansion::default();
+        if let Some(link) = href(resource.node)
+            && let Some(linked) = self.resources.get(link).copied()
+            && linked.kind == resource.kind
+        {
+            body.add(self.resource_body(link, linked, depth + 2, visiting)?)?;
+        }
+        // A clip path can name another clip path in `clip-path`, and a mask
+        // another mask in `mask`; usvg converts the linked resource too.
+        body.add(self.references(resource.node, depth, visiting)?)?;
+        for child in resource.node.children() {
+            body.add(self.expand(child, false, true, depth + 1, visiting)?)?;
+        }
+        visiting.pop();
+        self.resource_memo.insert(id, body);
+        Ok(body)
+    }
+
+    /// Text in a resource named by a `<style>` element can be laid out for
+    /// every element the rule matches; charge it as if it matched every
+    /// element, and a marker once per vertex of every shape.
+    fn stylesheet_references(
+        &mut self,
+        doc: &roxmltree::Document<'_>,
+        total: &mut Expansion,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<(), Error> {
+        let mut mentioned: HashSet<&str> = HashSet::new();
+        for style in doc
+            .descendants()
+            .filter(|node| node.is_element() && node.tag_name().name() == "style")
+        {
+            let Some(text) = style.text() else {
+                continue;
+            };
+            mentioned.extend(func_iris(text));
+        }
+        let resources: Vec<(&'a str, Resource<'a, 'input>)> = self
+            .resources
+            .iter()
+            .filter(|(id, _)| mentioned.contains(**id))
+            .map(|(&id, &resource)| (id, resource))
+            .collect();
+        if resources.is_empty() {
+            return Ok(());
+        }
+        let elements = doc
+            .descendants()
+            .filter(roxmltree::Node::is_element)
+            .count()
+            .max(1) as u64;
+        let vertices = self.vertices.max(1);
+        for (id, resource) in resources {
+            if resource.kind.cached(resource.node) && self.counted.contains(id) {
+                continue;
+            }
+            let body = self.resource_body(id, resource, 0, visiting)?;
+            let multiplier = match resource.kind {
+                ResourceKind::Marker => vertices,
+                // A cached resource is converted once however many rules
+                // name it; an objectBoundingBox clip path or mask is
+                // converted per element, and a stylesheet can apply to any
+                // element.
+                kind if kind.cached(resource.node) => 1,
+                _ => elements,
+            };
+            total.add(body.scaled(multiplier)?)?;
+        }
+        Ok(())
+    }
+
     /// The characters a `<tref>` to `id` lays out: every text node under the
-    /// referenced element.
+    /// referenced element. Unlike a `<use>`, a `tref` reads the target's text
+    /// without expanding it, so it cannot cycle.
     fn text_chars(&mut self, id: &'a str) -> Result<usize, Error> {
         if let Some(chars) = self.text_memo.get(id) {
             return Ok(*chars);
@@ -606,11 +969,129 @@ impl<'a, 'input> TextScan<'a, 'input> {
     }
 }
 
-/// The id a `<use>` or `<tref>` refers to, when it is in this document.
+/// How many times a marker is laid out for `user`: once at each end, and once
+/// per vertex for middle markers. A marker attribute inherits to descendant
+/// shapes, so the whole subtree counts; a `<use>` can reach shapes elsewhere,
+/// so it falls back to the document's totals.
+fn marker_multiplier(
+    node: roxmltree::Node<'_, '_>,
+    property: &str,
+    document_shapes: u64,
+    document_vertices: u64,
+) -> u64 {
+    let (mut shapes, mut vertices, has_use) = marker_totals(node);
+    if has_use {
+        shapes = document_shapes;
+        vertices = document_vertices;
+    }
+    if property.eq_ignore_ascii_case("marker-start") || property.eq_ignore_ascii_case("marker-end")
+    {
+        shapes.max(1)
+    } else {
+        vertices.max(1)
+    }
+}
+
+fn marker_totals(node: roxmltree::Node<'_, '_>) -> (u64, u64, bool) {
+    let mut shapes = 0u64;
+    let mut vertices = 0u64;
+    let mut has_use = false;
+    let mut add = |node: roxmltree::Node<'_, '_>| {
+        if is_marker_shape(node) {
+            shapes = shapes.saturating_add(1);
+        }
+        vertices = vertices.saturating_add(vertex_bound(node));
+        has_use |= node.tag_name().name() == "use";
+    };
+    add(node);
+    for descendant in node
+        .descendants()
+        .skip(1)
+        .filter(roxmltree::Node::is_element)
+    {
+        add(descendant);
+    }
+    (shapes, vertices, has_use)
+}
+
+fn is_marker_shape(node: roxmltree::Node<'_, '_>) -> bool {
+    matches!(
+        node.tag_name().name(),
+        "path" | "line" | "polyline" | "polygon" | "rect" | "circle" | "ellipse"
+    )
+}
+
+/// An upper bound on the vertices a shape has, for counting middle markers:
+/// the length of its path data or points list, as counting characters cannot
+/// overrun the number of vertices.
+fn vertex_bound(node: roxmltree::Node<'_, '_>) -> u64 {
+    match node.tag_name().name() {
+        "path" => node.attribute("d").map_or(1, |d| d.len().max(1) as u64),
+        "polyline" | "polygon" => node
+            .attribute("points")
+            .map_or(1, |p| p.len().max(1) as u64),
+        "line" => 2,
+        "rect" | "circle" | "ellipse" => 8,
+        _ => 0,
+    }
+}
+
+/// The id a `<use>`, `<tref>` or resource `href` refers to, when it is in
+/// this document. usvg takes `xlink:href` before `href`, then parses the value
+/// as an IRI: spaces around it are ignored and the id runs to the first space.
 fn href<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> Option<&'a str> {
-    node.attributes()
-        .find(|attribute| attribute.name() == "href")
-        .and_then(|attribute| attribute.value().strip_prefix('#'))
+    let value = node
+        .attribute((XLINK_NS, "href"))
+        .or_else(|| node.attribute("href"))?;
+    iri(value)
+}
+
+fn iri(value: &str) -> Option<&str> {
+    let value = value.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let value = value.strip_prefix('#')?;
+    let end = value.find(' ').unwrap_or(value.len());
+    let id = &value[..end];
+    if id.is_empty() || value[end..].chars().any(|c| !c.is_ascii_whitespace()) {
+        return None;
+    }
+    Some(id)
+}
+
+/// The id in a `url(#id)` value, ignoring surrounding quotes and spaces.
+fn func_iri(value: &str) -> Option<&str> {
+    let start = value.find("url(")? + "url(".len();
+    let rest = value[start..].trim_start();
+    let (rest, quote) = match rest.chars().next() {
+        Some(quote @ ('\'' | '"')) => (&rest[quote.len_utf8()..], Some(quote)),
+        _ => (rest, None),
+    };
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('#')?;
+    let end = rest
+        .char_indices()
+        .find(|&(_, c)| Some(c) == quote || c == ')' || c.is_ascii_whitespace())
+        .map(|(index, _)| index)?;
+    if end == 0 {
+        return None;
+    }
+    Some(&rest[..end])
+}
+
+/// Every `url(#id)` in a stylesheet's text.
+fn func_iris(text: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("url(") {
+        if let Some(id) = func_iri(&rest[start..]) {
+            ids.push(id);
+        }
+        let after = &rest[start + "url(".len()..];
+        rest = match after.find(')') {
+            Some(end) => &after[end + 1..],
+            None => break,
+        };
+    }
+    ids
 }
 
 fn xml(text: &str) -> Result<roxmltree::Document<'_>, Error> {
