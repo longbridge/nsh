@@ -161,9 +161,13 @@ pub struct WindowProgress {
 }
 
 /// The look of the window controls a hidden title bar draws over the app
-/// ([`TitleBarOptions::caption_buttons`]; Windows' caption buttons). A
-/// field left out keeps Windows 11's own: one device pixel strokes,
-/// 10-point icons and 46-point buttons.
+/// ([`TitleBarOptions::caption_buttons`]; Windows' caption buttons): the
+/// metrics that fit the platform's own buttons to the app's design while
+/// the standard frame and the platform's controls stay. An app that draws
+/// window controls of its own composes them with `desktop.windowControl`
+/// in a window whose frame is none ([`super::WindowFrameStyle::None`])
+/// instead. A field left out keeps Windows 11's own: one device pixel
+/// strokes, 10-point icons and 46-point buttons.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Default, JsObject)]
 pub struct CaptionButtonOptions {
@@ -190,7 +194,9 @@ pub struct TitleBarOptions {
     /// window's top left corner (macOS's traffic lights).
     pub controls_offset: Option<Point<Points>>,
     /// The look of the window controls drawn over a hidden title bar
-    /// (Windows' caption buttons).
+    /// (Windows' caption buttons): their metrics, while the standard frame
+    /// and the platform's controls stay ([`CaptionButtonOptions`]). A new
+    /// `titleBar` replaces the whole one, so an update keeps what it sets.
     pub caption_buttons: Option<CaptionButtonOptions>,
 }
 
@@ -1264,10 +1270,54 @@ mod tests {
                 value: Some(Percentage(2.0)),
                 state: ProgressState::Normal,
             })),
+            title_bar: Some(TitleBarOptions {
+                caption_buttons: Some(CaptionButtonOptions {
+                    stroke_width: Some(px(-1.0)),
+                    icon_size: Some(px(12.0)),
+                    button_width: Some(px(f32::NAN)),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
             ..Default::default()
         };
         assert!(!a.sanitize());
         assert_eq!(a.min_size, None);
         assert_eq!(a.progress.unwrap().unwrap().value, Some(Percentage(1.0)));
+        let caption = a.title_bar.unwrap().caption_buttons.unwrap();
+        assert_eq!(caption.stroke_width, None);
+        assert_eq!(caption.icon_size, Some(px(12.0)));
+        assert_eq!(caption.button_width, None);
+    }
+
+    #[test]
+    fn updates_replace_the_title_bar_object() {
+        let mut a = WindowAttributes::default();
+        a.merge(&WindowAttributes {
+            title_bar: Some(TitleBarOptions {
+                style: TitleBarStyle::Hidden,
+                height: Some(px(44.0)),
+                caption_buttons: Some(CaptionButtonOptions {
+                    button_width: Some(px(50.0)),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        // A new `titleBar` replaces the whole one: an update that keeps
+        // `style` and `height` leaves the metrics out of it.
+        a.merge(&WindowAttributes {
+            title_bar: Some(TitleBarOptions {
+                style: TitleBarStyle::Hidden,
+                height: Some(px(44.0)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let bar = a.title_bar.unwrap();
+        assert_eq!(bar.style, TitleBarStyle::Hidden);
+        assert_eq!(bar.height, Some(px(44.0)));
+        assert_eq!(bar.caption_buttons, None);
     }
 }
