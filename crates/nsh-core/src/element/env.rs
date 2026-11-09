@@ -35,6 +35,9 @@ pub struct Environment {
     pub pixel_ratio: f32,
     /// The operating system.
     pub os: Os,
+    /// The platform's name where it is not the OS's (a platform built
+    /// outside NSH: [`crate::platform::Environment::platform`]).
+    pub platform: Option<&'static str>,
     /// The OS version: major and minor (iOS), Android's API level and 0.
     pub os_version: (u16, u16),
     /// The kind of device.
@@ -80,6 +83,14 @@ pub struct Environment {
     pub web_input: bool,
 }
 
+impl Environment {
+    /// The platform's name (TS: `platform.name`): a platform built outside
+    /// NSH's own, else the OS's.
+    pub fn platform_name(&self) -> &'static str {
+        self.platform.unwrap_or(self.os.name())
+    }
+}
+
 impl Default for Environment {
     fn default() -> Self {
         Self {
@@ -96,6 +107,7 @@ impl Default for Environment {
             rtl: false,
             pixel_ratio: 1.0,
             os: Os::default(),
+            platform: None,
             os_version: (0, 0),
             idiom: Idiom::Phone,
             locale: Locale::EN_US,

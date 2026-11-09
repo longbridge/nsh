@@ -14976,6 +14976,49 @@ fn window_drag_is_a_view_prop() {
     ));
 }
 
+/// `web={{ element }}` reaches the platform in the view's props (the web
+/// draws the view as that HTML element), and clearing it sends the props
+/// again.
+#[test]
+fn web_element_is_a_view_prop() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::WebElement(Some(crate::WebElement::Nav)),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element == Some(crate::WebElement::Nav)
+    )));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::WebElement(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element.is_none()
+    )));
+}
+
 /// `focusable={false}` reaches the platform in the view's props.
 #[test]
 fn focusable_is_a_view_prop() {
@@ -20632,7 +20675,9 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         view()
             .disabled(move || disabled.get())
             .on_press(move |_: &()| disabled.set(true))
-            .on_file_drag_enter(|_: &()| {})
+            .on_file_drag_enter(move |event: &crate::element::FileDragEvent| {
+                received.set(format!("enter {}", event.uris.join("\n")))
+            })
             .on_file_drag_leave(|_: &()| {})
             .on_file_drop(move |event: &crate::element::FileDropEvent| {
                 received.set(event.uris.join("\n"))
@@ -20654,6 +20699,14 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         "file:///tmp/a%20b.txt".into(),
         "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
     ];
+    assert!(c.component_event(
+        host,
+        EventKind::FileDragEnter,
+        &EventPayload::FileDrop(uris.clone())
+    ));
+    let entered = c.commit().unwrap();
+    assert!(entered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == format!("enter {}", uris.join("\n")))));
     assert!(c.component_event(
         host,
         EventKind::FileDrop,
@@ -22714,6 +22767,46 @@ fn overlays_in_a_modal_show_in_it() {
     let batch = c.commit().unwrap();
     assert!(inserts(&batch).contains(&(2, 6, None)));
     assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
+}
+
+#[test]
+fn an_anchored_overlay_lands_on_whole_device_pixels() {
+    use StyleValue::Number;
+    for ratio in [1.0, 2.0, 3.0] {
+        let mut c = core();
+        at_ratio(&mut c, ratio);
+        add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(480.0))]);
+        add(&mut c, 10, Tag::Overlay, 2, &[]);
+        add(
+            &mut c,
+            12,
+            Tag::View,
+            10,
+            &[("width", Number(120.0)), ("height", Number(60.0))],
+        );
+        // A pointer between pixels, as a context menu opens at.
+        apply(
+            &mut c,
+            vec![overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                    px(100.38),
+                    px(50.71),
+                ))),
+            )],
+        );
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 10).expect("overlay frame");
+        for v in [frame.origin.x.0, frame.origin.y.0] {
+            let pixels = v * ratio;
+            assert!(
+                (pixels - pixels.round()).abs() < 1.0e-3,
+                "{v} is not on a device pixel at {ratio}"
+            );
+        }
+        // Still centred on the pointer (100.38 - 120 / 2), within a pixel.
+        assert!((frame.origin.x.0 - 40.38).abs() <= 1.0 / ratio);
+    }
 }
 
 #[test]
