@@ -176,7 +176,7 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
   panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
   `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
-  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui/tui-host`; Rust edits
   restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
   raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
@@ -854,6 +854,9 @@ program that describes them, builds the hosts and runners with them, and does ev
     with Rust components"). `gpui-host` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
     target_os = "macos", windows))`) is a workspace of its own in `.nsh/rust/gpui` (excluded from the main one), written
     only when the GPUI host is built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
+    `tui-host` is one too, in `.nsh/rust/tui` (`RustApp::tui_workspace`), written only when the terminal host is built:
+    `nsh check`, `nsh test` and the other targets never resolve the terminal's crates, which nsh's crates.io releases
+    before the terminal backend lack.
     The hosts and runners of Windows, macOS, Linux and iOS (`<platform>-host`, `<platform>-app`, `rust-<platform>`;
     `components_platform`) also register each crate's native components: `#[native_components(<platform>)]`
     (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
@@ -982,7 +985,7 @@ directory. A checkout's build never downloads: it builds its runtimes with cargo
 
 The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
 is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
-are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
+are. App-specific development hosts are generated in `.nsh/rust/tui/tui-host`.
 
 ## Releases
 
