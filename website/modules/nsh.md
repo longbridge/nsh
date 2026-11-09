@@ -1964,7 +1964,9 @@ only the running app: one left on screen after the app exits does nothing.
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
-`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`.
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`. On Apple
+platforms `requestPermission()` resolves with the permission the system's settings hold once it has asked: `"denied"` for
+an app the user turned notifications off for.
 
 ## UrlScheme
 
