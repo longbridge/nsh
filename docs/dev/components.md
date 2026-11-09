@@ -496,7 +496,8 @@ parameters at the end may be left out). The signature decides how a call runs (`
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
   the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
-  (`RustCall::Op`, in order with the ops before it). As for a method: returning `()`, it gives `void`, with no
+  (`RustCall::Op`, in order with the ops before it), which the core runs in the reactive graph, as a listener: it
+  may `spawn` a task (one of no owner, which runs to its end) and make signals. As for a method: returning `()`, it gives `void`, with no
   reply (a conversion error throws); returning `Result<(), E>`, `Promise<void>`; returning a value, `Promise<T>`,
   settled like a method's (a conversion error rejects it).
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
