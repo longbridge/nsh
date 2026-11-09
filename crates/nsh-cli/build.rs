@@ -1,4 +1,5 @@
-//! Stamps the CLI with its source revision without changing crate versions.
+//! Stamps the CLI with its source revision and release channel without
+//! changing crate versions.
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -22,8 +23,20 @@ fn short_sha(value: &str) -> Option<String> {
         .then(|| value[..7].to_owned())
 }
 
+/// Main-thread stack of the `nsh` binary. The JS host lets QuickJS use up
+/// to 4 MB (`Limits::stack_bytes`), and the CLI evaluates on its main thread.
+/// Windows reserves only 1 MB for that thread, so QuickJS overflowed the real
+/// stack before its own limit tripped (#1191). Match the engine thread size.
+const MAIN_STACK_BYTES: u64 = 8 << 20;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        match env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => println!("cargo:rustc-link-arg-bins=/STACK:{MAIN_STACK_BYTES}"),
+            _ => println!("cargo:rustc-link-arg-bins=-Wl,--stack,{MAIN_STACK_BYTES}"),
+        }
+    }
     let manifest =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"));
     let root = manifest.parent().and_then(Path::parent);
@@ -52,8 +65,22 @@ fn main() {
             .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
             .and_then(|data| data["git"]["sha1"].as_str().and_then(short_sha))
     };
+    let revision = revision.as_deref().unwrap_or("unknown");
+    println!("cargo:rustc-env=NSH_GIT_SHA={revision}");
+
+    // The release channel the build is published on: the nightly workflow
+    // sets `nightly`, `nsh update` stays on it. Anything else is `stable`.
+    println!("cargo:rerun-if-env-changed=NSH_CHANNEL");
+    let nightly = env::var("NSH_CHANNEL").as_deref() == Ok("nightly");
     println!(
-        "cargo:rustc-env=NSH_GIT_SHA={}",
-        revision.as_deref().unwrap_or("unknown")
+        "cargo:rustc-env=NSH_CHANNEL={}",
+        if nightly { "nightly" } else { "stable" }
     );
+    let version = env::var("CARGO_PKG_VERSION").expect("package version");
+    let version = if nightly {
+        format!("{version} ({revision} nightly)")
+    } else {
+        format!("{version} ({revision})")
+    };
+    println!("cargo:rustc-env=NSH_VERSION_TEXT={version}");
 }

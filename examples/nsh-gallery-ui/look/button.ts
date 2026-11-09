@@ -291,3 +291,79 @@ export function roundButtonGlyph(variant: "primary" | "secondary" = "primary", s
     },
   };
 }
+
+/** Options of `splitButtonLook`'s halves. */
+export interface SplitSegmentOptions {
+  /** Shaded as pressed while what it opens is open (the menu half's menu). */
+  selected?: Live<boolean | undefined>;
+  /** No hover and no press feedback. */
+  disabled?: Live<boolean | undefined>;
+  /** More style (a width, a padding), over the look's. */
+  style?: Live<ViewStyle | undefined>;
+}
+
+/**
+ * A split button: a main action and the menu of its variants in one
+ * silhouette of a kind's finish (`frame`, a row clipping its halves), the
+ * two halves (`segment()`, each a pressable with its own hover, press and
+ * focus) and the hairline between them (`divider`). A half carries no fill
+ * of its own: under the pointer it takes a whisper of the label's color, a
+ * deeper one pressed or while its menu is open, so the pair keeps one
+ * fill. The frame and the halves are a `buttonLook` of the same kind and
+ * size; the label and icons take `buttonLabel` / `buttonGlyph`.
+ */
+export function splitButtonLook(kind: Live<ButtonKind> = "primary", o?: ButtonLookOptions) {
+  const shade = (a: number) => alpha(ink(kind), a);
+  return {
+    frame: {
+      get style(): ViewStyle {
+        return {
+          flexDirection: "row",
+          alignItems: "stretch",
+          borderRadius: radius.control,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          overflow: "hidden",
+          ...rest(read(kind) ?? "primary", false),
+          ...transition,
+          ...read(o?.style),
+        };
+      },
+    },
+    segment(s?: SplitSegmentOptions) {
+      return {
+        get style(): ViewStyle {
+          const dims = dimensions(o);
+          return {
+            height: terminal ? TERMINAL_ROW : dims.height,
+            paddingHorizontal: terminal ? TERMINAL_COLUMN : dims.pad,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: pointer ? 6 : 8,
+            backgroundColor: read(s?.selected) ? shade(0.12) : "transparent",
+            ...transition,
+            ...read(s?.style),
+          };
+        },
+        get hoverStyle(): ViewStyle | undefined {
+          return read(s?.disabled) || read(s?.selected) ? undefined : { backgroundColor: shade(0.06) };
+        },
+        get activeStyle(): ViewStyle | undefined {
+          return read(s?.disabled) ? undefined : { backgroundColor: shade(0.12) };
+        },
+        get focusStyle(): ViewStyle {
+          return focusRing(-2);
+        },
+        // Taller only: the halves touch, so a finger's slop stays off their shared edge.
+        get hitSlop() {
+          const v = slop(dimensions(o).height);
+          return v ? { top: v, bottom: v } : undefined;
+        },
+      };
+    },
+    get divider(): ViewStyle {
+      return { width: 1, backgroundColor: shade(0.22) };
+    },
+  };
+}

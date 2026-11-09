@@ -131,8 +131,14 @@ pub(crate) fn package(
     let mut published = BTreeSet::new();
     // An app with Rust components of its own has a runtime built for it,
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
-    let (linked, has_math) = {
+    let (linked, has_math, has_emoji) = {
         let plan = GatePlan::of(built);
+        if let Some(whole) = &plan.whole {
+            ui::warn(whole);
+        }
+        // `EmojiPicker`'s emoji, fetched by the first picker, wherever it is.
+        let has_emoji =
+            plan.main.iter().any(|g| g == EMOJI_GATE) || plan.lazy().contains(&EMOJI_GATE);
         let exports = prune::exports(&linkable)?;
         let keep: Vec<&str> = exports
             .iter()
@@ -162,7 +168,7 @@ pub(crate) fn package(
         // A runtime published whole has the typesetter in its main module.
         let has_math = published.contains(MATH_GATE)
             || (split.sides.is_empty() && exports.iter().any(|e| e == MATH_GATE));
-        (split.main, has_math)
+        (split.main, has_math, has_emoji)
     };
     let wasm = site.add("nsh.wasm", &linked)?;
     // What the runtime fetches when it first needs it: the syntaxes it
@@ -179,6 +185,13 @@ pub(crate) fn package(
         data.insert(
             "math".into(),
             site.add(MATH_FONTS_FILE, nsh_base::MATH_FONTS)?.into(),
+        );
+    }
+    if has_emoji {
+        data.insert(
+            "emoji".into(),
+            site.add(EMOJI_FILE, nsh_base::EMOJI_DATA.as_bytes())?
+                .into(),
         );
     }
     // The wasm-bindgen glue of a runtime whose crates call JS through
@@ -300,6 +313,10 @@ const TEXT_VIEW_GATE: &str = "nsh_part_text_view";
 const MATH_GATE: &str = "nsh_feature_math";
 /// The KaTeX fonts of the typesetter, which the page fetches with its code.
 const MATH_FONTS_FILE: &str = "nsh-math.bin";
+/// The gate of `EmojiPicker`.
+const EMOJI_GATE: &str = "nsh_part_emoji_picker";
+/// `EmojiPicker`'s emoji, which the page fetches for the first picker.
+const EMOJI_FILE: &str = "nsh-emoji.bin";
 
 /// The modules published for an app from its linkable runtime: the main
 /// module with `keep` and side modules for `lazy` ([`split::split`]). A
@@ -415,6 +432,27 @@ struct GatePlan {
     /// By chunk id, the gates its own code needs that `main` lacks (a
     /// chunk's static imports list theirs: the page prepares them too).
     chunks: BTreeMap<String, Vec<String>>,
+    /// Why `main` keeps every gate when the bundler could have told which
+    /// ones the app uses ([`whole_because`]), and in which code.
+    whole: Option<Whole>,
+}
+
+/// What made a runtime linked for an app keep every gate: `why`, found in
+/// `code` (the app's entry, or a chunk it imports statically).
+#[derive(Debug, PartialEq, Eq)]
+struct Whole {
+    why: &'static str,
+    code: String,
+}
+
+impl std::fmt::Display for Whole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the engine keeps every part of nsh/base, zlib and the shader compiler: {} ({}). Import NSH's modules by name to leave out what the app doesn't use",
+            self.why, self.code
+        )
+    }
 }
 
 impl GatePlan {
@@ -431,15 +469,34 @@ impl GatePlan {
             Some((entry, chunks?))
         });
         let Some((entry, chunks)) = per_chunk else {
+            let whole = built
+                .native_use
+                .as_ref()
+                .and_then(whole_because)
+                .map(|why| Whole {
+                    why,
+                    code: "the app".to_owned(),
+                });
             return Self {
                 main: linked_gates(built.native_use.as_ref()),
                 chunks: BTreeMap::new(),
+                whole,
             };
         };
+        let mut whole = whole_because(entry).map(|why| Whole {
+            why,
+            code: "the app's entry".to_owned(),
+        });
         let mut first = entry.clone();
         for (id, uses) in &chunks {
             if built.entry_imports.iter().any(|e| e == id) {
                 first.merge(uses);
+                if whole.is_none() {
+                    whole = whole_because(uses).map(|why| Whole {
+                        why,
+                        code: format!("its chunk {id}"),
+                    });
+                }
             }
         }
         let main = linked_gates(Some(&first));
@@ -456,7 +513,11 @@ impl GatePlan {
                 plan.insert(id.to_owned(), gates);
             }
         }
-        Self { main, chunks: plan }
+        Self {
+            main,
+            chunks: plan,
+            whole,
+        }
     }
 
     /// Every gate some chunk loads later, each once, sorted.
@@ -506,6 +567,22 @@ pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String>
     linked_gates_of(uses, &app_set_specifiers())
 }
 
+/// Why [`linked_gates`] keeps every gate for code that uses `uses`, when
+/// the bundler read it: what the code does that it cannot tell apart.
+/// `None` when it keeps only what the code uses. [`linked_gates_of`]
+/// keeps everything by this, so the warning and the pruning agree.
+fn whole_because(uses: &nsh_bundler::NativeUse) -> Option<&'static str> {
+    if uses.computed_import {
+        return Some("it loads a module whose name is worked out as it runs, `import(name)`");
+    }
+    match uses.imports.get(nsh_base::SPECIFIER) {
+        Some(nsh_bundler::Imported::All) => {
+            Some("it takes nsh/base whole, `import * as` or `import(\"nsh/base\")`")
+        }
+        _ => None,
+    }
+}
+
 /// The prefix of the gates of an app's own UI sets ([`ui_set_gate`]).
 /// Not `nsh_set_`: the runtime's `nsh_set_base_url` and `nsh_set_dark`
 /// would read as gates.
@@ -546,15 +623,23 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
             .map(|(name, _)| format!("nsh_part_{name}"))
             .collect();
         gates.push("nsh_std_zlib".into());
+        gates.push("nsh_std_crypto".into());
+        gates.push("nsh_std_url".into());
         gates.push("nsh_feature_shader".into());
         gates.extend(app_sets.iter().map(|s| ui_set_gate(s)));
         gates
     };
     let Some(uses) = uses else { return all() };
-    if uses.computed_import {
+    if whole_because(uses).is_some() {
         return all();
     }
-    let mut gates = vec!["nsh_part_core".to_owned()];
+    let mut gates = Vec::new();
+    if needs_base_core(uses, app_sets) {
+        gates.push("nsh_part_core".to_owned());
+    }
+    if uses.global_crypto {
+        gates.push("nsh_std_crypto".into());
+    }
     if uses.shader {
         gates.push("nsh_feature_shader".into());
     }
@@ -565,7 +650,10 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
     };
     for (module, imported) in &uses.imports {
         match module.as_str() {
-            "zlib" => add("nsh_std_zlib".into()),
+            "zlib" | "node:zlib" => add("nsh_std_zlib".into()),
+            "crypto" | "node:crypto" => add("nsh_std_crypto".into()),
+            // `domainToASCII` and `domainToUnicode`; `URL` is the browser's.
+            "url" | "node:url" => add("nsh_std_url".into()),
             // Shaders are `nsh`'s shader elements.
             "nsh" => match imported {
                 nsh_bundler::Imported::All => add("nsh_feature_shader".into()),
@@ -576,21 +664,36 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
                 }
             },
             "nsh/base/plot" => add("nsh_part_plot".into()),
-            nsh_base::SPECIFIER => match imported {
-                nsh_bundler::Imported::All => return all(),
-                nsh_bundler::Imported::Names(names) => {
+            // Taken whole, it kept everything above ([`whole_because`]).
+            nsh_base::SPECIFIER => {
+                if let nsh_bundler::Imported::Names(names) = imported {
                     for name in names {
                         if let Some(part) = part_of(name) {
                             add(format!("nsh_part_{part}"));
                         }
                     }
                 }
-            },
+            }
             module if app_sets.iter().any(|s| s == module) => add(ui_set_gate(module)),
             _ => {}
         }
     }
     gates
+}
+
+/// Whether an app that uses `uses` needs `nsh/base`'s core part: it
+/// imports `nsh/base` or one of its parts, one of its own UI sets (whose
+/// Rust components may build on the core's controls), or may give a view
+/// a scroll bar theme of its own (the core draws built-in bars). An app
+/// that only imports `nsh` gets the platform's scroll indicators either
+/// way, and `AlertDialog` and `Toast` are `nsh/base`'s.
+fn needs_base_core(uses: &nsh_bundler::NativeUse, app_sets: &[String]) -> bool {
+    uses.scrollbar_theme
+        || uses.imports.keys().any(|module| {
+            module == nsh_base::SPECIFIER
+                || module.starts_with(&format!("{}/", nsh_base::SPECIFIER))
+                || app_sets.iter().any(|s| s == module)
+        })
 }
 
 /// `nsh`'s exports whose views a shader draws: an import of one keeps the
@@ -867,6 +970,10 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
         files.push((runtime::SYNTAXES.to_owned(), syntaxes));
     }
     files.push((MATH_FONTS_FILE.to_owned(), nsh_base::MATH_FONTS.to_vec()));
+    files.push((
+        EMOJI_FILE.to_owned(),
+        nsh_base::EMOJI_DATA.as_bytes().to_vec(),
+    ));
     Ok((page, files))
 }
 
@@ -1559,22 +1666,48 @@ mod tests {
             gates
         };
         let core: &[&str] = &["Button", "Switch", "Tabs", "Tab", "NavStack", "AlertDialog"];
-        assert_eq!(
-            gates(&[("nsh", Some(&["mount", "View"]))]),
-            ["nsh_part_core"]
-        );
+        // Only `nsh`: no core part, no standard modules.
+        assert!(gates(&[("nsh", Some(&["mount", "View"]))]).is_empty());
         assert_eq!(
             gates(&[
                 ("nsh", Some(&["mount"])),
                 ("nsh/base", Some(core)),
                 ("buffer", None),
                 ("crypto", Some(&["createHash"])),
+                ("url", Some(&["domainToASCII"])),
             ]),
-            ["nsh_part_core"]
+            ["nsh_part_core", "nsh_std_crypto", "nsh_std_url"]
         );
+        // A scroll bar theme of a view's own is drawn by the core part.
+        let mut themed = uses(&[("nsh", Some(&["ScrollView"]))]);
+        themed.scrollbar_theme = true;
+        assert_eq!(linked_gates(Some(&themed)), ["nsh_part_core"]);
+        // The globals of `crypto` need its operations.
+        let mut global = uses(&[("nsh", Some(&["View"]))]);
+        global.global_crypto = true;
+        assert_eq!(linked_gates(Some(&global)), ["nsh_std_crypto"]);
         assert_eq!(
             gates(&[("nsh/base", Some(&["Button", "Editor"]))]),
             ["nsh_part_core", "nsh_part_editor"]
+        );
+        // Menus, popups, pickers, the command palette and toasts are
+        // parts apart from the core.
+        assert_eq!(
+            gates(&[(
+                "nsh/base",
+                Some(&["Button", "Select", "Menu", "Tooltip", "Toast", "toast"])
+            )]),
+            [
+                "nsh_part_core",
+                "nsh_part_menu",
+                "nsh_part_overlays",
+                "nsh_part_select",
+                "nsh_part_toast"
+            ]
+        );
+        assert_eq!(
+            gates(&[("nsh/base", Some(&["Combobox", "Command"]))]),
+            ["nsh_part_combobox", "nsh_part_command", "nsh_part_core"]
         );
         assert_eq!(
             gates(&[
@@ -1589,9 +1722,9 @@ mod tests {
         );
         assert_eq!(
             gates(&[("nsh", Some(&["mount", "Shader"]))]),
-            ["nsh_feature_shader", "nsh_part_core"]
+            ["nsh_feature_shader"]
         );
-        let every = nsh_base::parts::ALL.len() + 2;
+        let every = nsh_base::parts::ALL.len() + 4;
         assert_eq!(gates(&[("nsh/base", None)]).len(), every);
         let mut computed = uses(&[]);
         computed.computed_import = true;
@@ -1624,6 +1757,46 @@ mod tests {
         let published = link(&runtime, true, &["run"], &[]).unwrap();
         assert_eq!(published.main, module);
         assert!(published.sides.is_empty());
+    }
+
+    #[test]
+    fn a_plan_that_keeps_every_gate_says_why_and_where() {
+        let chunk = |id: &str, uses: nsh_bundler::NativeUse| crate::build::BuiltChunk {
+            id: id.to_owned(),
+            code: String::new(),
+            bytecode: Vec::new(),
+            source_map: None,
+            native_use: Some(uses),
+        };
+        let mut computed = uses(&[("nsh", Some(&["View"]))]);
+        computed.computed_import = true;
+        let mut built = crate::build::rust_root();
+        built.rust_root = false;
+        built.entry_native_use = Some(uses(&[("nsh", Some(&["View"]))]));
+        built.entry_imports = vec!["shared.js".into()];
+        built.chunks = vec![
+            chunk("shared.js", computed.clone()),
+            chunk("Later.js", uses(&[("nsh/base", None)])),
+        ];
+        let whole = GatePlan::of(&built).whole.unwrap();
+        assert_eq!(whole.code, "its chunk shared.js");
+        assert!(whole.why.contains("import(name)"));
+        assert!(whole.to_string().contains("Import NSH's modules by name"));
+
+        // The entry's own reason comes first; a chunk loaded later doesn't
+        // make the engine whole (its gates are side modules).
+        built.entry_native_use = Some(uses(&[("nsh/base", None)]));
+        let whole = GatePlan::of(&built).whole.unwrap();
+        assert_eq!(whole.code, "the app's entry");
+        assert!(whole.why.contains("nsh/base whole"));
+        built.entry_native_use = Some(uses(&[("nsh", Some(&["View"]))]));
+        built.chunks[0] = chunk("shared.js", uses(&[]));
+        assert_eq!(GatePlan::of(&built).whole, None);
+
+        // Not read at all (a development or Rust app's build): nothing to say.
+        built.entry_native_use = None;
+        built.native_use = None;
+        assert_eq!(GatePlan::of(&built).whole, None);
     }
 
     #[test]
@@ -1687,6 +1860,8 @@ mod tests {
                 "Editor.js": ["nsh_part_editor"],
             })
         );
+
+        assert_eq!(plan.whole, None);
 
         // A chunk whose use is unknown: everything is the entry's.
         built.chunks.push(chunk("Unknown.js", None));
@@ -1800,7 +1975,13 @@ mod tests {
         let names = |files: &Files| files.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
         assert_eq!(
             names(&plain_files),
-            ["nsh.js", "nsh.wasm", "nsh.version", MATH_FONTS_FILE]
+            [
+                "nsh.js",
+                "nsh.wasm",
+                "nsh.version",
+                MATH_FONTS_FILE,
+                EMOJI_FILE
+            ]
         );
         let glue = dir.join("nsh-dev-bindgen.js");
         fs::write(&glue, "export {};").unwrap();
@@ -1823,7 +2004,8 @@ mod tests {
                 "nsh.version",
                 "nsh-bindgen.js",
                 "snippets/app-1/inline0.js",
-                MATH_FONTS_FILE
+                MATH_FONTS_FILE,
+                EMOJI_FILE
             ]
         );
         // Another glue is another runtime: an open page loads again.

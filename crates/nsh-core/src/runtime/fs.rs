@@ -809,6 +809,31 @@ pub(super) async fn blocking<T: Send + 'static>(
     rx.await.map_err(|e| JsError::Error(e.to_string()))?
 }
 
+/// `relative` in canonical `root` with the symlinks on the way resolved
+/// (the last component too when `follow`), when they lead to a place still
+/// in `root`; else `relative` as it is.
+#[cfg(not(target_arch = "wasm32"))]
+fn through_links(root: &Path, relative: &Path, follow: bool) -> PathBuf {
+    let (dirs, last) = match relative.file_name() {
+        Some(name) if !follow => (relative.parent().unwrap_or(Path::new("")), Some(name)),
+        _ => (relative, None),
+    };
+    let Ok(real) = resolved(&root.join(dirs)) else {
+        return relative.to_path_buf();
+    };
+    let Some(mut rest) = inside(&real, root) else {
+        return relative.to_path_buf();
+    };
+    if let Some(last) = last {
+        rest.push(last);
+    }
+    if rest.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        rest
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl Grant {
     fn name(&self) -> &str {
@@ -819,11 +844,17 @@ impl Grant {
     /// write creates its first root when none exists (the app's own
     /// directory, `${dataDir}`); for a read, every entry of a root that
     /// does not exist is missing.
-    fn open(&self) -> std::io::Result<(cap_std::fs::Dir, &Path)> {
+    ///
+    /// Symlinks on the way are resolved first (the last component too when
+    /// `follow`): cap-std refuses any link to an absolute path, even one
+    /// whose target is still in the root (`~/link -> /home/me/elsewhere`).
+    /// A target outside the root keeps the path as written, so cap-std
+    /// still refuses it.
+    fn open(&self, follow: bool) -> std::io::Result<(cap_std::fs::Dir, PathBuf)> {
         let mut failed = None;
         for (root, relative) in &self.within {
             match confined::open_root(root) {
-                Ok(dir) => return Ok((dir, relative)),
+                Ok(dir) => return Ok((dir, through_links(root, relative, follow))),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
                     failed.get_or_insert(e);
@@ -837,7 +868,7 @@ impl Grant {
             return Err(std::io::ErrorKind::NotFound.into());
         };
         std::fs::create_dir_all(root)?;
-        Ok((confined::open_root(root)?, relative))
+        Ok((confined::open_root(root)?, relative.clone()))
     }
 
     /// I/O error `error` of `syscall` as Node's: the message names the
@@ -863,8 +894,8 @@ impl Grant {
         };
         let (grant, file, size) = blocking(move || {
             let file = self
-                .open()
-                .and_then(|(dir, relative)| confined::open_file(&dir, relative, false))
+                .open(true)
+                .and_then(|(dir, relative)| confined::open_file(&dir, &relative, false))
                 .map_err(|e| self.error("read", "open", e))?;
             let size = file
                 .metadata()
@@ -955,8 +986,8 @@ impl Grant {
         blocking(move || {
             use std::io::Write;
             let mut file = self
-                .open()
-                .and_then(|(dir, relative)| confined::open_file(&dir, relative, true))
+                .open(true)
+                .and_then(|(dir, relative)| confined::open_file(&dir, &relative, true))
                 .map_err(|e| self.error("write", "open", e))?;
             file.set_len(0)
                 .map_err(|e| self.error("write", "ftruncate", e))?;
@@ -968,7 +999,7 @@ impl Grant {
 
     async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         blocking(move || {
-            self.open()
+            self.open(true)
                 .and_then(|(dir, relative)| {
                     if recursive {
                         dir.create_dir_all(relative)
@@ -986,15 +1017,15 @@ impl Grant {
     async fn exists(self) -> Result<bool, JsError> {
         blocking(move || {
             Ok(self
-                .open()
-                .is_ok_and(|(dir, relative)| dir.symlink_metadata(relative).is_ok()))
+                .open(false)
+                .is_ok_and(|(dir, relative)| dir.symlink_metadata(&relative).is_ok()))
         })
         .await
     }
 
     async fn stat(self, link: bool) -> Result<Stats, JsError> {
         blocking(move || {
-            self.open()
+            self.open(!link)
                 .and_then(|(dir, relative)| {
                     if link {
                         dir.symlink_metadata(relative)
@@ -1010,8 +1041,8 @@ impl Grant {
 
     async fn readlink(self) -> Result<String, JsError> {
         blocking(move || {
-            self.open()
-                .and_then(|(dir, relative)| dir.read_link_contents(relative))
+            self.open(false)
+                .and_then(|(dir, relative)| dir.read_link_contents(&relative))
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| self.error("read link", "readlink", e))
         })
@@ -1020,8 +1051,8 @@ impl Grant {
 
     async fn unlink(self) -> Result<(), JsError> {
         blocking(move || {
-            self.open()
-                .and_then(|(dir, relative)| dir.remove_file(relative))
+            self.open(false)
+                .and_then(|(dir, relative)| dir.remove_file(&relative))
                 .map_err(|e| self.error("remove", "unlink", e))
         })
         .await
@@ -1029,8 +1060,8 @@ impl Grant {
 
     async fn rmdir(self) -> Result<(), JsError> {
         blocking(move || {
-            self.open()
-                .and_then(|(dir, relative)| dir.remove_dir(relative))
+            self.open(false)
+                .and_then(|(dir, relative)| dir.remove_dir(&relative))
                 .map_err(|e| self.error("remove", "rmdir", e))
         })
         .await
@@ -1038,9 +1069,9 @@ impl Grant {
 
     async fn rename(self, to: Self) -> Result<(), JsError> {
         blocking(move || {
-            self.open()
+            self.open(false)
                 .and_then(|(dir, relative)| {
-                    let (target, to_relative) = to.open()?;
+                    let (target, to_relative) = to.open(false)?;
                     dir.rename(relative, &target, to_relative)
                 })
                 .map_err(|e| self.error("rename", "rename", e))
@@ -1052,8 +1083,8 @@ impl Grant {
         let name = self.name.clone();
         let (grant, mut listing) = blocking(move || {
             let listing = self
-                .open()
-                .and_then(|(dir, relative)| dir.read_dir(relative))
+                .open(true)
+                .and_then(|(dir, relative)| dir.read_dir(&relative))
                 .map_err(|e| self.error("list", "scandir", e))?;
             Ok((self, listing))
         })
@@ -1492,6 +1523,54 @@ mod tests {
         assert_eq!(super::inside(&sibling, root), None);
         #[cfg(windows)]
         assert!(super::inside(Path::new("c:\\DATA\\App\\x"), root).is_some());
+    }
+
+    /// A link to an absolute path still in the root is followed (cap-std
+    /// alone refuses it); one leading out of the root is still refused.
+    #[cfg(unix)]
+    #[test]
+    fn absolute_links_within_the_root_are_followed() {
+        use std::{io::Read, os::unix::fs::symlink, path::Path};
+        let base = std::env::temp_dir().join(format!("nsh-fs-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("root");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("real/a.txt"), "in").unwrap();
+        std::fs::write(outside.join("a.txt"), "out").unwrap();
+        let root = crate::access::canonicalize(&root).unwrap();
+        let outside = crate::access::canonicalize(&outside).unwrap();
+        symlink(root.join("real"), root.join("dir")).unwrap();
+        symlink(root.join("real/a.txt"), root.join("file")).unwrap();
+        symlink(&outside, root.join("away")).unwrap();
+        let dir = super::confined::open_root(&root).unwrap();
+        let read = |path: &str, follow: bool| {
+            let relative = super::through_links(&root, Path::new(path), follow);
+            let mut text = String::new();
+            super::confined::open_file(&dir, &relative, false)?.read_to_string(&mut text)?;
+            std::io::Result::Ok(text)
+        };
+        // cap-std alone refuses both.
+        assert!(super::confined::open_file(&dir, Path::new("dir/a.txt"), false).is_err());
+        assert_eq!(read("dir/a.txt", true).unwrap(), "in");
+        assert_eq!(read("file", true).unwrap(), "in");
+        assert!(read("away/a.txt", true).is_err());
+        // An operation on the link itself keeps its last component.
+        assert_eq!(
+            super::through_links(&root, Path::new("dir/file"), false),
+            Path::new("real/file")
+        );
+        assert_eq!(
+            super::through_links(&root, Path::new("file"), false),
+            Path::new("file")
+        );
+        // A path that does not exist yet (a write) resolves its ancestors.
+        assert_eq!(
+            super::through_links(&root, Path::new("dir/new.txt"), true),
+            Path::new("real/new.txt")
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

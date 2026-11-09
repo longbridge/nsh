@@ -47,6 +47,9 @@ go elsewhere under these rules rather than into them.
 - A Rust enum's variants are a string union of the same words (`DialogChangeReason::BackdropPress` →
   `"backdropPress"`).
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
+- A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
+  object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
+  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`.
 
 ## Conventions
 
@@ -188,6 +191,20 @@ be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled
 (`crates/nsh-base/src/listbox.rs`, which `Combobox` will share) and keeps `gpui-component`'s names for its data
 (`SearchableListItem::title`, `SearchableGroup`'s sections) while its look stays the app's.
 
+`EmojiPicker` has no counterpart in `gpui-kit`: its name is that of `gpui-base`'s `*Picker`s (`ColorPicker`,
+`DatePicker`), its behavior and names `Command`'s (`onSelect`, `onHighlightChange({ highlighted })`,
+`onQueryChange`, `onCancel`, the `searchBar` / `search` / `list` / `item` / `group` parts, `renderItem`,
+`renderGroup`, `empty`), and its features those of frimousse and AndroidX's `EmojiPickerView` (rows of `columns`
+cells, a global skin tone, recent emoji the app keeps, a newest Emoji version). The groups' tabs and the skin tone
+choice are the app's `Tabs` and controls in its slots, with `onGroupChange` and `scrollToGroup`.
+Its own names are those the emoji pickers share: `EmojiPicker` as frimousse, emoji_picker_flutter and shadcn's
+registry name it (AndroidX `EmojiPickerView`, emoji-picker-element `<emoji-picker>`); `emojiVersion`, the newest
+Emoji version shown, as frimousse, emoji-mart and emoji-picker-element; `skinTone` and its values (`"mediumLight"`, ...)
+as frimousse's and CLDR's skin tone names; `columns` as frimousse and emoji_picker_flutter; `label` as frimousse's and
+emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.txt`, emojibase's `smileys-emotion`,
+...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
+entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
@@ -300,6 +317,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
 | (new) wry's `WebViewBuilder::with_incognito(bool)` (the web views of GPUI Kit's `gpui-webview`) | `incognito` (`false`), Rust `.incognito(bool)` | States | wry's name, which Tauri's and other web view APIs share: a state of the web view, read when it is made (Rust takes a value, not a signal). A boolean, not a storage mode: a named persistent store would be a prop of its own, which `incognito` composes with |
+| (new) wry's `WebViewBuilder::with_asynchronous_custom_protocol(name, handler)`, WebKit's `setURLSchemeHandler:forURLScheme:` | Rust `.url_scheme(scheme, handler)`; `WebResourceRequest` (`url()`, `method()`, `is_cancelled()`, `respond(WebResource)`, `fail()`), `WebResource { mime_type, bytes }` | Where names come from | WebKit's and RFC 3986's word, "scheme" (wry's "protocol" is the same thing); the request is answered once, from any thread, as wry's responder is. Rust only for now: the bytes are the app's Rust data |
 | **NavPage** | | | |
 | `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
@@ -331,7 +349,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
 | `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
-| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations, when NSH has them, come from rust-i18n |
+| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations come from rust-i18n: `nsh/i18n`'s `t`, `setLocale`, `availableLocales` (Rust `t!`, `set_locale`, `available_locales`) |
 | `OS` (type) | unchanged | | `platform.os`'s type |
 | **`nsh`: accessibility** | | | |
 | `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
@@ -454,7 +472,7 @@ and `Input`'s React Native names follow the rules as well.
 | Tiptap's `Link` extension (`RichEditor`'s class, was `Link`) | `RichLink` (its extension name stays `"link"`) | `RichImage`, `RichTable`, `RichTextStyle` (`rich-editor.md`) | `Link` is `gpui-base`'s component; the editor's class takes the `Rich` prefix its others take where a name is taken (decided by the user, 2026-10-28) |
 | `Link::tab_index`, `tab_stop` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
 | a link inside text (`gpui-base`'s `Link` is a `div`) | an inline box of the paragraph (`verticalAlign`, `align-text-bottom`) | `text.md` "Inline attachments" | Every view inside a `<Text>` is one: it keeps its states, focus and role, and stays on one line. A link that wraps with the paragraph's lines is a nested `<Text role="link" onPress>` span (`TextView`'s links), which is no stop of the keyboard focus |
-| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs `href` carried to the platform as a host prop and the web runtime making an anchor whose default navigation it cancels |
+| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs the web runtime making an anchor from the view's `href` (the host prop `Href`, `ViewProps::href`, which the link sets while enabled and a terminal draws as an OSC 8 hyperlink) whose default navigation it cancels |
 | (new) | `hitSlop: number \| Partial<Edges>`; Rust `.hit_slop(..)` | the host prop `hitSlop` (every view's), passed to the link's view; `Button`'s `hitSlop` | Neither `gpui-base`'s nor `gpui-component`'s `Link` has one, as with `Button`: GPUI hit-tests a pointer against the bounds, which a mouse needs. A finger needs more around a small target (an icon, a short word), so it is the host prop's name, type and meaning, with no new concept |
 | **HoverCard** (`nsh/base`) | | | |
 | `HoverCard::new(id)`, `trigger`, `content(\|state, ..\|)` / `gpui-component`'s children | `HoverCard`, slot `trigger`, children (made on each opening) | `base/src/hover_card.rs:37-72`; `component/src/hover_card.rs:65-93`, `:129` | The content builder's `HoverCardState` gives it `is_open`, which the app has as `open` / `onOpenChange` |

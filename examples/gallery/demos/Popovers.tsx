@@ -143,8 +143,10 @@ export function Popovers() {
     const following = signal(false);
     return (
       <Card icon="popover" title="A person's card" subtitle={`${tap} a mention: who it is, and what to do next`}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Avatar name="Mira Chen" size={pointer ? 24 : 30} />
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <View style={{ marginRight: 10 }}>
+            <Avatar name="Mira Chen" size={pointer ? 24 : 30} />
+          </View>
           <Popover
             open={open()}
             onOpenChange={(e) => {
@@ -155,7 +157,7 @@ export function Popovers() {
             align="start"
             offset={6}
             margin={8}
-            trigger={<Trigger label="@Mira Chen" open={open()} variant="ghost" ink={colors.accent} />}
+            trigger={<Trigger label="@Mira Chen" open={open()} variant="ghost" inline ink={colors.accent} />}
           >
             <PopIn side="top" style={popoverLook({ width: pointer ? 280 : 300 })}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -207,7 +209,8 @@ export function Popovers() {
               </View>
             </PopIn>
           </Popover>
-          <Text style={{ flex: 1, fontSize: pointer ? 13 : 15, color: colors.muted }}>mentioned you in Q3 roadmap</Text>
+          {/* A word's space after the mention, as in the line of text it is part of. */}
+          <Text style={{ flex: 1, marginLeft: 4, fontSize: pointer ? 13 : 15, color: colors.muted }}>mentioned you in Q3 roadmap</Text>
         </View>
       </Card>
     );

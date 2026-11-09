@@ -1,6 +1,6 @@
 import { cleanup, mount, signal, Scroll, Text, View } from "nsh";
 import { TextView } from "nsh/base";
-import { button, buttonText, desktop, ui } from "./palette";
+import { button, buttonText, desktop, textViewCaretClass, textViewLinkClasses, ui } from "./palette";
 
 const REPLY = `## Moving to offline sync
 
@@ -47,8 +47,9 @@ function App() {
         <TextView
           markdown={text()}
           options={{ streaming: streaming() }}
-          streamingCaret={streaming() ? <View style={{ width: 8, height: 16, marginLeft: 2, borderRadius: 2, backgroundColor: ui().accent }} /> : undefined}
+          streamingCaret={streaming() ? <View class={textViewCaretClass} /> : undefined}
           selectable
+          classes={textViewLinkClasses}
         />
         <View
           onPress={play}

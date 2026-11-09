@@ -219,6 +219,10 @@ pub(crate) struct Surface {
     /// ([`crate::AppView::set_theme_overrides`]): sent to every engine the
     /// surface starts, before its first frame.
     pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
+    /// Links that came before the engine started (the one that launched
+    /// the app): sent before the app's code runs, so its first
+    /// `UrlScheme.url()` reads them.
+    pub(crate) launch_links: RefCell<Vec<String>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Batches that arrived while animations run, and what came after
@@ -242,6 +246,9 @@ pub(crate) struct Surface {
     /// The rate the display link was last asked for
     /// ([`Surface::frame_rate`]; `None`: the screen's highest).
     link_rate: Cell<Option<f32>>,
+    /// The highest refresh rate of the screen the display link was last
+    /// asked on ([`Surface::frame_rate_range`]), in Hz; `0` before any.
+    link_screen_max: Cell<f32>,
     /// The frame callbacks that asked for a rate in the last frame
     /// ([`Surface::cap_frame`]): how many, and the highest rate.
     capped_frames: Cell<(usize, f32)>,
@@ -349,6 +356,7 @@ impl Surface {
             chunks: RefCell::new(None),
             host_environment: Cell::default(),
             host_tokens: RefCell::new(None),
+            launch_links: RefCell::new(Vec::new()),
             js_frame: Cell::new(false),
             queued: RefCell::default(),
             frame_callbacks: RefCell::default(),
@@ -358,6 +366,7 @@ impl Surface {
             test_model: RefCell::default(),
             link: RefCell::new(None),
             link_rate: Cell::new(None),
+            link_screen_max: Cell::new(0.0),
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
@@ -430,11 +439,22 @@ impl Surface {
         let tokens = self.host_tokens.borrow().clone();
         // The displays are there as the app first renders.
         let displays = crate::window_state::displays(self.mtm);
+        let links = std::mem::take(&mut *self.launch_links.borrow_mut());
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
             control.set_displays(displays);
+            for url in links {
+                control.dispatch_event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::UrlScheme,
+                    nsh_core::EventPayload::Map(vec![(
+                        nsh_core::url_scheme::URL,
+                        nsh_core::PayloadValue::Str(url),
+                    )]),
+                );
+            }
         };
         // Remote images download with NSURLSession.
         crate::image::install_transport();
@@ -947,15 +967,33 @@ impl Surface {
     /// The frame rates the display link asks for ([`frame_rate_range`]) at
     /// the rate it was last asked for, on the window's screen.
     fn frame_rate_range(&self) -> objc2_quartz_core::CAFrameRateRange {
-        let max = self
-            .root
+        let max = self.screen_max();
+        self.link_screen_max.set(max);
+        frame_rate_range(self.link_rate.get(), max)
+    }
+
+    /// The highest refresh rate of the window's screen (the main screen
+    /// while the root is in no window), in Hz.
+    fn screen_max(&self) -> f32 {
+        self.root
             .ns()
             .window()
             .and_then(|w| w.screen())
             .or_else(|| objc2_app_kit::NSScreen::mainScreen(self.mtm))
             .map_or(60, |s| s.maximumFramesPerSecond())
-            .max(1) as f32;
-        frame_rate_range(self.link_rate.get(), max)
+            .max(1) as f32
+    }
+
+    /// Asks the display link for its rates again when the window's screen
+    /// refreshes at another rate than the one they were made for: the
+    /// window moved to another screen, or the screen's mode changed. The
+    /// link follows the window's screen, but its rates stay what they were
+    /// asked for: one resumed on a 60 Hz screen and kept running (a looping
+    /// animation, the performance monitor) stays at 60 Hz on a 120 Hz one.
+    fn follow_screen(&self, link: &CADisplayLink) {
+        if self.screen_max() != self.link_screen_max.get() {
+            link.setPreferredFrameRateRange(self.frame_rate_range());
+        }
     }
 
     /// When the next thing that changes the app's state comes due without
@@ -1042,6 +1080,7 @@ impl Surface {
         if !self.wants_frames() && self.perf.borrow().is_none() {
             link.setPaused(true);
         } else {
+            self.follow_screen(link);
             self.update_frame_rate(link, false);
         }
     }

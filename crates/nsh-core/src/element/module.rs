@@ -357,6 +357,11 @@ impl ModuleCx {
         self.actions.push(super::services::announce(message.into()));
     }
 
+    /// The device plays `haptic` (TS: `Haptics` of `nsh/mobile`).
+    pub fn haptic(&mut self, haptic: crate::Haptic) {
+        self.actions.push(super::services::haptic(haptic));
+    }
+
     /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
     pub fn set_clipboard(&mut self, text: impl Into<String>) {
         self.actions
@@ -376,6 +381,18 @@ impl ModuleCx {
     /// [`crate::platform::Appearance::System`] follows the system again.
     pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {
         self.actions.push(Action::Appearance(appearance));
+    }
+
+    /// Shows the app in `locale` whatever the user's language (`None`: the
+    /// user's again), as [`crate::i18n::set_locale`] does.
+    pub fn set_locale(&mut self, locale: Option<crate::platform::Locale>) {
+        self.actions.push(Action::Locale(locale));
+    }
+
+    /// Gives the core the app's translations (`nsh-js`: the bundle's).
+    #[doc(hidden)]
+    pub fn set_translations(&mut self, translations: crate::i18n::Translations) {
+        self.actions.push(Action::Translations(translations));
     }
 
     /// Asks the platform for `action` (the runtime's own modules).

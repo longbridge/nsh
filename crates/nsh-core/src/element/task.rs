@@ -118,6 +118,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The app's address resolves the slot ([`crate::url_scheme`]).
+    AppUrl(AnswerSlot<Option<String>>),
+    /// The app sets its address ([`crate::url_scheme`]).
+    SetAppUrl(String),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here
@@ -152,6 +156,11 @@ pub(crate) enum Action {
     Appearance(crate::platform::Appearance),
     /// Sets the app's design tokens.
     Tokens(super::Tokens),
+    /// Sets the app's translations ([`crate::i18n`]).
+    Translations(crate::i18n::Translations),
+    /// Shows the app in a language whatever the user's (`None`: the
+    /// user's again).
+    Locale(Option<crate::platform::Locale>),
     /// Draws the scroll views' bars with the built-in bar the source makes
     /// of the theme, or (no theme) with the platform's indicator.
     BuiltInScrollbars(super::ScrollbarSource, Option<super::AnyValue>),
@@ -478,6 +487,12 @@ impl Executor {
 
     pub(crate) fn set_runtime(&self, runtime: Handle) {
         *self.runtime.borrow_mut() = Some(runtime);
+    }
+
+    /// The runtime tasks are polled in the context of, if one is set.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn runtime(&self) -> Option<Handle> {
+        self.runtime.borrow().clone()
     }
 
     pub(crate) fn set_notify(&self, notify: Notify) {

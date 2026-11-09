@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), an emoji picker (`EmojiPicker`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -36,6 +36,8 @@ mod diff;
 pub mod dock;
 #[cfg(feature = "editor")]
 pub mod editor;
+#[cfg(feature = "emoji-picker")]
+mod emoji_picker;
 mod hover_card;
 mod keys;
 mod link;
@@ -71,6 +73,13 @@ mod term;
 pub mod terminal;
 pub mod text_view;
 
+/// `EmojiPicker`'s emoji (`emoji_picker/emoji.tsv`): the native runtimes
+/// embed them; `nsh` publishes them next to a web runtime, which fetches
+/// them for its first picker.
+#[cfg(all(feature = "emoji-picker", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub use crate::emoji_picker::EMOJI_DATA;
+
 /// The KaTeX fonts `TextView` draws formulas with, in one file,
 /// zstd-compressed (about 230 kB of 500 kB; license in
 /// `fonts/katex.LICENSE.txt`). The native runtimes embed them; `nsh` publishes
@@ -94,6 +103,12 @@ use nsh_core::element::{ComponentSpec, Registry};
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
 pub use nsh_core::element::{Input, input};
 
+#[cfg(feature = "emoji-picker")]
+pub use crate::emoji_picker::{
+    EmojiAnnotation, EmojiEntry, EmojiGroup, EmojiGroupId, EmojiGroupLabels, EmojiPicker,
+    EmojiPickerApi, EmojiPickerElement, EmojiPickerEvent, EmojiPickerProps, EmojiSkinTone,
+    emoji_picker,
+};
 #[cfg(feature = "term")]
 pub use crate::term::{
     Terminal, TerminalApi, TerminalColor, TerminalCursor, TerminalElement, TerminalEmulator,
@@ -295,6 +310,8 @@ pub fn registry_of(parts: impl IntoIterator<Item = parts::Part>) -> Registry {
 pub mod parts {
     use nsh_core::element::Registry;
 
+    #[cfg(feature = "emoji-picker")]
+    use crate::EmojiPicker;
     #[cfg(feature = "plot")]
     use crate::plot;
     #[cfg(feature = "rich-editor")]
@@ -309,7 +326,7 @@ pub mod parts {
         RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
         Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
         TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
-        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, toast,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
     #[cfg(feature = "editor")]
     use crate::{DiffView, Editor};
@@ -320,8 +337,16 @@ pub mod parts {
     /// Every part by its name, the order [`crate::registry`] registers them.
     pub const ALL: &[(&str, Part)] = &[
         ("core", core),
+        ("menu", menu),
+        ("overlays", overlays),
+        ("select", select),
+        ("command", command),
+        ("combobox", combobox),
+        ("toast", toast),
         ("pickers", pickers),
         ("color_picker", color_picker),
+        #[cfg(feature = "emoji-picker")]
+        ("emoji_picker", emoji_picker),
         ("carousel", carousel),
         ("tree", tree),
         ("fields", fields),
@@ -342,12 +367,12 @@ pub mod parts {
         ("term", term),
     ];
 
-    /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// links, checkboxes, radios, switches, toggles, toolbars, sliders,
-    /// scroll bars, paginations, tabs, collapsibles, accordions, avatars,
-    /// progress, menus, popovers, hover cards, sheets, tooltips, toasts and
-    /// system alerts. The larger controls are parts of their own, so a web
-    /// runtime linked for an app leaves out those it does not use.
+    /// The controls every app may use: buttons, links, checkboxes, radios,
+    /// switches, toggles, toolbars, sliders, scroll bars, paginations,
+    /// tabs, collapsibles, accordions, avatars, progress and system
+    /// alerts. It also draws the built-in scroll bars. Menus, popups,
+    /// pickers, the command palette and toasts are parts of their own, so a
+    /// web runtime linked for an app leaves out those it does not use.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -359,15 +384,6 @@ pub mod parts {
             .register::<AvatarGroup>()
             .register::<Button>()
             .register::<Link>()
-            .register::<ContextMenu>()
-            .register::<Menu>()
-            .register::<MenuItem>()
-            .register::<MenuSeparator>()
-            .register::<Submenu>()
-            .register::<Popover>()
-            .register::<HoverCard>()
-            .register::<Sheet>()
-            .register::<Tooltip>()
             .register::<Checkbox>()
             .register::<Collapsible>()
             .register::<Pagination>()
@@ -378,10 +394,6 @@ pub mod parts {
             .module::<Scrollbar>()
             .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
-            // Lists to pick from: in every app's forms, so never apart.
-            .register::<Select>()
-            .register::<Combobox>()
-            .register::<Command>()
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
@@ -390,10 +402,49 @@ pub mod parts {
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
+            .module::<AlertDialog>();
+    }
+
+    /// `Menu`, `ContextMenu` and their items.
+    pub fn menu(registry: &mut Registry) {
+        registry
+            .register::<ContextMenu>()
+            .register::<Menu>()
+            .register::<MenuItem>()
+            .register::<MenuSeparator>()
+            .register::<Submenu>();
+    }
+
+    /// `Popover`, `HoverCard`, `Sheet` and `Tooltip`.
+    pub fn overlays(registry: &mut Registry) {
+        registry
+            .register::<Popover>()
+            .register::<HoverCard>()
+            .register::<Sheet>()
+            .register::<Tooltip>();
+    }
+
+    /// `Select`.
+    pub fn select(registry: &mut Registry) {
+        registry.register::<Select>();
+    }
+
+    /// `Command`: a command palette.
+    pub fn command(registry: &mut Registry) {
+        registry.register::<Command>();
+    }
+
+    /// `Combobox`.
+    pub fn combobox(registry: &mut Registry) {
+        registry.register::<Combobox>();
+    }
+
+    /// `Toast`, `ToastStack` and the toast manager.
+    pub fn toast(registry: &mut Registry) {
+        registry
             .register::<Toast>()
             .register::<ToastStack>()
-            .class::<toast::ToastManagerClass>()
-            .module::<AlertDialog>();
+            .class::<crate::toast::ToastManagerClass>();
     }
 
     /// `Calendar`, `DatePicker` and `TimeField`: dates and times.
@@ -413,6 +464,13 @@ pub mod parts {
             .register::<ColorField>()
             .register::<ColorSwatch>()
             .register::<ColorEyeDropper>();
+    }
+
+    /// `EmojiPicker`: a search field over every emoji, with the emoji's
+    /// data (fetched by the web runtime the first time a picker shows).
+    #[cfg(feature = "emoji-picker")]
+    pub fn emoji_picker(registry: &mut Registry) {
+        registry.register::<EmojiPicker>();
     }
 
     /// `Carousel` and its parts.
@@ -515,7 +573,12 @@ mod tests {
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
-    #[cfg(all(feature = "editor", feature = "plot", feature = "rich-editor"))]
+    #[cfg(all(
+        feature = "editor",
+        feature = "emoji-picker",
+        feature = "plot",
+        feature = "rich-editor"
+    ))]
     #[test]
     fn the_exports_are_pinned() {
         let registry = super::registry();
@@ -555,6 +618,7 @@ mod tests {
                 "DiffView",
                 "DockArea",
                 "Editor",
+                "EmojiPicker",
                 "HoverCard",
                 "Link",
                 "Menu",

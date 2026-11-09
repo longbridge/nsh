@@ -64,13 +64,13 @@ mount(App);
 
 ### 属性
 
-在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`、`incognito`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`、`incognito`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。Rust 还可以用 `url_scheme` 向页面提供应用自己的资源（[见下文](#应用提供的资源)）。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `src` | `string` | | 要显示的页面的 URL。 |
 | `html` | `string` | | 内联 HTML，代替 `src` 显示。 |
-| `baseUrl` | `string` | | `html` 中相对 URL 的解析基准。 |
+| `baseUrl` | `string` | | `html` 中相对 URL 的解析基准。它需要与该地址的页面相同的授权（`webview.hosts`）；未授权时 HTML 不带基准 URL 加载，`onError` 报告 `ERR_ACCESS_DENIED`。 |
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自己的脚本之前运行。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
@@ -282,6 +282,40 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### 应用提供的资源
+
+页面可以从应用自己的 URL scheme 加载应用持有的字节（内存或磁盘中的图片、邮件的附件）。`url_scheme` 指定 scheme
+和应答其请求的 Rust 函数；页面像引用其他 URL 一样引用它的 URL（`<img src="app-image:42">`、
+`fetch("app-image:42")`），网页引擎像加载任何子资源一样加载它们：字节原样传给页面，不经过页面的脚本。几十 MB
+的图片也能以读文件的速度加载。
+
+```rust
+use nsh_core::{
+    prelude::*,
+    web_resource::{WebResource, WebResourceRequest},
+};
+
+fn serve(request: WebResourceRequest) {
+    // 在主线程上调用：把耗时的工作交给线程，并在那里应答。
+    std::thread::spawn(move || match std::fs::read(path_for(request.url())) {
+        Ok(bytes) if !request.is_cancelled() => request.respond(WebResource::new("image/png", bytes)),
+        _ => request.fail(),
+    });
+}
+
+web_view_html(html, None).url_scheme("app-image", serve).flex_1()
+```
+
+处理函数在平台的主线程上运行，因此应立即返回；请求只应答一次，可以当场或稍后、在任何线程上应答：`respond`
+（字节和 MIME 类型）或 `fail`（图片的 `error` 事件、被拒绝的 `fetch`）。未应答就被丢弃的请求视为失败。页面不再需要
+它时（页面已跳转、网页视图已移除），`is_cancelled()` 变为 true，之后的应答会被丢弃。应答带有
+`Access-Control-Allow-Origin: *`，所以无论页面的来源是什么，页面的脚本都能 `fetch` 它们；Content-Security-Policy
+像其他来源一样写出 scheme 即可（`img-src app-image:`）。
+
+scheme 以字母开头，后接字母、数字、`+`、`-` 或 `.`，且不能是 Web 或系统的 scheme（`http`、`https`、`file`、
+`data`、`blob`、`about` 等）。多个 scheme 就调用多次。与 `incognito` 一样，scheme 在创建网页视图时读取。iOS、
+macOS 和 Linux 提供它们（WebKit 的 `WKURLSchemeHandler` 和 `webkit_web_context_register_uri_scheme`）。
 
 ### 已登录的页面：请求头
 

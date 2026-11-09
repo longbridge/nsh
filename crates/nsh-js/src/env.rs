@@ -620,6 +620,46 @@ pub(crate) fn current(cx: *mut JsContext) -> Environment {
     (*env(cx).current.borrow()).unwrap_or_default()
 }
 
+/// The user's locale and preferred languages, read so that what reads them
+/// (`nsh/i18n`'s `t`) runs again when they change.
+pub(crate) fn tracked_languages(
+    cx: *mut JsContext,
+) -> (nsh_core::platform::Locale, nsh_core::platform::Languages) {
+    for part in [Part::Locale, Part::LocaleSettings] {
+        let accessor = env(cx).accessors[part as usize].get();
+        // SAFETY: calling the accessor reads (and tracks) the signal; its
+        // value is freed at once.
+        unsafe {
+            let value = qjs::JS_Call(cx, accessor, UNDEFINED, 0, ptr::null_mut());
+            qjs::JS_FreeValue(cx, value);
+        }
+    }
+    let current = current(cx);
+    (current.locale, current.locale_settings.languages)
+}
+
+/// Shows the app in `locale` at once (`setLocale`): `locale()`, `t` and
+/// `Intl` read it from now on; the engine keeps it in the environment it
+/// reports after.
+pub(crate) fn show_locale(cx: *mut JsContext, locale: nsh_core::platform::Locale) {
+    let e = env(cx);
+    let mut current = e.current.borrow_mut();
+    let mut next = current.unwrap_or_default();
+    if next.locale == locale {
+        return;
+    }
+    // `localeSettings()` follows when the engine reports it.
+    next.locale = locale;
+    next.locale_settings.languages = next.locale_settings.languages.preferring(locale);
+    *current = Some(next);
+    drop(current);
+    reactive::set_signal(
+        cx,
+        e.signals[Part::Locale as usize].get(),
+        string(cx, locale.as_str()),
+    );
+}
+
 /// The user's locale (`Intl`'s default), read where it is used: a change
 /// applies to what is formatted next.
 pub(crate) fn locale(cx: *mut JsContext) -> nsh_core::platform::Locale {

@@ -322,6 +322,10 @@ img.nsh-fill { pointer-events: none; }
 .nsh-dark .nsh-sheet > div { background: rgba(44,44,46,.97); color: #fff; }
 .nsh-dark .nsh-sheet button { color: #0a84ff; border-top-color: rgba(255,255,255,.15); }
 .nsh-dark .nsh-sheet button.destructive { color: #ff453a; }
+/* Alert and sheet buttons take focus when they open: no browser outline.
+   Keyboard focus shows as a pressed tint on phones, a ring on desktop. */
+.nsh-dialog button:focus, .nsh-sheet button:focus { outline: none; }
+.nsh-dialog button:focus-visible, .nsh-sheet button:focus-visible { background: rgba(128,128,128,.12); }
 .nsh-desktop .nsh-sheet > div { border-radius: 12px; padding: 6px; background: #fff; color: #0a0a0a; border: 1px solid #e5e5e5;
   box-shadow: 0 10px 30px rgba(0,0,0,.25); }
 .nsh-desktop .nsh-sheet .nsh-sheet-head { color: #737373; border-bottom: 1px solid #e5e5e5; margin-bottom: 4px; padding: 8px 12px 12px; }
@@ -331,6 +335,8 @@ img.nsh-fill { pointer-events: none; }
 .nsh-desktop.nsh-dark .nsh-sheet > div { background: #171717; color: #fafafa; border-color: #262626; }
 .nsh-desktop.nsh-dark .nsh-sheet .nsh-sheet-head { color: #a3a3a3; border-bottom-color: #262626; }
 .nsh-desktop.nsh-dark .nsh-sheet button.destructive { color: #f87171; }
+.nsh-desktop .nsh-dialog button:focus-visible { box-shadow: 0 0 0 3px rgba(163,163,163,.5); }
+.nsh-desktop.nsh-dark .nsh-dialog button:focus-visible { box-shadow: 0 0 0 3px rgba(115,115,115,.5); }
 .nsh-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .nsh-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
 .nsh-spinner { position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px; pointer-events: none; z-index: 5; }
@@ -382,6 +388,11 @@ const CODE_CHARS = {
   Quote: "'", Comma: ",", Period: ".", Slash: "/", Backquote: "`", Space: " ",
 };
 
+/** A name for the history entries of one load of the page. */
+function newHistorySession() {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+}
+
 /** The offset of local time at `ms` (since the epoch) in seconds east of UTC. */
 function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
@@ -419,11 +430,12 @@ function regional(locale) {
  * (shortcuts work on any layout, as menus' do).
  */
 function keyCode(e) {
-  const named = NAMED_KEYS[e.key];
+  // Some IME and webview key events carry no `key`; fall back to `code`.
+  const k = typeof e.key === "string" ? e.key : "";
+  const named = NAMED_KEYS[k];
   if (named) return named;
-  const f = /^F([0-9]{1,2})$/.exec(e.key);
+  const f = /^F([0-9]{1,2})$/.exec(k);
   if (f) return Number(f[1]) >= 1 && Number(f[1]) <= 24 ? 512 + Number(f[1]) : -1;
-  const k = e.key;
   if (k.length === 1 && !e.shiftKey && !e.altKey && k >= " " && k <= "~") return k.toLowerCase().charCodeAt(0);
   const c = e.code ?? "";
   if (/^Key[A-Z]$/.test(c)) return c.charCodeAt(3) + 32;
@@ -1259,7 +1271,7 @@ class Player {
    */
   testStart() {
     // The apps started from now on send their requests to the test
-    // (`web/browser/testing.js`).
+    // (`web/browser/fetch.js`, `web/browser/testing.js`).
     this.testing = true;
     this.wasm.nsh_test_start?.();
   }
@@ -1542,6 +1554,9 @@ class Player {
     this.hostEvents ??= [];
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
+    // The app's address starts as its first entry's, which the core has
+    // before the app's code runs (`nsh_set_page_url`).
+    if (this.history) this.withStrings([this.firstUrl], (p, l) => this.wasm.nsh_set_page_url?.(p, l));
     try {
       this.call(() => start(environment));
     } catch (err) {
@@ -4726,7 +4741,7 @@ class Player {
       // alone, as on the native platforms, where the field never sees it: a
       // RichEditor would delete twice on Backspace.
       if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
-        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
+        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
       // Return submits unless it inserts a line break (`submitBehavior`);
@@ -5135,8 +5150,11 @@ class Player {
     this.ignoredPops = 0;
     // Entries are this page load's: those of an earlier load (a reload
     // keeps them, with their depths) are foreign, below this one's.
-    this.historySession = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    this.historySession = newHistorySession();
     history.replaceState(this.historyState(0), "");
+    // The address of the app's first entry, where every run starts, and of
+    // the entry shown (a page the app keeps on a back keeps it).
+    this.firstUrl = this.shownUrl = location.href;
     window.addEventListener("popstate", (e) => this.popState(e));
   }
 
@@ -5146,10 +5164,35 @@ class Player {
 
   /** A new run starts at the app's first entry. */
   resetHistory() {
-    if (!this.history || !this.historyDepth) return;
+    if (!this.history) return;
+    this.pageUrl = null;
+    if (!this.historyDepth) return;
     this.ignoredPops++;
     history.go(-this.historyDepth);
     this.historyDepth = 0;
+  }
+
+  /** `UrlScheme.setUrl` / `set_app_url`: the current entry's address, once
+   * the entries of the pages pushed or popped with it exist
+   * (`syncHistory`). Resolved as `replaceState` resolves it (against
+   * `<base href>`); one of another origin is dropped (TS's `setUrl` throws
+   * for it first, in `runtime.js`). */
+  setPageUrl(url) {
+    if (!this.history) return;
+    let resolved;
+    try {
+      resolved = new URL(url, document.baseURI);
+    } catch {
+      console.warn(`[nsh] the app's address is not a URL: ${url}`);
+      return;
+    }
+    if (resolved.origin !== location.origin) {
+      console.warn(`[nsh] the app's address is not of the page's origin: ${resolved.href}`);
+      return;
+    }
+    this.pageUrl = resolved.href;
+    this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
+    this.syncHistorySoon();
   }
 
   backDepth() {
@@ -5179,11 +5222,31 @@ class Player {
       history.go(depth - have);
     }
     this.historyDepth = depth;
+    // The address goes to the entry the traversal lands on (its
+    // `popstate` syncs again).
+    if (this.pageUrl != null && !this.ignoredPops) {
+      const url = this.pageUrl;
+      this.pageUrl = null;
+      try {
+        // Resolved as `replaceState` does, against `<base href>` when the
+        // page has one.
+        history.replaceState(history.state, "", url);
+        this.shownUrl = url;
+        if (!this.historyDepth) this.firstUrl = url;
+      } catch (error) {
+        this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
+      }
+    }
   }
 
   popState(e) {
     if (this.ignoredPops > 0) {
-      this.ignoredPops--;
+      if (--this.ignoredPops) return;
+      // A traversal of the player's own landed: the address waiting for it
+      // goes to the entry, or the core takes the entry's (the app did not
+      // set one).
+      if (this.pageUrl != null) this.syncHistorySoon();
+      else this.tellAddress(false);
       return;
     }
     const have = this.historyDepth;
@@ -5193,21 +5256,58 @@ class Player {
       // as if the page had been left from its first screen.
       this.historyDepth = 0;
       for (let i = 0; i < have; i++) if (!this.back()) break;
-      if (e.state?.nsh != null) history.back();
+      if (e.state?.nsh == null) return;
+      // An earlier load's entry (a reload keeps them): an address the app
+      // is handed from outside, as a link (`open`). The entry becomes the
+      // app's first, in a session of its own, so this load's entries after
+      // it are an earlier load's too.
+      this.historySession = newHistorySession();
+      history.replaceState(this.historyState(0), "");
+      this.firstUrl = location.href;
+      this.tellAddress(true);
       return;
     }
     const at = e.state.nsh ?? 0;
+    if (at > have) {
+      // Forward to a screen the stack no longer has: an address the app is
+      // handed from outside, as a link (`open`), and its pages' entries go
+      // on from here. An app that shows nothing for it goes back where it
+      // was (`syncHistory`).
+      this.historyDepth = at;
+      this.tellAddress(true);
+      this.syncHistorySoon();
+      return;
+    }
+    // A pop the app hears at once (no motion, a modal) may give the address
+    // itself from `onChange`, before the entry's below.
+    const sets = this.pageUrlSets;
     if (at < have) {
       // Back (several entries from the back button's menu): what the app
       // does not let go back gets its entry again.
       this.historyDepth = at;
-      for (let i = at; i < have; i++) if (!this.back()) break;
+      let popped = 0;
+      while (at + popped < have && this.back()) popped++;
+      const kept = at + popped < have;
+      // The app kept its page: its entry keeps the address it showed (an
+      // app's `onChange` sets the address of a page it went back to part of
+      // the way).
+      if (kept && !popped) this.pageUrl ??= this.shownUrl;
       this.syncHistorySoon();
-    } else if (at > have) {
-      // Forward to a screen that is gone: back where the app is.
-      this.ignoredPops++;
-      history.go(have - at);
+      if (kept) return;
     }
+    // The app went back: the address is the entry's (`UrlScheme.url()`),
+    // with no `open`, as its stack went back already; a `setUrl` from its
+    // `onChange` wins, whether it came during the pops or comes after.
+    if (!at) this.firstUrl = location.href;
+    if (this.pageUrlSets === sets) this.tellAddress(false);
+    else this.shownUrl = location.href;
+  }
+
+  /** Tells the core the entry's address: with `open` when the app is handed
+   * it from outside, else as the address only (`quiet`). */
+  tellAddress(open) {
+    this.shownUrl = location.href;
+    this.event(ROOT_ID, "onUrlScheme", open ? { url: this.shownUrl, page: true } : { url: this.shownUrl, page: true, quiet: true });
   }
 
   stackChanged(stack, added) {
@@ -5792,6 +5892,7 @@ class Player {
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
+      case "setAppUrl": this.setPageUrl(args[0]); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.
@@ -7436,7 +7537,9 @@ class Player {
       return;
     }
     // Wheel notches glide; touchpads move with the fingers.
-    const smooth = e.deltaMode !== 0 || Math.abs(d) >= 40;
+    // Pixel-mode input may already contain touchpad inertia, including large
+    // deltas. Its magnitude cannot distinguish a notch from a finger.
+    const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
   }
 
@@ -7447,6 +7550,11 @@ class Player {
     if (!a) {
       a = el._glide = { x: el.scrollLeft, y: el.scrollTop, frame: 0, timer: 0, last: 0 };
       this.drive(el, 1);
+    }
+    // Direct input takes over where the glide is displayed, not where it
+    // was going. Keep fractional direct deltas between browser roundings.
+    if (!smooth && a.frame) {
+      [a.x, a.y] = a.at ?? [el.scrollLeft, el.scrollTop];
     }
     a.x = Math.min(Math.max(a.x + dx, 0), el.scrollWidth - el.clientWidth);
     a.y = Math.min(Math.max(a.y + dy, 0), el.scrollHeight - el.clientHeight);

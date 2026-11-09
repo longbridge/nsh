@@ -788,11 +788,11 @@ const TODAY = new Date().toLocaleDateString("en-US", { month: "long", day: "nume
 function DocumentWindow() {
   const win = currentWindow();
   const active = () => win.state()?.focused ?? true;
-  // The window's title, the unsaved dot (macOS) and the export's progress
-  // on the Dock or the taskbar follow the document.
+  // The window's title and the export's progress on the Dock or the
+  // taskbar follow the document.
   effect(() => {
     const share = doc.exporting();
-    win.set({ title: doc.title() || "Untitled", edited: edited(), progress: share == null ? null : { value: share } });
+    win.set({ title: doc.title() || "Untitled", progress: share == null ? null : { value: share } });
   });
   // Autosave: a moment after the last edit.
   effect(() => {

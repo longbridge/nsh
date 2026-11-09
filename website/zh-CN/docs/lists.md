@@ -455,7 +455,19 @@ function Chat() {
           submitBehavior="submit"
           returnKeyType="send"
           placeholder="Message"
-          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical### 底部对齐
+          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
+        />
+      </View>
+    </View>
+  );
+}
+
+mount(Chat);
+```
+
+在倒置列表上调用 `scroll_to_end(..)` / `scrollToEnd()` 会滚动到它的开头，也就是最新的消息。
+
+### 底部对齐
 
 `alignment="bottom"`（Rust 中为 `.alignment(ListAlignment::Bottom)`）是构建聊天界面最简单的方式：消息按阅读顺序排列，最旧的在前，列表打开时显示最新消息。回复流式输出、追加消息或键盘弹出时，列表保持在末尾；用户向上滚动后，可见内容保持不动，滚回末尾后继续跟随。消息不足一屏时位于视口底部。
 
@@ -473,18 +485,6 @@ virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))
   {(m) => <Bubble message={m()} />}
 </List>
 ```
-
-: 8 }}
-        />
-      </View>
-    </View>
-  );
-}
-
-mount(Chat);
-```
-
-在倒置列表上调用 `scroll_to_end(..)` / `scrollToEnd()` 会滚动到它的开头，也就是最新的消息。
 
 ### 让非倒置列表跟随末尾
 

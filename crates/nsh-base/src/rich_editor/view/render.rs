@@ -345,28 +345,60 @@ fn render_kind(node: &Node) -> Option<&str> {
     node.ty().spec().extra.get("render")?.as_str()
 }
 
-/// An image node's `Image`: its `src`, `alt` (what screen readers say)
-/// and, when set, its `width` and `height` in points.
+/// An image node's `Image`: its `src` (a URL, a file path or `file:` URL,
+/// a `data:` URI, as `Image` takes them), `alt` (what screen readers say)
+/// and its `width` and `height` in points. A side it leaves out follows
+/// the image's natural size once known ([`image_box`]).
 fn image_of(node: &Node) -> AnyElement {
     let attrs = node.attrs();
-    let src = attrs.get("src").and_then(Value::as_str).unwrap_or_default();
-    let mut el = image(src.to_owned());
-    if let Some(alt) = attrs.get("alt").and_then(Value::as_str) {
-        el = el.label(alt.to_owned());
-    }
+    let src = attrs
+        .get("src")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let number = |key: &str| {
         attrs.get(key).and_then(|v| {
             v.as_f64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                .map(|n| n as f32)
         })
     };
-    if let Some(w) = number("width") {
-        el = el.w(px(w as f32));
+    let (width, height) = (number("width"), number("height"));
+    // Its natural size, for the sides it leaves out (an image has no size
+    // of its own in layout: one without both sides showed nothing).
+    let natural = signal(None::<(f32, f32)>);
+    if (width.is_none() || height.is_none()) && !src.is_empty() {
+        let src = src.clone();
+        spawn(async move {
+            if let Ok(size) = image_size(src).await {
+                natural.set(Some((size.width.0 as f32, size.height.0 as f32)));
+            }
+        });
     }
-    if let Some(h) = number("height") {
-        el = el.h(px(h as f32));
+    let mut el = image(src);
+    if let Some(alt) = attrs.get("alt").and_then(Value::as_str) {
+        el = el.label(alt.to_owned());
     }
-    el.into_element()
+    let size = move || image_box(width, height, natural.get());
+    el.w(move || px(size().0))
+        .h(move || px(size().1))
+        .into_element()
+}
+
+/// The size an image node shows at, in points: the `width` and `height`
+/// it asks for; a side it leaves out from the other and the aspect ratio
+/// of its `natural` size; its natural size (a pixel a point, as a browser
+/// takes it) when it asks for neither. A side that cannot be known yet is
+/// 0.
+fn image_box(width: Option<f32>, height: Option<f32>, natural: Option<(f32, f32)>) -> (f32, f32) {
+    let natural = natural.filter(|(w, h)| *w > 0.0 && *h > 0.0);
+    let aspect = natural.map(|(w, h)| w / h);
+    match (width, height) {
+        (Some(w), Some(h)) => (w, h),
+        (Some(w), None) => (w, aspect.map_or(0.0, |a| w / a)),
+        (None, Some(h)) => (aspect.map_or(0.0, |a| h * a), h),
+        (None, None) => natural.unwrap_or_default(),
+    }
 }
 
 /// A task item's checkbox, before the item's content: unstyled
@@ -1504,6 +1536,19 @@ mod tests {
 
     use super::*;
     use crate::rich_editor::extensions::starter;
+
+    #[test]
+    fn an_image_takes_the_sides_it_leaves_out_from_its_natural_size() {
+        let natural = Some((400.0, 200.0));
+        assert_eq!(image_box(Some(30.0), Some(40.0), natural), (30.0, 40.0));
+        assert_eq!(image_box(Some(100.0), None, natural), (100.0, 50.0));
+        assert_eq!(image_box(None, Some(100.0), natural), (200.0, 100.0));
+        assert_eq!(image_box(None, None, natural), (400.0, 200.0));
+        // Unknown yet (or never: it failed): what it asks for, else 0.
+        assert_eq!(image_box(Some(100.0), None, None), (100.0, 0.0));
+        assert_eq!(image_box(None, None, None), (0.0, 0.0));
+        assert_eq!(image_box(None, None, Some((0.0, 10.0))), (0.0, 0.0));
+    }
 
     #[test]
     fn decorations_split_text_and_widgets_take_a_unit() {

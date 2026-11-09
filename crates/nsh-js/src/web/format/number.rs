@@ -363,7 +363,7 @@ fn group(parts: &mut Vec<Part>, int: &str, numbers: &Numbers, grouping: Grouping
     let mut start = 0;
     for &cut in cuts.iter().rev() {
         push(parts, "integer", &int[start..cut]);
-        push(parts, "group", numbers.group);
+        push(parts, "group", numbers.group.as_str());
         start = cut;
     }
     push(parts, "integer", &int[start..]);
@@ -537,7 +537,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
         _ => None,
     };
     let sign = |parts: &mut Vec<Part>| match sign {
-        Some(true) => push(parts, "minusSign", numbers.minus),
+        Some(true) => push(parts, "minusSign", numbers.minus.as_str()),
         Some(false) => push(parts, "plusSign", "+"),
         None => {}
     };
@@ -549,7 +549,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
         Style::Percent => {
             sign(&mut parts);
             parts.append(&mut body);
-            push_spaced(&mut parts, "percentSign", numbers.percent);
+            push_spaced(&mut parts, "percentSign", &numbers.percent);
         }
         Style::Currency { code, display } => {
             let symbol = currency_symbol(code, *display, lang, region);
@@ -560,7 +560,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
                 let space = if numbers.currency_space.is_empty() && letters {
                     "\u{a0}"
                 } else {
-                    numbers.currency_space
+                    numbers.currency_space.as_str()
                 };
                 push(&mut parts, "literal", space);
                 parts.append(&mut body);
@@ -569,7 +569,7 @@ pub(crate) fn format(value: &Value, f: &Format, numbers: &Numbers, tag: &str) ->
                 let space = if numbers.currency_space.is_empty() {
                     "\u{a0}"
                 } else {
-                    numbers.currency_space
+                    numbers.currency_space.as_str()
                 };
                 push(&mut parts, "literal", space);
                 push(&mut parts, "currency", symbol);
@@ -644,23 +644,23 @@ fn number_body(
             digits(parts, &rounded, min_fraction, f, numbers, Grouping::Off);
             push(parts, "exponentSeparator", "E");
             if exponent < 0 {
-                push(parts, "exponentMinusSign", numbers.minus);
+                push(parts, "exponentMinusSign", numbers.minus.as_str());
             }
             push(parts, "exponentInteger", exponent.abs().to_string());
             rounded.is_zero()
         }
         Notation::Compact { long } => {
             let units = if long {
-                numbers.compact_long
+                &numbers.compact_long
             } else {
-                numbers.compact_short
+                &numbers.compact_short
             };
             let unit_of = |magnitude: i32| {
                 units
                     .iter()
                     .rev()
                     .find(|(power, _)| i32::from(*power) <= magnitude)
-                    .copied()
+                    .map(|(power, suffix)| (*power, suffix.as_str()))
             };
             let mut unit = if d.is_zero() {
                 None
@@ -712,7 +712,7 @@ fn digits(
     }
     group(parts, &int, numbers, grouping);
     if !frac.is_empty() {
-        push(parts, "decimal", numbers.decimal);
+        push(parts, "decimal", numbers.decimal.as_str());
         push(parts, "fraction", frac);
     }
 }
@@ -720,7 +720,7 @@ fn digits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::intl::locale::resolve;
+    use crate::web::format::locale::resolve;
 
     fn fmt(tag: &str, x: f64, f: &Format) -> String {
         let locale = resolve(&[tag.to_owned()], "en-US");

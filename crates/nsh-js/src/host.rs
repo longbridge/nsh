@@ -59,6 +59,8 @@ pub(crate) struct Shared {
     pub(crate) system_filesystem:
         RefCell<Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>>,
     pub(crate) system_updater: RefCell<Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>>,
+    /// The core's address (`UrlScheme.url()`).
+    pub(crate) system_app_url: RefCell<nsh_core::url_scheme::AppUrlCell>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
@@ -636,6 +638,18 @@ impl Host {
         });
     }
 
+    /// Whether `<Each>` leaves the rows the core may cull unrendered, as
+    /// placeholders, until the core asks for them (`content_culling`);
+    /// off by default. Set before evaluating the bundle.
+    pub fn set_lazy_rows(&self, lazy: bool) {
+        self.cx.with(|cx| {
+            // SAFETY: the state of this host's context.
+            unsafe { &(*crate::state::state(cx.as_raw().as_ptr())).dom }
+                .lazy_rows
+                .set(lazy);
+        });
+    }
+
     /// Asks a `List` to render items into cells: `(slot, item index)`
     /// pairs.
     pub fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
@@ -715,6 +729,11 @@ impl Host {
     /// Installs what `nsh/updater` runs on.
     pub fn set_updater(&self, updater: Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>) {
         *self.shared.system_updater.borrow_mut() = updater;
+    }
+
+    /// Shares the core's address with the VM's modules (`UrlScheme.url()`).
+    pub fn set_app_url(&self, app_url: nsh_core::url_scheme::AppUrlCell) {
+        *self.shared.system_app_url.borrow_mut() = app_url;
     }
 
     /// Installs the host WebSocket transport.
@@ -1160,12 +1179,28 @@ impl Host {
             .map_or(0, |rt| self.scheduler.ready(rt.memory_usage()).obj_count)
     }
 
+    /// The JS heap's size in bytes and its live objects (diagnostics: a
+    /// walk of the heap, so not for every frame).
+    pub fn heap_usage(&self) -> (u64, u64) {
+        self.rt.borrow().as_ref().map_or((0, 0), |rt| {
+            let m = self.scheduler.ready(rt.memory_usage());
+            (m.malloc_size.max(0) as u64, m.obj_count.max(0) as u64)
+        })
+    }
+
     /// Runs the cycle collector. Call when idle so released nodes are
     /// reported promptly.
     pub fn collect_garbage(&self) {
         self.guarded(Phase::Call, || {
             self.scheduler
                 .ready(self.rt.borrow().as_ref().expect("live VM").run_gc());
+            // What the collection released: the graph gives back the slots
+            // of nodes that are gone.
+            self.cx.with(|cx| {
+                // SAFETY: the state of this host's context; no other borrow
+                // of the graph is live between calls into JS.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.compact();
+            });
             self.run_jobs();
         });
     }
@@ -2294,7 +2329,7 @@ const report = (v) => text(String(v));
     /// `CET-1CEST,M3.5.0,M10.5.0/3`, whose summer instant shows a zone
     /// named by one offset.
     #[test]
-    fn intl_names_the_zone_it_formats_local_time_in() {
+    fn names_the_zone_it_formats_local_time_in() {
         let host = Host::new().unwrap();
         let script = format!(
             r#"{REPORT}
@@ -2323,8 +2358,17 @@ const report = (v) => text(String(v));
     /// `Intl` and the `toLocaleString`s format natively, in the device's
     /// locale by default.
     #[test]
-    fn intl_formats_numbers_and_dates() {
+    fn formats_numbers_and_dates() {
         let host = Host::new().unwrap();
+        // What a bundle listing these languages registers (`nsh:rt`'s
+        // `i18n`): the runtime has English only.
+        let mut languages = serde_json::Map::new();
+        for lang in ["de", "fr", "ja", "ko"] {
+            let data = nsh_i18n::language_data(lang).unwrap();
+            languages.insert(lang.into(), serde_json::from_str(data).unwrap());
+        }
+        host.cx
+            .with(|cx| crate::web::add_languages(cx.as_raw().as_ptr(), languages));
         host.eval_source(&format!(
             r#"{REPORT}
             report((1234567.891).toLocaleString());
@@ -2872,6 +2916,36 @@ const report = (v) => text(String(v));
         assert!(err.message.contains("top level"), "{}", err.message);
         assert!(rejections(&logs::take()).is_empty());
         assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn collecting_gives_back_the_graph_slots_of_a_tree_that_is_gone() {
+        let host = Host::new().unwrap();
+        let slots = |host: &Host| {
+            host.cx.with(|cx| {
+                // SAFETY: the host's state; no JS runs meanwhile.
+                unsafe { crate::reactive::graph(cx.as_raw().as_ptr()) }.slots()
+            })
+        };
+        host.collect_garbage();
+        let (_, before) = slots(&host);
+        host.eval_source(
+            r#"import { cond } from "nsh:rt";
+            import { computed, signal } from "nsh";
+            const shown = signal(true);
+            const branch = cond(() => shown(), () => {
+                for (let i = 0; i < 20000; i++) computed(() => i)();
+                return null;
+            });
+            branch();
+            globalThis.hide = () => { shown.set(false); branch(); };"#,
+        )
+        .unwrap();
+        assert!(slots(&host).1 >= before + 20000);
+        host.eval_script("hide.js", "hide();").unwrap();
+        host.collect_garbage();
+        let (_, after) = slots(&host);
+        assert!(after < before + 100, "{before} → {after} slots");
     }
 
     #[test]

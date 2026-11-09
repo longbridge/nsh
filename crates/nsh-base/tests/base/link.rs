@@ -257,3 +257,165 @@ mod hit_slop {
         assert_eq!(hit_slop(&seen, widen), EdgeInsets::default());
     }
 }
+
+/// `href` reaches the platforms as data on the link's view (a terminal
+/// links the text inside it): it follows the prop, and a disabled link
+/// carries none.
+mod href {
+    use std::sync::{Arc, Mutex};
+
+    use nsh_base::link;
+    use nsh_core::{MountBatch, MountItem, NodeId, Size, element::Root, prelude::*};
+    use nsh_engine::EngineConfig;
+    use nsh_testing::Headless;
+
+    type Seen = Arc<Mutex<Vec<MountItem>>>;
+
+    fn start<C: Component<Props = ()>>() -> (Headless, Seen) {
+        let config = EngineConfig {
+            viewport: Size::new(px(390.0), px(844.0)),
+            ..EngineConfig::new(Root::of::<C>())
+        };
+        let mut app = Headless::start(config).unwrap();
+        let seen = Seen::default();
+        let log = seen.clone();
+        app.observe(move |_: &str, batch: &MountBatch| {
+            log.lock().unwrap().extend(batch.items.iter().cloned());
+        });
+        app.first_render().unwrap();
+        (app, seen)
+    }
+
+    /// The `href` the platforms last got for view `id`.
+    fn href(seen: &Seen, id: NodeId) -> Option<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id: of, props } if *of == id => {
+                    Some(props.href.as_deref().map(str::to_owned))
+                }
+                _ => None,
+            })
+            .next_back()
+            .flatten()
+    }
+
+    fn target(app: &Headless, selector: &str) -> NodeId {
+        app.screen()
+            .press_target(selector)
+            .unwrap()
+            .unwrap_or_else(|| panic!("no pressable {selector}"))
+    }
+
+    #[component]
+    fn Links() -> impl IntoElement {
+        let page = signal(1u32);
+        let off = signal(false);
+        view()
+            .child(
+                link()
+                    .href(Prop::bind(move || {
+                        Some(SharedString::from(format!(
+                            "https://example.com/{}",
+                            page.get()
+                        )))
+                    }))
+                    .child(text("Docs")),
+            )
+            .child(
+                link()
+                    .href("https://example.com/old")
+                    .disabled(Prop::bind(move || off.get()))
+                    .child(text("Old")),
+            )
+            .child(link().child(text("None")))
+            .child(
+                view()
+                    .on_press(move |_: &()| {
+                        page.set(2);
+                        off.set(true);
+                    })
+                    .child(text("Change")),
+            )
+    }
+
+    #[test]
+    fn href_reaches_the_links_view_and_follows_it() {
+        let (mut app, seen) = start::<Links>();
+        let docs = target(&app, "text:Docs");
+        let old = target(&app, "text:Old");
+        assert_eq!(href(&seen, docs).as_deref(), Some("https://example.com/1"));
+        assert_eq!(href(&seen, old).as_deref(), Some("https://example.com/old"));
+        assert_eq!(href(&seen, target(&app, "text:None")), None);
+        app.press("text:Change").unwrap();
+        app.wait_for("text:Change").unwrap();
+        assert_eq!(href(&seen, docs).as_deref(), Some("https://example.com/2"));
+        // A disabled link goes nowhere.
+        assert_eq!(href(&seen, old), None);
+    }
+}
+
+/// An enabled link, a disabled one, and one whose app class sets its own
+/// cursor.
+#[component]
+fn Cursors() -> impl IntoElement {
+    view()
+        .child(link().href("https://example.com").child(text("On")))
+        .child(
+            link()
+                .href("https://example.com")
+                .disabled(true)
+                .child(text("Off")),
+        )
+        .child(
+            link()
+                .href("https://example.com")
+                .app_class("cursor-default")
+                .child(text("Plain")),
+        )
+}
+
+#[test]
+fn a_link_shows_the_pointing_hand_unless_disabled_or_the_app_says_otherwise() {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    use nsh_core::{Cursor, MountItem};
+
+    let config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<Cursors>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let log = seen.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                log.lock().unwrap().insert(*id, style.cursor);
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let cursor = |app: &Headless, label: &str| {
+        let id = app
+            .screen()
+            .press_target(&format!("text:{label}"))
+            .unwrap()
+            .unwrap();
+        seen.lock().unwrap().get(&id).copied().unwrap_or_default()
+    };
+    assert_eq!(cursor(&app, "On"), Cursor::Pointer);
+    assert_eq!(cursor(&app, "Plain"), Cursor::Default);
+    // The disabled link takes no press: the one hand is the enabled link's.
+    let hands = seen
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|c| **c == Cursor::Pointer)
+        .count();
+    assert_eq!(hands, 1);
+}

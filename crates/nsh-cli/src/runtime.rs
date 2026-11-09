@@ -23,6 +23,10 @@
 //! runtime/web/nsh-syntaxes.bin         the syntaxes it fetches to highlight code
 //! ```
 //!
+//! A release archive holds this machine's own runtime; the others are
+//! components (`crate::component`), added the first time a command needs
+//! them (or with `nsh component add`).
+//!
 //! In a cargo checkout, the same files come from `target/<triple>/<profile>`
 //! (with the profile of this CLI; Linux's, macOS's, Windows' and GPUI's
 //! from `target/<profile>`, as they are built for this machine), and are
@@ -76,6 +80,18 @@ impl Platform {
             Platform::Windows => "windows",
             Platform::Gpui => "gpui",
             Platform::Tui => "tui",
+        }
+    }
+
+    /// The component of the distribution holding its runtime
+    /// ([`crate::component`]); `None` for this machine's own, which the
+    /// release archive holds.
+    fn component(self) -> Option<&'static str> {
+        match self {
+            Platform::IphoneOs | Platform::IphoneSimulator | Platform::MacCatalyst => Some("ios"),
+            Platform::Gpui => Some("gpui"),
+            Platform::Tui => Some("tui"),
+            Platform::Linux | Platform::MacOs | Platform::Windows => None,
         }
     }
 
@@ -142,6 +158,17 @@ impl Platform {
     }
 }
 
+/// In an installed distribution, adds the component `name` that holds
+/// `missing` ([`crate::component`]) and answers `true`; a checkout's build
+/// (`false`) builds its runtimes with cargo instead.
+fn add_component(name: &str, missing: &Path) -> anyhow::Result<bool> {
+    let Some(root) = crate::component::distribution() else {
+        return Ok(false);
+    };
+    crate::component::ensure(&root, name, missing)?;
+    Ok(true)
+}
+
 /// This `nsh`, through symlinks: an installer links `~/.local/bin/nsh` (or
 /// `/opt/homebrew/bin/nsh`) to the distribution's `bin/nsh`, whose runtimes
 /// are next to the real file. macOS reports the path as it was run, Linux
@@ -186,6 +213,9 @@ fn prebuilt_android(dev: bool) -> anyhow::Result<PathBuf> {
     let bin = exe.parent().context("cli has no parent directory")?;
     let dist = bin.join("../runtime/android").join(variant);
     if dist.join("classes.dex").exists() {
+        return Ok(dist);
+    }
+    if add_component("android", &dist.join("classes.dex"))? {
         return Ok(dist);
     }
     // Cargo checkout: `cargo xtask android [--release] [--dev]` output.
@@ -401,6 +431,11 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
     if let Some(runtime) = found(bin.join("../runtime/web")) {
         return Ok(Some(runtime));
     }
+    if build && add_component("web", &bin.join("../runtime/web").join(kind.file()))? {
+        return found(bin.join("../runtime/web"))
+            .map(Some)
+            .context("the component `web` holds no web runtime");
+    }
     let Some(root) = checkout(bin) else {
         if build {
             bail!(
@@ -485,21 +520,24 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     if dist.exists() {
         return Ok(dist);
     }
+    if let Some(component) = platform.component()
+        && add_component(component, &dist)?
+    {
+        return Ok(dist);
+    }
     // Cargo checkout: target/<profile>/nsh -> target/<triple>/<profile>/<name>.
     let profile = bin.file_name().context("cli profile dir")?;
+    let mut host_target = None;
     if let Some(root) = checkout(bin) {
         let mut args = vec!["build", "-p", name];
-        // The GPUI backend is a workspace of its own, built into the same
-        // `target/` (cargo reads `crates/gpui/.cargo/config.toml` only when
-        // run from there).
-        let manifest = root.join("crates/gpui/Cargo.toml");
-        let manifest = manifest.to_string_lossy();
-        let target_dir = root.join("target");
-        let target_dir = target_dir.to_string_lossy();
-        if matches!(platform, Platform::Gpui) {
-            args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+        // GPUI has its own workspace. Run there so Cargo reads its config,
+        // and ask Cargo where it builds rather than imposing the CLI's target.
+        let workspace = if matches!(platform, Platform::Gpui) {
             args.extend(gpui_features());
-        }
+            root.join("crates/gpui")
+        } else {
+            root.clone()
+        };
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
         }
@@ -516,12 +554,19 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
             Some(other) => format!("{} ({other} build)", platform.host(runner)),
             None => platform.host(runner),
         };
-        cargo(&root, &args, &what)?;
+        cargo(&workspace, &args, &what)?;
+        if matches!(platform, Platform::Gpui) {
+            host_target = Some(
+                crate::rust_app::cargo_target_directory(&workspace)
+                    .context("Cargo did not report the GPUI workspace's target directory")?,
+            );
+        }
     }
-    let mut built = bin
-        .parent()
-        .context("cli is not in a target directory")?
-        .to_path_buf();
+    let mut built = host_target.unwrap_or(
+        bin.parent()
+            .context("cli is not in a target directory")?
+            .to_path_buf(),
+    );
     if let Some(triple) = platform.triple() {
         built.push(triple);
     }

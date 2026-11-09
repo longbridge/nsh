@@ -1,6 +1,6 @@
 import { effect, List, type ListRef, mount, signal, Text, View } from "nsh";
 import { windowSize } from "nsh";
-import { focusRing, hoverFill, size, tint, ui, wide } from "./palette";
+import { focusRing, hoverFill, sectionSurface, size, tint, ui, wide } from "./palette";
 
 /** In a wide window the lists sit in one centered region, 760 points across. */
 const REGION = 760;
@@ -30,7 +30,7 @@ function Feed() {
       each={posts()}
       keyExtractor={(p) => String(p.id)}
       estimatedItemSize={wide() ? size.row : 56}
-      style={wide() ? { ...ui().card, flex: 1, margin: 20, marginTop: 12, borderRadius: 12, overflow: "hidden" } : { flex: 1 }}
+      style={wide() ? { ...sectionSurface(), flex: 1, margin: 20, marginTop: 12, overflow: "hidden" } : { flex: 1 }}
       contentStyle={wide() ? {} : { padding: 12, gap: 8 }}
       onLoadMore={() => posts.update((p) => [...p, ...make(20)])}
       loadMoreThreshold={0.5}
@@ -120,7 +120,7 @@ function Contacts() {
       estimatedItemSize={wide() ? size.rowSm : 44}
       style={
         wide()
-          ? { ...ui().card, flex: 1, margin: 20, marginTop: 12, borderRadius: 12, overflow: "hidden" }
+          ? { ...sectionSurface(), flex: 1, margin: 20, marginTop: 12, overflow: "hidden" }
           : { flex: 1, backgroundColor: ui().card.backgroundColor }
       }
     >

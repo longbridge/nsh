@@ -55,6 +55,8 @@ pub(crate) struct Ambient {
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
+    /// The app's address (`set_app_url` resolves against its page base).
+    app_url: Option<crate::url_scheme::AppUrlCell>,
 }
 
 impl Ambient {
@@ -125,6 +127,12 @@ impl super::Runtime {
     pub(crate) fn set_services(&self, executor: Rc<Executor>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.executor = Some(executor));
+    }
+
+    /// The app's address, the core's (`set_app_url`).
+    pub(crate) fn set_app_url(&self, app_url: crate::url_scheme::AppUrlCell) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_url = Some(app_url));
     }
 
     /// Where the app's storage is kept.
@@ -519,6 +527,12 @@ pub fn announce_for_accessibility(message: impl Into<String>) {
     act(super::services::announce(message.into()));
 }
 
+/// The device plays `haptic` (TS: `Haptics` of `nsh/mobile`): iOS and
+/// Android; elsewhere nothing happens.
+pub fn haptic(haptic: crate::Haptic) {
+    act(super::services::haptic(haptic));
+}
+
 /// Runs `f` with the app's storage (`nsh/storage`, [`crate::storage::Storage`]):
 /// the one the engine was given, or one in memory when it was given none.
 pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R {
@@ -812,6 +826,41 @@ pub fn next_url_scheme_open() -> Answer<String> {
     answer
 }
 
+/// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
+/// the native platforms the last link that opened the app; what
+/// [`set_app_url`] set after it; `None` when there is none
+/// ([`crate::url_scheme`]). To await in a task.
+pub fn app_url() -> Answer<Option<String>> {
+    let (answer, slot) = Answer::new();
+    act(Action::AppUrl(slot));
+    answer
+}
+
+/// Sets the app's address (TS: `UrlScheme.setUrl`): on the web it replaces
+/// the current history entry's; the native platforms keep it for
+/// [`app_url`] ([`crate::url_scheme`]). An address longer than
+/// [`crate::url_scheme::MAX_URL_LEN`] or with whitespace is an error, as
+/// TS's `TypeError`; on the web a URL is resolved against the page's base,
+/// as TS's is, and one of another origin than the page's is an error.
+pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
+    let mut url = url.into();
+    crate::url_scheme::check_address(&url)?;
+    // Where the app is the page (the web), as TS's `setUrl` there.
+    if try_os() == Some(Os::Web)
+        && let Some(base) = with_data(|d| d.ambient.app_url.as_ref().and_then(|a| a.page_base()))
+    {
+        url = crate::url_scheme::resolve_on_page(&url, &base)?;
+    }
+    act(Action::SetAppUrl(url));
+    Ok(())
+}
+
+/// `UrlScheme.setUrl`'s part in the core: the address again, in order with
+/// what came since the VM wrote it, and the web's history entry.
+pub(crate) fn set_app_url_from_js(url: String) {
+    act(Action::SetAppUrl(url));
+}
+
 /// Whether a web view's ref gives its page trusted input here (TS:
 /// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
 /// the platform delivers it (macOS) and the app's capabilities grant
@@ -959,6 +1008,11 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     let (answer, action) = super::services::fetch(request.into());
     act(action);
     answer
+}
+
+/// Asks for the app to show in `locale` ([`crate::i18n::set_locale`]).
+pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
+    act(Action::Locale(locale));
 }
 
 /// Shows the surface in `appearance` whatever the system's (TS:
@@ -1175,14 +1229,23 @@ pub fn after_answer(f: impl FnOnce() + 'static) {
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
-/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
-/// that should also run on the web uses the engine's services instead
-/// ([`fetch`], [`timer`]).
+/// its result; `tokio::task::spawn_blocking`), starting at once, whether
+/// called from a task, a render, an effect or a handler. Not in
+/// WebAssembly: code that should also run on the web uses the engine's
+/// services instead ([`fetch`], [`timer`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,
 ) -> tokio::task::JoinHandle<R> {
-    tokio::task::spawn_blocking(f)
+    // Tasks are polled in the runtime's context; outside a task the
+    // surface's runtime is the one they would be.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => runtime.spawn_blocking(f),
+        Err(_) => match executor().runtime() {
+            Some(runtime) => runtime.spawn_blocking(f),
+            None => tokio::task::spawn_blocking(f),
+        },
+    }
 }
 
 /// Runs `future` on the runtime's threads (in a task: await its result;
@@ -1529,7 +1592,7 @@ pub fn fps_enabled() -> bool {
 }
 
 /// Turns the platform's performance monitor on or off (TS:
-/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::fps`
 /// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {

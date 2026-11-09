@@ -22,6 +22,8 @@ pub(crate) struct State {
     pub(crate) graph: Graph,
     pub(crate) dom: Dom,
     pub(crate) env: Env,
+    /// `nsh/i18n`: the app's translations.
+    pub(crate) i18n: crate::i18n::I18n,
     pub(crate) components: Components,
     pub(crate) lists: Lists,
     pub(crate) platform: crate::platform_modules::PlatformModules,
@@ -80,6 +82,7 @@ pub(crate) fn install(
             graph,
             dom,
             env: Env::default(),
+            i18n: Default::default(),
             components: Components::default(),
             lists: Lists::default(),
             platform: Default::default(),
@@ -131,6 +134,7 @@ pub(crate) fn uninstall(cx: &Ctx<'_>) {
         state.keymap.free_all();
         state.host_channel.free_all();
         state.web.free_all();
+        state.i18n.free_all(raw);
         state.canvases.free_all(raw);
         state.animations.free_all(raw);
         state.platform.free_all(raw);

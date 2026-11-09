@@ -154,8 +154,10 @@ pub(super) struct Instance {
     /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
-    /// The nodes of its view with bindings: what was applied last.
-    pub(super) bound: FxHashMap<NodeId, super::views::BoundNode>,
+    /// The nodes of its view with bindings: what was applied last. Boxed:
+    /// a record is large, and a map's free slots are as large as its
+    /// entries.
+    pub(super) bound: FxHashMap<NodeId, Box<super::views::BoundNode>>,
     /// In a view placing its JS children one by one: them, as a signal.
     pub(super) js_kids: Option<crate::element::Signal<Vec<NodeId>>>,
     /// A cell of a view's list: the owner of the row it shows.
@@ -508,6 +510,10 @@ struct UrlScheme {
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
     next: Option<AnswerSlot<String>>,
+    /// The app's address: the last link taken, the page's on the web, or
+    /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy,
+    /// which every VM's `System` shares ([`Core::app_url_cell`]).
+    address: crate::url_scheme::AppUrlCell,
 }
 
 /// The speech recognition session running ([`crate::speech`]).
@@ -608,6 +614,9 @@ pub(super) struct Components {
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
+    /// The language the app asked to show in (`Some(None)`: the user's
+    /// again), for the engine ([`Core::take_locale_request`]).
+    pub(super) locale_request: Option<Option<crate::platform::Locale>>,
     next_url_open: u32,
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
@@ -711,6 +720,7 @@ impl Default for Components {
             clipboard_reads: FxHashMap::default(),
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
+            locale_request: None,
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
@@ -769,6 +779,9 @@ impl Components {
         components.environment.window = viewport;
         // What components that run once read of the core.
         components.runtime.set_services(components.executor.clone());
+        components
+            .runtime
+            .set_app_url(components.url_schemes.address.clone());
         components.runtime.set_environment(components.environment);
         components.runtime.set_tokens(components.tokens.clone());
         components
@@ -888,6 +901,20 @@ impl<M: TextEngine> Core<M> {
     pub fn set_tokens(&mut self, tokens: Tokens) {
         self.components.app_tokens = Arc::new(tokens);
         self.tokens_changed();
+    }
+
+    /// The app's translations ([`crate::i18n`]): what `t!` and TS's `t`
+    /// read from now on.
+    pub fn set_translations(&mut self, translations: crate::i18n::Translations) {
+        let _entered = self.components.runtime.enter();
+        crate::element::global::<crate::i18n::Translations>().set(translations);
+    }
+
+    /// The language the app asked to show in since the last call
+    /// (`Some(None)`: the user's again), which the engine applies to the
+    /// environment it gives the core and JS.
+    pub fn take_locale_request(&mut self) -> Option<Option<crate::platform::Locale>> {
+        self.components.locale_request.take()
     }
 
     /// The embedding app's design tokens (`None`: the app's again): an app
@@ -5044,14 +5071,32 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
+    /// The app's address, which the engine shares with every VM's
+    /// `System` (`UrlScheme.url()` reads it there).
+    pub fn app_url_cell(&self) -> crate::url_scheme::AppUrlCell {
+        self.components.url_schemes.address.clone()
+    }
+
     /// Hands `url`, a link the system gave the app, to the listener, or
     /// keeps it for the next; drops it when the app does not claim it.
-    fn url_scheme(&mut self, url: String) {
+    /// `page`: the address of the page the app is (the web), which needs
+    /// no scheme of the app's; `quiet` only takes it as the address.
+    fn url_scheme(&mut self, url: String, page: bool, quiet: bool) {
         let links = &mut self.components.url_schemes;
-        if let Err(dropped) = crate::url_scheme::check_url(&url, &links.schemes) {
+        let checked = if page {
+            crate::url_scheme::check_page_url(&url)
+        } else {
+            crate::url_scheme::check_url(&url, &links.schemes)
+        };
+        if let Err(dropped) = checked {
             log::warn!("link dropped: {dropped}");
             return;
         }
+        self.components.url_schemes.address.set(url.clone());
+        if quiet {
+            return;
+        }
+        let links = &mut self.components.url_schemes;
         if let Some(answer) = links.next.take() {
             answer.borrow_mut().deliver(url);
             return;
@@ -5330,6 +5375,8 @@ impl<M: TextEngine> Core<M> {
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Appearance(appearance) => self.set_appearance(appearance),
             Action::Tokens(tokens) => self.set_tokens(tokens),
+            Action::Translations(translations) => self.set_translations(translations),
+            Action::Locale(locale) => self.components.locale_request = Some(locale),
             Action::BuiltInScrollbars(source, theme) => {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
@@ -5507,6 +5554,33 @@ impl<M: TextEngine> Core<M> {
                 match links.pending.pop_front() {
                     Some(url) => answer.borrow_mut().deliver(url),
                     None => links.next = Some(answer),
+                }
+            }
+            Action::AppUrl(answer) => {
+                let address = self.components.url_schemes.address.get();
+                answer.borrow_mut().deliver(address);
+            }
+            Action::SetAppUrl(url) => {
+                // Checked where the app called (`set_app_url`, `setUrl`);
+                // where the app is the page, the address stays of its
+                // origin (both refuse others first).
+                let web = self.components.environment.os == crate::platform::Os::Web;
+                let address = self.components.url_schemes.address.clone();
+                if let Some(base) = address.page_base()
+                    && !crate::url_scheme::same_origin(Some(base.as_str()), &url)
+                {
+                    log::warn!("set_app_url: {url} is not of the page's origin");
+                    return;
+                }
+                // Again for `setUrl`, which wrote it as it was called: in
+                // order with the page's address the core took since.
+                address.set(url.clone());
+                // Only the web shows an address (its history entries).
+                if web {
+                    let _ = self.apply_op(Op::Command {
+                        id: crate::ROOT_ID,
+                        command: Command::SetAppUrl(url),
+                    });
                 }
             }
             Action::WebInputAvailable(answer) => {
@@ -5923,7 +5997,25 @@ impl<M: TextEngine> Core<M> {
                 let Some(url) = url else {
                     return false;
                 };
-                self.url_scheme(url.clone());
+                let flag = |key: &str| {
+                    entries.iter().find_map(|(k, v)| match v {
+                        crate::PayloadValue::Bool(b) if *k == key => Some(*b),
+                        _ => None,
+                    })
+                };
+                let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
+                let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
+                // The page's base URL (the web), which Rust's `set_app_url`
+                // resolves against.
+                if let Some(base) = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(s) if *k == crate::url_scheme::BASE => {
+                        url::Url::parse(s).ok()
+                    }
+                    _ => None,
+                }) {
+                    self.components.url_schemes.address.set_page_base(base);
+                }
+                self.url_scheme(url.clone(), page, quiet);
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

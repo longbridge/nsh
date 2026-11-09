@@ -305,6 +305,24 @@ public class NshView extends FrameLayout {
         }
     }
 
+    /**
+     * Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host
+     * ships, so every app this view loads can name its family in
+     * {@code fontFamily} without bundling the file. Call it before or after
+     * loading: a font registered before a load is in that app's first frame,
+     * and one registered while an app runs is used from the next layout.
+     * Registering the same file again does nothing.
+     *
+     * @param data the font file
+     * @throws IllegalArgumentException when {@code data} is not a font
+     */
+    public void registerFont(byte[] data) {
+        String error = Native.registerFont(handle, data);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
+    }
+
     /** The contents of {@code file}, or null when it does not exist. */
     private static String readText(File file) throws java.io.IOException {
         return file.exists() ? new String(Net.readAll(new FileInputStream(file)), StandardCharsets.UTF_8) : null;
@@ -541,7 +559,8 @@ public class NshView extends FrameLayout {
 
     /**
      * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
-     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     * {@code schemes}). URLs given before the app listens are kept until it does; given before an app loads, they are
+     * the address of the next one loaded when its code first runs ({@code UrlScheme.url()}). UI thread.
      *
      * @param url the URL
      */

@@ -103,6 +103,9 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde_json::Value>,
+    /// The languages whose data the app ships (read by the bundler).
+    #[serde(default, rename = "locales")]
+    _locales: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
@@ -707,7 +710,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 let udid = crate::run::simulator(None)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
-                crate::run::simctl(&["launch", "--terminate-running-process", &udid, &id])?;
+                crate::run::simctl_with_env(
+                    &["launch", "--terminate-running-process", &udid, &id],
+                    &crate::run::simctl_app_env(config),
+                )?;
                 step.done(format!("launched {id} in the simulator"));
             }
         }

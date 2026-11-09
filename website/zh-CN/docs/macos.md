@@ -50,7 +50,7 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 
 `--window-size` 是窗口的初始尺寸（TSX 应用）；窗口可以调整大小。`--display <n>`（`nsh run` / `nsh test --target macos --display <n>`）让窗口在第 `n` 个显示器上居中打开：`1` 是主显示器，即带菜单栏的那个。
 
-`nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试，有副显示器时窗口开在副显示器上（主屏留给你用；`--display <n>` 可以另选）：测试打开的每个应用都有自己的窗口，尺寸就是测试要求的尺寸，显示器比窗口矮时也一样；步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里（`--foreground` 让它们成为当前活跃的应用）。
+`nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试，有副显示器时窗口开在副显示器上（主屏留给你用；`--display <n>` 可以另选）：测试打开的每个应用都有自己的窗口，尺寸就是测试要求的尺寸，显示器比窗口矮时也一样；步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里（`--foreground` 让它们成为当前活跃的应用），点击会像在活跃窗口中一样到达应用的视图，隐藏的标题栏下也是如此。
 
 ### 性能监视器
 
@@ -71,7 +71,7 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 | `CPU` / `GPU` / `MEM` | 进程：CPU（100% 为一个核心）、它占用的 GPU 比例、内存占用（活动监视器中的数值）。 |
 
 下方的柱状图是最近 120 帧的主线程耗时，与一次刷新的时长（横线）对比：在一半以内为绿色，在其以内为琥珀色，超过为红色。
-面板显示时，读数也会每秒记录到日志一次（target `nsh::perf`，格式与 Linux 后端相同，帧阶段为 macOS 的 `tick`、`drain` 和 `canvas`；毫秒，依次为 mean/p50/p95/max），`nsh test --fps -v` 会显示这些日志，`examples/gallery/tools/perf.py` 会读取它们。请测量 release 构建；监视器关闭时没有任何开销。
+面板显示时，读数也会每秒记录到日志一次（target `nsh::fps`，格式与 Linux 后端相同，帧阶段为 macOS 的 `tick`、`drain` 和 `canvas`；毫秒，依次为 mean/p50/p95/max），`nsh test --fps -v` 会显示这些日志，`examples/gallery/tools/perf.py` 会读取它们。请测量 release 构建；监视器关闭时没有任何开销。
 
 ## 打包
 

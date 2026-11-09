@@ -98,7 +98,7 @@ nsh run my-app/App.tsx --target web
 | `--release` | | 压缩代码并去掉调试信息。release 包没有热模块替换：每次保存都会重新加载应用。 |
 | `--limits [<LIMITS>]` | | 按嵌入在其他应用中的方式运行应用，使用宿主应用设置的限制：`memory` 和 `stack`（单位为 `KB`、`MB` 或 `GB`）、`load` 和 `call`（单位为 `ms` 或 `s`）以及 `nodes`，例如 `--limits memory=128MB,call=500ms`。没写的项保持嵌入时的默认值，只写 `--limits` 就全部使用默认值（[沙箱与能力](./sandbox-and-capabilities.md#限制)）。不带它时，应用像打包后的应用一样独立运行。仅 TSX 入口。 |
 | `--trace` | | 宿主把每次 commit 的耗时（JS、布局、挂载项）记录到终端。 |
-| `--fps` | | 性能监视器：帧率、每帧和每次 commit 的开销、CPU、GPU 和内存；macOS 上显示在应用上方（[macOS](./macos.md#性能监视器)）；macOS、Linux、Windows 和 iOS 上每秒输出一行日志。`tui` 在角落显示 FPS/idle、帧 p95、应用批次/绘制/刷新耗时、字节数和变化的 Cell 数，`C-h p` 切换显示。 |
+| `--fps` | | 性能监视器：帧率、每帧和每次 commit 的开销、CPU、GPU 和内存；macOS 上显示在应用上方（[macOS](./macos.md#性能监视器)）；macOS、Linux、Windows 和 iOS 上每秒输出一行日志，用 `-v` 显示。`tui` 在角落显示 FPS/idle、帧 p95、应用批次/绘制/刷新耗时、字节数和变化的 Cell 数，`C-h p` 切换显示。 |
 | `--name <NAME>` | `nsh.json` 的 name | 菜单栏中的应用显示名称及初始窗口标题（`--target macos`，TSX 入口）。 |
 | `--points-per-cell <WIDTHxHEIGHT>` | `nsh.json` 的 `tui.pointsPerCell`，否则 `8x16` | 终端单元格的宽高，单位为点（`--target tui`）。 |
 | `--window-size <WIDTHxHEIGHT>` | 宿主默认值 | 初始窗口尺寸，单位为点，例如 `800x600`（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
@@ -204,7 +204,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 
 | 参数 | 说明 |
 |---|---|
-| `--target <TARGET>` | 必填。`ios`：iOS 设备，签名的 `.ipa`（不带 `--sign` 时为未签名的 `.app`）。`ios-simulator`：ad hoc 签名的 `.app`。`android`：签名的 `.apk`。`macos`：ad hoc 签名的 `.app`（[macOS](./macos.md#打包)）。`linux`：一个目录 `<Name>/`（可执行文件、`nsh/`、`.desktop` 文件）和 `<Name>.tar.gz`（[Linux](./linux.md#打包)）。`windows`：一个目录 `<Name>\`（`<Name>.exe`、`nsh\`）和 `<Name>.zip`（[Windows](./windows.md#打包)）。`web`：一个目录 `<Name>/`，即静态站点（`index.html` 和以内容命名的文件）（[Web](./web.md#发布应用)）。 |
+| `--target <TARGET>` | 必填。`ios`：iOS 设备，签名的 `.ipa`（不带 `--sign` 时为未签名的 `.app`）。`ios-simulator`：ad hoc 签名的 `.app`。`android`：签名的 `.apk`。`macos`：ad hoc 签名的 `.app`（[macOS](./macos.md#打包)）。`linux`：一个目录 `<Name>/`（可执行文件、`nsh/`、`.desktop` 文件）和 `<Name>.tar.gz`（[Linux](./linux.md#打包)）。`windows`：一个目录 `<Name>\`（`<Name>.exe`、`nsh\`）、`<Name>.zip`、Inno Setup 脚本 `<Name>.iss`，以及装有 Inno Setup 时生成的安装程序 `<Name>-setup.exe`（[Windows](./windows.md#打包)）。`web`：一个目录 `<Name>/`，即静态站点（`index.html` 和以内容命名的文件）（[Web](./web.md#发布应用)）。 |
 | `-o, --out <OUT>` | 输出目录（默认 `.nsh/out`）。 |
 | `--name <NAME>` | 显示名称。 |
 | `--id <ID>` | Bundle identifier，例如 `com.example.app`。 |
@@ -232,6 +232,24 @@ nsh package my-app --target web
 ```
 
 参见[打包](./packaging.md)。
+
+## nsh update
+
+把已安装的 `nsh` 更新到所在渠道的最新构建；指定渠道即切换（与 `rustup update nightly` 一致）（[安装](./installation.md#更新)）。
+
+```sh
+nsh update [stable|nightly]
+```
+
+## nsh component
+
+添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
+
+```sh
+nsh component list
+nsh component add <NAME>...
+nsh component remove <NAME>...
+```
 
 ## 签名命令
 

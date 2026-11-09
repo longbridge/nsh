@@ -62,7 +62,8 @@ screen stays yours; `--display <n>` picks another): each app a test opens gets a
 test asks for even on a display shorter than it, and
 the steps click, type and scroll with the system's input at the views their selectors name
 ([Testing](./testing-and-trace.md#on-a-real-platform)). The apps run in the background: their windows show while the
-keyboard stays with the app you type in (`--foreground` lets them become the active app).
+keyboard stays with the app you type in (`--foreground` lets them become the active app), and clicks reach the app's
+views as they do in the active window, under a hidden title bar too.
 
 ### Performance monitor
 
@@ -84,7 +85,7 @@ the panel however the app is opened. Add this key through `nsh.json`'s `macos.in
 | `CPU` / `GPU` / `MEM` | The process: CPU (100% is one core), its GPU share, its memory footprint (Activity Monitor's figure). |
 
 The bars below are the last 120 frames' main-thread time against one refresh (the line): green within half of it, amber
-within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::perf`, in the
+within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::fps`, in the
 Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; milliseconds as mean/p50/p95/max), which
 `nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
 while it is off.

@@ -20,6 +20,7 @@ my-app/
 │   ├── main.rs        cargo run: the root on this machine's desktop backend
 │   └── screens/       your own modules (any layout you like)
 ├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
+├── locales/           translations, rust-i18n's files: t!("hello") (I18n)
 ├── .gitignore         .nsh/ and target/
 ├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
 └── target/            Cargo's build directory
@@ -39,6 +40,7 @@ my-app/
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
+├── locales/           translations, rust-i18n's files: t("hello") (I18n)
 └── .nsh/              generated: type declarations, development host builds, test entries, build output (.nsh/out)
 ```
 
@@ -127,6 +129,7 @@ mount(App);
 | `schemes` | string[] | `package`、`run` | 打开应用的 URL scheme，例如 `["myapp"]` 对应 `myapp://…` 链接，由 [`UrlScheme`](../modules/nsh.md#urlscheme) 接收。只含小写字母、数字、`+`、`-` 和 `.`；不能是系统或浏览器占用的（`https`、`file` 等）。 |
 | `icon` | string | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
+| `locales` | string[] | 每次构建 | 应用除英语外格式化数字和日期所用的语言（`["de", "zh-CN"]`），bundle 会携带它们的数据。默认：`locales/` 中翻译所包含的语言（[I18n](./i18n.md#数字和日期)）。 |
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
@@ -214,7 +217,7 @@ import strings from "./strings.json";
 
 ### 从二进制中去掉部分功能
 
-如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），可以去掉可选功能：平台 crate 默认全部开启，在平台 crate（以及 `nsh-base`）上设置 `default-features = false`，再从 `js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`highlight`、`math`、`zlib`、`crypto` 中列出要保留的项。应用导入了构建时去掉的功能，会在加载时报错。`nsh package` 构建的应用始终包含全部功能。
+如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），可以去掉可选功能：平台 crate 默认全部开启，在平台 crate（以及 `nsh-base`）上设置 `default-features = false`，再从 `js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto` 中列出要保留的项。应用导入了构建时去掉的功能，会在加载时报错。`nsh package` 构建的应用始终包含全部功能。
 
 ### 按需加载代码
 
@@ -239,6 +242,7 @@ const open = async () => {
 | `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、文本输入框（`Input`）和系统警告对话框（`AlertDialog`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
 | `nsh/mobile` | iOS 和 Android 的 API：`TabBar`、`InputAccessoryView`（iOS）、`BackHandler`（Android）（[参考](../modules/nsh-mobile.md)） |
 | `nsh/desktop` | macOS、Windows 和 Linux 的 API：窗口（`Window`、`currentWindow`、`windows`）、`titleBar`、`displays`、`Menu`、`Tray`、`GlobalShortcut`（[参考](../modules/nsh-desktop.md)） |
+| `nsh/i18n` | 应用的翻译（它的 `locales/` 文件）和它显示的语言：`t`、`setLocale`、`availableLocales`（[I18n](./i18n.md)、[参考](../modules/nsh-i18n.md)） |
 | `nsh/updater` | 打包后的应用自我更新：`checkForUpdate`、`downloadUpdate`、`installAndRestart`（[参考](../modules/nsh-updater.md)） |
 
 [模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/base"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
