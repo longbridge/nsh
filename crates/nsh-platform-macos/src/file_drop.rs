@@ -222,8 +222,7 @@ pub(crate) fn text_performed(
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> Option<bool> {
     let offered = !surface.file_drop.uris.borrow().is_empty();
-    (offered && target(surface, sender).is_some())
-        .then(|| perform(surface, sender))
+    (offered && target(surface, sender).is_some()).then(|| perform(surface, sender))
 }
 
 fn read_uris(sender: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
