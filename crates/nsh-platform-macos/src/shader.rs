@@ -6,9 +6,13 @@
 //! The surface opens the GPU device the first time a shader is mounted
 //! ([`Shaders`]). The shader views with a frame to render or collect
 //! ([`ShaderView::wants_frame`]: their uniforms or size changed, or they
-//! read `nsh.time`) render on one frame callback of the surface's display
-//! link, at their window's backing scale; a frame that comes back becomes a
-//! `CGImage`, the layer's contents, stretched over the view's box. A view
+//! read `nsh.time`) render at their window's backing scale, on one frame
+//! callback of the surface's display link while their frames change with
+//! time or anything else wants frames; a view that only changed (a uniform
+//! the app set) renders once the batch is applied, and its frame shows
+//! when the GPU says it is done ([`Drive`]), without the display link. A
+//! frame that comes back becomes the layer's contents (an IOSurface, else
+//! a `CGImage`), stretched over the view's box. A view
 //! out of sight (a list row scrolled away, a screen under another) stops
 //! rendering and starts again once it shows ([`shown`], from
 //! [`crate::mount::Mounter::revisit`]).
@@ -51,6 +55,7 @@ use std::{
     time::Instant,
 };
 
+use dispatch2::DispatchQueue;
 use nsh_core::{
     animation::AnimationValue,
     canvas::Damage,
@@ -78,8 +83,45 @@ pub(crate) struct Shaders {
     /// The running page and dialog overlays' marks ([`NavOverlay`]), which
     /// [`ui_changed`] sets when a view under one changes.
     overlays: RefCell<Vec<Weak<Mark>>>,
-    /// Its frame callback runs.
-    running: Cell<bool>,
+    /// What renders the views now.
+    drive: Cell<Drive>,
+    /// The GPU's notifications asked for ([`Drive::Gpu`]): only the last
+    /// one drives.
+    asked: Cell<u64>,
+}
+
+/// What renders a surface's shader views. Resuming the display link for
+/// one frame wakes the process about as often as keeping it running, so a
+/// view that changed renders without it when nothing else wants frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Drive {
+    /// Nothing: no view has a frame to render or collect.
+    #[default]
+    Idle,
+    /// A frame callback of the display link: views whose frames change
+    /// with time, that read pictures, or whose frame waits for a free
+    /// surface; or the link runs anyway.
+    Link,
+    /// The main queue, once what runs now is done: views that changed,
+    /// rendering their one new frame.
+    Soon,
+    /// The GPU, once it finished the frames rendered: views waiting only
+    /// for them to come back.
+    Gpu,
+}
+
+/// What a view in [`Shaders::views`] has left, least first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Need {
+    /// Nothing.
+    None,
+    /// A frame on its way back from the GPU.
+    Pending,
+    /// One new frame: something changed (after a pass, a frame that found
+    /// no free surface, which the display link tries again).
+    Changed,
+    /// The frame clock: its frames change with time, or it takes pictures.
+    Clock,
 }
 
 impl Shaders {
@@ -168,6 +210,24 @@ impl ShaderState {
     /// view shows its background and children as they are).
     fn hides(&mut self, shaders: &Shaders, now: Instant) -> bool {
         self.view.replaces_children(now) && shaders.renderer().is_some()
+    }
+
+    /// What it has left to render or collect. Effects and transitions
+    /// render on the frame clock, with their pictures.
+    fn need(&self) -> Need {
+        if self.view.animates() || self.stale || self.backdrop_stale {
+            Need::Clock
+        } else if self.view.due() {
+            if self.role == ShaderRole::Fill {
+                Need::Changed
+            } else {
+                Need::Clock
+            }
+        } else if self.view.pending() {
+            Need::Pending
+        } else {
+            Need::None
+        }
     }
 
     /// Whether its program reads the children it draws (an effect's
@@ -1330,7 +1390,7 @@ pub(crate) fn shown(view: &NshView) {
 /// ([`set_args`]), once the animator is no longer borrowed.
 pub(crate) fn wake(surface: &Surface) {
     let shaders = &surface.shaders;
-    if shaders.running.get() || shaders.views.borrow().is_empty() {
+    if shaders.drive.get() != Drive::Idle || shaders.views.borrow().is_empty() {
         return;
     }
     if let Some(surface) = Surface::with_key(surface.key()) {
@@ -1358,7 +1418,7 @@ pub(crate) fn clear(surface: &Surface) {
     let key = surface.key();
     PICTURING.with(|p| p.borrow_mut().retain(|&k| k != key));
     surface.shaders.views.borrow_mut().clear();
-    surface.shaders.running.set(false);
+    surface.shaders.drive.set(Drive::Idle);
 }
 
 /// Adds `view` to the views rendering if it has a frame to render; whether
@@ -1396,31 +1456,115 @@ fn tick_if(view: &NshView, pictures_due: bool) -> bool {
     true
 }
 
-/// Runs the frame callback that renders the views, if it does not run.
+/// Renders the views, if nothing does ([`Drive`]): on the display link
+/// when one needs the frame clock or the link runs anyway, else once what
+/// runs now (the batch that changed them) is done.
 fn start(surface: &Rc<Surface>) {
     let shaders = &surface.shaders;
-    if shaders.running.get() || shaders.views.borrow().is_empty() {
+    if shaders.drive.get() != Drive::Idle || shaders.views.borrow().is_empty() {
         return;
     }
-    shaders.running.set(true);
-    surface.add_draw_callback(|surface, _| {
-        let more = frame(surface);
-        if !more {
-            surface.shaders.running.set(false);
+    if surface.wants_frames() || needs(surface) == Need::Clock {
+        drive_on_link(surface);
+        return;
+    }
+    shaders.drive.set(Drive::Soon);
+    let key = surface.key();
+    DispatchQueue::main().exec_async(move || {
+        if let Some(surface) = Surface::with_key(key)
+            && surface.shaders.drive.get() == Drive::Soon
+        {
+            pass(&surface);
         }
-        more
     });
 }
 
-/// One display frame: each view renders and collects; whether a view has
-/// more to render.
-fn frame(surface: &Rc<Surface>) -> bool {
+/// Renders the views on every display frame until they need it no more.
+fn drive_on_link(surface: &Rc<Surface>) {
+    surface.shaders.drive.set(Drive::Link);
+    surface.add_draw_callback(|surface, _| {
+        frame(surface);
+        let next = next_drive(surface);
+        surface.shaders.drive.set(next);
+        next == Drive::Link
+    });
+}
+
+/// One pass over the views off the display link, then what renders them
+/// next.
+fn pass(surface: &Rc<Surface>) {
+    frame(surface);
+    match next_drive(surface) {
+        Drive::Link => drive_on_link(surface),
+        next => surface.shaders.drive.set(next),
+    }
+}
+
+/// What renders the views after a pass over them: nothing when none has
+/// anything left; the GPU when they only wait for frames to come back and
+/// the display link does not run anyway (asking it to tell); else the
+/// display link.
+fn next_drive(surface: &Rc<Surface>) -> Drive {
+    match needs(surface) {
+        Need::None => Drive::Idle,
+        Need::Pending if !surface.wants_frames() && ask_gpu(surface) => Drive::Gpu,
+        _ => Drive::Link,
+    }
+}
+
+/// Asks the GPU to tell, once it finished the frames rendered, the main
+/// thread, which collects them ([`pass`]); whether it can.
+fn ask_gpu(surface: &Surface) -> bool {
     let shaders = &surface.shaders;
     let Some(renderer) = shaders.renderer() else {
         return false;
     };
+    let asked = shaders.asked.get() + 1;
+    shaders.asked.set(asked);
+    let key = surface.key();
+    renderer.when_done(move || {
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key)
+                && surface.shaders.drive.get() == Drive::Gpu
+                && surface.shaders.asked.get() == asked
+            {
+                pass(&surface);
+            }
+        });
+    })
+}
+
+/// What the views rendering have left, the most of them.
+fn needs(surface: &Surface) -> Need {
+    surface
+        .shaders
+        .views
+        .borrow()
+        .iter()
+        .map(need)
+        .max()
+        .unwrap_or(Need::None)
+}
+
+/// What `view` has left ([`ShaderState::need`]).
+fn need(view: &NshView) -> Need {
+    view.state()
+        .shader
+        .as_ref()
+        .map_or(Need::None, |s| s.need())
+}
+
+/// One pass over the views (a display frame's, or one off the display
+/// link: [`Drive`]): each renders and collects; those with more to render
+/// or collect stay.
+fn frame(surface: &Rc<Surface>) {
+    let shaders = &surface.shaders;
+    let Some(renderer) = shaders.renderer() else {
+        return;
+    };
+    // Mounting: the views stay for the next pass.
     let Ok(mounter) = surface.mounter.try_borrow() else {
-        return true;
+        return;
     };
     let views = std::mem::take(&mut *shaders.views.borrow_mut());
     let now = Instant::now();
@@ -1454,7 +1598,6 @@ fn frame(surface: &Rc<Surface>) -> bool {
     let mut views = shaders.views.borrow_mut();
     kept.append(&mut views);
     *views = kept;
-    !views.is_empty()
 }
 
 /// Renders and collects `view`'s frame, showing one that came back;
@@ -1850,6 +1993,51 @@ mod tests {
             renderer: OnceCell::from(None),
             ..Shaders::default()
         }
+    }
+
+    /// A fill that changed renders off the display link and waits for the
+    /// GPU after; what changes with time or takes pictures keeps the frame
+    /// clock.
+    #[test]
+    fn only_what_changes_with_time_or_takes_pictures_needs_the_frame_clock() {
+        assert_eq!(state(ShaderRole::Fill).need(), Need::Changed);
+        assert_eq!(state(ShaderRole::Effect).need(), Need::Clock);
+        let timed = |paused: bool| {
+            let shader = Shader::compile(
+                "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
+            )
+            .expect("a shader");
+            let layer = ShaderLayer::new(shader, &[], &mut Vec::new()).with_paused(paused);
+            let mut s = ShaderState::new(Weak::new());
+            s.view.set_layer(Some(Arc::new(layer)));
+            s.need()
+        };
+        assert_eq!(timed(false), Need::Clock, "its time runs");
+        assert_eq!(timed(true), Need::Changed, "paused: one frame");
+        let mut stale = state(ShaderRole::Fill);
+        stale.stale = true;
+        assert_eq!(stale.need(), Need::Clock, "a picture is due");
+
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut s = state(ShaderRole::Fill);
+        s.view.set_size(
+            nsh_core::geometry::size(nsh_core::geometry::px(4.0), nsh_core::geometry::px(4.0)),
+            1.0,
+        );
+        let _ = s.view.render(&renderer, Instant::now());
+        if s.need() == Need::Pending {
+            let (tx, rx) = std::sync::mpsc::channel();
+            assert!(renderer.when_done(move || {
+                let _ = tx.send(());
+            }));
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("the GPU tells");
+            assert!(s.view.collect_frame(&renderer), "its frame is back");
+        }
+        assert_eq!(s.need(), Need::None, "shown: nothing left");
     }
 
     #[test]
