@@ -757,15 +757,11 @@ pub(crate) fn handle(
             }
             Some(Some(LRESULT(0)))
         }
-        WM_ERASEBKGND => {
-            // As the main window's: what DWM shows past the last frame while
-            // a resize's is on its way.
-            fill_background(surface, id, hwnd);
-            Some(Some(LRESULT(1)))
-        }
+        WM_ERASEBKGND => Some(Some(LRESULT(1))),
         WM_SIZE => {
             if let Some(window) = &window {
-                // Filled before the frame, as the main window's.
+                // What DWM shows past the last frame meanwhile, as the main
+                // window's.
                 fill_background(surface, id, hwnd);
                 resized(surface, window);
                 // Drawn now, so that it never shows stretched or stale

@@ -646,10 +646,12 @@ pub(crate) fn wake(hwnd: isize) {
     }
 }
 
-/// Fills the window's client area with its background before the first
-/// frame. Windows composites and animates a window that has not painted yet
-/// with its default light surface, which flashes white on a dark appearance;
-/// its swap chain does not cover that surface until the first present.
+/// Fills the window's client area with its background: before the first
+/// frame, and as it is resized. Windows composites and animates a window
+/// that has not painted yet with its default light surface, which flashes
+/// white on a dark appearance; its swap chain does not cover that surface
+/// until the first present, nor past the last frame while a resize's is on
+/// its way.
 pub(crate) fn fill_background(surface: &Surface, hwnd: HWND) {
     if !surface.transparent() {
         fill(hwnd, crate::system::window_background(surface));
@@ -1038,17 +1040,12 @@ fn handle(
             // SAFETY: as above.
             let _ = unsafe { EndPaint(hwnd, &ps) };
         }
-        WM_ERASEBKGND => {
-            // While a resize's frame is on its way DWM shows the window's
-            // redirection surface past the last one, black unless filled:
-            // a window swap chain's own background color is never shown.
-            fill_background(surface, hwnd);
-            return Some(LRESULT(1));
-        }
+        WM_ERASEBKGND => return Some(LRESULT(1)),
         WM_SIZE => {
             // Filled first: the frame below waits for the layout, and DWM
-            // shows the area the window grew by meanwhile (`WM_ERASEBKGND`
-            // comes after it).
+            // shows the window's redirection surface past the last frame
+            // meanwhile, black unless filled (DWM never shows a window swap
+            // chain's own background color).
             fill_background(surface, hwnd);
             sync_size(surface, hwnd);
             // Drawn now, so that the window never shows stretched or

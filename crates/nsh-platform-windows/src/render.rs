@@ -1353,12 +1353,16 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     }
     // A window that is resized draws now, once its frame in flight is shown:
     // a resize's frames presented faster than the display shows them would
-    // queue up, and the window would trail the pointer by all of them. The
+    // queue up, and the window would trail the pointer by all of them. That
+    // wait holds the thread up for a vblank at most, the one exception: the
     // others wait until the compositor has room, so that no window's present
     // holds the thread up for another's vblank. The damage stays.
-    if resized {
-        chain.wait_ready();
-    } else if !chain.ready() {
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
@@ -1679,9 +1683,12 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
     }
     // As the main window's ([`frame`]): resized, it draws once its frame in
     // flight is shown; otherwise it waits until its swap chain has room.
-    if resized {
-        chain.wait_ready();
-    } else if !chain.ready() {
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {

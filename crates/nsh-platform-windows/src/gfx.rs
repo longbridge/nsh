@@ -229,6 +229,34 @@ const MAX_DEVICE_LATENCY: u32 = 16;
 /// ([`SwapChain::wait_ready`]): a few vertical blanks at the slowest rates.
 const RESIZE_FRAME_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 
+/// Whether DWM shows window `hwnd`: visible, its top-level window neither
+/// minimized nor cloaked.
+fn composed(hwnd: HWND) -> bool {
+    use windows::Win32::{
+        Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
+        UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, IsIconic, IsWindowVisible},
+    };
+    // SAFETY: plain calls on a window handle (an invalid one answers no);
+    // the attribute is written into a local of its size.
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() {
+            return false;
+        }
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if IsIconic(root).as_bool() {
+            return false;
+        }
+        let mut cloaked = 0u32;
+        let read = DwmGetWindowAttribute(
+            root,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut u32 as *mut _,
+            std::mem::size_of::<u32>() as u32,
+        );
+        read.is_err() || cloaked == 0
+    }
+}
+
 /// The flags every swap chain is made (and resized) with: frames are paced
 /// on its latency waitable object ([`SwapChain::ready`]).
 pub(crate) const SWAP_CHAIN_FLAGS: DXGI_SWAP_CHAIN_FLAG =
@@ -331,22 +359,36 @@ impl Latency {
     }
 
     /// Waits until a frame may be drawn (takes a token), at most `timeout`.
-    /// Waits in slices: a wait registered by [`Latency::defer`] may take the
-    /// token meanwhile, and it then hands it over through `holding`.
+    /// A wait [`Latency::defer`] registered is cancelled first: it would take
+    /// the token in this one's place and hand it over only through
+    /// `holding`, which a blocking wait does not see until it times out.
     fn wait(&self, timeout: std::time::Duration) -> bool {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            if self.wake.holding.load(Ordering::Acquire) {
-                return true;
-            }
-            // SAFETY: a wait on a live semaphore.
-            if unsafe { WaitForSingleObject(self.handle, 1) } == WAIT_OBJECT_0 {
-                self.wake.holding.store(true, Ordering::Release);
-                return true;
-            }
-            if std::time::Instant::now() >= deadline {
-                return false;
-            }
+        self.cancel();
+        if self.wake.holding.load(Ordering::Acquire) {
+            return true;
+        }
+        let ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+        // SAFETY: a wait on a live semaphore.
+        if unsafe { WaitForSingleObject(self.handle, ms) } == WAIT_OBJECT_0 {
+            self.wake.holding.store(true, Ordering::Release);
+            return true;
+        }
+        false
+    }
+
+    /// Unregisters the wait [`Latency::defer`] registered, if any, once its
+    /// callback (if it runs) has ended.
+    fn cancel(&self) {
+        let wait = self.wait.replace(HANDLE::default());
+        if wait.is_invalid() {
+            return;
+        }
+        // SAFETY: waits for a running callback to end.
+        let _ = unsafe { UnregisterWaitEx(wait, Some(HANDLE(-1isize as *mut _))) };
+        if self.wake.armed.swap(false, Ordering::AcqRel) {
+            // The callback never ran: take its leaked clone back.
+            // SAFETY: `defer` leaked exactly one clone, still unclaimed.
+            drop(unsafe { Arc::from_raw(Arc::as_ptr(&self.wake)) });
         }
     }
 
@@ -388,16 +430,7 @@ impl Latency {
 
 impl Drop for Latency {
     fn drop(&mut self) {
-        let wait = self.wait.get();
-        if !wait.is_invalid() {
-            // SAFETY: waits for a running callback to end.
-            let _ = unsafe { UnregisterWaitEx(wait, Some(HANDLE(-1isize as *mut _))) };
-            if self.wake.armed.swap(false, Ordering::AcqRel) {
-                // The callback never ran: take its leaked clone back.
-                // SAFETY: `defer` leaked exactly one clone, still unclaimed.
-                drop(unsafe { Arc::from_raw(Arc::as_ptr(&self.wake)) });
-            }
-        }
+        self.cancel();
         // SAFETY: the handle was obtained from the swap chain and is ours.
         let _ = unsafe { CloseHandle(self.handle) };
     }
@@ -434,8 +467,8 @@ impl SwapChain {
             // While a resize is drawn DWM already shows the window at its new
             // size: the last frame stays as it was, where stretching it would
             // move everything in the window by part of a pixel, every frame.
-            // Past it DWM shows the redirection surface, which `WM_ERASEBKGND`
-            // fills with the window's background.
+            // Past it DWM shows the redirection surface, which `WM_SIZE` fills
+            // with the window's background.
             Scaling: DXGI_SCALING_NONE,
             // Back buffers keep their pixels: frames draw only what changed.
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
@@ -548,11 +581,21 @@ impl SwapChain {
         }
     }
 
-    /// Waits until a frame may be presented, at most [`RESIZE_FRAME_WAIT`]:
-    /// a resize draws its frame now, but a frame queued past the one in
-    /// flight would show every later one that much late.
+    /// Whether a resized window's frame can be presented: waits for the
+    /// frame in flight to be shown, at most [`RESIZE_FRAME_WAIT`], since a
+    /// frame queued past it would show every later one that much late. A
+    /// window DWM does not compose (hidden, minimized, cloaked) may not get
+    /// its token back for a while, so it only polls. When not,
+    /// `WM_NSH_PAINT` comes as soon as it can, as from [`SwapChain::ready`].
     pub(crate) fn wait_ready(&self) -> bool {
-        self.latency.wait(RESIZE_FRAME_WAIT)
+        let hwnd = HWND(self.latency.wake.hwnd as *mut _);
+        if composed(hwnd) {
+            if self.latency.wait(RESIZE_FRAME_WAIT) {
+                return true;
+            }
+            log::debug!("a resized window's frame in flight was not shown in time");
+        }
+        self.ready()
     }
 
     /// Queues the frame drawn for the next vertical blank; `changed`:
