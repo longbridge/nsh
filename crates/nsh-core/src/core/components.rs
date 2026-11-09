@@ -5089,6 +5089,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The app's address, which the engine shares with every VM's
     /// `System` (`UrlScheme.url()` reads it there).
+    #[doc(hidden)]
     pub fn app_url_cell(&self) -> crate::url_scheme::AppUrlCell {
         self.components.url_schemes.address.clone()
     }
