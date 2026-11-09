@@ -2391,6 +2391,14 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id,
+                command: Command::CancelPress,
+            } => {
+                self.key(id)?;
+                self.cancel_press(id);
+                Ok(())
+            }
+            Op::Command {
                 command: Command::ClearJsResponder,
                 ..
             } => {

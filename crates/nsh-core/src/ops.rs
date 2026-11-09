@@ -1953,6 +1953,12 @@ pub enum Command {
     },
     /// The JS responder let go (on the root).
     ClearJsResponder,
+    /// The press going on in this view (or a view inside it) ends without
+    /// its release: no `onPressUp` or `onPress` follow, and its `active:`
+    /// styles reset at once (a context menu opened by a held finger). The
+    /// core handles it; platforms never see it.
+    #[doc(hidden)]
+    CancelPress,
     /// Select a range of an input (UTF-16 units; equal for a caret).
     SetSelection {
         /// Start.

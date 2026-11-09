@@ -955,6 +955,11 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {
                                 hold.replace(None);
+                                // The finger went to the menu: lifting it
+                                // presses nothing (no `onPress` or
+                                // `onPressUp`) and the trigger's `active:`
+                                // styles reset now.
+                                anchor.cancel_press();
                                 keyed.replace(None);
                                 point.set(page);
                                 on_hold(true, OpenChangeReason::LongPress);

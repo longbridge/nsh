@@ -5562,6 +5562,48 @@ fn press_and_group_states() {
 }
 
 #[test]
+fn a_cancelled_press_resets_active_and_drops_its_release() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white active:bg-zinc-200");
+    c.commit().unwrap();
+    c.set_states(2, crate::tailwind::state::PRESSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xe4e4_e7ff)
+    );
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 2,
+            command: Command::CancelPress,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    // Never reaches the platform; the active styles reset at once.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Command {
+            command: Command::CancelPress,
+            ..
+        }
+    )));
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+    // The platform still reporting it pressed changes nothing.
+    c.set_states(2, crate::tailwind::state::PRESSED);
+    assert!(c.commit().is_none_or(|b| view_style_of(&b, 2).is_none()));
+    // Its release reaches no one (JS included); the next press does.
+    assert!(c.component_event(2, EventKind::PressUp, &EventPayload::None));
+    assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::PressDown, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::PressUp, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::Press, &EventPayload::None));
+}
+
+#[test]
 fn a_node_joining_a_group_in_a_state_reads_it() {
     let mut c = core();
     view_with_classes(&mut c, 2, "group");
