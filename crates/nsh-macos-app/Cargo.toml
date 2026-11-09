@@ -12,7 +12,7 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto"]
+default = ["js", "shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto"]
 # JS apps (the bundle in the app's resources). Without it the runner runs a
 # Rust app only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-macos/js", "nsh-engine/js-core"]
@@ -26,6 +26,7 @@ plot = ["nsh-platform-macos/plot"]
 term = ["nsh-platform-macos/term"]
 highlight = ["nsh-platform-macos/highlight"]
 math = ["nsh-platform-macos/math"]
+emoji-picker = ["nsh-platform-macos/emoji-picker"]
 zlib = ["nsh-platform-macos/zlib"]
 crypto = ["nsh-platform-macos/crypto"]
 

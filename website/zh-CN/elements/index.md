@@ -96,6 +96,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
 | `<Command>` | `nsh_base::command()` | 命令面板：在原生过滤的命令之上放一个搜索框，虚拟化列表，Cmd+K 面板的按键 | [Command](./command.md) |
+| `<EmojiPicker>` | `nsh_base::emoji_picker()` | 表情选择面板：在按分组排列的全部表情之上放一个搜索框，应用的最近使用和名称，肤色，虚拟化网格 | [EmojiPicker](./emoji-picker.md) |
 | `<DataTable>` | `nsh_base::data_table()` | 行列数量不限的表格，可选择、排序，列可调整宽度和移动 | [DataTable](./data-table.md) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | 两段文本之间或补丁中的改动，并排或合并显示 | [DiffView](./diff-view.md) |

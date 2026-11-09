@@ -19303,6 +19303,119 @@ mod rust_windows {
     }
 
     #[component]
+    fn SetsOwnTitle() -> impl IntoElement {
+        view().child(window().id("settings").title("Static title").content(|| {
+            let me = current_window();
+            effect(move || {
+                me.set(WindowAttributes {
+                    title: Some("Set in content".into()),
+                    ..Default::default()
+                });
+                me.set(WindowAttributes {
+                    resizable: Some(false),
+                    ..Default::default()
+                });
+            });
+            text("settings")
+        }))
+    }
+
+    // #1344: attributes a window's own content sets while it first opens
+    // reach the window, after the open and over its options.
+    #[test]
+    fn attributes_set_while_a_window_opens_are_kept() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<SetsOwnTitle>());
+        let mut commands = desktop_commands(&c.commit().unwrap());
+        // An effect may run in the next commit: collect both.
+        if let Some(batch) = c.commit() {
+            commands.extend(desktop_commands(&batch));
+        }
+        // It opens with them (or gets them right after): what it ends up with.
+        let mut id = None;
+        let mut merged = WindowAttributes::default();
+        for (at, command) in &commands {
+            match command {
+                DesktopCommand::OpenWindow(open) => {
+                    id = Some(*at);
+                    merged.merge(&open.options.attributes);
+                }
+                DesktopCommand::SetAttributes(a) if Some(*at) == id => merged.merge(a),
+                _ => {}
+            }
+        }
+        assert!(id.is_some(), "the window opens: {commands:?}");
+        assert_eq!(
+            merged.title.as_deref(),
+            Some("Set in content"),
+            "{commands:?}"
+        );
+        assert_eq!(merged.resizable, Some(false), "{commands:?}");
+        // Sent once: nothing more on the next commit.
+        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
+    }
+
+    fn opened_title(c: &mut Core<FakeEngine>) -> Option<String> {
+        let mut title = None;
+        while let Some(batch) = c.commit() {
+            for (_, command) in desktop_commands(&batch) {
+                match command {
+                    DesktopCommand::OpenWindow(open) => title = open.options.attributes.title,
+                    DesktopCommand::SetAttributes(a) if a.title.is_some() => title = a.title,
+                    _ => {}
+                }
+            }
+        }
+        title
+    }
+
+    // #1344, `open_window` and a window opened again: each opening keeps
+    // what its content set then, not what an earlier one did.
+    #[test]
+    fn attributes_set_while_an_opened_window_opens_are_kept_each_time() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit();
+        let open = |title: &'static str| {
+            open_window(window().id("doc").title("Static").content(move || {
+                let me = current_window();
+                effect(move || {
+                    me.set(WindowAttributes {
+                        title: Some(title.into()),
+                        ..Default::default()
+                    });
+                });
+                text("doc")
+            }))
+            .expect("opens on a desktop")
+        };
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            open("First")
+        };
+        assert_eq!(opened_title(&mut c).as_deref(), Some("First"));
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = opened_title(&mut c);
+        {
+            let _entered = c.components.runtime.enter();
+            open("Second");
+        }
+        assert_eq!(opened_title(&mut c).as_deref(), Some("Second"));
+    }
+
+    #[component]
     fn WithNotes() -> impl IntoElement {
         view().child(window().id("notes").content(|| text("Notes")))
     }

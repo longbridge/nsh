@@ -986,13 +986,16 @@ are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 
 ## Releases
 
-`.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon: the iOS, Mac Catalyst and macOS
-runtimes and the iOS SDK), Linux and Windows (x86_64), each with the GPUI development host of its OS and the Android runtime, checks that the packaged CLI
-makes and bundles a new app, and archives `dist/nsh` as one directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on
-Windows) with the CLI and that machine's runtime only. The embedding SDKs are archives of their own
-(`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack` moves every other runtime into its
-component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and `nsh-web.tar.gz` from Linux's build,
-`nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`, `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
+`.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon, with the iOS and Mac Catalyst
+runtimes and the iOS SDK, and Intel), Linux and Windows (x86_64 and arm64), each with the desktop runtime and the GPUI
+and terminal development hosts of its machine. The arm64 Linux and Windows builds set `NSH_DIST_NO_ANDROID` and leave
+the Android runtime out: the `android` component comes from x86_64 Linux, and the NDK has no arm64 Linux
+toolchain. Each run checks that the packaged CLI makes and bundles a new app, and archives `dist/nsh` as one
+directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on Windows) with the CLI and that machine's runtime only. The
+embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack`
+moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
+`nsh-web.tar.gz` from x86_64 Linux's build, `nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`,
+`nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
 `xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
 than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers

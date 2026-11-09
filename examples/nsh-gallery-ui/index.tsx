@@ -41,6 +41,7 @@ export * from "./slider";
 export * from "./scrollbar-theme";
 export * from "./tree";
 export * from "./command";
+export * from "./emoji";
 export * from "./avatar";
 
 /**
