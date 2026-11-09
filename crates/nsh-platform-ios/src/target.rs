@@ -2,7 +2,7 @@
 //! gesture actions, pull-to-refresh, scroll view and text input delegate
 //! calls and display link ticks. Views are identified by their `tag` (the node id).
 
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::{
     EventKind, EventPayload, KeyboardTaps, NodeId, SubmitBehavior,
     geometry::{point, px},
@@ -129,9 +129,15 @@ define_class!(
 
         #[unsafe(method(handleRefresh:))]
         fn handle_refresh(&self, control: &UIRefreshControl) {
-            if let Some(scroll) = control.superview() {
-                self.dispatch(scroll.tag() as NodeId, EventKind::Refresh, EventPayload::None);
-            }
+            // The control names its scroll view (`refresh_owner`): UIKit
+            // may move it into an untagged container (iOS 26 under a large
+            // title), so its superview may name nothing.
+            let id = crate::mount::refresh_owner(control);
+            let control = MainThreadBound::new(control.retain(), self.mtm());
+            self.with_mounter(move |m| {
+                let mtm = MainThreadMarker::new().expect("main thread");
+                m.refresh_pulled(id, control.get(mtm));
+            });
         }
 
         #[unsafe(method(dismissKeyboard:))]
