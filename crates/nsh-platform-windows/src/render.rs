@@ -1351,10 +1351,14 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
         *swap = None;
         return false;
     }
-    // A window that is resized draws now (never stretched pixels); the
-    // others wait until the compositor has room, so that no window's
-    // present holds the thread up for another's vblank. The damage stays.
-    if !resized && !chain.ready() {
+    // A window that is resized draws now, once its frame in flight is shown:
+    // a resize's frames presented faster than the display shows them would
+    // queue up, and the window would trail the pointer by all of them. The
+    // others wait until the compositor has room, so that no window's present
+    // holds the thread up for another's vblank. The damage stays.
+    if resized {
+        chain.wait_ready();
+    } else if !chain.ready() {
         return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
@@ -1673,9 +1677,11 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
         *swap = None;
         return false;
     }
-    // As the main window's ([`frame`]): resized, it draws now; otherwise it
-    // waits until its swap chain has room.
-    if !resized && !chain.ready() {
+    // As the main window's ([`frame`]): resized, it draws once its frame in
+    // flight is shown; otherwise it waits until its swap chain has room.
+    if resized {
+        chain.wait_ready();
+    } else if !chain.ready() {
         return true;
     }
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {

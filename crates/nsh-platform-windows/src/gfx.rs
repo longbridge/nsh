@@ -225,6 +225,10 @@ pub(crate) fn target_properties(scale: f32, premultiplied: bool) -> D2D1_BITMAP_
 /// The most frames the device queues (the maximum DXGI takes).
 const MAX_DEVICE_LATENCY: u32 = 16;
 
+/// The longest a resized window waits for its swap chain's frame in flight
+/// ([`SwapChain::wait_ready`]): a few vertical blanks at the slowest rates.
+const RESIZE_FRAME_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// The flags every swap chain is made (and resized) with: frames are paced
 /// on its latency waitable object ([`SwapChain::ready`]).
 pub(crate) const SWAP_CHAIN_FLAGS: DXGI_SWAP_CHAIN_FLAG =
@@ -324,6 +328,26 @@ impl Latency {
             return true;
         }
         false
+    }
+
+    /// Waits until a frame may be drawn (takes a token), at most `timeout`.
+    /// Waits in slices: a wait registered by [`Latency::defer`] may take the
+    /// token meanwhile, and it then hands it over through `holding`.
+    fn wait(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.wake.holding.load(Ordering::Acquire) {
+                return true;
+            }
+            // SAFETY: a wait on a live semaphore.
+            if unsafe { WaitForSingleObject(self.handle, 1) } == WAIT_OBJECT_0 {
+                self.wake.holding.store(true, Ordering::Release);
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+        }
     }
 
     /// Asks for `WM_NSH_PAINT` when a token is free (once).
@@ -522,6 +546,13 @@ impl SwapChain {
             self.latency.defer();
             false
         }
+    }
+
+    /// Waits until a frame may be presented, at most [`RESIZE_FRAME_WAIT`]:
+    /// a resize draws its frame now, but a frame queued past the one in
+    /// flight would show every later one that much late.
+    pub(crate) fn wait_ready(&self) -> bool {
+        self.latency.wait(RESIZE_FRAME_WAIT)
     }
 
     /// Queues the frame drawn for the next vertical blank; `changed`:

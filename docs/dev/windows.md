@@ -266,7 +266,9 @@ waitable object and one frame in flight (two buffers), and a window draws only w
 (`SwapChain::ready`, a non-blocking poll). Otherwise `render::frame` returns before drawing, the damage and the
 invalid flag stay, and a thread pool wait on the object posts `WM_NSH_PAINT` to the window when a frame is free
 (posted, not `InvalidateRect`: a posted message comes before the `WM_PAINT`s that wait for the thread's other
-messages). A resized window draws at once, so it never shows stretched pixels.
+messages). A resized window draws in its `WM_SIZE`, but only once it holds the token (`SwapChain::wait_ready`, a
+blocking wait of at most 50 ms): a drag's frames presented without it outrun the display, queue up to the device's
+latency limit and leave the window trailing the pointer; they also skip the token, so other frames get extra ones.
 
 The gate is what lets several windows share a UI thread (`Window.open`, several `AppView`s in an embedding app): a
 blocking `Present(1)` waited for the vertical blank of the other windows' frames, about 60 presents a second for the
