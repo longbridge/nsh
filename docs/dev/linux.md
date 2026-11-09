@@ -252,7 +252,7 @@ A panel at the top right, which takes only the clicks on itself, also shows the 
 (frame time and p95, JS and core time per commit, in ms; CPU, resident memory, the JS heap and the nodes alive) over
 the latest 120 frame costs as a curve along its bottom edge (newest at the right; frames within the refresh budget
 stay under the text, slow ones rise into it in amber). A click on
-the panel collapses it to a pill of the frame rate, and a click on the pill expands it again (per window, for the session). It redraws twice a
+the panel collapses it to a pill of the frame rate and the process' CPU, and a click on the pill expands it again (per window, for the session). It redraws twice a
 second while mapped; disabling the monitor removes the panel and timer as well as stopping measurement.
 `examples/gallery/tools/perf.py` runs the gallery under it, idle and scrolling on every demo, and prints a table.
 
