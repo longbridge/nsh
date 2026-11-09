@@ -36095,3 +36095,359 @@ fn svg_drawn_as_an_image_carries_its_text_color() {
     assert_ne!(blue, Color(0xfb2c_36ff));
     assert_eq!(color_of(&batch, 4), None);
 }
+
+// Structural variants share positions without changing immediate restyling.
+mod positional_regressions {
+    use super::*;
+
+    const CLASSES: &str = "w-10 h-4 bg-red-500 first:bg-green-500 last:bg-blue-500 odd:pt-1 even:pb-2 only:px-3 last:text-white first:z-10 odd:pointer-events-none last:max-w-prose";
+
+    fn snapshot(c: &Core<FakeEngine>, children: &[Key]) -> Vec<String> {
+        children
+            .iter()
+            .map(|&key| {
+                let n = &c.nodes[key as usize];
+                format!(
+                    "{:?}",
+                    (
+                        n.id,
+                        &n.view_style,
+                        &n.text_style,
+                        &n.class_props,
+                        &n.base_layout,
+                        n.direction,
+                        n.rtl,
+                        n.z_index,
+                        n.wants_fixed,
+                    )
+                )
+            })
+            .collect()
+    }
+
+    // The ordinary resolver still queries the actual sibling list for each
+    // child. Compare the shared-position pass with that independent path.
+    fn check(c: &mut Core<FakeEngine>, parent: NodeId) {
+        let parent = c.key(parent).unwrap();
+        c.positions_changed(parent);
+        let children = c.nodes[parent as usize].children.clone();
+        let expected = snapshot(c, &children);
+        for &key in &children {
+            if c.nodes[key as usize]
+                .classes
+                .as_ref()
+                .is_some_and(|classes| classes.deps() & crate::tailwind::deps::POSITION != 0)
+            {
+                c.restyle(key);
+            }
+        }
+        assert_eq!(snapshot(c, &children), expected);
+    }
+
+    fn child(c: &mut Core<FakeEngine>, id: NodeId, parent: NodeId) {
+        apply(
+            c,
+            vec![
+                Op::Create { id, tag: Tag::View },
+                class_op(id, CLASSES),
+                Op::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+        check(c, parent);
+    }
+
+    #[test]
+    fn shared_positions_match_individual_resolution_after_tree_edits() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        view_with_classes(&mut c, 100, "");
+        for id in [4, 6, 8, 10] {
+            child(&mut c, id, 2);
+        }
+
+        // Text markers do not consume the first, last or odd/even positions.
+        for (id, before) in [(40, Some(4)), (42, Some(8)), (44, None)] {
+            apply(
+                &mut c,
+                vec![
+                    Op::CreateText {
+                        id,
+                        text: "".into(),
+                    },
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before,
+                    },
+                ],
+            );
+            check(&mut c, 2);
+        }
+
+        // An ordinary sibling still consumes an element position.
+        c.apply(Op::Create {
+            id: 52,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(class_op(52, "w-10 h-4")).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 52,
+            before: Some(8),
+        })
+        .unwrap();
+        check(&mut c, 2);
+
+        // The core's own decorations are excluded too. A decoration with
+        // structural classes keeps the resolver's existing index-0 fallback.
+        c.apply(Op::Create {
+            id: 46,
+            tag: Tag::View,
+        })
+        .unwrap();
+        let decoration = c.key(46).unwrap();
+        c.nodes[decoration as usize].decoration = true;
+        c.apply(class_op(46, CLASSES)).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 46,
+            before: Some(6),
+        })
+        .unwrap();
+        check(&mut c, 2);
+
+        // Setting classes after insertion must register the parent's
+        // positional children before the next append.
+        c.apply(Op::Create {
+            id: 48,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: 100,
+            child: 48,
+            before: None,
+        })
+        .unwrap();
+        c.apply(class_op(48, CLASSES)).unwrap();
+        assert!(c.nodes[c.key(100).unwrap() as usize].positional_children);
+        child(&mut c, 50, 100);
+
+        for op in [
+            Op::Insert {
+                parent: 2,
+                child: 10,
+                before: Some(4),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 100,
+                child: 6,
+                before: Some(48),
+            },
+            Op::Remove {
+                parent: 2,
+                child: 8,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 50,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 48,
+            },
+        ] {
+            c.apply(op).unwrap();
+            check(&mut c, 2);
+            check(&mut c, 100);
+        }
+
+        // A real tooltip overlay also does not count among the rows.
+        c.apply(Op::Create {
+            id: 60,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(60)),
+        })
+        .unwrap();
+        let overlay = c.overlay_state.tooltips[&2].overlay;
+        c.apply(class_op(overlay, CLASSES)).unwrap();
+        check(&mut c, 2);
+        child(&mut c, 62, 2);
+        c.commit();
+        check(&mut c, 2);
+        check(&mut c, 100);
+
+        // The sole element in the second parent is still both first and last.
+        let only = &c.nodes[c.key(6).unwrap() as usize];
+        assert_eq!(only.view_style.background_color, Color(0x2b7f_ffff));
+        assert_eq!(only.text_style.color, Some(Color(0xffff_ffff)));
+    }
+
+    #[test]
+    fn positional_fixed_style_still_settles_after_reordering() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        for id in [4, 6, 8] {
+            apply(
+                &mut c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    class_op(id, "w-10 h-4 last:fixed"),
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 8);
+        }
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 4);
+        }
+        check(&mut c, 2);
+    }
+}
+
+// Investigation-only timings of structural Tailwind variants during mounting.
+mod positional_audit {
+    use std::{hint::black_box, time::Instant};
+
+    use super::*;
+
+    fn hash(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf29ce484222325, |h, b| {
+            (h ^ *b as u64).wrapping_mul(0x100000001b3)
+        })
+    }
+
+    fn sample(n: u32, variant: &str) -> serde_json::Value {
+        let classes = match variant {
+            "plain" => "w-10 h-4 bg-red-500",
+            "odd" => "w-10 h-4 bg-red-500 odd:bg-blue-500",
+            "first_last" => "w-10 h-4 bg-red-500 first:bg-green-500 last:bg-blue-500",
+            _ => panic!("unknown positional benchmark variant"),
+        };
+        let mut c = core();
+        c.apply(Op::Create {
+            id: 2,
+            tag: Tag::View,
+        })
+        .unwrap();
+        let mut ops = Vec::with_capacity(n as usize * 3 + 1);
+        for i in 0..n {
+            let id = 4 + 2 * i;
+            ops.push(Op::Create { id, tag: Tag::View });
+            ops.push(class_op(id, classes));
+            ops.push(Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            });
+        }
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        let op_count = ops.len();
+        let started = Instant::now();
+        for op in ops {
+            c.apply(op).unwrap();
+        }
+        let apply_us = started.elapsed().as_secs_f64() * 1_000_000.0;
+        let batch = c.commit().unwrap();
+        let total_us = started.elapsed().as_secs_f64() * 1_000_000.0;
+        black_box(&batch);
+
+        let ids: Vec<_> = (0..n).map(|i| 4 + 2 * i).collect();
+        let parent = c.key(2).unwrap();
+        let logical: Vec<_> = c.nodes[parent as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect();
+        assert_eq!(logical, ids);
+        assert_eq!(c.node_count(), n as usize + 2);
+        let rows: Vec<_> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                let node = &c.nodes[c.key(id).unwrap() as usize];
+                let color = match variant {
+                    "odd" if i % 2 == 0 => Color(0x2b7f_ffff),
+                    "first_last" if i + 1 == n as usize => Color(0x2b7f_ffff),
+                    "first_last" if i == 0 => Color(0x00c9_50ff),
+                    _ => Color(0xfb2c_36ff),
+                };
+                assert_eq!(node.view_style.background_color, color, "row {i}");
+                (id, node.frame, node.view_style.background_color)
+            })
+            .collect();
+        serde_json::json!({
+            "kind": "positional_classes",
+            "variant": variant,
+            "children": n,
+            "ops": op_count,
+            "apply_us": apply_us,
+            "total_us": total_us,
+            "mount_items": batch.items.len(),
+            "live_nodes": c.node_count(),
+            "order_hash": format!("{:016x}", hash(format!("{ids:?}").as_bytes())),
+            "state_hash": format!("{:016x}", hash(format!("{rows:?}").as_bytes())),
+            "mount_hash": format!("{:016x}", hash(format!("{:?}", batch.items).as_bytes())),
+        })
+    }
+
+    #[test]
+    fn positional_mount_probe_checks_final_colors_and_order() {
+        for n in [1, 2, 3, 10] {
+            for variant in ["plain", "odd", "first_last"] {
+                black_box(sample(n, variant));
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_positional_mount() {
+        let sizes =
+            std::env::var("NSH_POSITION_SIZES").unwrap_or_else(|_| "100,300,1000,2000".into());
+        let sizes: Vec<u32> = sizes.split(',').map(|n| n.parse().unwrap()).collect();
+        let variants = std::env::var("NSH_POSITION_VARIANTS")
+            .unwrap_or_else(|_| "plain,odd,first_last".into());
+        let variants: Vec<_> = variants.split(',').collect();
+        for &variant in &variants {
+            black_box(sample(10, variant));
+        }
+        for n in sizes {
+            for &variant in &variants {
+                println!("POSITION_AUDIT {}", sample(n, variant));
+            }
+        }
+    }
+}
