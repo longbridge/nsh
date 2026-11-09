@@ -477,22 +477,24 @@ and description. The app stays one app: the same code draws the same screens on 
 
 ### Headings, paragraphs and links
 
-`semantic` draws a view or a text as the HTML element it names, and `href` gives a link view its target
-([the page's markup](../elements/index.md#the-pages-markup)). The element keeps the view's layout, styles and events,
-so the page looks and behaves as before, and its markup reads as a document:
+On the web each view is drawn as the HTML element its props say it is
+([the page's markup](../elements/index.md#the-pages-markup)): a `role="header"` is a heading of its
+`accessibilityLevel`, a [`Link`](../elements/link.md) with an `href` is a link, and `web={{ element }}` names the
+rest. The element keeps the view's layout, styles and events, so the page looks and behaves as before, and its markup
+reads as a document:
 
 ```tsx
-<View semantic="article">
-  <Text semantic="h1">{note.title}</Text>
-  <Text semantic="time">{note.date}</Text>
-  <Each of={note.body}>{(paragraph) => <Text semantic="p">{paragraph()}</Text>}</Each>
-  <View semantic="a" href="/" onPress={() => nav.pop()}>
+<View web={{ element: "article" }}>
+  <Text role="header" accessibilityLevel={1}>{note.title}</Text>
+  <Text web={{ element: "time" }}>{note.date}</Text>
+  <Each of={note.body}>{(paragraph) => <Text web={{ element: "p" }}>{paragraph()}</Text>}</Each>
+  <Link href="/" openWith="app" onOpen={() => nav.pop()}>
     <Text>All notes</Text>
-  </View>
+  </Link>
 </View>
 ```
 
-A press on a link is the app's `onPress`, so the app navigates as it always does; a crawler follows the `href`, a
+A press on a link is the app's `onOpen`, so the app navigates as it always does; a crawler follows the `href`, a
 click with a modifier key or the middle button opens it in a new tab, and a right click shows the browser's menu for
 links (open in a new tab, copy the link) unless the app shows its own with `onContextMenu`.
 

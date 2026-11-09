@@ -8,7 +8,7 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode } = await import(
+const { Player, keyCode, elementTag } = await import(
   `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode };`)}`
 );
 
@@ -93,6 +93,20 @@ test("keyboard context menus have no pointer even when Chromium names a mouse", 
   } finally {
     globalThis.getComputedStyle = saved;
   }
+});
+
+test("views are drawn as headings and links by their role, else the element they name", () => {
+  // Headings: `role="header"`, by level, `h2` without one, levels clamped.
+  assert.equal(elementTag({ role: "header", level: 1 }), "h1");
+  assert.equal(elementTag({ role: "header" }), "h2");
+  assert.equal(elementTag({ role: "header", level: 9 }), "h6");
+  // Links: `role="link"` with the `href` `Link` sets; without one, a view.
+  assert.equal(elementTag({ role: "link", href: "/notes/q3" }), "a");
+  assert.equal(elementTag({ role: "link" }), "div");
+  // `web={{ element }}` names the rest, and wins over the role.
+  assert.equal(elementTag({ element: "nav" }), "nav");
+  assert.equal(elementTag({ role: "header", element: "p" }), "p");
+  assert.equal(elementTag({}), "div");
 });
 
 test("links the app shows no menu for keep the browser's context menu", () => {

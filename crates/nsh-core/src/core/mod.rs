@@ -5062,10 +5062,10 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            Prop::Semantic(value) => {
+            Prop::WebElement(value) => {
                 let props = node.props.get_or_insert_default();
-                if props.semantic != value {
-                    props.semantic = value;
+                if props.web_element != value {
+                    props.web_element = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }

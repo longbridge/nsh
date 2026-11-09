@@ -1293,31 +1293,19 @@ pub enum KeyboardDismissMode {
     Interactive,
 }
 
-/// What a view is in a document (`semantic`): the HTML element the web
-/// draws it as, so search engines and readers of the page's markup see
-/// headings, paragraphs, links and landmarks. Only the web reads it; the
+/// The HTML element the web draws a view or text as (`web={{ element }}`),
+/// for what `role` cannot say: paragraphs, landmarks, lists, emphasis, ...
+/// Headings come from `role="header"` with `accessibilityLevel` and links
+/// from a `Link` with an `href`, everywhere. Only the web reads it; the
 /// layout, styles and events stay the view's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub enum Semantic {
-    /// A heading of the first level (`<h1>`).
-    H1,
-    /// A heading of the second level (`<h2>`).
-    H2,
-    /// A heading of the third level (`<h3>`).
-    H3,
-    /// A heading of the fourth level (`<h4>`).
-    H4,
-    /// A heading of the fifth level (`<h5>`).
-    H5,
-    /// A heading of the sixth level (`<h6>`).
-    H6,
+pub enum WebElement {
     /// A paragraph (`<p>`).
     P,
-    /// A link (`<a>`), to the view's `href`.
-    A,
     /// Navigation links (`<nav>`).
     Nav,
-    /// The header of the page or a section (`<header>`).
+    /// The header of the page or a section (`<header>`), a landmark; a
+    /// heading is `role="header"`.
     Header,
     /// The footer of the page or a section (`<footer>`).
     Footer,
@@ -2748,11 +2736,11 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
-    /// `semantic`: what the view is in a document, the HTML element the web
-    /// draws it as (`"h1"`, `"p"`, `"a"`, `"nav"`, ...); the other
-    /// platforms keep the view as it is.
-    #[prop(js = "semantic")]
-    Semantic(Option<Semantic>),
+    /// `web={{ element }}`: the HTML element the web draws the view or text
+    /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
+    /// the other platforms keep the view as it is.
+    #[prop(web = "element")]
+    WebElement(Option<WebElement>),
     /// `windowDrag` (desktops): pressing the view drags the window, as its
     /// title bar would (double-clicking maximizes it); `false` keeps a part
     /// of a draggable view clickable. The nearest view that sets it

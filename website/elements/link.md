@@ -171,7 +171,9 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 - iOS, Android and Mac Catalyst: a press is a tap that ends on the link.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a press is a click. On macOS and the web, Return and Space also
   open the link that has the keyboard focus.
-- The web renders a link as an element with `role="link"`.
+- The web renders a link with an `href` as an `<a href>` (crawlers follow it; a click with a modifier key or the
+  middle button opens it in a new tab, and a right click shows the browser's menu for links), one without as an
+  element with `role="link"`.
 - Terminal: the text inside an enabled link whose `href` is a URL (not a path of the app's) is an OSC 8 hyperlink
   to it, which the terminal emulator opens itself on a modified click, outside `openWith`. The Linux console
   (`TERM=linux`) shows plain text.

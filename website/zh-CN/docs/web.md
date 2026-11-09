@@ -424,20 +424,20 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 ### 标题、段落和链接
 
-`semantic` 把视图或文本绘制成它指定的 HTML 元素，`href` 给链接视图设定目标（[页面的标记](../elements/index.md#页面的标记)）。元素保留视图的布局、样式和事件，因此页面的外观和行为不变，而它的标记读起来就是一篇文档：
+在 Web 上，每个视图都绘制成它的属性所表明的 HTML 元素（[页面的标记](../elements/index.md#页面的标记)）：`role="header"` 是对应 `accessibilityLevel` 级别的标题，带 `href` 的 [`Link`](../elements/link.md) 是链接，其余元素用 `web={{ element }}` 指定。元素保留视图的布局、样式和事件，因此页面的外观和行为不变，而它的标记读起来就是一篇文档：
 
 ```tsx
-<View semantic="article">
-  <Text semantic="h1">{note.title}</Text>
-  <Text semantic="time">{note.date}</Text>
-  <Each of={note.body}>{(paragraph) => <Text semantic="p">{paragraph()}</Text>}</Each>
-  <View semantic="a" href="/" onPress={() => nav.pop()}>
+<View web={{ element: "article" }}>
+  <Text role="header" accessibilityLevel={1}>{note.title}</Text>
+  <Text web={{ element: "time" }}>{note.date}</Text>
+  <Each of={note.body}>{(paragraph) => <Text web={{ element: "p" }}>{paragraph()}</Text>}</Each>
+  <Link href="/" openWith="app" onOpen={() => nav.pop()}>
     <Text>All notes</Text>
-  </View>
+  </Link>
 </View>
 ```
 
-按压链接触发的是应用的 `onPress`，应用照常导航；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时在新标签页中打开它；右键点击显示浏览器的链接菜单（在新标签页中打开、复制链接），除非应用用 `onContextMenu` 显示自己的菜单。
+按压链接触发的是应用的 `onOpen`，应用照常导航；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时在新标签页中打开它；右键点击显示浏览器的链接菜单（在新标签页中打开、复制链接），除非应用用 `onContextMenu` 显示自己的菜单。
 
 ### 标题和描述
 

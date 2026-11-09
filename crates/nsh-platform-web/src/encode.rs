@@ -819,9 +819,10 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
-    // The HTML element the view is drawn as (`semantic`), and a link's target.
-    if let Some(tag) = p.semantic {
-        let _ = write!(s, ",\"semantic\":{}", json_str(enum_name(&tag)));
+    // The HTML element the view is drawn as (`web={{ element }}`), and a
+    // link's target (`Link`'s `href`).
+    if let Some(tag) = p.web_element {
+        let _ = write!(s, ",\"element\":{}", json_str(enum_name(&tag)));
     }
     if let Some(h) = &p.href {
         let _ = write!(s, ",\"href\":{}", json_str(h));

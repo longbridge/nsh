@@ -1,24 +1,22 @@
-// A case of the API's test suite (docs/dev/compatibility.md): what a view
-// or text is in a document (`semantic`, the HTML element the web draws it
-// as) and where a link view leads (`href`). The platform receives both
-// with the view's props; a press on the link stays the view's `onPress`.
+// A case of the API's test suite (docs/dev/compatibility.md): the HTML
+// element the web draws a view or text as where `role` cannot say it
+// (`web={{ element }}`). The platform receives it with the view's props;
+// headings are `role="header"` with a level, links `Link`s with an `href`.
 // Its script checks each.
-import { Text, View, signal } from "nsh";
+import { Text, View } from "nsh";
 
 function App() {
-  const presses = signal(0);
   return (
-    <View testID="article" semantic="article" style={{ flex: 1, paddingTop: 64 }}>
-      <Text testID="heading" semantic="h1">
+    <View testID="article" web={{ element: "article" }} style={{ flex: 1, paddingTop: 64 }}>
+      <Text testID="heading" role="header" accessibilityLevel={1}>
         Notes
       </Text>
-      <Text testID="paragraph" semantic="p">
+      <Text testID="date" web={{ element: "time" }}>
+        2026-11-09
+      </Text>
+      <Text testID="paragraph" web={{ element: "p" }}>
         A paragraph
       </Text>
-      <View testID="link" semantic="a" href="/notes/q3" onPress={() => presses.set(presses() + 1)}>
-        <Text>Open note</Text>
-      </View>
-      <Text>{`Presses: ${presses()}`}</Text>
     </View>
   );
 }

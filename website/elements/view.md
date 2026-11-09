@@ -92,7 +92,7 @@ set (`flexDirection: "column"`, `flex-col`, `.flex_col()`). A view that sets no 
 `onPressUp`, `delayLongPress`, `hitSlop`), the state styles (`activeStyle`, `hoverStyle`,
 `focusStyle`, `disabledStyle`, `checkedStyle`), `onMouseEnter` / `onMouseMove` / `onMouseLeave`, `onContextMenu`,
 `onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `focusable`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
-markup on the web (`semantic`, `href`), the
+markup on the web (`web={{ element }}`), the
 gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the accessibility props
 and `ios` / `android` / `desktop`.
 

@@ -71,6 +71,20 @@ const ARIA_ROLES = {
   search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
 };
 
+/**
+ * The HTML element a view or text is drawn as, from what its props say it
+ * is: a heading (`role="header"`, `h1` to `h6` by `accessibilityLevel`,
+ * `h2` without one, as ARIA's default), a link (`role="link"` with an
+ * `href`, as `Link` sets), else the element `web={{ element }}` names, else
+ * a `div`.
+ */
+export function elementTag(props) {
+  if (props.element) return props.element;
+  if (props.role === "header") return `h${Math.min(6, Math.max(1, props.level ?? 2))}`;
+  if (props.role === "link" && props.href != null) return "a";
+  return "div";
+}
+
 /** How far a refreshable scroll view is pulled to refresh, and the room its spinner takes while refreshing (as on Linux and macOS), unless the app draws its own indicator (`refreshIndicator`: its height is both). */
 const REFRESH_PULL = 64;
 const REFRESH_SPACE = 56;
@@ -131,7 +145,7 @@ const KEYFRAMES = `
   touch-action: none; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
-/* Views drawn as semantic elements (\`semantic\`) look as a view does: none of
+/* Views drawn as document elements (headings, links, \`web={{ element }}\`) look as a view does: none of
    the browser's margins, fonts, colors, underlines or list markers. */
 :is(h1, h2, h3, h4, h5, h6, p, a, ul, ol, li, strong, em, blockquote, figure, figcaption, time, address, nav, header,
   footer, main, article, section, aside).nsh-v { display: block; font: inherit; color: inherit; text-decoration: none;
@@ -2557,7 +2571,7 @@ class Player {
   op_vp([, id, props]) {
     let el = this.view(id);
     if (!el) return;
-    el = this.retag(el, props.semantic ?? null);
+    el = this.retag(el, elementTag(props));
     if (props.href != null) el.setAttribute("href", props.href);
     else el.removeAttribute("href");
     el._props = props;
@@ -2577,15 +2591,14 @@ class Player {
   }
 
   /**
-   * The view drawn as the HTML element its `semantic` names (`h1`, `p`,
-   * `a`, `nav`, ...), else a `div`: the element is replaced by one of that
+   * The view drawn as the HTML element `elementTag` gives it (`h1`, `a`,
+   * `p`, `nav`, ...), else a `div`: the element is replaced by one of that
    * tag carrying its attributes, children and fields, so search engines
    * and the page's markup see the document's structure while the layout,
    * styles and events stay the view's. Views whose element holds a
    * control of its own (images, scroll views, canvases, ...) keep theirs.
    */
-  retag(el, semantic) {
-    const tag = semantic ?? "div";
+  retag(el, tag) {
     if (el.localName === tag || (el._kind !== "view" && el._kind !== "text")) return el;
     const next = document.createElement(tag);
     for (const { name, value } of el.attributes) next.setAttribute(name, value);
@@ -7112,7 +7125,7 @@ class Player {
   installInput() {
     const root = this.root;
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
-    // A link view (`semantic="a"`) is the app's to press: a plain click
+    // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
     // middle button opens its `href` as the browser would.
     root.addEventListener("click", (e) => {
@@ -7203,7 +7216,7 @@ class Player {
         });
         return true;
       }
-      // A link (`semantic="a"` with an `href`) the app shows no menu for has
+      // A link (`Link` with an `href`) the app shows no menu for has
       // the browser's: open in a new tab, copy the link.
       if (el.localName === "a" && el.hasAttribute("href")) return true;
       if (el.matches(".nsh-field, .nsh-selectable")) return false;

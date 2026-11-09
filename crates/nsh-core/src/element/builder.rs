@@ -1821,11 +1821,13 @@ pub trait Interactive: Element {
         self
     }
 
-    /// What the view is in a document: the HTML element the web draws it
-    /// as (a heading, a paragraph, a link, a landmark), for search engines
-    /// and readers of the page's markup. The other platforms ignore it.
-    fn semantic(mut self, semantic: crate::Semantic) -> Self {
-        super::host::set(self.node(), Prop::Semantic(Some(semantic)));
+    /// The HTML element the web draws the view as (a paragraph, a
+    /// landmark, a list), for search engines and readers of the page's
+    /// markup, where `role` cannot say it: headings are
+    /// `role(AccessibilityRole::Header)` with a level, links `Link`s. The
+    /// other platforms ignore it.
+    fn web_element(mut self, element: crate::WebElement) -> Self {
+        super::host::set(self.node(), Prop::WebElement(Some(element)));
         self
     }
 

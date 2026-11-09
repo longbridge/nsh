@@ -943,20 +943,22 @@ HTML is: its views carry the document's structure, its pages are URLs, and its h
 Prerendering (writing each URL's first screen as static HTML ahead of time, or on demand as incremental static
 regeneration does) is a tool of the site's own beside NSH; `examples/seo-site` is one (`server.mjs`, `render.mjs`).
 
-**Semantic elements.** A view's or text's `semantic` (`Prop::Semantic`, `ViewProps::semantic`, the `Semantic`
-enum) and `href` (`Prop::Href`) go to the web in the view's props (`encode.rs` `props_json`). `nsh.js` `retag`
-replaces the view's element by one of that tag (`h1`, `p`, `a`, `nav`, ...), carrying its attributes, children and
-fields and taking its place in `views`; views whose element is a control of its own (images, scroll views, canvases,
-inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the browser's margins, fonts, colors, underlines
-and list markers off those tags, so the view looks as a `div` does. A link view gets `href` and is not draggable; a
-plain click on it stays the app's (`onPress`; the root's `click` listener prevents the browser's navigation), a click
-with a modifier key or the middle button opens `href` as the browser does, and a context menu on it is the
-browser's (open in a new tab, copy the link) unless the link or a view in it listens for `onContextMenu`
-(`contextMenu`, where the runtime otherwise prevents the browser's menu). The other backends store the props and
-draw nothing differently.
+**Document elements.** `nsh.js` `elementTag` picks the HTML element a view or text is drawn as from its props
+(`encode.rs` `props_json`): `role="header"` is `h1` to `h6` by `accessibilityLevel` (`h2` without one, ARIA's
+default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `Link` sets) is `a`, and
+`web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
+say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
+tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
+of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
+link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
+listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the
+browser does, and a context menu on it is the browser's (open in a new tab, copy the link) unless the link or a view
+in it listens for `onContextMenu` (`contextMenu`, where the runtime otherwise prevents the browser's menu). The other
+backends store `web_element` and draw nothing differently.
 
 **The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the
-QuickJS hosts serve `nsh-js`'s `web_page.rs` (`isAvailable` false, `Head` renders nothing), the browser runtime its
+QuickJS hosts serve `nsh-js`'s `web_page.rs` (`Head` renders nothing), the browser runtime its
 own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web` namespace). `page.js` runs in the
 page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
 mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later

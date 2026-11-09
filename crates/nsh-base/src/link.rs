@@ -97,7 +97,7 @@ pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
         })
         .hit_slop(props.hit_slop)
         // Where it goes, for a platform that links its text (a terminal's
-        // hyperlink); a disabled link goes nowhere.
+        // hyperlink, the web's `<a href>`); a disabled link goes nowhere.
         .__link_href(Prop::bind(move || {
             if disabled.get() {
                 None
