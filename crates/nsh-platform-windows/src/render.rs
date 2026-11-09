@@ -1433,9 +1433,6 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
                 device_lost(surface);
                 return false;
             }
-            if resized {
-                gfx::await_composition();
-            }
             if let (Some(fps), Some(painted)) = (&fps, painted) {
                 fps.painted(painted, shown.elapsed());
             }
@@ -1721,9 +1718,6 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
                 *swap = None;
                 device_lost(surface);
                 return false;
-            }
-            if resized {
-                gfx::await_composition();
             }
             crate::surface::items_placed(placed, drawn.items, None);
             crate::surface::composed_placed(composed, composition, drawn.composed, &drawn.layers);

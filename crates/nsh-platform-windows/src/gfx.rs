@@ -282,10 +282,6 @@ struct Latency {
     wake: Arc<Wake>,
     /// The registered wait, if any (`armed`).
     wait: Cell<HANDLE>,
-    /// Frames presented without a token (a resize draws at once, room or
-    /// not): the counts their presents give back are theirs, so they are
-    /// taken before a frame may count on room in the queue again.
-    owed: Cell<u32>,
 }
 
 /// The thread pool's callback once a swap chain has room for a frame.
@@ -327,38 +323,19 @@ impl Latency {
                 hwnd: hwnd.0 as isize,
             }),
             wait: Cell::new(HANDLE::default()),
-            owed: Cell::new(0),
         })
     }
 
     /// Whether a frame may be drawn and presented now (takes a token).
     fn ready(&self) -> bool {
-        loop {
-            if self.wake.holding.load(Ordering::Acquire) {
-                let owed = self.owed.get();
-                if owed == 0 {
-                    return true;
-                }
-                // The count was a tokenless frame's: room it took already.
-                self.owed.set(owed - 1);
-                self.wake.holding.store(false, Ordering::Release);
-                continue;
-            }
-            // SAFETY: a poll of a live semaphore.
-            if unsafe { WaitForSingleObject(self.handle, 0) } != WAIT_OBJECT_0 {
-                return false;
-            }
-            self.wake.holding.store(true, Ordering::Release);
-        }
-    }
-
-    /// Takes a token for a frame that is presented now whatever the queue
-    /// holds (a resize); `false`: none was free, and the frame owes one.
-    fn take_or_owe(&self) -> bool {
-        if self.ready() {
+        if self.wake.holding.load(Ordering::Acquire) {
             return true;
         }
-        self.owed.set(self.owed.get() + 1);
+        // SAFETY: a poll of a live semaphore.
+        if unsafe { WaitForSingleObject(self.handle, 0) } == WAIT_OBJECT_0 {
+            self.wake.holding.store(true, Ordering::Release);
+            return true;
+        }
         false
     }
 
@@ -611,10 +588,11 @@ impl SwapChain {
     /// queue or not, so that the window is never shown stretched. With room
     /// it takes a token and waits for the vertical blank as any frame does.
     /// Without, it does not wait for the blank (the queue already holds a
-    /// frame; DWM shows the newest at the next one) and owes the token, so
-    /// the next frame does not count on room the resize took.
+    /// frame; DWM shows the newest at the next one) and takes no token: the
+    /// latency semaphore is capped at one, so the count its present gives
+    /// back is dropped and owes nothing.
     pub(crate) fn resize_interval(&self) -> u32 {
-        if self.latency.take_or_owe() { 1 } else { 0 }
+        if self.latency.ready() { 1 } else { 0 }
     }
 
     /// Queues the frame drawn for the vertical blank `sync` intervals on
@@ -643,17 +621,4 @@ impl SwapChain {
         self.last = if result.is_ok() { changed } else { None };
         result
     }
-}
-
-/// Waits until DWM has composed the frame just presented for a resize.
-///
-/// DWM shows a window at its new size at its next composition, but a flip
-/// model frame presented for that size only at the one after: until then
-/// the window's new area shows the swap chain's background (white edges)
-/// and the content trails the pointer. The sizing loop sends the next
-/// `WM_SIZE` only once this one returns, so waiting here keeps each size
-/// and its frame in the same composition, at most one size per refresh.
-pub(crate) fn await_composition() {
-    // SAFETY: a plain call; it fails (not composing) without waiting.
-    let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
 }
