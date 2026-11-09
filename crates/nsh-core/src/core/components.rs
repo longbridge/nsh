@@ -5632,7 +5632,7 @@ impl<M: TextEngine> Core<M> {
                 let address = self.components.url_schemes.address.get();
                 answer.borrow_mut().deliver(address);
             }
-            Action::SetAppUrl(url) => {
+            Action::SetAppUrl(url, history) => {
                 // Checked where the app called (`set_app_url`, `setUrl`);
                 // where the app is the page, the address stays of its
                 // origin (both refuse others first).
@@ -5649,9 +5649,13 @@ impl<M: TextEngine> Core<M> {
                 address.set(url.clone());
                 // Only the web shows an address (its history entries).
                 if web {
+                    let command = match history {
+                        crate::url_scheme::HistoryBehavior::Push => Command::PushAppUrl(url),
+                        _ => Command::SetAppUrl(url),
+                    };
                     let _ = self.apply_op(Op::Command {
                         id: crate::ROOT_ID,
-                        command: Command::SetAppUrl(url),
+                        command,
                     });
                 }
             }

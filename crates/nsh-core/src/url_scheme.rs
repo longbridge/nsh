@@ -52,6 +52,22 @@ pub(crate) const BASE: &str = "base";
 /// a change ([`crate::element::next_app_url_change`]), not as `open`.
 pub(crate) const CHANGE: &str = "change";
 
+/// How the app's address it sets meets the history (TS: `UrlScheme.setUrl`'s
+/// `history`, Rust: [`set_app_url_with`](crate::element::set_app_url_with)):
+/// only the web has one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HistoryBehavior {
+    /// The current entry's address (`history.replaceState`).
+    #[default]
+    Replace,
+    /// An entry of its own after the current one (`history.pushState`),
+    /// with the app's pages as they are, so the browser's back goes back to
+    /// the address before it. An entry the same turn pushes for a page
+    /// takes the address instead, and the address shown makes none.
+    Push,
+}
+
 /// An address the app moved to without making the move itself (TS:
 /// `UrlScheme.on("change", ...)`, Rust:
 /// [`next_app_url_change`](crate::element::next_app_url_change)): on the
@@ -335,6 +351,11 @@ mod tests {
         }
         assert_eq!(AppUrlChangeCause::parse("open"), None);
         assert_eq!(AppUrlChangeCause::parse("Back"), None);
+    }
+
+    #[test]
+    fn an_address_replaces_the_history_entrys_unless_it_asks_to_push() {
+        assert_eq!(HistoryBehavior::default(), HistoryBehavior::Replace);
     }
 
     #[test]

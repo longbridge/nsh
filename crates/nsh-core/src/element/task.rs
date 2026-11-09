@@ -123,8 +123,9 @@ pub(crate) enum Action {
     NextAppUrlChange(AnswerSlot<crate::url_scheme::AppUrlChange>),
     /// The app's address resolves the slot ([`crate::url_scheme`]).
     AppUrl(AnswerSlot<Option<String>>),
-    /// The app sets its address ([`crate::url_scheme`]).
-    SetAppUrl(String),
+    /// The app sets its address ([`crate::url_scheme`]), replacing the
+    /// history entry's or pushing one.
+    SetAppUrl(String, crate::url_scheme::HistoryBehavior),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here

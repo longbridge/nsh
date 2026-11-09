@@ -5258,6 +5258,7 @@ class Player {
   resetHistory() {
     if (!this.history) return;
     this.pageUrl = null;
+    this.pageUrlPush = false;
     this.endPopAnswer();
     const index = this.historyIndex;
     this.historyIndex = 0;
@@ -5268,13 +5269,14 @@ class Player {
     history.go(-index);
   }
 
-  /** A new entry after the current one, at `depth`: those after it go. */
-  pushEntry(depth) {
+  /** A new entry after the current one, at `depth`, with address `url`
+   * (the current one's when not given): those after it go. */
+  pushEntry(depth, url) {
     const index = this.historyIndex + 1;
+    history.pushState(this.historyState(depth, index), "", url);
     this.historyDepths.length = index;
     this.historyDepths.push(depth);
     this.historyIndex = index;
-    history.pushState(this.historyState(depth, index), "");
   }
 
   /** The newest entry before the current one at most `depth` deep: where
@@ -5286,10 +5288,13 @@ class Player {
 
   /** `UrlScheme.setUrl` / `set_app_url`: the current entry's address, once
    * the entries of the pages pushed or popped with it exist
-   * (`syncHistory`). Resolved as `replaceState` resolves it (against
+   * (`syncHistory`); with `push` (`history: "push"`) an entry of its own
+   * after it, unless the turn pushed a page's (which takes the address) or
+   * it is the address shown. In one turn the last address wins, and a push
+   * wins over a replace. Resolved as `replaceState` resolves it (against
    * `<base href>`); one of another origin is dropped (TS's `setUrl` throws
    * for it first, in `runtime.js`). */
-  setPageUrl(url) {
+  setPageUrl(url, push = false) {
     if (!this.history) return;
     let resolved;
     try {
@@ -5303,6 +5308,7 @@ class Player {
       return;
     }
     this.pageUrl = resolved.href;
+    if (push) this.pageUrlPush = true;
     this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
     this.syncHistorySoon();
   }
@@ -5347,11 +5353,16 @@ class Player {
     // `popstate` syncs again).
     if (this.pageUrl != null && !this.ignoredPops) {
       const url = this.pageUrl;
+      // An entry of its own, at the depth of the pages shown, when the
+      // turn pushed no page's and the address is not the one shown.
+      const push = this.pageUrlPush && depth <= have && url !== location.href;
       this.pageUrl = null;
+      this.pageUrlPush = false;
       try {
         // Resolved as `replaceState` does, against `<base href>` when the
         // page has one.
-        history.replaceState(history.state, "", url);
+        if (push) this.pushEntry(depth, url);
+        else history.replaceState(history.state, "", url);
         this.shownUrl = url;
         if (!this.historyIndex) this.firstUrl = url;
       } catch (error) {
@@ -6104,6 +6115,7 @@ class Player {
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
+      case "pushAppUrl": this.setPageUrl(args[0], true); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.

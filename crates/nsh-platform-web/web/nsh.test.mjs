@@ -1909,7 +1909,8 @@ function historyPlayer(t, { href = "https://a.test/inbox" } = {}) {
     pushState(state, _title, url) {
       entries.length = ++at;
       entries.push({ state, url: url ?? location.href });
-      calls.push(["push", state.nsh, state.nshIndex]);
+      if (url != null) location.href = url;
+      calls.push(["push", state.nsh, state.nshIndex, ...(url == null ? [] : [url])]);
     },
     replaceState(state, _title, url) {
       entries[at] = { state, url: url ?? location.href };
@@ -2040,6 +2041,92 @@ test("a forward to a page the stack no longer has is still a link (open), not a 
   user(1);
   assert.equal(calls[0][2].change, undefined);
   assert.deepEqual(calls[0], ["event", "onUrlScheme", { url: "https://a.test/inbox", page: true }]);
+});
+
+/** Runs `turn` as one engine turn of the app's: what it sets is synced
+ * once, after it. */
+function inOneTurn(player, turn) {
+  const soon = player.syncHistorySoon;
+  player.syncHistorySoon = () => {};
+  try {
+    turn();
+  } finally {
+    player.syncHistorySoon = soon;
+  }
+  player.syncHistory();
+}
+
+test("UrlScheme.setUrl with history push makes an entry of its own at the pages shown, which the browser's back goes back from", (t) => {
+  const { player, calls, user } = historyPlayer(t);
+  player.setPageUrl("?tab=live", true);
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?tab=live"]]);
+  assert.equal(player.historyDepth, 0);
+  assert.equal(player.firstUrl, "https://a.test/inbox", "the first entry keeps its address");
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+  user(1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox?tab=live", page: true, change: "forward" }]]);
+});
+
+test("in one turn, pushes make one entry with the last address, and a push wins over a replace", (t) => {
+  const { player, calls } = historyPlayer(t);
+  inOneTurn(player, () => {
+    player.setPageUrl("?tab=live", true);
+    player.setPageUrl("?tab=all", true);
+    player.setPageUrl("?tab=mine");
+  });
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?tab=mine"]]);
+  // A replace in a later turn is the pushed entry's.
+  player.setPageUrl("?tab=mine&sort=new");
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=mine&sort=new"]]);
+});
+
+test("a push in the turn that pushes a page gives the page's entry its address, with no entry of its own", (t) => {
+  const { player, calls, app } = historyPlayer(t);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?message=42", true);
+  });
+  assert.deepEqual(calls.splice(0), [["push", 1, 1], ["replace", 1, 1, "https://a.test/inbox?message=42"]]);
+});
+
+test("a push in the turn that pops a page waits for the back over its entry, then makes its own", (t) => {
+  const { player, calls, app, at } = historyPlayer(t);
+  app.depth = 1;
+  player.syncHistory();
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -1], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  assert.equal(player.historyDepth, 0);
+});
+
+test("a push drops the browser's forward entries, and the address shown makes none", (t) => {
+  const { player, calls, user, entries } = historyPlayer(t);
+  player.setPageUrl("?tab=live", true);
+  player.setPageUrl("?tab=all", true);
+  user(-2);
+  calls.splice(0);
+  player.setPageUrl("?tab=mine", true);
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?tab=mine"]]);
+  assert.equal(entries().length, 2);
+  assert.deepEqual(player.historyDepths, [0, 0]);
+  // The address the entry has already: no entry.
+  player.setPageUrl("?tab=mine", true);
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=mine"]]);
+});
+
+test("a new run drops a push waiting for its turn", (t) => {
+  const { player, calls } = historyPlayer(t);
+  player.syncHistorySoon = () => {};
+  player.setPageUrl("?tab=live", true);
+  player.resetHistory();
+  player.syncHistory();
+  assert.deepEqual(calls, []);
+  assert.equal(player.pageUrlPush, false);
 });
 
 test("a key event without `key` falls back to its physical key instead of throwing", () => {

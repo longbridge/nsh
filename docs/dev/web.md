@@ -813,6 +813,14 @@ browsers' touches into what phones report:
   popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
   `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost
   stays `open`.
+- **Pushed addresses** (`setUrl(url, { history: "push" })`, `set_app_url_with(url, HistoryBehavior::Push)`): the core
+  sends the web root `Command::PushAppUrl` (`pushAppUrl`) instead of `SetAppUrl`, and `setPageUrl` marks the waiting
+  address a push (`pageUrlPush`; in one turn the last address wins and a push wins over a replace). `syncHistory`
+  pushes it as an entry of its own (`pushEntry(depth, url)`, which drops the mirror's forward entries as the browser
+  drops its own) when the turn pushed no page's entry (else the address goes on the new top entry, as a replace) and
+  it is not the landed entry's address; a turn that popped pages pushes it once its `history.go` lands. A new run
+  drops a push waiting (`resetHistory`). `browser/address.js` hands the options to the core as they are; the core
+  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

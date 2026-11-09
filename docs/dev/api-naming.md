@@ -49,7 +49,8 @@ go elsewhere under these rules rather than into them.
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
 - A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
   object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
-  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`, `UrlScheme.on("change", …)` → `next_app_url_change()`.
+  `url` would read as any URL), `setUrl(url, { history })` → `set_app_url_with(url, history)` (the option as an argument, as
+  `on_key_with`), `UrlScheme.on("open", …)` → `next_url_scheme_open()`, `UrlScheme.on("change", …)` → `next_app_url_change()`.
 
 ## Conventions
 

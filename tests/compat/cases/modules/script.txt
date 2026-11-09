@@ -136,7 +136,7 @@ expect Listener: listening
 expect Address: null
 expect Changes: none
 tap id:set-url
-expect Address: compat://orders/42, wrong TypeError TypeError
+expect Address: compat://orders/43, wrong TypeError TypeError TypeError
 expect Changes: none
 tap id:stop-links
 expect Listener: stopped

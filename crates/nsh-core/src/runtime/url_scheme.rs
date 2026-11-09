@@ -85,17 +85,48 @@ impl UrlScheme {
     }
 
     /// Sets the current page's address: on the web it replaces the
-    /// current history entry's (as `history.replaceState`); the native
-    /// platforms keep it for `url()`. The app's pages stay as they are.
-    pub(crate) fn set_url(url: String, sys: System, cx: CallCx<'_>) -> Result<(), JsError> {
+    /// current history entry's (as `history.replaceState`), or with
+    /// `history: "push"` is an entry of its own after it (as
+    /// `history.pushState`), which the browser's back goes back from; the
+    /// native platforms keep it for `url()` either way. The app's pages
+    /// stay as they are.
+    pub(crate) fn set_url(
+        url: String,
+        options: Option<SetUrlOptions>,
+        sys: System,
+        cx: CallCx<'_>,
+    ) -> Result<(), JsError> {
         crate::url_scheme::check_address(&url).map_err(JsError::Type)?;
+        let history = match options.and_then(|o| o.history) {
+            Some(SetUrlHistory::Push) => crate::url_scheme::HistoryBehavior::Push,
+            _ => crate::url_scheme::HistoryBehavior::Replace,
+        };
         // Written at once, so `url()` reads it back; the web's history
         // entry follows in order with what JS sent before (the stack's
         // changes).
         sys.app_url.set(url.clone());
-        cx.start(async move { crate::element::set_app_url_from_js(url) });
+        cx.start(async move { crate::element::set_app_url_from_js(url, history) });
         Ok(())
     }
+}
+
+/// How `UrlScheme.setUrl` sets the address.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct SetUrlOptions {
+    /// `"replace"` (when not given) replaces the current history entry's
+    /// address; `"push"` makes it an entry of its own after it. Only the
+    /// web has a history.
+    history: Option<SetUrlHistory>,
+}
+
+/// `UrlScheme.setUrl`'s `history`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub(crate) enum SetUrlHistory {
+    /// The current entry's address.
+    #[default]
+    Replace,
+    /// An entry of its own after the current one.
+    Push,
 }
 
 /// `UrlScheme.on`'s events.

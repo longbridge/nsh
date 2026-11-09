@@ -2026,14 +2026,14 @@ const UrlScheme: {
   /** The app's address, or null when it has none. */
   url(): string | null;
   /** Sets the address of the page shown; the app's pages stay as they are. */
-  setUrl(url: string): void;
+  setUrl(url: string, options?: { history?: "replace" | "push" }): void;
 };
 ```
 
 | Platform | `url()` | `setUrl(url)` |
 | --- | --- | --- |
-| The web, the app the whole page | The page's address: the one it loaded, what `setUrl` set, or the entry's the browser's back went back to | Replaces the current history entry's address, resolved as `history.replaceState` resolves it (against the page's `<base href>`), after the entries of the pages pushed or popped in the same turn |
-| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()`; giving it to the system (Handoff, App Links) is the embedding app's |
+| The web, the app the whole page | The page's address: the one it loaded, what `setUrl` set, or the entry's the browser's back went back to | Replaces the current history entry's address, resolved as `history.replaceState` resolves it (against the page's `<base href>`), after the entries of the pages pushed or popped in the same turn; with `history: "push"`, an entry of its own after it, as `history.pushState` makes one (below) |
+| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()`, with `history: "push"` too (there is no history to push to); giving it to the system (Handoff, App Links) is the embedding app's |
 
 A URL that is not a string, longer than 16 KiB or with whitespace is a `TypeError`, and so on the web, when the app is
 the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too, and `url()` reads it as it is: a link,
@@ -2085,6 +2085,25 @@ export function App() {
 Rust code awaits `app_url()` and calls `set_app_url(url)` of `nsh_core::prelude`, beside `next_url_scheme_open()`; the
 same address as `url()` and `setUrl`, and `set_app_url` returns an error for the URLs `setUrl` throws for. On the web it
 resolves a URL against the page's base, as `setUrl` does, and one of another origin than the page's is an error.
+
+An address that is a place of its own in the app, with no page pushed for it (a tab, a filter or sort in the query, a
+split view's selected row), is set with `history: "push"`, so the browser's back goes back to the address before it
+instead of leaving the page. The app hears that back and the forward after it as
+[`change`](#urlschemeonchange):
+
+```tsx
+function selectTab(tab: Tab) {
+  current.set(tab);
+  UrlScheme.setUrl(`?tab=${tab}`, { history: "push" });
+}
+UrlScheme.on("change", ({ url }) => current.set(tabOf(url)));
+```
+
+A push is an entry at the pages shown, after the current one, and drops the browser's forward entries, as
+`history.pushState` does. In the turn that pushes a page, the address goes to the page's entry, with no entry of its
+own (as `onChange` sets it); in the turn that pops one, it is an entry after the one the back lands on. Pushing the
+address shown makes no entry, and in one turn the last address wins and a push wins over a replace. `history` of
+another value is a `TypeError`. Rust calls `set_app_url_with(url, HistoryBehavior::Push)` (`nsh_core::url_scheme`).
 
 ### UrlScheme.on("change")
 
