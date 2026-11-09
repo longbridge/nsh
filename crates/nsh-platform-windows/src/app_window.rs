@@ -750,6 +750,8 @@ pub(crate) fn handle(
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),
         WM_SIZE => {
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             if let Some(window) = &window {
                 resized(surface, window);
                 // Drawn now, so that it never shows stretched or stale
