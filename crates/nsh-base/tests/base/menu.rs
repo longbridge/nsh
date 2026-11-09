@@ -5,11 +5,12 @@
 //! closes the menu unless `closeOnSelect` is false; toggling one item sends
 //! only that item and its indicator; opening it from the keyboard (Return,
 //! Space or Down on its trigger) focuses its first enabled item, Up its
-//! last, a press none; closing it with Escape or a choice gives the focus
-//! back to its trigger. A desktop menu, on a Mac. A context menu opened
+//! last, a press none, after which Down or Home focus the first enabled
+//! item and Up or End the last; closing it with Escape or a choice gives
+//! the focus back to its trigger. A desktop menu, on a Mac. A context menu opened
 //! from the keyboard (Shift+F10 on its focused trigger, in the browser
 //! and on Linux) focuses its first enabled item, one opened by the secondary button
-//! none.
+//! none, until an arrow key.
 
 use std::{
     collections::HashMap,
@@ -426,6 +427,49 @@ fn a_press_on_the_trigger_focuses_no_item() {
     assert!(app.app.shows("Open"), "still open");
 }
 
+#[test]
+fn after_a_press_the_arrows_home_and_end_focus_an_end_of_the_enabled_items() {
+    // New is disabled: Down and Home go past it to Open. Once an item has
+    // the focus, its own keys move on from it (Down twice: Save).
+    for (keys, chosen) in [
+        (&["down"][..], "Open"),
+        (&["home"][..], "Open"),
+        (&["up"][..], "Quit"),
+        (&["end"][..], "Quit"),
+        (&["down", "down"][..], "Save"),
+        (&["up", "up"][..], "Save"),
+        (&["end", "home"][..], "Open"),
+    ] {
+        let mut app = start_with(Root::of::<FileMenu>());
+        app.app.press("id:file").unwrap();
+        app.app.wait_for("Open").unwrap();
+        for key in keys {
+            app.app.press_key(key).unwrap();
+        }
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{keys:?}: {e}"));
+    }
+}
+
+#[test]
+fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Open", std::time::Duration::from_secs(2))
+        .unwrap();
+    // Closed, the arrows are the trigger's again: Up opens it at Quit.
+    app.app.press_key("up").unwrap();
+    app.app.wait_for("Quit").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Quit").unwrap();
+}
+
 /// A document whose context menu's first item is disabled: New
 /// (disabled), Rename, Delete. The text says the item chosen last and how
 /// the last `onContextMenu` of a plain view beside it came.
@@ -538,6 +582,20 @@ fn a_secondary_click_opens_a_context_menu_with_no_item_focused() {
     app.app.press_key("space").unwrap();
     assert!(app.app.shows("chose:none"), "no item had the focus");
     assert!(app.app.shows("Rename"), "still open");
+}
+
+#[test]
+fn after_a_secondary_click_down_focuses_the_first_enabled_item() {
+    for (key, chosen) in [("down", "Rename"), ("up", "Delete")] {
+        let mut app = start_on(Root::of::<DocumentMenu>(), Os::Web);
+        app.app.right_click("id:doc").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_key(key).unwrap();
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
+    }
 }
 
 #[test]
