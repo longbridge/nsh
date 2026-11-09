@@ -7941,6 +7941,19 @@ impl<M: TextEngine> Core<M> {
                 self.laid_follower(key, None, false, (0.0, 0.0));
             }
             self.set_frame(key, Bounds::default());
+            // An input's field would still show at its former content box
+            // where a platform does not clip a view's children (a browser),
+            // so it gets none either.
+            let node = &mut self.nodes[key as usize];
+            if let Some(input) = node.input.as_mut()
+                && input.content.is_some_and(|c| c != Bounds::default())
+            {
+                input.content = Some(Bounds::default());
+                self.mount.push(MountItem::InputContent {
+                    id: node.id,
+                    content: Bounds::default(),
+                });
+            }
             if self.nodes[key as usize].kind.is_container() {
                 let children = std::mem::take(&mut self.nodes[key as usize].children);
                 for &child in &children {
