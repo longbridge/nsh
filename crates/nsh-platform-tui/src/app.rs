@@ -58,6 +58,10 @@ pub struct TerminalCapabilities {
     /// keyboard protocol. Without it, Ctrl stands in for Cmd in the app's
     /// shortcuts on macOS.
     pub command_key: bool,
+    /// The terminal takes OSC 8 hyperlinks: the text inside a `Link` is
+    /// drawn as a hyperlink to its `href`. Without it, as on the Linux
+    /// console, which shows the sequence, links are plain text.
+    pub hyperlinks: bool,
 }
 
 /// The colors a terminal shows.
@@ -84,6 +88,7 @@ impl Default for TerminalCapabilities {
             background_color: None,
             foreground_color: None,
             command_key: false,
+            hyperlinks: true,
         }
     }
 }
@@ -1665,6 +1670,13 @@ impl AppView {
             perf.pending.draw = drawing.elapsed();
             perf.draw(area, buffer);
         }
+        let painted = if self.options.capabilities.hyperlinks {
+            &self.tree.links
+        } else {
+            &crate::link::Painted::new()
+        };
+        let links = crate::link::finish(buffer, painted, &self.output.links.borrow());
+        *self.output.links.borrow_mut() = links;
         #[cfg(feature = "dev")]
         {
             let requests: Vec<_> = self
