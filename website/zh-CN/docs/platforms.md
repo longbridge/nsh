@@ -66,6 +66,17 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 > [!NOTE]
 > Rust 宿主通过 NSH 仓库里的平台 crate 嵌入 NSH；macOS、Windows 和 Linux 的 `AppView` 从应用自己的文件（或源代码）加载 bundle，使用默认限制。GPUI crate 以及 iOS 和 Android SDK 还能加载[签名包](./signed-packages.md)，并为每个视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
 
+### 共享移动宿主的 Tokio 运行时
+
+链接 Rust 的移动宿主可以让 NSH 的异步任务使用应用已有的 Tokio 运行时。iOS 在创建 `AppView` 前设置
+`SurfaceOptions.runtime = Some(runtime.handle().clone())`。Android 在 UI 线程上，用存活的 `NshView` 的原生句柄调用
+`unsafe { nsh::set_runtime(handle, Some(runtime.handle().clone())) }`，然后再加载应用或连接开发服务器。
+Android 的配置属于单个视图，后续更改从下一次加载起生效；运行中的引擎继续使用启动时的运行时。
+
+应用保留运行时的所有权，并保持启用了 IO 和时间驱动的运行时运转，直到视图停止。销毁或重建视图后，宿主仍可继续使用该运行时。
+`None` 选择 NSH 共享的默认运行时。两个平台的代码见
+[Rust 链接移动宿主示例](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)。
+
 ## 为每个平台编写
 
 应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：

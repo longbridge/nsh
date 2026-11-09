@@ -751,7 +751,7 @@ impl RootView {
             header_heights: header_heights(mtm),
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
-            runtime: None,
+            runtime: self.ivars().options.runtime.clone(),
             data_dir: self.ivars().options.data_dir.clone(),
             cache: system_cache(self.ivars().options.cache.clone()),
             storage: self.ivars().options.storage.as_ref().map(|dir| {
@@ -871,6 +871,10 @@ pub struct SurfaceOptions {
     pub asset_base: Option<AssetBase>,
     /// The VM limits of the apps it runs.
     pub limits: nsh_engine::Limits,
+    /// The runtime for async tasks; `None` uses NSH's shared runtime.
+    /// The embedding app owns it and must keep it running until the view
+    /// stops. Dropping the view does not shut the runtime down.
+    pub runtime: Option<tokio::runtime::Handle>,
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
@@ -904,6 +908,7 @@ impl Default for SurfaceOptions {
             trace: false,
             asset_base: None,
             limits: nsh_engine::Limits::default(),
+            runtime: None,
             granted: None,
             data_dir: data_dir(),
             storage: None,

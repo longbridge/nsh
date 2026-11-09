@@ -64,6 +64,17 @@
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+- **An application-owned Tokio runtime (Rust-linked mobile hosts)**: iOS `SurfaceOptions::runtime` and Android
+  `nsh::set_runtime(handle, runtime)` forward an optional `tokio::runtime::Handle` to
+  `EngineConfig::runtime`. The setting belongs to one view; `None` keeps the process-wide NSH default. On Android,
+  call the unsafe Rust hook on the UI thread with that live `NshView`'s native `handle`, before loading an app or
+  connecting a dev server. Changes apply to subsequent engine starts, including a load waiting for its first size;
+  an already running engine keeps its runtime. iOS `AppView` retains its options across loads and clones the handle
+  into every new surface. The application owns the runtime and keeps it running until all engines using it stop;
+  disposing a view drops only its handles. Use an IO/time-enabled runtime with workers, or keep a current-thread
+  runtime driven on another thread. The stock Swift/JNI SDKs continue to select the default; a Rust handle stays
+  inside a custom-linked Rust host. Examples for both platforms are in `examples/embedded-runtime.md`. The engine's
+  `runtime` tests check runtime identity, per-engine selection, reuse after disposal and the unchanged shared default.
 - **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`

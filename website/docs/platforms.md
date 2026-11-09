@@ -66,6 +66,19 @@ A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `Ap
 > [!NOTE]
 > Rust hosts embed NSH with the platform crates from the NSH repository; the `AppView` of macOS, Windows and Linux loads bundles from the app's own files (or source code), with the default limits. The GPUI crate and the iOS and Android SDKs also load [signed packages](./signed-packages.md) and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
 
+### Share a mobile host's Tokio runtime
+
+A Rust-linked mobile host can run NSH's async tasks on its application's existing Tokio runtime. On iOS, set
+`SurfaceOptions.runtime = Some(runtime.handle().clone())` before creating `AppView`. On Android, call
+`unsafe { nsh::set_runtime(handle, Some(runtime.handle().clone())) }` on the UI thread with the
+live `NshView`'s native handle, before loading an app or connecting a dev server. Android keeps this setting per
+view and applies changes from the next load; a running engine keeps the runtime it started with.
+
+The application retains ownership and keeps its IO/time-enabled runtime running until the views stop. Disposing
+or recreating a view leaves that runtime available to the host. `None` selects NSH's shared default runtime.
+See the [Rust-linked mobile example](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)
+for both platforms.
+
 ## Writing for every platform
 
 Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):
