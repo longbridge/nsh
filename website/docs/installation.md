@@ -187,7 +187,7 @@ The commands for the iOS and Android runtimes and the release runners are in the
   - `platforms;android-35` and a recent `build-tools` (NSH uses `aapt2`, `zipalign` and `apksigner` from it, no Gradle);
   - `platform-tools` (`adb`).
 - **A JDK** (`keytool` creates the debug keystore in `~/.android/debug.keystore` the first time you package, `apksigner` needs Java).
-- A running emulator or a device connected over `adb`. Apps need Android 9 (API 28) or later.
+- A running emulator or a device connected over `adb`. Apps need Android 8 (API 26) or later.
 
 ```sh
 sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"

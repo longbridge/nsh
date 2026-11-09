@@ -67,4 +67,4 @@ The view reports the safe area and keyboard as the parts of the system bars
 and the keyboard that overlap it, so an app embedded below other views gets
 no top inset.
 
-`NshView` needs the `INTERNET` permission (declared by the AAR) and API 28+.
+`NshView` needs the `INTERNET` permission (declared by the AAR) and API 26+.
