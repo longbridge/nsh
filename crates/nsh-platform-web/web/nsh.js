@@ -2482,6 +2482,34 @@ class Player {
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
+    if (spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
+      this.installLinkHover(el);
+    }
+  }
+
+  /**
+   * The mouse over the links of text `el` (the `_link` of the run spans
+   * under it): a link listening hears `onMouseEnter` when the mouse comes
+   * over its characters (on any of its lines) and `onMouseLeave` when it
+   * leaves them, as the other desktops report a link's hover (the core
+   * shows a link's hint, its URL, by them). Installed once per text; the
+   * listeners read the spans the runs have now.
+   */
+  installLinkHover(el) {
+    if (el._linkHover !== undefined) return;
+    el._linkHover = null;
+    const follow = (e) => {
+      if (e.pointerType !== "mouse") return;
+      const link = e.type === "pointerleave" ? null : (e.target?._link ?? null);
+      const old = el._linkHover;
+      if ((old?.node ?? null) === (link?.node ?? null)) return;
+      el._linkHover = link;
+      if (old?.events.has("onMouseLeave")) this.event(old.node, "onMouseLeave", this.mouseEvent(el, e, true));
+      if (link?.events.has("onMouseEnter")) this.event(link.node, "onMouseEnter", this.mouseEvent(el, e, true));
+    };
+    el.addEventListener("pointerover", follow);
+    el.addEventListener("pointermove", follow);
+    el.addEventListener("pointerleave", follow);
   }
 
 

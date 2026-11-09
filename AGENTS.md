@@ -408,7 +408,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `CodeHighlighter` or `renderCodeBlock` replaces, and the `Editor`'s default look, its colors the theme's shadcn tokens
   (search matches amber, warnings amber, information blue), its font the theme's `font-mono`, every part overridable by
   the app's `classes` / `styles`, and the same built-in syntax highlighting colors, which the app's `decorations` style over, and `DiffView`'s default look: theme tokens, added green, deleted red, every part
-  overridable by `classes` / `styles`); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
+  overridable by `classes` / `styles`, and the URL hint of `Link` and `TextView`'s links: the theme's popover tokens, so every app shows where a link goes (`link_hint.rs`)); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
   slot), no dialog card, scrim or shadow, no native press fade (press feedback is the app's `activeStyle` /

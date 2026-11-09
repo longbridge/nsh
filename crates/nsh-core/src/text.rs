@@ -464,7 +464,11 @@ pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 /// of its own ([`Self::focus_stop`]): Tab reaches it after its text view,
 /// in text order, the platform reports `FOCUSED` (`focus:`) and `Focus` /
 /// `Blur` for the span's node and presses it on Return, as a view that
-/// takes presses.
+/// takes presses. A span with a hint watching it and no press listeners (a
+/// `RichEditor`'s link mark) is one too, for the pointer only: its events
+/// are `MouseEnter` / `MouseLeave`, it is no stop of Tab, and presses on
+/// its characters go to the views around, as the platforms route only
+/// links whose events take presses.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextLink {
     /// Start offset (UTF-16 units, inclusive).

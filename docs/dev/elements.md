@@ -458,6 +458,30 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
   so. The overlay should
   not take the pointer (`pointerEvents: "none"`).
+- **A link's hint** (a hint overlay whose parent is a link of a text: a nested span, `AttributedText::links`): the
+  span is its anchor (`Core::hint_anchor` takes any span, `is_text_span`, since the watch is what makes it a link;
+  `is_link_span`: a span taking presses or watched for a hint). A span taking no presses (`RichEditor`'s link mark,
+  whose presses are the editor's) is a link for the pointer only: `MouseEnter` / `MouseLeave`, `focus_stop` false,
+  and none inside a span that takes presses (that one keeps the press); the platforms route presses, the pointer
+  cursor and Tab only to links whose events take presses (`has_press`; the web's `PRESS_EVENTS`). The span has no
+  frame, so
+  the platforms report the pointer over its characters: while a hint watches the span (`watch::HINT`), its
+  `TextLink::events` carry `MouseEnter` / `MouseLeave` (`collect_text`; `rewatch` merges the block again), and each
+  desktop backend sends them to the span's node as the link under the mouse changes (`hover_link` in the macOS,
+  Linux, Windows and GPUI `input.rs`, from the pick their cursor or hover already makes; the web's
+  `installLinkHover` over the runs' link spans; the headless driver models links as views). The hint is placed
+  against where the pointer came over the link (`OverlayState::pointer`, an `OverlayAnchor::Point`), against the
+  text block for the keyboard focus; a press on the block hides it (the block listens to touches), and so does a
+  scroll of a scroll view or list around the link (`Core::set_scroll_offset` → `overlay_scrolled`: the point would
+  stay behind; the pointer coming over a link again shows it there). `nsh-base`'s
+  `Link`, `TextView`'s links (and images in them) and `RichEditor`'s link mark show their destination with it
+  (`link_hint.rs`: the link's title — Markdown's, HTML
+  `<a title>`'s, the mark's `title`, `Link`'s `title` prop — over one row of
+  `open_url::hint_url`'s two parts, laid out LTR (`direction`) in every app: a head of scheme, host and port that
+  never shrinks or wraps and a rest that alone gives way, one line with a middle ellipsis (`EllipsizeMode::Middle`),
+  IDN hosts as punycode; paths and anchors as written, escaped; `Link`'s below the link, by default apart from an app's
+  `tooltip` above it, though either may flip near an edge); hint overlays inside an element count
+  for none of its positional classes (`is_tooltip_overlay`).
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
   placement never moves it), placed on top with a 4 pt gap, holding the element JS made (retained by the node, moved
