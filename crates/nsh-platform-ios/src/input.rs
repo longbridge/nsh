@@ -2,7 +2,10 @@
 //! inside a container view that carries the decoration (background,
 //! border, corners, shadow) like any other view.
 
-use std::{cell::Cell, ffi::CStr};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::CStr,
+};
 
 use nsh_core::{
     AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
@@ -12,7 +15,7 @@ use nsh_core::{
 use nsh_engine::EngineControl;
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
-    rc::Retained,
+    rc::{Retained, Weak},
     runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel},
     sel,
 };
@@ -54,6 +57,12 @@ pub(crate) struct InputIvars {
     /// The scrolling last reported (offset y, content width and height,
     /// viewport width and height): only changes are reported again.
     scroll_reported: Cell<Option<[CGFloat; 5]>>,
+    /// The event target the input reports to, which is also its delegate.
+    /// Kept here, not read back from `delegate`: a host may wrap the
+    /// delegate (BlocksKit puts an `NSProxy` there that answers
+    /// `isKindOfClass:` for the object it wraps), and a downcast of that
+    /// proxy would read its memory as the target's.
+    target: RefCell<Weak<EventTarget>>,
 }
 
 impl Default for InputIvars {
@@ -74,6 +83,7 @@ impl Default for InputIvars {
             paste_inserts: Cell::new(true),
             scroll_replaced: Cell::new(false),
             scroll_reported: Cell::new(None),
+            target: RefCell::default(),
         }
     }
 }
@@ -184,12 +194,7 @@ impl Area {
         if !self.ivars().scroll_replaced.get() {
             return;
         }
-        // SAFETY: UITextView's `delegate`, set to the target.
-        let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![self, delegate] };
-        if let Some(target) = delegate
-            .as_deref()
-            .and_then(|d| d.downcast_ref::<EventTarget>())
-        {
+        if let Some(target) = self.ivars().target.borrow().load() {
             target.input_scrolled(self.as_ref());
         }
     }
@@ -466,12 +471,7 @@ fn can_paste_more(view: &UIView, ivars: &InputIvars) -> bool {
 /// Reports `paste` to the app (`onPaste`), through the input's delegate,
 /// the event target.
 pub(crate) fn report_paste(view: &UIView, paste: nsh_core::PasteEvent) {
-    // SAFETY: both input classes have a `delegate`, set to the target.
-    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![view, delegate] };
-    if let Some(target) = delegate
-        .as_deref()
-        .and_then(|d| d.downcast_ref::<EventTarget>())
-    {
+    if let Some(target) = target_of(view) {
         target.pasted(view.tag() as NodeId, paste);
     }
 }
@@ -521,12 +521,7 @@ fn set_paste(view: &UIView, listens: bool, inserts: bool) {
 /// Reports `Backspace` for a delete in an empty input (to its delegate,
 /// the event target).
 fn backspace_on_empty(view: &UIView) {
-    // SAFETY: both input classes have a `delegate`, set to the target.
-    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![view, delegate] };
-    if let Some(target) = delegate
-        .as_deref()
-        .and_then(|d| d.downcast_ref::<EventTarget>())
-    {
+    if let Some(target) = target_of(view) {
         target.key_press(view.tag() as NodeId, "Backspace".to_owned());
     }
 }
@@ -588,6 +583,15 @@ pub(crate) fn caret_changed(view: &UIView, caret: Bounds<Points>) -> bool {
         .map(|f| f.ivars())
         .or_else(|| view.downcast_ref::<Area>().map(|a| a.ivars()));
     ivars.is_none_or(|i| i.caret.replace(caret) != caret)
+}
+
+/// The event target of input view `view`, set when it was attached.
+pub(crate) fn target_of(view: &UIView) -> Option<Retained<EventTarget>> {
+    let ivars = view
+        .downcast_ref::<Field>()
+        .map(|f| f.ivars())
+        .or_else(|| view.downcast_ref::<Area>().map(|a| a.ivars()))?;
+    ivars.target.borrow().load()
 }
 
 /// Selects `start..end` (UTF-16 units, clamped to the text).
@@ -758,6 +762,7 @@ impl Input {
         view.setBackgroundColor(None);
         match &self.editor {
             Editor::Line(field) => {
+                *field.ivars().target.borrow_mut() = Weak::new(target);
                 // SAFETY: the target implements the delegate protocol and
                 // `handleEditingChanged:`, and outlives the field (both are
                 // owned by the mounter).
@@ -771,6 +776,7 @@ impl Input {
                 }
             }
             Editor::Area { view, placeholder } => {
+                *view.ivars().target.borrow_mut() = Weak::new(target);
                 // SAFETY: as above.
                 unsafe { view.setDelegate(Some(ProtocolObject::from_ref(target))) };
                 view.textContainer().setLineFragmentPadding(0.0);
