@@ -11,7 +11,7 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 
 | File | What |
 |---|---|
-| `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSortDirection` (`PropEnum`s), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
+| `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSortDirection` (`PropEnum`s), `ColumnFixed` (`None` / `Left` / `Right`, following GPUI Kit's side naming), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DataTableClasses`, `DataTableStyles` and `DataTablePart` |
 | `data.rs` | `DataTableRows`: the rows from JS (arrays, or objects by the columns' keys) or from Rust a typed column at a time (`new`, `texts`, `numbers`, `bools`, as the core's `Rows::from_columns`), each field as a `Cell` |
 | `axis.rs` | `Axis`: one axis's real extent against the extent the scroll views get (see "Huge tables") |

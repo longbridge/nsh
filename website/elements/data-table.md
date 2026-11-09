@@ -395,3 +395,16 @@ parts provide the table's structure and alignment; their classes supply the appe
 - [Editor](./editor.md) and [DiffView](./diff-view.md): the other data-heavy base components.
 - [Menu](./menu.md): the menu to open from `onContextMenu`.
 - [`nsh/base`](../modules/nsh-base.md): the other base components.
+
+### Fixed columns in Rust
+
+`ColumnFixed` follows GPUI Kit's column-side naming. `None` (the default) scrolls normally;
+`Left` and `Right` pin the column to that side. TS uses `false`, `"left"` and `"right"`,
+with `true` retained as a shorthand for `"left"`.
+
+```rust
+use nsh_base::{ColumnFixed, DataTableColumn};
+
+let mut actions = DataTableColumn::default();
+actions.fixed = ColumnFixed::Right;
+```

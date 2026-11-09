@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-use super::DataTableFixed;
+use super::ColumnFixed;
 
 /// What the layout needs of a column.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,15 +22,15 @@ pub(crate) struct Spec {
     pub(crate) min: f32,
     pub(crate) max: f32,
     /// Where it stays while the others scroll.
-    pub(crate) fixed: DataTableFixed,
+    pub(crate) fixed: ColumnFixed,
 }
 
 /// The zone of a column with `fixed`, in display order.
-fn zone(fixed: DataTableFixed) -> u8 {
+fn zone(fixed: ColumnFixed) -> u8 {
     match fixed {
-        DataTableFixed::Left => 0,
-        DataTableFixed::None => 1,
-        DataTableFixed::Right => 2,
+        ColumnFixed::Left => 0,
+        ColumnFixed::None => 1,
+        ColumnFixed::Right => 2,
     }
 }
 
@@ -61,7 +61,7 @@ impl Columns {
         let mut order: Vec<usize> = (0..specs.len()).collect();
         crate::sort::sort_by_key(&mut order, |&i| zone(specs[i].fixed));
         let count = |f| specs.iter().filter(|s| s.fixed == f).count();
-        let (fixed, end) = (count(DataTableFixed::Left), count(DataTableFixed::Right));
+        let (fixed, end) = (count(ColumnFixed::Left), count(ColumnFixed::Right));
         let mut columns = Columns {
             specs,
             widths,
@@ -329,7 +329,7 @@ fn clamp(spec: &Spec, width: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn spec(width: f32, fixed: impl Into<DataTableFixed>) -> Spec {
+    fn spec(width: f32, fixed: impl Into<ColumnFixed>) -> Spec {
         Spec {
             width,
             min: 20.0,
@@ -344,7 +344,7 @@ mod tests {
             spec(100.0, false),
             spec(60.0, true),
             spec(80.0, false),
-            spec(50.0, DataTableFixed::Right),
+            spec(50.0, ColumnFixed::Right),
             spec(120.0, false),
         ])
     }
@@ -383,8 +383,8 @@ mod tests {
     fn columns_fixed_at_the_end_move_among_themselves() {
         let mut c = Columns::new(vec![
             spec(10.0, false),
-            spec(20.0, DataTableFixed::Right),
-            spec(30.0, DataTableFixed::Right),
+            spec(20.0, ColumnFixed::Right),
+            spec(30.0, ColumnFixed::Right),
         ]);
         assert_eq!(c.order(), [0, 1, 2]);
         assert!(!c.move_to(0, 2), "a scrolling column stays among them");

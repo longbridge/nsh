@@ -205,10 +205,11 @@ emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.t
 ...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
 entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
-`DataTable`'s column `fixed` goes past `gpui-component`'s `ColumnFixed`, which fixes columns at the left only: a
-table of orders or tickets keeps its actions column at the right while the others scroll, as Ant Design's and MUI's
-tables do (`fixed: "right"`, `pinned: "right"`). The values are `"left"` and `"right"`, the words those tables use
-(decided by the owner, 2026-11-09); `true` stays `"left"`, `gpui-component`'s one side.
+`DataTable`'s column `fixed` follows GPUI Kit's `gpui-component` type `ColumnFixed` and its
+`Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;
+`true` remains a shorthand for `"left"`, and `false` leaves the column scrolling. NSH's
+`ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
+Left-fixed columns lead the order and right-fixed columns close it.
 
 ## Shapes that can grow
 

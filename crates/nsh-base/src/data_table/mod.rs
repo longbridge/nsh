@@ -35,9 +35,9 @@ pub enum DataTableAlign {
 }
 
 /// Where a column stays while the others scroll sideways (`fixed`): JS's
-/// `true` is [`DataTableFixed::Left`], `false` [`DataTableFixed::None`].
+/// `true` is [`ColumnFixed::Left`], `false` [`ColumnFixed::None`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum DataTableFixed {
+pub enum ColumnFixed {
     /// It scrolls with the others.
     #[default]
     None,
@@ -50,13 +50,13 @@ pub enum DataTableFixed {
     Right,
 }
 
-impl From<bool> for DataTableFixed {
+impl From<bool> for ColumnFixed {
     fn from(fixed: bool) -> Self {
         if fixed { Self::Left } else { Self::None }
     }
 }
 
-impl JsValue for DataTableFixed {
+impl JsValue for ColumnFixed {
     fn ts_type(_: &mut TsTypes) -> String {
         r#"boolean | "left" | "right""#.into()
     }
@@ -126,7 +126,7 @@ pub struct DataTableColumn {
     /// left (`true` or `"left"`), leading the others, or at the right
     /// (`"right"`), after them; fixed columns keep their order.
     #[prop(default)]
-    pub fixed: DataTableFixed,
+    pub fixed: ColumnFixed,
     /// Whether a drag of its edge resizes it (default the table's
     /// `resizableColumns`).
     #[prop(skip_none)]
