@@ -29,7 +29,7 @@ mod collapsible;
 mod color_picker;
 mod combobox;
 mod command;
-mod data_table;
+pub mod data_table;
 mod date_picker;
 #[cfg(feature = "editor")]
 mod diff;
@@ -162,11 +162,11 @@ pub use crate::{
         CommandProps, command,
     },
     data_table::{
-        ColumnFixed, DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses,
-        DataTableColumn, DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu,
-        DataTableDump, DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart,
-        DataTablePress, DataTableProps, DataTableRange, DataTableRows, DataTableSelection,
-        DataTableSort, DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
+        DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
+        DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
+        DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress,
+        DataTableProps, DataTableRange, DataTableRows, DataTableSelection, DataTableSort,
+        DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
     },
     date_picker::{
         DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,

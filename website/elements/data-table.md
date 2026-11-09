@@ -398,12 +398,12 @@ parts provide the table's structure and alignment; their classes supply the appe
 
 ### Fixed columns in Rust
 
-`ColumnFixed` follows GPUI Kit's column-side naming. `None` (the default) scrolls normally;
+`nsh_base::data_table::ColumnFixed` follows GPUI Kit's column-side naming. `None` (the default) scrolls normally;
 `Left` and `Right` pin the column to that side. TS uses `false`, `"left"` and `"right"`,
 with `true` retained as a shorthand for `"left"`.
 
 ```rust
-use nsh_base::{ColumnFixed, DataTableColumn};
+use nsh_base::{DataTableColumn, data_table::ColumnFixed};
 
 let mut actions = DataTableColumn::default();
 actions.fixed = ColumnFixed::Right;
