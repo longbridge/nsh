@@ -10,10 +10,12 @@ demo: el-select
 A select chooses one value from a list of items: a setting, a filter, a country, a time zone. The app's trigger
 opens the list, presented as each device expects:
 
-- On the desktops and in desktop browsers, a popup over the trigger with the selected row laid over the trigger, so
-  the chosen title stays where it was (shadcn/ui's `item-aligned` position), as wide as the trigger (the app's
-  `popupStyle` / `popupClass` width sets another, as `gpui-component`'s `menu_width`) and as tall as its rows up to the room on the screen; with nothing selected it opens below the trigger. The keyboard moves
-  through the items and chooses one.
+- On the desktops and in desktop browsers, a popup as wide as the trigger (the app's `popupStyle` / `popupClass`
+  width sets another, as `gpui-component`'s `menu_width`) and as tall as its rows up to the room on the screen. On
+  macOS it opens with the selected row laid over the trigger, so the chosen title stays where it was, as the
+  system's pop-up buttons do (shadcn/ui's `item-aligned` position); with nothing selected it opens below the
+  trigger. On Windows, Linux and in browsers it opens below the trigger, as their drop-down lists do. The keyboard
+  moves through the items and chooses one.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 
 The select owns the behavior: the value (the app's, or its own), the open state, the keyboard, typeahead, search,
@@ -338,7 +340,7 @@ pointer highlights the row it moves over; the highlighted row is revealed as the
 
 | | Desktops and desktop browsers | Phones and tablets |
 | --- | --- | --- |
-| The list | a popup over the trigger, the selected row on it (below it while none is), as wide as the trigger unless `popupStyle` sets a width, as tall as its rows up to the room on the screen | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
+| The list | a popup over the trigger with the selected row on it on macOS (below it while none is), below the trigger on Windows, Linux and in browsers, as wide as the trigger unless `popupStyle` sets a width, as tall as its rows up to the room on the screen | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
 | Closing it | a choice, Escape, a press outside (which goes on to what is under the pointer) | a choice, the backdrop, the Android back button |
 | Search | the field takes the keyboard as the list opens | the keyboard comes up when the field is pressed |
 | A choice | the press going down chooses, so the search field keeps the keyboard | a tap |

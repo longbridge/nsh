@@ -16,6 +16,9 @@
 //!   toggles the list; while it has the keyboard focus (the desktops),
 //!   Down, Up, Return and Space open it, and letters and digits choose by
 //!   typeahead without opening it, as a native select does.
+//! - **The list** on the desktops opens with the chosen item over the
+//!   trigger on macOS (the system's pop-up button) and below the trigger
+//!   elsewhere (the drop-down lists of Windows and Linux).
 //! - **Opening** highlights the chosen item; with none, Down (Return,
 //!   Space) highlights the first enabled item, Up the last, and a press
 //!   nothing until a key or the pointer moves it. The highlighted item is
@@ -639,8 +642,12 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         render_group: props.render_group,
         empty: props.empty,
         footer: None,
-        // A terminal's list opens under the trigger, never over it.
-        cover: (!is_terminal()).then(crate::popup::Cover::new),
+        // On macOS the list opens with the chosen item over the trigger,
+        // as the system's pop-up buttons do; elsewhere (Windows, Linux,
+        // browsers, terminals) it drops below the trigger, as their own
+        // drop-down lists do.
+        cover: (os() == nsh_core::platform::Os::MacOs && !is_terminal())
+            .then(crate::popup::Cover::new),
     };
     // Tab past the trigger, or out of the list's search field, closes the
     // list and moves the focus on.
