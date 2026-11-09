@@ -1840,6 +1840,29 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
 }
 
 #[cfg(test)]
+impl ImageState {
+    /// An image state showing a loaded, opaque white SVG of `points` at
+    /// `pixels` square (as one decoded for the display's scale).
+    pub(crate) fn loaded_for_test(pixels: u32, points: f32) -> ImageState {
+        use nsh_core::geometry::{px, size};
+        let data = vec![255u8; (pixels * pixels * 4) as usize];
+        let picture = Picture::still(
+            Pixels {
+                width: pixels,
+                height: pixels,
+                data,
+            },
+            Natural::Vector(size(px(points), px(points))),
+        );
+        ImageState {
+            image: Some(picture),
+            alpha: 1.0,
+            ..ImageState::default()
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 

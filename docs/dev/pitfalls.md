@@ -360,6 +360,19 @@ Things that were found the hard way. Read the section of the area you change bef
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
   the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
   so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+- **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
+  `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
+  - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's
+    aliases (`sans-serif-thin`, `-light`, `-medium`, `-black`, with `BOLD` for 600 and 700); other faces get bold and
+    italic synthesized only where the face is lighter or upright (`TextLayouts.weighted`).
+  - Text measurement: `PrecomputedText` is API 28; `prepare` hands `StaticLayout` the spanned text itself, which measures
+    it again for each width with the same breaks.
+  - Shadows: a hardware canvas ignores `Paint.setShadowLayer` on shapes (text keeps its shadows) before API 28.
+    `Decor` draws box shadows with the same code into a software bitmap of the smallest box with the same corners and
+    stretches it in nine slices (`drawShadowSlices`, shared through an 8 MiB LRU); a `<Canvas>` drawing that sets a
+    shadow is replayed into a software bitmap of the view.
+  Animated images other than GIFs (which play from a `Movie`) show their first frame there (`AnimatedImageDrawable` is
+  API 28).
 - **Android 9, GIFs cannot play from an `AnimatedImageDrawable`**: its later frames decode on hwui's `AnimatedImageTh`, and
   reading the source bytes there (`ByteArrayStream::read`, `SkGIFFrameContext`) needs a JNIEnv that thread does not have: the
   process aborts with "Failed to get JNIEnv for JavaVM". Any `ImageDecoder` source backed by memory hits it; animated WebP does

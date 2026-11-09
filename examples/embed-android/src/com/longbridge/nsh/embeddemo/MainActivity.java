@@ -100,6 +100,12 @@ public final class MainActivity extends Activity {
         count.setText("loaded " + (++loads) + "×");
     }
 
+    /** Android 8 hands back presses to the view here; later versions give them to it directly. */
+    @Override
+    public void onBackPressed() {
+        if (!nsh.handleBack()) super.onBackPressed();
+    }
+
     @Override
     protected void onDestroy() {
         nsh.destroy();
