@@ -73,7 +73,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   the window's (the process is per-monitor DPI aware, v2).
 - **One hop per commit.** The engine runs on its own thread (`nsh_engine::Engine`); its sink queues each commit and
   posts one `WM_NSH_WAKE` to the window, and the main thread applies every queued batch in order (`surface.rs`,
-  `mount.rs`). The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
+  `mount.rs`). The animated values go into the views after those batches (`Surface::write_animations`) and before
+  each desktop command in one, which can paint its window before the batch ends (docs/dev/pitfalls.md, "Windows").
+  The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
   input and hosted items find views by id while a batch is being applied. Worker threads (image decoding, media
   callbacks, the dev client) run code back on a UI thread with `UiThread::invoke`: each UI thread has a message-only
   dispatcher window of its own, a surface records the `UiThread` it was made on (`Surface::ui_thread`), and work

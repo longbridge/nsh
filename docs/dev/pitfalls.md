@@ -636,6 +636,13 @@ Things that were found the hard way. Read the section of the area you change bef
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and
   `name:stream` writes an NTFS alternate data stream. `nsh-package` refuses paths with `:`, as with `\` or `..`.
+- **Sizing or showing a window can paint it before the call returns**: `SetWindowPos` sends `WM_SIZE` when the size
+  changes, where NSH's windows draw at once (for a resize not to show stale pixels), and `window::show` calls
+  `UpdateWindow`, which paints what is invalid. A desktop command runs in the middle of `Surface::apply`, before the
+  batch's animated values are written (`Surface::write_animations`, once the batches are applied), so
+  `Surface::apply` writes them before each one. Without that, a window growing to its content (`sizeToContent`) as
+  it opened drew a view entering with a motion as its style is while hidden, then at the motion's start, and showed
+  the first frame while the second waited for room in its swap chain: the content flashed.
 
 ## Web, browsers
 
