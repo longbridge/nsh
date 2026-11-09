@@ -5639,6 +5639,36 @@ fn press_and_group_states() {
 }
 
 #[test]
+fn a_cancelled_press_skips_the_slots_of_released_nodes() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white");
+    view_with_classes(&mut c, 4, "bg-white active:bg-zinc-200");
+    c.commit().unwrap();
+    // Node 2's slot is left empty, below the slab's length.
+    c.apply(Op::Remove {
+        parent: ROOT_ID,
+        child: 2,
+    })
+    .unwrap();
+    c.apply(Op::Release { id: 2 }).unwrap();
+    c.commit().unwrap();
+    c.set_states(4, crate::tailwind::state::PRESSED);
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: ROOT_ID,
+            command: Command::CancelPress,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 4).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+}
+
+#[test]
 fn a_cancelled_press_resets_active_and_drops_its_release() {
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white active:bg-zinc-200");
