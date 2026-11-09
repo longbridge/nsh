@@ -1358,6 +1358,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     if !resized && !chain.ready() {
         return true;
     }
+    let sync = if resized { chain.resize_interval() } else { 1 };
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
         chain.drop_target();
         surface.target_scale.set(scale);
@@ -1426,7 +1427,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
                 return false;
             }
             let shown = std::time::Instant::now();
-            if let Err(err) = chain.present(changed) {
+            if let Err(err) = chain.present(changed, sync) {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
@@ -1681,6 +1682,7 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
     if !resized && !chain.ready() {
         return true;
     }
+    let sync = if resized { chain.resize_interval() } else { 1 };
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {
         chain.drop_target();
     }
@@ -1711,7 +1713,7 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
                 device_lost(surface);
                 return false;
             }
-            if let Err(err) = chain.present(None) {
+            if let Err(err) = chain.present(None, sync) {
                 log::warn!("present failed: {err}");
                 *swap = None;
                 device_lost(surface);
