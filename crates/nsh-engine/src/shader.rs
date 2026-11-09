@@ -81,26 +81,52 @@ pub struct Renderer {
     pipelines: std::cell::RefCell<Pipelines>,
 }
 
+/// The backends to open a device on, in order (`WGPU_BACKEND` overrides).
+///
+/// Linux tries OpenGL first: frames come back to the CPU every display
+/// frame, and Vulkan drivers there (Mesa's ANV on Intel, among others) offer
+/// no host-visible memory both coherent and cached, so wgpu maps its
+/// read-back buffers write-combined and reading a frame out costs several
+/// milliseconds of the main thread (a 2000×300 frame: 8–17 ms against
+/// 0.2 ms through OpenGL). Elsewhere the platform's own API first.
+fn backend_order() -> Vec<wgpu::Backends> {
+    if let Some(env) = wgpu::Backends::from_env() {
+        return vec![env];
+    }
+    if cfg!(all(target_os = "linux", not(target_os = "android"))) {
+        vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
+    } else {
+        vec![wgpu::Backends::PRIMARY | wgpu::Backends::GL]
+    }
+}
+
 impl Renderer {
     /// Opens a GPU device (blocking, once: adapters answer in milliseconds);
     /// `None` when there is none, which the log says.
     pub fn new(format: PixelFormat) -> Option<Renderer> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env()
-                .unwrap_or(wgpu::Backends::PRIMARY | wgpu::Backends::GL),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter =
+        let mut found = None;
+        let mut last = None;
+        for backends in backend_order() {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends,
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            });
             match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 ..Default::default()
             })) {
-                Ok(adapter) => adapter,
-                Err(e) => {
-                    log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
-                    return None;
+                Ok(adapter) => {
+                    found = Some(adapter);
+                    break;
                 }
-            };
+                Err(e) => last = Some(e),
+            }
+        }
+        let Some(adapter) = found else {
+            let e = last.map_or_else(String::new, |e| e.to_string());
+            log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
+            return None;
+        };
         let (device, queue) =
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
