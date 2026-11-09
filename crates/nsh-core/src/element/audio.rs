@@ -153,21 +153,7 @@ pub async fn load_sound(src: &str) -> Result<Sound, AudioFailure> {
     // Before any byte is read (the core checks again, and alone on the web,
     // where the platform fetches).
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let access = loader::context().access;
-        if !access.allows_audio() {
-            return Err(AudioFailure::new(
-                AudioError::NotAllowed,
-                "sound is not granted: add `\"audio\": true` to capabilities in nsh.json",
-            ));
-        }
-        if !access.allows_media(&uri) {
-            return Err(AudioFailure::new(
-                AudioError::NotAllowed,
-                format!("`{src}` is not granted by capabilities.network in nsh.json"),
-            ));
-        }
-    }
+    let uri = granted_uri(&loader::context().access, src, uri)?;
     // Nothing to read for where nothing plays it.
     if !audio_available().await {
         return Err(AudioFailure::new(
@@ -261,6 +247,30 @@ async fn wait(pending: &Pending) -> Result<Rc<Buffer>, AudioFailure> {
         }
     })
     .await
+}
+
+/// What a sound loads from `uri` (`src` as the loader names it), if the app
+/// may load it: the URL the check granted (`Access::media_url`).
+#[cfg(not(target_arch = "wasm32"))]
+fn granted_uri(
+    access: &crate::access::Access,
+    src: &str,
+    uri: String,
+) -> Result<String, AudioFailure> {
+    if !access.allows_audio() {
+        return Err(AudioFailure::new(
+            AudioError::NotAllowed,
+            "sound is not granted: add `\"audio\": true` to capabilities in nsh.json",
+        ));
+    }
+    match access.media_url(&uri, None) {
+        Some(std::borrow::Cow::Owned(granted)) => Ok(granted),
+        Some(std::borrow::Cow::Borrowed(_)) => Ok(uri),
+        None => Err(AudioFailure::new(
+            AudioError::NotAllowed,
+            format!("`{src}` is not granted by capabilities.network in nsh.json"),
+        )),
+    }
 }
 
 /// `src` as the loader names it: a relative path is the app's asset.
@@ -677,5 +687,29 @@ mod tests {
             "data:audio/wav;base64,AA"
         );
         assert_eq!(asset_uri("/tmp/x.wav"), "/tmp/x.wav");
+    }
+
+    /// A sound loads the URL the check granted, as WHATWG's parser reads
+    /// the source.
+    #[test]
+    fn sounds_load_the_url_the_check_granted() {
+        use super::granted_uri;
+        let access = crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({
+                "audio": true,
+                "network": { "http": [{ "host": "example.com", "pathPrefix": "/public" }] }
+            }))
+            .unwrap(),
+            granted: None,
+        };
+        let load = |src: &str| granted_uri(&access, src, asset_uri(src)).map_err(|f| f.error);
+        assert_eq!(
+            load("https://EXAMPLE.com/private/../public/a.wav"),
+            Ok("https://example.com/public/a.wav".to_owned())
+        );
+        assert!(load("https://example.com/public/../private/a.wav").is_err());
+        assert!(load("https://example.com/public/%2e%2e/private/a.wav").is_err());
+        assert!(load("//example.com/public/a.wav").is_err());
+        assert_eq!(load("click.wav"), Ok("asset:/click.wav".to_owned()));
     }
 }

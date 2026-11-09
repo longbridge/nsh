@@ -122,7 +122,15 @@ one form) names a `host` pattern; every other key narrows it and is optional: `m
 (any of `http`, `https`, `ws`, `wss`), `port` (any; a URL without one has its scheme's default), `paths` (exact,
 without the query) and `pathPrefixes` / `pathPrefix` / `path_prefixes` (whole segments: `/v1` covers `/v1/x`, not
 `/v10`; a prefix ending in `/` covers what follows). Without paths or prefixes a rule covers every path, so
-`{host, methods}` means what it always did. The spellings of a key are merged and may appear together (gpui-shell's
+`{host, methods}` means what it always did. Paths match the path WHATWG's parser (the `url` crate) sends,
+dot segments and `%2e` ones resolved (`Access::allows_http`), and what loads is what was checked:
+`Access::http_url` (the engine's requests, `registerFont` among them) and `Access::media_url` (images, placeholders,
+canvas images, videos, sounds, `Image.getSize` / `prefetch`) return the WHATWG serialization, which the core writes
+back over the source. A media source with no scheme that starts with `//` is resolved against the bundle's base URL
+(`Bundle::base_url`, the page's on the web; `Core::set_base_url`, `System::base_url`) and refused without one; other
+sources without a scheme, and `asset:`, `file:`, `data:`, `blob:` (any case) and drive paths, stay as written. Whether a
+source names a host is read after WHATWG's stripping (spaces and C0 controls around it, tabs and newlines in it); one
+that stripping changed is ambiguous. The spellings of a key are merged and may appear together (gpui-shell's
 `scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot
 match is a parse error rather than a silent grant of nothing: a scheme outside the four, port 0, a path without a
 leading `/` or with `*`, `?` or `#`, a method that is not a token. WebSockets (the global and the `websocket` module)

@@ -1891,6 +1891,10 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
+        if let App::Js(bundle) = &config.app {
+            // What `//` media sources resolve against, as `fetch`'s URLs do.
+            core.set_base_url(bundle.base_url.clone());
+        }
         #[cfg(not(target_arch = "wasm32"))]
         core.set_image_context(nsh_core::image::loader::Context {
             asset_base: config.assets.as_ref().and_then(|a| a.base()),
@@ -2714,14 +2718,22 @@ impl Net {
 
     /// Makes `who`'s request, if the app may (else why not). Bundled files
     /// are the app's own: their requests need no capability.
-    fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), access::Refused> {
+    fn request(&mut self, who: Requester, mut request: HttpRequest) -> Result<(), access::Refused> {
         if is_asset(&request.url) {
             self.asset(who, request);
-        } else if self.access.is_unrestricted() {
+            return Ok(());
+        }
+        if self.access.is_unrestricted() {
             self.start(who, request, None);
-        } else if !self.access.allows_http(&request.method, &request.url) {
-            return Err(access::refused(&request.method, &request.url));
-        } else if request.follow_redirects {
+            return Ok(());
+        }
+        // The request goes out with the URL the check granted: Rust's and
+        // `registerFont`'s URLs come as written, `fetch`'s already parsed.
+        match self.access.http_url(&request.method, &request.url) {
+            Some(url) => request.url = url.into_owned(),
+            None => return Err(access::refused(&request.method, &request.url)),
+        }
+        if request.follow_redirects {
             let hop = access::hop(&request);
             let followed = access::Followed { request, hops: 0 };
             self.start(who, hop, Some(followed));

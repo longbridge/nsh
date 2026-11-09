@@ -1294,6 +1294,9 @@ pub struct Core<M: TextEngine> {
     max_nodes: usize,
     /// What the app may reach ([`Core::set_access`]).
     access: Arc<crate::access::Access>,
+    /// What media sources starting with `//` resolve against
+    /// ([`Core::set_base_url`]).
+    base_url: Option<Arc<str>>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
     /// The windows' attribute records, by root node (the main window's is
@@ -1376,6 +1379,7 @@ impl<M: TextEngine> Core<M> {
             attachment_blocks: Vec::new(),
             max_nodes: usize::MAX,
             access: Arc::default(),
+            base_url: None,
             denied: Default::default(),
             windows: Default::default(),
             window_ids: Default::default(),
@@ -1603,6 +1607,14 @@ impl<M: TextEngine> Core<M> {
                 .set(crate::element::desktop::WindowAccess(Some(access.clone())));
         }
         self.access = access;
+    }
+
+    /// Sets the URL media sources starting with `//` resolve against, whose
+    /// scheme they take (the page's on the web, as `fetch`'s relative
+    /// URLs). Without one such a source names no URL, and only an app
+    /// without capabilities loads it ([`crate::access::Access::media_url`]).
+    pub fn set_base_url(&mut self, url: Option<Arc<str>>) {
+        self.base_url = url;
     }
 
     /// Sets what the core's own image loads (an [`crate::element::svg`]'s
@@ -2293,18 +2305,32 @@ impl<M: TextEngine> Core<M> {
                 }
                 if !self.access.is_unrestricted() {
                     let access = self.access.clone();
+                    let base = self.base_url.clone();
                     let mut refused = Vec::new();
-                    drawing.ops.retain(|op| match op {
-                        crate::canvas::CanvasOp::DrawImage { image, .. }
-                            if !access.allows_media(&image.uri) =>
-                        {
-                            refused.push(image.uri.clone());
-                            false
+                    // An image draws what the check granted
+                    // (`Access::media_url`).
+                    drawing.ops.retain_mut(|op| match op {
+                        crate::canvas::CanvasOp::DrawImage { image, .. } => {
+                            match access.media_url(&image.uri, base.as_deref()) {
+                                Some(std::borrow::Cow::Owned(url)) => {
+                                    image.uri = url.into();
+                                    true
+                                }
+                                Some(std::borrow::Cow::Borrowed(_)) => true,
+                                None => {
+                                    refused.push(image.uri.clone());
+                                    false
+                                }
+                            }
                         }
                         _ => true,
                     });
                     for uri in refused {
-                        self.deny(not_granted("a canvas image", &uri, "network"));
+                        self.deny(media_not_granted(
+                            "a canvas image",
+                            &uri,
+                            self.base_url.as_deref(),
+                        ));
                     }
                 }
                 let node = &mut self.nodes[key as usize];
@@ -2885,15 +2911,30 @@ impl<M: TextEngine> Core<M> {
                 kept.push((id, command));
                 continue;
             }
+            // `Image.getSize` / `prefetch` load what the check granted
+            // (`Access::media_url`).
+            if let Command::ImageInfo { id: request, uri } = &mut command {
+                match self.media_source(uri) {
+                    Some(granted) => {
+                        if let Some(url) = granted {
+                            *uri = url.to_string();
+                        }
+                    }
+                    None => {
+                        let message = media_not_granted(
+                            "Image.getSize / prefetch of",
+                            uri,
+                            self.base_url.as_deref(),
+                        );
+                        self.answer_image_info(*request, Err(message.clone()));
+                        self.deny(message);
+                        continue;
+                    }
+                }
+            }
             // Lists resolved theirs in `update_lists`; a scroll view can
             // still scroll to its end.
             match &command {
-                Command::ImageInfo { id: request, uri } if !self.access.allows_media(uri) => {
-                    let message = not_granted("Image.getSize / prefetch of", uri, "network");
-                    self.answer_image_info(*request, Err(message.clone()));
-                    self.deny(message);
-                    continue;
-                }
                 Command::SetClipboard(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
@@ -4017,6 +4058,16 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Media source `uri` as the app may load it ([`crate::access::Access::media_url`]
+    /// against [`Core::set_base_url`]'s URL): `Some(None)` as written,
+    /// `Some(Some(url))` the URL to load in its place, `None` refused.
+    fn media_source(&self, uri: &str) -> Option<Option<Arc<str>>> {
+        match self.access.media_url(uri, self.base_url.as_deref())? {
+            std::borrow::Cow::Borrowed(_) => Some(None),
+            std::borrow::Cow::Owned(url) => Some(Some(url.into())),
+        }
+    }
+
     /// `prop` with what the app may not reach removed: a refused image,
     /// video or web view source shows nothing and fails (`onError` with
     /// `code` `ERR_ACCESS_DENIED`).
@@ -4045,6 +4096,10 @@ impl<M: TextEngine> Core<M> {
         let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
             report(core, not_granted(what, uri, capability));
         };
+        let refuse_media = |core: &mut Self, what: &str, uri: &str| {
+            let message = media_not_granted(what, uri, core.base_url.as_deref());
+            report(core, message);
+        };
         let no_webviews = |core: &mut Self| {
             report(
                 core,
@@ -4052,21 +4107,37 @@ impl<M: TextEngine> Core<M> {
             );
         };
         match prop {
-            Prop::Source(Some(source)) if !self.access.allows_media(&source.uri) => {
-                refuse(self, "the image", &source.uri, "network");
-                Prop::Source(None)
+            // A loader loads what the check granted (`Access::media_url`).
+            Prop::Source(Some(mut source)) => match self.media_source(&source.uri) {
+                Some(granted) => {
+                    source.uri = granted.unwrap_or(source.uri);
+                    Prop::Source(Some(source))
+                }
+                None => {
+                    refuse_media(self, "the image", &source.uri);
+                    Prop::Source(None)
+                }
+            },
+            Prop::Image(ImageProp::Placeholder(Some(mut source))) => {
+                match self.media_source(&source.uri) {
+                    Some(granted) => {
+                        source.uri = granted.unwrap_or(source.uri);
+                        Prop::Image(ImageProp::Placeholder(Some(source)))
+                    }
+                    None => {
+                        refuse_media(self, "the placeholder", &source.uri);
+                        Prop::Image(ImageProp::Placeholder(None))
+                    }
+                }
             }
-            Prop::Image(ImageProp::Placeholder(Some(source)))
-                if !self.access.allows_media(&source.uri) =>
-            {
-                refuse(self, "the placeholder", &source.uri, "network");
-                Prop::Image(ImageProp::Placeholder(None))
-            }
-            Prop::Native(NativeProp::Src(Some(url)))
-                if kind == Kind::Video && !self.access.allows_media(&url) =>
-            {
-                refuse(self, "the video", &url, "network");
-                Prop::Native(NativeProp::Src(None))
+            Prop::Native(NativeProp::Src(Some(url))) if kind == Kind::Video => {
+                match self.media_source(&url) {
+                    Some(granted) => Prop::Native(NativeProp::Src(Some(granted.unwrap_or(url)))),
+                    None => {
+                        refuse_media(self, "the video", &url);
+                        Prop::Native(NativeProp::Src(None))
+                    }
+                }
             }
             Prop::Native(NativeProp::Src(Some(url)))
                 if kind == Kind::WebView && !self.access.allows_webview(&url) =>
@@ -4080,11 +4151,16 @@ impl<M: TextEngine> Core<M> {
                 no_webviews(self);
                 Prop::Native(NativeProp::Html(None))
             }
-            Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
-                if kind == Kind::Video && !self.access.allows_media(&uri) =>
-            {
-                refuse(self, "the video", &uri, "network");
-                Prop::Native(NativeProp::Source(crate::WebSource::None))
+            Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri))) if kind == Kind::Video => {
+                match self.media_source(&uri) {
+                    Some(granted) => Prop::Native(NativeProp::Source(crate::WebSource::Uri(
+                        granted.unwrap_or(uri),
+                    ))),
+                    None => {
+                        refuse_media(self, "the video", &uri);
+                        Prop::Native(NativeProp::Source(crate::WebSource::None))
+                    }
+                }
             }
             Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
                 if kind == Kind::WebView && !self.access.allows_webview(&uri) =>
@@ -9369,6 +9445,13 @@ fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
 /// The message for a refused URL.
 fn not_granted(what: &str, uri: &str, capability: &str) -> String {
     let advice = crate::access::grant_advice(uri, capability);
+    format!("{what} {uri} is not granted: {advice}")
+}
+
+/// The message for a refused media source, read against `base` as
+/// `Access::media_url` reads it.
+fn media_not_granted(what: &str, uri: &str, base: Option<&str>) -> String {
+    let advice = crate::access::media_grant_advice(uri, base);
     format!("{what} {uri} is not granted: {advice}")
 }
 

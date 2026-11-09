@@ -8060,6 +8060,182 @@ fn refused_urls_fail_and_send_nothing() {
     );
 }
 
+/// An image or a video loads the URL the check granted, as WHATWG's parser
+/// reads it: `//` takes the base's scheme, dot segments are resolved, and a
+/// source naming a host the app is not granted loads nothing.
+#[test]
+fn media_sources_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let image = |id, uri: &str| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = image(2, "//docs.example.com/a/../x.png");
+    ops.extend(image(4, "//bank.example/x.png"));
+    ops.extend(image(6, "https:\\\\bank.example\\x.png"));
+    ops.extend(image(8, "asset:/own.png"));
+    ops.extend([
+        Op::Create {
+            id: 10,
+            tag: Tag::Video,
+        },
+        Op::SetProp {
+            id: 10,
+            prop: Prop::Native(NativeProp::Src(Some(
+                "//docs.example.com/v/../v.mp4".into(),
+            ))),
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 10,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let images: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, source, .. } => {
+                Some((*id, source.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        images,
+        [
+            (2, Some("https://docs.example.com/x.png".to_owned())),
+            (4, None),
+            (6, None),
+            (8, Some("asset:/own.png".to_owned())),
+        ]
+    );
+    let video = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id: 10,
+            props: crate::NativeProps::Video(p),
+        } => Some(p.source.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        video.flatten().as_deref(),
+        Some("https://docs.example.com/v.mp4")
+    );
+}
+
+/// A canvas image draws, and `Image.getSize` / `prefetch` loads, the URL the
+/// check granted; one naming a host the app is not granted is dropped.
+#[test]
+fn canvas_images_and_image_info_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let draw = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+        image: crate::canvas::CanvasImage { uri: uri.into() },
+        source: None,
+        dest: [crate::canvas::Num::Const(0.0); 4],
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Canvas,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Draw {
+                id: 2,
+                drawing: Box::new(crate::canvas::Drawing {
+                    ops: vec![
+                        draw("//docs.example.com/a/../x.png"),
+                        draw("//bank.example/x.png"),
+                    ],
+                    ..Default::default()
+                }),
+            },
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::ImageInfo {
+                    id: 1,
+                    uri: "//docs.example.com/b/../y.png".into(),
+                },
+            },
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::ImageInfo {
+                    id: 2,
+                    uri: "//bank.example/y.png".into(),
+                },
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let drawn: Vec<String> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Canvas { drawing, .. } => Some(drawing),
+            _ => None,
+        })
+        .flat_map(|d| d.ops.iter())
+        .filter_map(|op| match op {
+            crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(drawn, ["https://docs.example.com/x.png"]);
+    let asked: Vec<String> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Command {
+                command: Command::ImageInfo { uri, .. },
+                ..
+            } => Some(uri.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, ["https://docs.example.com/y.png"]);
+}
+
 /// A refusal names the host to grant, or, for a URL no host grant can
 /// cover, how to write it: adding the URL itself would never grant it.
 #[test]
@@ -32522,6 +32698,23 @@ mod audio {
         text(move || shown.get())
     }
 
+    /// Opens a player of a source written with a dot segment and an
+    /// upper-case host, and plays it.
+    #[component]
+    fn LooseVoice() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            let mut player = audio_player(
+                "https://EXAMPLE.com/a/../voice.m4a",
+                crate::audio::PlayerSettings::default(),
+            );
+            player.play();
+            let event = player.next().await;
+            shown.set(format!("{event:?}"));
+        });
+        text(move || shown.get())
+    }
+
     fn shown_after<C: crate::element::Component>(c: &mut Core<FakeEngine>) -> String
     where
         C::Props: Default,
@@ -32728,6 +32921,28 @@ mod audio {
             "Failed { error: NotAllowed, message: \"the source is not granted\" }|None"
         );
         assert_eq!(audio.log(), Vec::<String>::new());
+    }
+
+    /// A player opens the URL the check granted (`Access::media_url`), as
+    /// WHATWG's parser reads the source.
+    #[test]
+    fn a_player_opens_the_url_the_check_granted() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "audio": true, "network": { "hosts": ["example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        shown_after::<LooseVoice>(&mut c);
+        settle(&mut c);
+        assert_eq!(
+            audio.log().first().map(String::as_str),
+            Some("open https://example.com/voice.m4a false")
+        );
     }
 }
 

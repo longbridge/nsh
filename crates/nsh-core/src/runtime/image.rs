@@ -152,12 +152,14 @@ fn failed(call: &str, error: String) -> JsError {
     JsError::Error(error)
 }
 
-/// Whether the app may load the image at `url`: why not when it may not.
+/// Whether the app may load the image at `url`, as the core checks the
+/// `Command::ImageInfo` it sends (against the same base): why not when it
+/// may not.
 fn granted(sys: &System, url: &str) -> Result<(), JsError> {
-    if sys.access.allows_media(url) {
+    if sys.access.media_url(url, sys.base_url.as_deref()).is_some() {
         return Ok(());
     }
-    let advice = crate::access::grant_advice(url, "network");
+    let advice = crate::access::media_grant_advice(url, sys.base_url.as_deref());
     Err(JsError::access_denied(
         format!("Image.getSize / prefetch of {url} is not granted: {advice}"),
         "network",

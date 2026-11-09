@@ -138,7 +138,7 @@ runtime does not know: they are not granted there.
 ### `network`
 
 Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `placeholder`, canvas images,
-`Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
+`Image.getSize` / `Image.prefetch`), video and sound sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
 |---|---|---|
@@ -154,6 +154,10 @@ Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`,
 
 An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and with both a path matching either.
 
+Paths are matched as the request sends them, after WHATWG's URL parser resolves dot segments, percent-encoded ones
+too: `/v1/../admin` and `/v1/%2e%2e/admin` are `/admin`, which `pathPrefix: "/v1"` does not cover. The request goes
+out with the URL that was checked, so the server receives the path the rule matched.
+
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
 `https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
@@ -165,8 +169,12 @@ A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss:/
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
 `sockets` lists each host and port exactly, and only `sockets` grants them.
 
-`asset:` URIs (the app's own files) are always allowed; images and videos may also use `data:` URIs and relative
-paths.
+`asset:` URIs (the app's own files) are always allowed; images, videos and sounds may also use `data:` and `blob:`
+URIs and relative paths. A source that starts with `//` names a host: on the web it takes the page's scheme and is
+checked as that URL; in a native app it has no page to take a scheme from, so it loads nothing (write `https://…`).
+Any other source with a scheme is checked as a URL, and loads what was checked. A source that names a host only
+after the URL parser drops its leading or trailing spaces, or a tab or newline in it, is granted only by `*`, as other
+URLs that platforms read differently are.
 
 ### `webview`
 

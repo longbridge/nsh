@@ -125,7 +125,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 ### `network`
 
 涵盖 `fetch`（包括每一次重定向）、WebSocket、远程图片（`<Image>`、`placeholder`、canvas 图片、`Image.getSize` /
-`Image.prefetch`）、视频源以及原始 TCP socket（`net.connect`）。
+`Image.prefetch`）、视频和声音源以及原始 TCP socket（`net.connect`）。
 
 | 键 | 类型 | 说明 |
 |---|---|---|
@@ -141,6 +141,10 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 
 `http` 规则没有列出 `paths` 或 `pathPrefixes` 时覆盖所有路径；两者都列出时，匹配其一的路径即被覆盖。
 
+路径按请求实际发出的样子匹配：先由 WHATWG 的 URL 解析器解析点段（包括百分号编码的点段），所以 `/v1/../admin` 和
+`/v1/%2e%2e/admin` 都是 `/admin`，不在 `pathPrefix: "/v1"` 的覆盖范围内。请求发出的就是检查过的 URL，服务器收到的路径
+正是规则匹配的那一个。
+
 主机模式可以是 `*`（任意主机）、`*.example.com`（`example.com` 的任意子域名，不包括 `example.com` 本身）或一个确切的
 主机名。匹配时忽略大小写和端口。主机取最后一个 `@` 之后的部分，因此 `https://api.example.com@evil.io/` 会按 `evil.io`
 检查。各平台可能解析出不同主机或路径的 URL 只有 `hosts` 中的 `*`（或不限定端口和路径的 `*` 规则）能授权：查询之前含反斜杠
@@ -151,7 +155,10 @@ WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https
 `http` 授权也允许这个 WebSocket。原始 socket 不经过任何 HTTP 规则，所以 `sockets` 精确列出每个主机和端口，也只有
 `sockets` 能授予它们。
 
-`asset:` URI（应用自己的文件）始终允许；图片和视频还可以使用 `data:` URI 和相对路径。
+`asset:` URI（应用自己的文件）始终允许；图片、视频和声音还可以使用 `data:`、`blob:` URI 和相对路径。以 `//` 开头的源指向
+一个主机：在 Web 上它沿用页面的协议，按补全后的 URL 检查；原生应用没有页面可以提供协议，所以它不会加载任何内容（请写成
+`https://…`）。其他带协议的源都按 URL 检查，加载的就是检查过的 URL。如果一个源要等 URL 解析器去掉首尾空格或其中的制表符、换行后才
+指向某个主机，那么和其他各平台读法不同的 URL 一样，只有 `*` 能授权它。
 
 ### `webview`
 

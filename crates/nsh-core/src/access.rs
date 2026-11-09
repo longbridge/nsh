@@ -53,7 +53,10 @@
 //! paths or prefixes a rule covers every path. Rules serialize in one form:
 //! `schemes` and `pathPrefixes`.
 
-use std::path::{Component, Path, PathBuf};
+use std::{
+    borrow::Cow,
+    path::{Component, Path, PathBuf},
+};
 
 use serde_json::{Map, Value};
 
@@ -486,8 +489,78 @@ pub(crate) fn grant_advice(url: &str, capability: &str) -> String {
     }
 }
 
+/// [`grant_advice`] for a media source, read as [`Access::media_url`] reads
+/// it: a protocol-relative source (`//host/…`) names the host it resolves to
+/// against `base`, the page's address, and without one has no scheme to load
+/// with.
+pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
+    let unambiguous = !uri.contains('\\') && !uri.bytes().any(|b| b.is_ascii_control());
+    if scheme_of(uri).is_none() && uri.starts_with("//") && unambiguous {
+        let resolved = base
+            .and_then(|base| url::Url::parse(base).ok())
+            .and_then(|base| base.join(uri).ok());
+        return match resolved {
+            Some(url) => grant_advice(url.as_str(), "network"),
+            None => NO_SCHEME_ADVICE.to_owned(),
+        };
+    }
+    grant_advice(uri, "network")
+}
+
+/// [`media_grant_advice`] for a protocol-relative source without a base.
+const NO_SCHEME_ADVICE: &str =
+    "it names no scheme and has no page to take one from: write it as an http(s) URL";
+
 /// [`grant_advice`] for a URL without parts.
 const NO_HOST_ADVICE: &str = "it names no host a grant could add: write it as an http(s) URL with a host, a backslash as `%5C` and no control characters";
+
+/// Whether media source `uri` is the app's own or a local file, which stay
+/// as written: a bundled file (`asset:`), bytes it has (`data:`, `blob:`, an
+/// in-memory image's `data:…;nsh-key=` key), a `file:` URL or a Windows
+/// drive path (`C:\…`, `C:/…`), which WHATWG's parser would take for a
+/// one-letter scheme.
+fn is_own_media(uri: &str) -> bool {
+    ["asset:", "file:", "data:", "blob:"].iter().any(|prefix| {
+        uri.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    }) || matches!(uri.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic())
+}
+
+/// `uri` as WHATWG's parser reads it: without leading and trailing spaces
+/// and C0 controls, and without tabs and newlines.
+fn whatwg_stripped(uri: &str) -> Cow<'_, str> {
+    let trimmed = uri.trim_matches(|c: char| c <= ' ');
+    if trimmed.contains(['\t', '\n', '\r']) {
+        Cow::Owned(trimmed.replace(['\t', '\n', '\r'], ""))
+    } else {
+        Cow::Borrowed(trimmed)
+    }
+}
+
+/// The scheme `uri` starts with (`[A-Za-z][A-Za-z0-9+.-]*:`), if any.
+fn scheme_of(uri: &str) -> Option<&str> {
+    let (scheme, _) = uri.split_once(':')?;
+    let mut chars = scheme.chars();
+    (chars.next()?.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+    .then_some(scheme)
+}
+
+/// Whether an app without capabilities loads media source `uri`: as before
+/// its sources were read as WHATWG's parser reads them, anything without
+/// `://`, and URLs `allows_http` grants.
+fn media_as_written(uri: &str, allows_http: impl Fn(&str) -> bool) -> bool {
+    !uri.contains("://") || is_own_media(uri) || allows_http(uri)
+}
+
+/// `serialized`, or `written` when the two are the same.
+fn written_or(written: &str, serialized: String) -> Cow<'_, str> {
+    if serialized == written {
+        Cow::Borrowed(written)
+    } else {
+        Cow::Owned(serialized)
+    }
+}
 
 /// Why [`read_url`] gives no parts.
 enum Unread {
@@ -1582,7 +1655,10 @@ impl Access {
             return true;
         }
         match read_url(url) {
-            Ok(parts) => self.each(|c| c.allows_http(method, &parts)),
+            // A URL WHATWG's parser cannot read is none the loaders load.
+            Ok(parts) => {
+                url::Url::parse(url).is_ok_and(|whatwg| self.allows_parts(method, parts, &whatwg))
+            }
             // Whatever host a parser reads, a grant of every host covers it.
             Err(Unread::Ambiguous(scheme)) => {
                 self.each(|c| c.allows_http_anywhere(method, &scheme))
@@ -1591,20 +1667,105 @@ impl Access {
         }
     }
 
-    /// Whether a media URL (image, video, canvas image) may be loaded.
-    /// Relative and `asset:` URIs are the app's own files; `data:` URIs and
-    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has; a
-    /// `file:` URL is a file path, as an absolute path is.
-    pub fn allows_media(&self, uri: &str) -> bool {
-        if !uri.contains("://")
-            || uri.starts_with("asset:")
-            || uri.starts_with("file:")
-            || uri.starts_with("data:")
-            || uri.starts_with("blob:")
-        {
-            return true;
+    /// [`Self::allows_http`] for `url` that `whatwg` is WHATWG's parse of:
+    /// a rule's paths are matched against the path a server is sent, dot
+    /// segments, percent-encoded ones too, resolved as that parser resolves
+    /// them.
+    fn allows_parsed(&self, method: &str, url: &str, whatwg: &url::Url) -> bool {
+        match read_url(url) {
+            Ok(parts) => self.allows_parts(method, parts, whatwg),
+            Err(Unread::Ambiguous(scheme)) => {
+                self.each(|c| c.allows_http_anywhere(method, &scheme))
+            }
+            Err(Unread::NotUrl) => false,
         }
-        self.allows_http("GET", uri)
+    }
+
+    /// Whether the rules grant `parts` with the path WHATWG's parse of the
+    /// URL, `whatwg`, sends.
+    fn allows_parts(&self, method: &str, parts: UrlParts<'_>, whatwg: &url::Url) -> bool {
+        let parts = UrlParts {
+            path: whatwg.path(),
+            ..parts
+        };
+        self.each(|c| c.allows_http(method, &parts))
+    }
+
+    /// The URL a request to `url` goes out with, if the app may make it:
+    /// its WHATWG serialization, which [`Self::allows_http`] checks, so the
+    /// loader requests what was granted. `asset:` URIs stay as written.
+    pub fn http_url<'a>(&self, method: &str, url: &'a str) -> Option<Cow<'a, str>> {
+        if url.starts_with("asset:") {
+            return Some(Cow::Borrowed(url));
+        }
+        let whatwg = url::Url::parse(url).ok()?;
+        self.allows_parsed(method, whatwg.as_str(), &whatwg)
+            .then(|| written_or(url, whatwg.into()))
+    }
+
+    /// Whether a media URL (image, video, canvas image) may be loaded:
+    /// [`Self::media_url`] with no base, so a `//` source names no URL.
+    pub fn allows_media(&self, uri: &str) -> bool {
+        self.media_url(uri, None).is_some()
+    }
+
+    /// What a media source (image, video, canvas image, sound) loads, if the
+    /// app may load it. `asset:` URIs are the app's own files; `data:` URIs
+    /// and `blob:` URLs (`URL.createObjectURL`) are bytes the app already
+    /// has; a `file:` URL is a file path, as an absolute path is; a source
+    /// with no scheme that does not start with `//` or a backslash is
+    /// relative, the app's own: these stay as written. A source with a
+    /// scheme, or one that starts with `//` (resolved against `base`, the
+    /// page's URL on the web, whose scheme it takes; with no base it names
+    /// no URL, as `fetch`'s), names a host: it is checked as WHATWG's parser
+    /// reads it and loads as its serialization, so the loader loads what
+    /// was granted. A backslash before the query or a control character is
+    /// read differently by other parsers (Foundation's `NSURL`): only a
+    /// grant of every host covers such a source, as written. An app without
+    /// capabilities loads what it writes, unchecked.
+    pub fn media_url<'a>(&self, uri: &'a str, base: Option<&str>) -> Option<Cow<'a, str>> {
+        if is_own_media(uri) {
+            return Some(Cow::Borrowed(uri));
+        }
+        if self.is_unrestricted() {
+            return media_as_written(uri, |url| self.allows_http("GET", url))
+                .then_some(Cow::Borrowed(uri));
+        }
+        // WHATWG's parser reads the source with leading and trailing spaces
+        // and C0 controls and every tab and newline dropped.
+        let stripped = whatwg_stripped(uri);
+        let scheme = scheme_of(&stripped);
+        let names_host = scheme.is_some()
+            || stripped.starts_with("//")
+            || stripped.starts_with(['\\'])
+            || stripped.starts_with("/\\");
+        if !names_host {
+            return Some(Cow::Borrowed(uri));
+        }
+        // Only a source without a scheme takes the base's.
+        let base = || base.and_then(|b| url::Url::parse(b).ok());
+        let head = uri.split(['?', '#']).next().unwrap_or(uri);
+        // Loaders that do not strip it read another URL.
+        if stripped.len() != uri.len()
+            || head.contains('\\')
+            || uri.bytes().any(|b| b.is_ascii_control())
+            || matches!(read_url(uri), Err(Unread::Ambiguous(_)))
+        {
+            let scheme = match scheme {
+                Some(scheme) => scheme.to_ascii_lowercase(),
+                None => base()?.scheme().to_owned(),
+            };
+            return self
+                .each(|c| c.allows_http_anywhere("GET", &scheme))
+                .then_some(Cow::Borrowed(uri));
+        }
+        let parsed = match scheme {
+            Some(_) => url::Url::parse(uri),
+            None => base()?.join(uri),
+        }
+        .ok()?;
+        self.allows_parsed("GET", parsed.as_str(), &parsed)
+            .then(|| written_or(uri, parsed.into()))
     }
 
     /// The next URL of a media load that was redirected from `base` to
@@ -1781,26 +1942,15 @@ impl Access {
 }
 
 /// `location` against `base` (absolute, scheme-relative, absolute-path or
-/// relative references), as a redirect's `Location` is read.
+/// relative references), as a redirect's `Location` is read: resolved as
+/// WHATWG's parser resolves it, dot segments included, so a rule checks the
+/// URL the next hop requests. A base that is no URL leaves the location as
+/// written, which no check grants.
 pub fn resolve_reference(base: &str, location: &str) -> String {
-    if location.contains("://") {
-        return location.to_owned();
+    match url::Url::parse(base).and_then(|base| base.join(location)) {
+        Ok(url) => url.into(),
+        Err(_) => location.to_owned(),
     }
-    let Some((scheme, rest)) = base.split_once("://") else {
-        return location.to_owned();
-    };
-    if let Some(net) = location.strip_prefix("//") {
-        return format!("{scheme}://{net}");
-    }
-    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let origin = format!("{scheme}://{}", &rest[..authority_end]);
-    if location.starts_with('/') {
-        return format!("{origin}{location}");
-    }
-    let path = &rest[authority_end..];
-    let path = path.split(['?', '#']).next().unwrap_or_default();
-    let dir = path.rsplit_once('/').map_or("", |(d, _)| d);
-    format!("{origin}{dir}/{location}")
 }
 
 #[cfg(test)]
@@ -2761,6 +2911,210 @@ mod tests {
                 .media_redirect(from, "ftp://b.com/z.png")
                 .is_err()
         );
+    }
+
+    /// An HTTP rule's paths are matched against the path WHATWG's parser
+    /// (the web views', the `url` crate's) reads, as a server receives it:
+    /// dot segments, percent-encoded ones too, are resolved first.
+    #[test]
+    fn http_paths_are_matched_as_whatwg_resolves_them() {
+        let a = Access {
+            declared: caps(
+                r#"{ "network": { "http": [{ "host": "api.example.com", "pathPrefix": "/public" }] } }"#,
+            ),
+            granted: None,
+        };
+        for url in [
+            "https://api.example.com/public/../private",
+            "https://api.example.com/public/%2e%2e/private",
+            "https://api.example.com/public/%2E%2E/private",
+            "https://api.example.com/public/.%2e/private",
+            "https://api.example.com/public/./../private",
+        ] {
+            assert!(!a.allows_http("GET", url), "{url}");
+            assert!(!a.allows_media(url), "{url}");
+        }
+        for url in [
+            "https://api.example.com/public/x",
+            "https://api.example.com/private/../public/x",
+            "https://api.example.com/public/./x",
+        ] {
+            assert!(a.allows_http("GET", url), "{url}");
+        }
+    }
+
+    /// A redirect's location is resolved as WHATWG's parser resolves it,
+    /// dot segments included, before the rules see it.
+    #[test]
+    fn redirects_resolve_dot_segments() {
+        assert_eq!(
+            resolve_reference("https://api.example.com/public/x", "../private"),
+            "https://api.example.com/private"
+        );
+        assert_eq!(
+            resolve_reference("https://api.example.com/public/x", "%2e%2e/private"),
+            "https://api.example.com/private"
+        );
+        let a = Access {
+            declared: caps(
+                r#"{ "network": { "http": [{ "host": "api.example.com", "pathPrefix": "/public" }] } }"#,
+            ),
+            granted: None,
+        };
+        let from = "https://api.example.com/public/a.png";
+        assert!(a.media_redirect(from, "b.png").is_ok());
+        assert!(a.media_redirect(from, "../private.png").is_err());
+        assert!(a.media_redirect(from, "/public/../private.png").is_err());
+    }
+
+    /// A media source with a scheme, or one that starts with `//` or a
+    /// backslash, names a host: it is checked as WHATWG's parser reads it,
+    /// not taken for the app's own file.
+    #[test]
+    fn media_sources_that_name_a_host_are_checked() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["docs.example.com"] } }"#),
+            granted: None,
+        };
+        for uri in [
+            "//bank.example/x.png",
+            "\\\\bank.example\\x.png",
+            "/\\bank.example/x.png",
+            "https:\\\\bank.example\\x.png",
+            "https:/bank.example/x.png",
+            "HTTPS://bank.example/x.png",
+        ] {
+            assert!(!a.allows_media(uri), "{uri}");
+        }
+        // The app's own files and bytes it has stay its own.
+        for uri in [
+            "asset:/a.png",
+            "img/a.png",
+            "data:image/png;base64,AAAA",
+            "blob:https://app.example/1",
+            "https://docs.example.com/x.png",
+        ] {
+            assert!(a.allows_media(uri), "{uri}");
+        }
+        // An app without capabilities is not checked, as before.
+        assert!(Access::default().allows_media("//bank.example/x.png"));
+    }
+
+    /// WHATWG's parser drops leading and trailing spaces and C0 controls and
+    /// every tab and newline before it reads a URL, so a source those make
+    /// into one naming a host is checked, never kept as a relative path.
+    #[test]
+    fn media_sources_are_read_after_whatwg_strips_them() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["docs.example.com"] } }"#),
+            granted: None,
+        };
+        let page = Some("https://app.example/index.html");
+        for uri in [
+            "\t//bank.example/x.png",
+            "\n//bank.example/x.png",
+            "/\t/bank.example/x.png",
+            " https://bank.example/x.png",
+            "https://bank.example/x.png ",
+            "ht\ttps://bank.example/x.png",
+            "\u{1}https://bank.example/x.png",
+        ] {
+            assert_eq!(a.media_url(uri, page), None, "{uri:?} on the web");
+            assert_eq!(a.media_url(uri, None), None, "{uri:?} in a native app");
+        }
+        // What stays relative after stripping stays the app's own.
+        assert_eq!(
+            a.media_url(" icons/a.png", page),
+            Some(Cow::Borrowed(" icons/a.png"))
+        );
+        // Hosts are checked as WHATWG writes them, and load as checked.
+        let local = Access {
+            declared: caps(r#"{ "network": { "hosts": ["127.0.0.1"] } }"#),
+            granted: None,
+        };
+        assert_eq!(
+            local.media_url("http://0x7f.1/a.png", None),
+            Some(Cow::Owned("http://127.0.0.1/a.png".into()))
+        );
+        assert_eq!(a.media_url("http://0x7f.1/a.png", None), None);
+        // Schemes ignore case, the app's own sources' too.
+        for own in [
+            "DATA:image/png;base64,AA",
+            "Asset:/a.png",
+            "BLOB:https://app.example/1",
+        ] {
+            assert_eq!(a.media_url(own, page), Some(Cow::Borrowed(own)), "{own}");
+        }
+    }
+
+    /// A refused source's advice names the host it resolves to, as the
+    /// check read it.
+    #[test]
+    fn refused_media_sources_advise_the_host_they_resolve_to() {
+        let page = Some("http://localhost:8080/index.html");
+        // Against the page, `//host` names the host a grant would add.
+        assert_eq!(
+            media_grant_advice("//127.0.0.1:9000/a.png", page),
+            "add `127.0.0.1` to capabilities.network in nsh.json"
+        );
+        // Without one, it has no scheme to load with.
+        assert_eq!(
+            media_grant_advice("//127.0.0.1:9000/a.png", None),
+            NO_SCHEME_ADVICE
+        );
+        // A backslash stays ambiguous, whatever the base.
+        assert_eq!(
+            media_grant_advice("//127.0.0.1\\a.png", page),
+            NO_HOST_ADVICE
+        );
+        assert_eq!(
+            media_grant_advice("https://cdn.example.com/a.png", page),
+            "add `cdn.example.com` to capabilities.network in nsh.json"
+        );
+    }
+
+    /// What a loader loads is what the check granted: a source naming a host
+    /// becomes its WHATWG serialization, `//` taking the base's scheme (the
+    /// page's on the web; with no base it names no URL); the app's own stay
+    /// as written.
+    #[test]
+    fn media_sources_load_the_url_the_check_granted() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["docs.example.com"] } }"#),
+            granted: None,
+        };
+        let https = Some("https://app.example/index.html");
+        let http = Some("http://127.0.0.1:8080/");
+        let loads = |uri, base| a.media_url(uri, base).map(|u| u.into_owned());
+        assert_eq!(
+            loads("https://DOCS.example.com/a/../x.png", None).as_deref(),
+            Some("https://docs.example.com/x.png")
+        );
+        assert_eq!(
+            loads("//docs.example.com/x.png", https).as_deref(),
+            Some("https://docs.example.com/x.png")
+        );
+        assert_eq!(
+            loads("//docs.example.com/x.png", http).as_deref(),
+            Some("http://docs.example.com/x.png")
+        );
+        // A backslash before the query is read differently by Foundation's
+        // `NSURL` (`urls_that_parsers_read_as_different_hosts_are_refused`):
+        // only a grant of every host covers it, `//`'s backslash forms too.
+        assert_eq!(loads("\\\\docs.example.com\\x.png", https), None);
+        assert_eq!(loads("//docs.example.com/x.png", None), None);
+        assert_eq!(loads("//bank.example/x.png", https), None);
+        for own in ["asset:/a.png", "img/a.png", "data:image/png;base64,AAAA"] {
+            assert!(
+                matches!(a.media_url(own, https), Some(std::borrow::Cow::Borrowed(u)) if u == own),
+                "{own}"
+            );
+        }
+        // Without capabilities, nothing is checked or rewritten.
+        assert!(matches!(
+            Access::default().media_url("//bank.example/x.png", None),
+            Some(std::borrow::Cow::Borrowed("//bank.example/x.png"))
+        ));
     }
 
     #[test]
