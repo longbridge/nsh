@@ -3845,6 +3845,10 @@ dependencies = [
  "nsh-js",
  "nsh-package",
  "nsh-updater",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "objc2-metal",
  "oxc_sourcemap",
  "pollster",
  "rustc-hash 2.1.3",
@@ -4031,6 +4035,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation",
  "objc2-image-io",
+ "objc2-io-surface",
  "objc2-quartz-core",
  "objc2-ui-kit",
  "rustc-hash 2.1.3",
@@ -4084,6 +4089,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-image-io",
  "objc2-io-kit",
+ "objc2-io-surface",
  "objc2-quartz-core",
  "rustc-hash 2.1.3",
  "serde_json",
@@ -4190,6 +4196,7 @@ dependencies = [
  "crossterm",
  "libc",
  "log",
+ "nsh-base",
  "nsh-bundler",
  "nsh-core",
  "nsh-dev",
@@ -4403,6 +4410,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.13.2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -4417,6 +4425,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]

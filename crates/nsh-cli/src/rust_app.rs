@@ -76,6 +76,16 @@ static CURRENT: std::sync::Mutex<Option<RustApp>> = std::sync::Mutex::new(None);
 /// of ending the session ([`RustApp::build_with`]).
 static RESTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set by `nsh run --release`: the development host is an optimized
+/// (`--release`) build too, so what the session shows runs at the speed
+/// the app ships at ([`RustApp::host`]).
+static RELEASE_HOSTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Builds this command's development hosts optimized ([`RELEASE_HOSTS`]).
+pub(crate) fn set_release_hosts() {
+    RELEASE_HOSTS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Makes `app` the app of this command ([`current`]).
 pub(crate) fn set_current(app: RustApp) {
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(app);
@@ -276,7 +286,7 @@ impl Nsh {
 
 /// What a generated crate names of a platform crate's features: all but `js`
 /// and the standard JS modules, which a Rust app does not run.
-pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
+pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -2095,11 +2105,17 @@ opt-level = \"s\"
             _ => (self.workspace.clone(), &[][..]),
         };
         let package = self.bin(name);
+        let release = runner || RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
+        let what = if release && !runner {
+            format!("{what} (release build)")
+        } else {
+            what
+        };
         self.build(
             &workspace,
             &package,
             platform.triple(),
-            runner,
+            release,
             features,
             &what,
         )

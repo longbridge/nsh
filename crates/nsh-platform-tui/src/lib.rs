@@ -13,6 +13,7 @@ mod gradient;
 mod input;
 mod key_scheme;
 mod keyboard;
+mod link;
 mod menu;
 mod mount;
 mod native;

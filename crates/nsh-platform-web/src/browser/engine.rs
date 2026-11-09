@@ -166,6 +166,9 @@ impl Host for Runtime {
                     ])
                 })(),
             ),
+            // Only for a lazy `<Each>`, which the web's renderer never is
+            // (it culls no content).
+            JsEvent::Rows(_) => {}
             JsEvent::Unrender { host, prop, key } => self.event(
                 "unrender",
                 (|| {

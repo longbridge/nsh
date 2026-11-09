@@ -22,6 +22,10 @@ term = ["dep:vte"]
 plot = []
 # Built-in syntax highlighting of `TextView`'s code blocks (syntect).
 highlight = ["dep:syntect", "dep:two-face"]
+# `EmojiPicker`, with Unicode's emoji and their English names embedded (about
+# 440 kB of code and data in a release runner); without it `nsh/base` has no
+# `EmojiPicker`.
+emoji-picker = []
 # `TextView`'s formulas typeset natively (RaTeX), with the KaTeX fonts
 # embedded (about 230 kB); without it a formula shows as its TeX, or as the
 # app's `renderMath`.

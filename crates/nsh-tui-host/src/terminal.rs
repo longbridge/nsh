@@ -395,7 +395,8 @@ fn parse_color(value: &str) -> Option<[u8; 3]> {
 
 /// The capabilities from the startup answers and the environment: `NSH_TUI_COLORS`
 /// (`truecolor`, `256`, `16` or `mono`) wins, then `NO_COLOR` (no colors at
-/// all, as no-color.org asks), then `COLORTERM`, then `TERM`.
+/// all, as no-color.org asks), then `COLORTERM`, then `TERM`. Hyperlinks are
+/// drawn everywhere but the Linux console (`TERM=linux`).
 pub(crate) fn capabilities(
     replies: &Replies,
     var: impl Fn(&str) -> Option<String>,
@@ -420,6 +421,8 @@ pub(crate) fn capabilities(
         };
     }
     let lower = |name| var(name).map(|value| value.to_ascii_lowercase());
+    // The Linux console prints an OSC 8 sequence instead of ignoring it.
+    capabilities.hyperlinks = !lower("TERM").is_some_and(|term| term.starts_with("linux"));
     capabilities.colors = match lower("NSH_TUI_COLORS").as_deref() {
         Some("truecolor" | "24bit") => ColorDepth::TrueColor,
         Some("256") => ColorDepth::Ansi256,
@@ -706,6 +709,8 @@ mod tests {
         let dark = capabilities(&Replies::default(), env(&[("TERM", "xterm-256color")]));
         assert_eq!(dark.background, nsh_core::platform::ColorScheme::Dark);
         assert_eq!(dark.colors, ColorDepth::Ansi256);
+        assert!(dark.hyperlinks);
+        assert!(!capabilities(&Replies::default(), env(&[("TERM", "linux")])).hyperlinks);
         assert_eq!(
             capabilities(&Replies::default(), env(&[("TERM", "xterm")])).colors,
             ColorDepth::Ansi16

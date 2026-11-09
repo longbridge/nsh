@@ -248,6 +248,15 @@ export function createBrowserHost(player) {
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
         const page = createWebPage(reactive, player);
+        // Where the app is the page, `setUrl` takes a URL of the page's
+        // origin, resolved once as `history.replaceState` resolves it
+        // (against the page's `<base href>`).
+        if (nsh.UrlScheme && player.history) {
+          scope.configureAddress(nsh.UrlScheme, {
+            base: () => document.baseURI,
+            origin: location.origin,
+          });
+        }
         const base = modules.exports.get("nsh/base");
         if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
 

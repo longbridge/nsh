@@ -345,7 +345,9 @@ pub struct ViewProps {
     pub test_id: Option<Arc<str>>,
     /// `semantic`: the HTML element the web draws the view as.
     pub semantic: Option<crate::Semantic>,
-    /// `href`: where a `semantic="a"` view links to (the web).
+    /// Where the view goes as a link (`Link`'s `href`): data for the
+    /// platform, never shown or read to accessibility clients. A terminal
+    /// draws the text inside the view as an OSC 8 hyperlink to it.
     pub href: Option<Arc<str>>,
     /// `panActivation`: the view's touch responder waits for a pan the
     /// platform recognizes.

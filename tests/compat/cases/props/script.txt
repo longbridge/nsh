@@ -318,6 +318,9 @@ nostyle id:plain userSelect
 # Shrunk to fit: at most to minimumFontScale; what fits keeps its size.
 style id:fit fontSize 20
 style id:fit-min fontSize 10
+style id:fixed-height numberOfLines 1
+style id:fixed-height lineHeight 20
+expect Hello
 covers [styles] numberOfLines
 covers [styles] textOverflow
 covers [styles] userSelect

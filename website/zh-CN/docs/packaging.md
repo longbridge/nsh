@@ -8,7 +8,7 @@ group: platforms
 # 打包
 
 `nsh package` 把应用变成可以安装的产物：用于 iOS 模拟器的 `.app`、用于 iOS 真机的已签名 `.ipa`、用于 Android 的已签名
-`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录和 `.zip`，或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
+`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录、`.zip` 和安装程序（`<Name>-setup.exe`，需 Inno Setup），或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
 
 - **Rust 应用**（`nsh.json` 写明 `"root"`）在自己的目录里打包。`nsh` 以 release 模式为目标构建 runner，编译进你的 crate 并挂载根组件，
   不带 QuickJS：需要 Cargo、该平台的 Rust 目标（`rustup target add …`），Android 还需要 NDK。
@@ -206,7 +206,8 @@ nsh package --target windows --run
 写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本和外观的 `nsh\app.json`，以及
 TSX 应用的 `nsh\bundle.nshc`），以及同样内容的 `.nsh\out\<Name>.zip`。TSX 应用不需要任何工具；Rust 应用的 runner 用 Visual Studio
 Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机器构建的，而且只有
-Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行，不需要安装。见 [Windows](./windows.md#打包)。
+Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
+时编译成 `.nsh\out\<Name>-setup.exe`：按用户安装（不需要管理员权限），带开始菜单快捷方式和“已安装的应用”条目，并支持原地升级。见 [Windows](./windows.md#打包)。
 
 ## Web
 

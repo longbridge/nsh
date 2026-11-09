@@ -1773,6 +1773,17 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Where the view goes as a link, carried to the platform as data
+    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`;
+    /// apps use `Link`.
+    #[doc(hidden)]
+    fn __link_href(mut self, href: impl IntoReactive<Option<SharedString>>) -> Self {
+        super::host::bind_prop(self.node(), href, |href: Option<SharedString>| {
+            Prop::Href(href.map(|href| href.to_arc()))
+        });
+        self
+    }
+
     /// How long a press must last to be a long press, in milliseconds.
     fn long_press_delay(mut self, ms: f32) -> Self {
         super::host::set(self.node(), Prop::LongPressDelay(Some(ms)));
@@ -1815,12 +1826,6 @@ pub trait Interactive: Element {
     /// and readers of the page's markup. The other platforms ignore it.
     fn semantic(mut self, semantic: crate::Semantic) -> Self {
         super::host::set(self.node(), Prop::Semantic(Some(semantic)));
-        self
-    }
-
-    /// Where a [`Semantic::A`](crate::Semantic::A) view links to (the web).
-    fn href(mut self, href: impl Into<Arc<str>>) -> Self {
-        super::host::set(self.node(), Prop::Href(Some(href.into())));
         self
     }
 
