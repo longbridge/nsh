@@ -4886,6 +4886,14 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::Href(value) => {
+                let value = value.filter(|href| !href.is_empty());
+                let props = node.props.get_or_insert_default();
+                if props.href != value {
+                    props.href = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::PanActivation(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.pan_activation != value {
