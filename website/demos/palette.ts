@@ -3,6 +3,7 @@ export { ui, tint, hoverFill, focusRing, desktop, wide, size, button, buttonText
 export { CheckMark, Icon, type IconName } from "../../examples/nsh-gallery-ui/icons";
 export { TreeRow, treeIndent, treeItemClass } from "../../examples/nsh-gallery-ui/tree";
 export { CommandEmpty, CommandHeading, CommandKeys, CommandRow, commandClasses } from "../../examples/nsh-gallery-ui/command";
+export { EmojiPanel, EmojiHeading, EmojiPreview, EmojiTabs, EmojiTones, emojiGroups, emojiGroupLabels, emojiPickerClasses } from "../../examples/nsh-gallery-ui/emoji";
 export { avatarHue, avatarIdentity, avatarPortrait, AVATAR_BROKEN } from "../../examples/nsh-gallery-ui/avatar";
 export { MenuMark, menuIndicator, PopIn, popIn, popupSurface, createPresence, type PopupSide } from "../../examples/nsh-gallery-ui/popup";
 export { progressLook, progressSweep, type ProgressSweep, DisclosureChevron, disclosurePanel, disclosureTriggerLook, carouselArrowLook, CarouselDot, carouselDotItemLook, carouselPaginationLook, carouselSizes, photoUrl, type PhotoName, linkColor, linkLook, linkSize, LinkText, paginationArrows, paginationItemClass, scrollbarTheme, categoryColors, plotAxisText, plotBaseline, plotCrossLine, plotDotClass, plotGrid, plotHoverDot, plotReference, plotWash, seriesColor, DiffHunkActions, dockClasses, DockDragPreview, DockTab, dockTabCloseClass, resizableHandleLook, richEditorClasses, textViewCaretClass, textViewLinkClasses } from "../../examples/nsh-gallery-ui/demo";

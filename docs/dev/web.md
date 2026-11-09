@@ -242,7 +242,9 @@ The web ran QuickJS in WebAssembly until 2026-10; those measurements do not appl
 
 The syntaxes code is highlighted with are a file of their own, `nsh-syntaxes.<digest>.bin`, fetched the first time a
 `TextView` code block, an `Editor` or a `DiffView` highlights a language (`nsh_core::runtime_data`, the page's
-`data`). `nsh.js` is minified at package time (`nsh_bundler::minify_module`: local names mangled, property names
+`data`). `EmojiPicker`'s emoji are another, `nsh-emoji.<digest>.bin` (`emoji_picker/emoji.tsv`, 104 KB, 35 KB
+gzipped), published only for an app whose runtime links the picker (the gate `nsh_part_emoji_picker`) and fetched by
+its first picker; the dev host serves both. `nsh.js` is minified at package time (`nsh_bundler::minify_module`: local names mangled, property names
 kept, since the mounter looks its `op_<name>` methods up by name); the dev host serves it as it is. Published sites
 carry no source maps.
 
