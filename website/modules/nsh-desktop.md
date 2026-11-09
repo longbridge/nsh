@@ -338,6 +338,33 @@ The main window is there when the app starts. nsh.json's `window` holds its laun
 
 It takes the [options](#options) `defaultSize`, `defaultPosition`, `display` and `defaultMode`, and every [attribute](#attributes). While the app runs, `currentWindow()` outside any `<Window>` (or `Window.get("main")`) is the main window, and its `set()` changes the same attributes.
 
+`"defaultVisible": false` starts the app with its main window hidden: the window is made and the app runs in it, unseen and without taking the keyboard, until the app shows it with `show()` or `focus()`, as a [tray](#tray) app does when its icon is clicked. Until then `state()` reports it hidden; the first time it shows, it opens in its `defaultMode`. A link of one of the app's [URL schemes](./nsh.md#urlscheme) opened while the app runs shows it too, and so does opening the app again on macOS (its Dock icon, the Finder). `nsh run` and `nsh test --target` start it hidden as well. Their development host opens the window as it does for every app: with `--target windows` (`nsh run`'s default on Windows) at the app's `defaultSize` and in its `defaultMode`, with `--target macos`, `linux` or `gpui` at the host's size in the normal mode; GPUI shows a window as it opens on Linux, so with `--target gpui` there it shows. Under `nsh run` an error shows it, so the error is seen.
+
+```json
+{
+  "window": {
+    "title": "Focus",
+    "closeOnPress": false,
+    "defaultVisible": false
+  }
+}
+```
+
+```tsx
+import { currentWindow, Tray } from "nsh/desktop";
+import icon from "./tray.svg";
+
+function App() {
+  const win = currentWindow();
+  // The close button hides the window: the app keeps running in the tray.
+  win.on("closePress", () => win.hide());
+  Tray.set({ icon, onClick: () => win.focus(), menu: [{ role: "quit" }] });
+  return <Timer />;
+}
+```
+
+[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) is a tray app made this way.
+
 ### Capabilities
 
 An app without `"capabilities"` in nsh.json may open windows of every kind except overlays. An app that declares its capabilities opens windows of its own when `capabilities.windows` grants them ([Sandbox and capabilities](../docs/sandbox-and-capabilities.md#windows)). Overlays and click-through windows (`pointerEvents: "none"`) are granted only when declared. `Window.open` and `<Window>` throw `ERR_ACCESS_DENIED` with `permission` `"windows"` and `resource` the window's id for a window not granted; an attribute not granted in `set()` is left as it is, with a warning.

@@ -1305,6 +1305,9 @@ pub struct Core<M: TextEngine> {
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
+    /// The main window has been on screen, or it opens shown: its reports
+    /// are where the user left it ([`Core::keep_window_placement`]).
+    main_shown: bool,
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
@@ -1380,6 +1383,7 @@ impl<M: TextEngine> Core<M> {
             windows: Default::default(),
             window_ids: Default::default(),
             keep_main_placement: false,
+            main_shown: false,
             clipboard: None,
             picker: None,
             window_backend: None,
@@ -1635,6 +1639,7 @@ impl<M: TextEngine> Core<M> {
     /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
         self.keep_main_placement = options.restore_bounds;
+        self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
             self.keep_window_placement(crate::ROOT_ID, &state);
         }
@@ -2624,12 +2629,25 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Keeps the placement of window `id` (its root node) a platform
-    /// reported, when the app asked to restore its bounds.
+    /// reported, when the app asked to restore its bounds. A main window
+    /// hidden since launch (`defaultVisible: false`) is not where the user
+    /// left it until it first shows: it has yet to take the mode it opens
+    /// in, and GTK has yet to size it. Once it has shown, its reports are,
+    /// hidden ones too: one hidden right after a move or resize reports
+    /// where it was left only then. (A development host's reload starts a
+    /// new core: there such a window shown before the reload counts as
+    /// hidden since launch until it shows again.)
     pub(crate) fn keep_window_placement(
         &mut self,
         id: NodeId,
         state: &crate::desktop::WindowState,
     ) {
+        if id == crate::ROOT_ID {
+            self.main_shown |= state.visible;
+            if !self.main_shown {
+                return;
+            }
+        }
         let key = if id == crate::ROOT_ID {
             self.keep_main_placement
                 .then(|| crate::desktop::window::placement_key("main"))

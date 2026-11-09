@@ -167,6 +167,13 @@ belong to the app, which owns retention and its storage budget.
   it is: AppKit would shrink a window taller than its screen when it shows it, and a test's window keeps the size the
   test opens it at on a shorter secondary display. nsh.json `window` applies before the window shows (its attributes,
   size, place, display and mode; with `restoreBounds` the placement the engine kept in the app's storage, which the runner reads first).
+  With `defaultVisible: false` the window is made and its app runs, but it is not ordered in: the mode it opens in
+  waits on the surface (`main_open_mode`) for the first `show()` / `focus()`, a link (`application:openURLs:`) or
+  the Dock's reopen to show it (`window::main_shown`). A development host holds its first show until the first app
+  came (`Running::held`): the app's `defaultVisible` decides whether it shows, at the host's size and in the normal
+  mode, as every app's window (the other launch options apply where a runner makes the window). An error shows the
+  window while it is hidden (held, or hidden by the app: a tray app whose startup failed), so it is seen; a reload
+  leaves it as it is.
   The standalone event loop
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`

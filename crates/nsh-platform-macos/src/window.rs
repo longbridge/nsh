@@ -1031,6 +1031,17 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
             });
         }
     }
+    if id == ROOT_ID {
+        match request {
+            // A main window hidden at launch shows at last.
+            WindowRequest::Show | WindowRequest::Focus => main_shown(surface),
+            // The app's own mode replaces the one it was to open in.
+            WindowRequest::SetMode(_) | WindowRequest::SetPlacement(_) => {
+                surface.main_open_mode.take();
+            }
+            _ => {}
+        }
+    }
     report(surface, id);
 }
 
@@ -1464,9 +1475,22 @@ pub(crate) fn launch_main(
     }
 }
 
-/// The standalone app's main window shows: it takes the mode it opens in.
-pub(crate) fn launched_main(surface: &Surface, mode: Option<WindowMode>) {
-    if let Some(mode) = mode.filter(|m| *m != WindowMode::Normal)
+/// The standalone app's main window launched (`shown`: and showed): it
+/// takes the mode it opens in when it first shows. A full screen or zoomed
+/// window would show at once.
+pub(crate) fn launched_main(surface: &Surface, mode: Option<WindowMode>, shown: bool) {
+    surface
+        .main_open_mode
+        .set(mode.filter(|m| *m != WindowMode::Normal));
+    if shown {
+        main_shown(surface);
+    }
+}
+
+/// The standalone app's main window shows: the first time, it takes the
+/// mode it opens in.
+pub(crate) fn main_shown(surface: &Surface) {
+    if let Some(mode) = surface.main_open_mode.take()
         && let Some(window) = surface.root.ns().window()
     {
         crate::window_state::set_mode(&surface.window, &window, mode);

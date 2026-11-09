@@ -20716,6 +20716,62 @@ mod rust_windows {
         assert_eq!(kept, placement);
     }
 
+    #[test]
+    fn hidden_main_windows_keep_the_placement_the_user_left() {
+        use crate::desktop::{MainWindowOptions, WindowMode, WindowPlacement, WindowState};
+        let mut c = core();
+        let kept = |c: &Core<FakeEngine>| {
+            let _entered = c.components.runtime.enter();
+            crate::storage::Storage::get_item("nsh.window:main")
+                .map(|json| serde_json::from_str::<WindowPlacement>(&json).unwrap())
+        };
+        let state = |x: f32, mode: WindowMode, visible: bool| {
+            let bounds =
+                crate::geometry::Bounds::new(point(px(x), px(60.0)), size(px(640.0), px(480.0)));
+            let mut state = WindowState::new(bounds, WindowPlacement::new(mode, bounds));
+            state.visible = visible;
+            state
+        };
+        let report = |c: &mut Core<FakeEngine>, state: WindowState| {
+            c.set_environment(crate::element::Environment {
+                os: crate::platform::Os::MacOs,
+                window_state: Some(state),
+                ..Default::default()
+            });
+        };
+        // Hidden since launch (`defaultVisible: false`), in Normal mode
+        // until it shows in the mode it opens in: nothing kept yet, so the
+        // placement of the last run stays.
+        report(&mut c, state(0.0, WindowMode::Normal, false));
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            default_visible: Some(false),
+            ..Default::default()
+        });
+        report(&mut c, state(10.0, WindowMode::Normal, false));
+        assert_eq!(kept(&c), None);
+        let maximized = state(40.0, WindowMode::Maximized, true);
+        report(&mut c, maximized);
+        assert_eq!(kept(&c), Some(maximized.placement));
+        // Shown, it is where the user left it, hidden too: a window hidden
+        // right after a resize reports its new size only then (a tray
+        // app's close).
+        let resized = state(40.0, WindowMode::Normal, false);
+        report(&mut c, resized);
+        assert_eq!(kept(&c), Some(resized.placement));
+
+        // One that opens shown is where the user left it from the start,
+        // hidden reports included, as before `defaultVisible`.
+        let mut c = core();
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            ..Default::default()
+        });
+        let hidden = state(80.0, WindowMode::Normal, false);
+        report(&mut c, hidden);
+        assert_eq!(kept(&c), Some(hidden.placement));
+    }
+
     /// A window with no size of the app's, and one with a `defaultSize`,
     /// each filled by a view.
     #[component]

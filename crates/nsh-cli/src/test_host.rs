@@ -156,6 +156,12 @@ fn start(
 ) -> Result<TestHost, String> {
     let server = serve(entry, options)?;
     let entry = resolve(entry)?;
+    if matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
+        crate::package::note_hidden_main_window(&entry);
+    }
     let dir = entry.parent().unwrap_or(Path::new("."));
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
