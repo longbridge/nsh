@@ -218,7 +218,7 @@ function PhotoViewer() {
 
 ## platform.os 与 platform.select
 
-Rust 中的 `os()` 和 TSX 中 `nsh` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，无论哪种形态 `platform.catalyst` 都为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，`platform.desktop` 为 `true` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
+Rust 中的 `os()` 和 TSX 中 `nsh` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，无论哪种形态 `platform.catalyst` 都为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，`platform.desktop` 为 `true` 时也会应用 `desktop` 属性）。Rust 中的 `platform_name()` 和 TSX 中的 `platform.name` 是平台本身的名字：在 NSH 自带的平台上就是系统名，[在 NSH 之外构建的平台](./platform-extensions.md)则是它自己的名字（`"miniprogram"`），此时 `platform.os` 是它所运行设备的系统。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};
