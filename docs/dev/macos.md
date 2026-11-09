@@ -412,6 +412,20 @@ state and transfers, repeated reopen without duplicate windows, Quit while
 hidden, a test's quit, and cleanup after run_app returns. Source implementation
 and CI compilation alone do not prove those runtime behaviors.
 
+## Activation policy
+
+`AppOptions::activation_policy` (`ActivationPolicy::Regular` by default, `Accessory` for a menu bar app) is what
+`run_app` gives `NSApplication.setActivationPolicy` before the app starts; `background` (Prohibited) takes precedence
+(`app.rs` `activation_policy`). nsh.json's `macos.activationPolicy` reaches it on every path that starts a standalone
+app, before the app's code runs: `nsh package` writes `LSUIElement` into the `Info.plist` (a key NSH reserves,
+`nsh-cli` `apple.rs`) and `activationPolicy` into `app.json`, which `nsh-macos-app` reads (packages, and Rust apps
+`nsh run` runs in place); `nsh run` and `nsh test` pass the development host `--activation-policy`
+(`MacosConfig::host_args`). A dev server or a hot reload never changes it, and an embedded `AppView` leaves it to its
+host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in_background`, the agent's
+`activate`): an accessory app's windows become key as a regular app's do. The Dock's features (the badge, the
+attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
+shows its window itself (`focus()` from its tray).
+
 ## Keyboard focus for views
 
 A mounted non-input view that is a focus stop participates in AppKit's key
