@@ -252,6 +252,15 @@ fn a_press_fails_on_a_view_another_covers() {
 }
 
 #[test]
+fn a_press_reaches_a_view_across_a_scroll_view_s_fold() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/scroll-hit");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
 fn animations_that_loop_forever_hold_no_step() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/loops");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();

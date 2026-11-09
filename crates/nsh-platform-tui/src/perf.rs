@@ -43,6 +43,9 @@ pub(crate) struct Output {
     pub(crate) enabled: Cell<bool>,
     pub(crate) bytes: Cell<Option<u64>>,
     pub(crate) cells: Cell<Option<u64>>,
+    /// The linked Cells of the frame last drawn, which the backend wraps
+    /// in their hyperlinks (`crate::link`).
+    pub(crate) links: std::cell::RefCell<crate::link::Links>,
 }
 
 pub(crate) struct Monitor {

@@ -310,6 +310,10 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIAccessibilityCustomAction",
   "UIAccessibilityIdentification",
   "UIEvent",
+  "UIFeedbackGenerator",
+  "UIImpactFeedbackGenerator",
+  "UINotificationFeedbackGenerator",
+  "UISelectionFeedbackGenerator",
   "UIGestureRecognizerSubclass",
   "UIPinchGestureRecognizer",
   "UIRotationGestureRecognizer",
@@ -378,6 +382,27 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
 ] }
 # The macOS performance monitor's per-process GPU time (the IO registry).
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "libc"] }
+# Shader frames on Apple platforms: IOSurfaces the GPU renders into and Core
+# Animation shows as they are (nsh-engine `shader`).
+objc2-io-surface = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "libc",
+  "objc2",
+  "objc2-core-foundation",
+  "IOSurfaceRef",
+  "IOSurfaceTypes",
+  "IOSurfaceBase",
+] }
+objc2-metal = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "objc2-io-surface",
+  "MTLAllocation",
+  "MTLDevice",
+  "MTLPixelFormat",
+  "MTLResource",
+  "MTLTexture",
+  "MTLTypes",
+] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "CFArray",

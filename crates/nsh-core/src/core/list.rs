@@ -1560,7 +1560,10 @@ impl ListState {
     /// meets the end of the list's content.
     pub(super) fn sticky_range(&self, index: u32, cell: u32, size: f32) -> StickyRange {
         let start = self.item_at(index) - self.sticky_offset;
-        let next = self.sticky.iter().find(|&&s| s > index && s < self.count);
+        let next = self
+            .sticky
+            .get(self.sticky.partition_point(|&s| s <= index))
+            .filter(|&&s| s < self.count);
         let end = match next {
             Some(&n) => (self.item_at(n) - size - self.sticky_offset).max(start),
             None if self.parent => {
@@ -1607,7 +1610,11 @@ impl ListState {
         let sticky = self.active_sticky();
         // And the one before it: scrolled back, it shows at once, pushed by
         // the pinned one, before a round of binding could render it.
-        let before = sticky.and_then(|s| self.sticky.iter().rev().find(|&&p| p < s).copied());
+        let before = sticky.and_then(|s| {
+            self.sticky[..self.sticky.partition_point(|&p| p < s)]
+                .last()
+                .copied()
+        });
         let kept = std::mem::take(&mut self.kept);
         let wanted = |i: u32| {
             range.is_some_and(|(f, l)| (f..=l).contains(&i))

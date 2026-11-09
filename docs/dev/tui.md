@@ -969,6 +969,19 @@ A press on the Cell of a pressable span (a nested `<Text onPress>`, a `TextView`
 desktop backends: the innermost span around the character drawn there takes it before the views around its
 text, and it fires only when released on that span.
 
+The text drawn inside a view with an `href` (`ViewProps::href`, which `nsh/base`'s `Link` sets from its own
+while enabled) reaches the terminal as an OSC 8 hyperlink to it, which the terminal emulator opens (while the
+host captures the mouse, most emulators open it on a modified click). The buffer keeps plain symbols, so layout,
+ratatui's diff, selection, search and the test agent's screen are as without links (`link.rs`); the painter
+records the Cells that hold a glyph drawn inside the innermost such view, the frame keeps those no overlay drew
+over, and `MeasuredBackend` wraps each such Cell the diff hands it in a link of its own (`ESC ] 8 ;
+id=nsh-<view> ; URL ESC \`, the symbol, `ESC ] 8 ; ; ESC \`): a Cell redrawn alone carries its link whole, and
+the Cells of one link share its view's id. A Cell whose link changed (a new URL over the same text, the link
+gone) is drawn again whatever the diff finds, as the terminal keeps the old link there. Only an `href` that
+`openUrl` would take (`check_url`: no path of the app's, no whitespace or control character) is a link, its
+characters outside ASCII percent-encoded. `TerminalCapabilities::hyperlinks` turns links off; the host does so
+on the Linux console (`TERM=linux`), which prints the sequence.
+
 A text field takes the pointer itself (the caret, a drag's selection), and one that listens to presses (a
 combobox's field) still reports the press: `onPressDown` as it goes down, then the focus it takes, then
 `onPressUp` and, released on the field, `onPress`, focused before or not. Return stays `onSubmit`.

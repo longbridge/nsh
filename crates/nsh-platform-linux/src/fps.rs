@@ -81,7 +81,7 @@ pub(crate) struct Fps {
     drains: RefCell<Vec<Duration>>,
     logged: Cell<Instant>,
     hud: RefCell<Option<Hud>>,
-    /// The panel shows only the frame rate (a click toggles it; per
+    /// The panel shows only the frame rate and CPU (a click toggles it; per
     /// window, for the session).
     collapsed: Cell<bool>,
 }
@@ -148,7 +148,7 @@ impl Drop for Hud {
 
 /// Shows readings and the most recent [`CHART_FRAMES`] frame costs. Updating
 /// at 2 Hz keeps the diagnostics readable without asking the app for
-/// continuous frames. A click collapses the panel to the frame rate alone,
+/// continuous frames. A click collapses the panel to the frame rate and CPU,
 /// and expands it again.
 pub(crate) fn show(overlay: &gtk::Overlay, fps: &Rc<Fps>) {
     let panel = gtk::DrawingArea::new();
@@ -206,11 +206,11 @@ pub(crate) fn show(overlay: &gtk::Overlay, fps: &Rc<Fps>) {
 }
 
 /// The panel's size and inner padding (points), and its size collapsed: a
-/// small pill holding only the frame rate.
+/// small pill holding the frame rate and the process' CPU.
 const WIDTH: i32 = 288;
 const HEIGHT: i32 = 96;
 const PAD: f64 = 10.0;
-const COLLAPSED_WIDTH: i32 = 76;
+const COLLAPSED_WIDTH: i32 = 128;
 const COLLAPSED_HEIGHT: i32 = 24;
 
 /// Collapses or expands the panel.
@@ -318,27 +318,47 @@ fn rounded(cx: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: f64) {
 /// The panel: the frame rate large over the display's rate and two rows of
 /// readings, over the latest frames' cost as its background ([`curve`]). A
 /// dark panel in either appearance, as diagnostics read best. `collapsed`:
-/// only the frame rate, on a small pill.
+/// only the frame rate and the process' CPU, on a small pill.
 fn draw(cx: &cairo::Context, width: f64, height: f64, s: &PerfSnapshot, collapsed: bool) {
     let _ = cx.save();
     cx.set_source_rgba(0.07, 0.075, 0.085, 0.92);
     if collapsed {
-        // The frame rate alone, centered on the pill.
+        // The frame rate and the process' CPU, centered on the pill: each
+        // figure bright, its unit muted after it.
         rounded(cx, 0.0, 0.0, width, height, height / 2.0);
         let _ = cx.fill();
-        let number = format!("{:.0}", s.fps);
-        font(cx, "sans", cairo::FontWeight::Bold, 13.0);
-        let advance = cx.text_extents(&number).map_or(0.0, |e| e.x_advance());
-        font(cx, "sans", cairo::FontWeight::Normal, 9.0);
-        let unit = cx.text_extents("fps").map_or(0.0, |e| e.x_advance());
-        let x = ((width - advance - 3.0 - unit) / 2.0).max(0.0).round();
+        let cpu = s
+            .process
+            .cpu
+            .map_or_else(|| "—".to_owned(), |c| format!("{c:.0}%"));
+        let pairs = [(format!("{:.0}", s.fps), "fps"), (cpu, "cpu")];
+        let measure = |s: &str, weight, size| {
+            font(cx, "sans", weight, size);
+            cx.text_extents(s).map_or(0.0, |e| e.x_advance())
+        };
+        let (unit_gap, pair_gap) = (3.0, 10.0);
+        let widths: Vec<(f64, f64)> = pairs
+            .iter()
+            .map(|(value, unit)| {
+                (
+                    measure(value, cairo::FontWeight::Bold, 13.0),
+                    measure(unit, cairo::FontWeight::Normal, 9.0),
+                )
+            })
+            .collect();
+        let total: f64 = widths.iter().map(|(v, u)| v + unit_gap + u).sum::<f64>()
+            + pair_gap * (pairs.len() - 1) as f64;
+        let mut x = ((width - total) / 2.0).max(0.0).round();
         let baseline = (height / 2.0 + 4.5).round();
-        font(cx, "sans", cairo::FontWeight::Bold, 13.0);
-        color(cx, VALUE);
-        text(cx, x, baseline, &number, false);
-        font(cx, "sans", cairo::FontWeight::Normal, 9.0);
-        color(cx, MUTED);
-        text(cx, x + advance + 3.0, baseline, "fps", false);
+        for ((value, unit), (advance, unit_advance)) in pairs.iter().zip(widths) {
+            font(cx, "sans", cairo::FontWeight::Bold, 13.0);
+            color(cx, VALUE);
+            text(cx, x, baseline, value, false);
+            font(cx, "sans", cairo::FontWeight::Normal, 9.0);
+            color(cx, MUTED);
+            text(cx, x + advance + unit_gap, baseline, unit, false);
+            x += advance + unit_gap + unit_advance + pair_gap;
+        }
         let _ = cx.restore();
         return;
     }
@@ -725,13 +745,14 @@ mod tests {
         clippy::field_reassign_with_default,
         reason = "PerfSnapshot is non-exhaustive outside nsh-engine"
     )]
-    fn the_collapsed_panel_is_a_pill_of_the_frame_rate() {
+    fn the_collapsed_panel_is_a_pill_of_the_frame_rate_and_cpu() {
         let (w, h) = (COLLAPSED_WIDTH, COLLAPSED_HEIGHT);
         let mut image = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h).unwrap();
         let cx = cairo::Context::new(&image).unwrap();
         let mut snapshot = PerfSnapshot::default();
         snapshot.fps = 134.0;
         snapshot.refresh_rate = Some(144.0);
+        snapshot.process.cpu = Some(24.0);
         draw(&cx, w as f64, h as f64, &snapshot, true);
         drop(cx);
         let stride = image.stride() as usize;
@@ -741,9 +762,12 @@ mod tests {
         assert_eq!(alpha(1, 1), 0);
         assert_eq!(alpha(w as usize - 2, h as usize - 2), 0);
         assert!(alpha(2, h as usize / 2) > 200);
-        // The figure is drawn bright across the middle of the pill.
+        // Both figures are drawn bright across the middle of the pill: one
+        // in each half.
         let red = |x: usize, y: usize| pixels[y * stride + x * 4 + 2];
-        assert!((0..w as usize).any(|x| red(x, h as usize / 2) > 150));
+        let half = w as usize / 2;
+        assert!((0..half).any(|x| red(x, h as usize / 2) > 150));
+        assert!((half..w as usize).any(|x| red(x, h as usize / 2) > 150));
     }
 
     #[test]

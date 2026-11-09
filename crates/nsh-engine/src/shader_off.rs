@@ -55,6 +55,11 @@ impl ShaderView {
     ) {
     }
 
+    /// `false`: there is no frame.
+    pub fn set_input_from_frame(&mut self, _renderer: &Renderer, _input: ShaderInput) -> bool {
+        false
+    }
+
     /// `false`: nothing is kept.
     pub fn has_input(&self, _input: ShaderInput) -> bool {
         false
@@ -105,6 +110,16 @@ impl ShaderView {
     /// The empty frame.
     pub fn frame(&self) -> &Frame {
         &self.frame
+    }
+
+    /// Does nothing: there are no frames.
+    #[cfg(target_vendor = "apple")]
+    pub fn show_on_surfaces(&mut self) {}
+
+    /// `None`: there are no frames.
+    #[cfg(target_vendor = "apple")]
+    pub fn surface(&self) -> Option<&objc2_io_surface::IOSurfaceRef> {
+        None
     }
 
     /// `false`: there are no frames.
