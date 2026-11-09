@@ -974,6 +974,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
                 .last_state
                 .set(Some(gdk::ModifierType::empty()));
             motion(surface, Key::Mouse, x, y, time);
+            link_cursor(surface, x, y);
             mouse_moved(surface, x, y, gdk::ModifierType::empty());
         }
         Simulated::Wheel(x, y, dx, dy) => {
@@ -983,6 +984,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
         Simulated::Hover(x, y) => {
             surface.input.last_state.set(Some(held));
             hover(surface, x, y);
+            link_cursor(surface, x, y);
             mouse_moved(surface, x, y, held);
         }
         Simulated::ContextMenu(x, y) => {
