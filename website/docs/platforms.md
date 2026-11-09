@@ -16,7 +16,7 @@ On every platform, an app is used the same two ways: packaged as an installable 
 | Platform | Backend; text | Runs on | Develop | Package |
 |---|---|---|---|---|
 | [iOS](./ios.md) | UIKit; CoreText | iOS 15.0+, devices and the simulator | `nsh run --target ios` | `.app` (simulator), signed `.ipa` |
-| [Android](./android.md) | Android views; `StaticLayout` | Android 9 (API 28)+, `arm64-v8a`, `armeabi-v7a` and `x86_64` | `nsh run --target android` | signed `.apk` |
+| [Android](./android.md) | Android views; `StaticLayout` | Android 8 (API 26)+, `arm64-v8a`, `armeabi-v7a` and `x86_64` | `nsh run --target android` | signed `.apk` |
 | [macOS](./macos.md) | AppKit and Core Animation; CoreText | macOS 14+ | `nsh run --target macos` | ad hoc signed `.app` |
 | [Windows](./windows.md) | Win32 windows drawn with Direct2D; DirectWrite | Windows 10 1809+, Windows 11 | `nsh run` (the default on Windows) | a directory, a `.zip` and an installer |
 | [Linux](./linux.md) | GTK 4 widgets; Pango | GTK 4.14+ | `nsh run` (the default on Linux) | a directory and a `.tar.gz` |
@@ -28,6 +28,8 @@ On every platform, an app is used the same two ways: packaged as an installable 
 - **[TUI](./tui.md)** draws apps on the terminal's grid of character Cells, in the terminal's own colors, keyboard first and with the mouse: `nsh run --target tui` runs an app in the current terminal, and a ratatui app embeds one with `AppView`.
 - **[Web](./web.md)** renders apps as HTML in a browser page: `nsh package --target web` publishes a static site for any web server or CDN, with a Rust app's engine and crate compiled to WebAssembly, and a page of your own embeds an app with `createPlayer` or an iframe. It also runs the live demos and the [playground](/playground) on this site.
 - **Mac Catalyst** runs the iOS backend in an iPhone-sized window (390×844) on a Mac, for development. Select it with `--target catalyst` to see how an app looks on a phone.
+
+More platforms are built by the community on the same engine, each in a repository of its own, and the `nsh` command line runs them by name: [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) runs apps in WeChat Mini Programs (`--target miniprogram`). [Building a platform](./platform-extensions.md) shows how one is made.
 
 ## Develop and package
 
@@ -122,3 +124,4 @@ Each backend lists what it does its own way: [macOS](./macos.md#what-differs-on-
 - [Building with Rust](./rust.md): apps written in Rust, and Rust with TSX.
 - [Installation](./installation.md): the tools each platform needs.
 - [Architecture](./architecture.md): what is shared and what each backend does.
+- [Building a platform](./platform-extensions.md): a platform of your own on NSH's engine.

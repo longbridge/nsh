@@ -188,7 +188,7 @@ iOS、Android 运行时和发布版运行器的构建命令见仓库的 [AGENTS.
   - `platforms;android-35` 和较新的 `build-tools`（NSH 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
   - `platform-tools`（`adb`）。
 - **JDK**（首次打包时 `keytool` 会在 `~/.android/debug.keystore` 创建调试密钥库，`apksigner` 也需要 Java）。
-- 一个正在运行的模拟器，或通过 `adb` 连接的设备。应用要求 Android 9（API 28）及以上。
+- 一个正在运行的模拟器，或通过 `adb` 连接的设备。应用要求 Android 8（API 26）及以上。
 
 ```sh
 sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"

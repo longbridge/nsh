@@ -131,7 +131,7 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
+应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 26（Android 8）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
 加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
 
 ```sh

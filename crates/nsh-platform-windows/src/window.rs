@@ -646,16 +646,24 @@ pub(crate) fn wake(hwnd: isize) {
     }
 }
 
-/// Fills the window's client area with its background before the first
-/// frame. Windows composites and animates a window that has not painted yet
-/// with its default light surface, which flashes white on a dark appearance;
-/// its swap chain does not cover that surface until the first present.
+/// Fills the window's client area with its background: before the first
+/// frame, and as it is resized. Windows composites and animates a window
+/// that has not painted yet with its default light surface, which flashes
+/// white on a dark appearance; its swap chain does not cover that surface
+/// until the first present, nor past the last frame while a resize's is on
+/// its way.
 pub(crate) fn fill_background(surface: &Surface, hwnd: HWND) {
-    if surface.transparent() {
-        return;
+    if !surface.transparent() {
+        fill(hwnd, crate::system::window_background(surface));
     }
+}
+
+/// Fills the client area of `hwnd` with `color` (opaque), through GDI: what
+/// DWM shows of the window where no frame of its swap chain covers it.
+pub(crate) fn fill(hwnd: HWND, color: nsh_core::Color) {
     // `Color` is 0xRRGGBBAA; a GDI color is 0x00BBGGRR.
-    let color = crate::system::window_background(surface).0;
+    let color = color.0;
+    // SAFETY: a plain GDI call; the brush is freed below.
     let brush = unsafe {
         CreateSolidBrush(COLORREF(
             ((color >> 24) & 0xff) | ((color >> 8) & 0xff00) | ((color & 0xff00) << 8),
@@ -1034,6 +1042,11 @@ fn handle(
         }
         WM_ERASEBKGND => return Some(LRESULT(1)),
         WM_SIZE => {
+            // Filled first: the frame below waits for the layout, and DWM
+            // shows the window's redirection surface past the last frame
+            // meanwhile, black unless filled (DWM never shows a window swap
+            // chain's own background color).
+            fill_background(surface, hwnd);
             sync_size(surface, hwnd);
             // Drawn now, so that the window never shows stretched or
             // stale pixels while it is resized.
