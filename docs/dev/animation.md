@@ -32,6 +32,16 @@
   `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_core::animation::sample_easing` /
   `sample_driver` (the drivers' own code, stepped like frames, at most `MAX_SAMPLES`), so drawn curves are what runs;
   Rust components call `element::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
+  A driver's numbers are taken as given by the decoders and checked in `Running::new` (`driver.rs` `sanitized`): what
+  cannot move a value (stiffness or mass not above 0, a damping or target that is not finite, a NaN or infinite
+  duration) ends where it rests; negative damping is none (it oscillates, as an undamped spring does); a velocity that
+  is not finite is 0; an easing whose numbers are not finite is linear; a NaN delay is none (an infinite one waits, as
+  a sequence's `Delay` does); a NaN deceleration or bounce is 0, the clamps hold infinite ones; bounds that leave no
+  finite place (both NaN, or both the same infinity) are none (one NaN bound is the other, as `min` / `max` give it).
+  It warns once where an animation starts (`AnimationOp::Start`, `StartComposite`, `sample_driver`), not on each pass
+  of a loop. Numbers that still overflow on the way do not reach the views: an easing's frame moves linearly, and
+  otherwise the animation ends (a timing or spring at its target, a decay where it started). An overdamped spring is
+  two decaying exponentials (`spring`), which do not overflow.
   Bindable: `opacity`, `backgroundColor`, `borderColor` (all sides), a text's `color` (the whole text: iOS and Android draw
   it into a layer and paint over it in the color, `SourceIn` / `SRC_IN`), `translate` / `rotate` / `scale` (`[x, y]` per axis) and the steps of a `transform` list (a motion's,
   `createMotion`: `{ opacity, transform }`), and where views stick: a sticky view's `top` /

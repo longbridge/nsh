@@ -460,8 +460,8 @@ const color = flash.interpolate({ inputRange: [0, 1], outputRange: ["#1f2328", "
 | `setOffset(offset)` | `set_offset(offset)` | 在显示值上加上 `offset`：绑定看到的是值 + 偏移，而 `set`、动画和拖动改变的是值本身。 |
 | `flattenOffset()` | `flatten_offset()` | 把偏移加到值上，并把偏移设为 0。 |
 | `extractOffset()` | `extract_offset()` | 把值移入偏移并把值设为 0：下一次拖动就从 0 开始，叠加在上一次停下的位置上。 |
-| `timing(to, { duration?, easing?, delay?, frameRate? })` | `timing(to, ms, easing)`、`timing_with(to, Timing { .. })` | 在 `duration` 毫秒内动画到 `to`（默认 300 毫秒，缓动 `"easeInOut"`）。 |
-| `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | 以弹簧运动到 `to`（默认 stiffness 170、damping 26、mass 1）。 |
+| `timing(to, { duration?, easing?, delay?, frameRate? })` | `timing(to, ms, easing)`、`timing_with(to, Timing { .. })` | 在 `duration` 毫秒内动画到 `to`（默认 300 毫秒，缓动 `"easeInOut"`）。`duration` 为 NaN 或无穷大时直接跳到 `to`；缓动的参数不是有限值时按线性处理。 |
+| `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | 以弹簧运动到 `to`（默认 stiffness 170、damping 26、mass 1）。stiffness 和 mass 大于 0 且 damping 为有限值时值才会运动，否则直接跳到 `to`；负的 damping 按 0 处理，值会一直振荡。 |
 | `decay({ velocity?, deceleration?, clamp?, bounce?, frameRate? })` | `decay(velocity, deceleration)`、`decay_within(velocity, deceleration, (min, max), bounce)` | 以 `velocity`（每秒单位数）开始滑行并逐渐减速（默认每毫秒 deceleration 0.998）。设置范围 `[min, max]` 时，它停在边界上，或以 `bounce`（0..1）保留的速度从边界反弹。 |
 
 每个动画都给出一个可以 await 的结果，表示它是否完成：播放到终点时为 `true`，被打断时（`stop()`、`set()`，或同一个值上启动了新动画）为 `false`。在 TSX 中它是 `Promise<{ finished: boolean }>`，在 Rust 中是 `AnimationEnd`，任务 await 它得到这个 `bool`。在运动中的值上启动新动画会平滑地接替旧动画：没有指定速度的弹簧或衰减会沿用该值当前的速度。
