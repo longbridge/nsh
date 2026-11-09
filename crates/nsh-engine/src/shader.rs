@@ -354,9 +354,26 @@ struct Readback {
     state: Arc<AtomicU8>,
     /// The frame's number.
     serial: u64,
+    /// The frame's size in pixels (at most the target's).
+    size: (u32, u32),
 }
 
-/// What a view renders into, for one size.
+/// How much a view's target grows by at a time once the view is resized
+/// (pixels): a view resized within it (a window dragged) renders into the
+/// same texture and read-back buffers, its top left, instead of making new
+/// ones on every size. A view's first target is its frame's size.
+const TARGET_STEP: u32 = 128;
+
+/// How much bigger than a view's frame its target may stay (pixels).
+const TARGET_SLACK: u32 = 2 * TARGET_STEP;
+
+/// Whether a target of `have` pixels can render a frame of `want`.
+fn target_fits(have: (u32, u32), want: (u32, u32)) -> bool {
+    let fits = |h: u32, w: u32| h >= w && h - w <= TARGET_SLACK;
+    fits(have.0, want.0) && fits(have.1, want.1)
+}
+
+/// What a view renders into, for sizes up to its own ([`TARGET_STEP`]).
 struct Target {
     width: u32,
     height: u32,
@@ -821,9 +838,19 @@ impl ShaderView {
             if self
                 .target
                 .as_ref()
-                .is_none_or(|t| (t.width, t.height) != (width, height))
+                .is_none_or(|t| !target_fits((t.width, t.height), (width, height)))
             {
-                self.target = Some(target(renderer, width, height));
+                // The first target is the frame's size; one resized out of
+                // it grows by steps (a drag goes on resizing).
+                let resized = self.target.is_some();
+                let grow = |v: u32| {
+                    if resized {
+                        v.next_multiple_of(TARGET_STEP).min(MAX_SIDE.max(v))
+                    } else {
+                        v
+                    }
+                };
+                self.target = Some(target(renderer, grow(width), grow(height)));
             }
             let target = self.target.as_ref().expect("target");
             match target
@@ -890,6 +917,9 @@ impl ShaderView {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            // A target bigger than the frame: its top left.
+            pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, width, height);
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bindings.group, &[]);
             pass.draw(0..3, 0..1);
@@ -931,6 +961,7 @@ impl ShaderView {
                 );
                 renderer.queue.submit([encoder.finish()]);
                 readback.serial = self.serial;
+                readback.size = (width, height);
                 readback.state.store(state::MAPPING, Ordering::Release);
                 let flag = readback.state.clone();
                 readback
@@ -997,12 +1028,14 @@ impl ShaderView {
                 continue;
             }
             if i == newest && r.serial > self.frame.serial {
-                let data = r.buffer.slice(..).get_mapped_range();
+                let (width, height) = r.size;
+                let used = u64::from(target.stride) * u64::from(height);
+                let data = r.buffer.slice(..used).get_mapped_range();
                 self.frame.pixels.clear();
                 self.frame.pixels.extend_from_slice(&data);
                 drop(data);
-                self.frame.width = target.width;
-                self.frame.height = target.height;
+                self.frame.width = width;
+                self.frame.height = height;
                 self.frame.stride = target.stride;
                 self.frame.serial = r.serial;
                 changed = true;
@@ -1078,6 +1111,7 @@ fn target(renderer: &Renderer, width: u32, height: u32) -> Target {
         }),
         state: Arc::new(AtomicU8::new(state::IDLE)),
         serial: 0,
+        size: (0, 0),
     };
     Target {
         width,
@@ -1228,6 +1262,48 @@ mod tests {
         view.set_slot(0, AnimationValue::Color(0x00ff00ff));
         let f = frame(&mut view, &renderer);
         assert_eq!(pixel(&f, 3, 1), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn a_resized_view_renders_its_own_size_into_the_same_target() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.set_layer(Some(layer(
+            "struct Uniforms { split: f32 }\n\
+             fn shade(uv: vec2f) -> vec4f {\n\
+               if (uv.x < uniforms.split) { return vec4f(1.0, 0.0, 0.0, 1.0); }\n\
+               return vec4f(0.0, 0.0, 1.0, 1.0);\n\
+             }",
+            &[("split", UniformValue::Number(0.5))],
+        )));
+        view.set_size(size(px(100.0), px(20.0)), 1.0);
+        let f = frame(&mut view, &renderer);
+        assert_eq!((f.width, f.height), (100, 20));
+        let first = view.target.as_ref().unwrap();
+        assert_eq!((first.width, first.height), (100, 20), "the first is exact");
+        // Resized: a target by steps, which the next sizes reuse.
+        view.set_size(size(px(70.0), px(14.0)), 1.0);
+        frame(&mut view, &renderer);
+        let texture = view.target.as_ref().unwrap().texture.clone();
+        // Smaller, within the target: the same texture, the frame its size,
+        // its halves where the new size puts them.
+        view.set_size(size(px(60.0), px(12.0)), 1.0);
+        let f = frame(&mut view, &renderer);
+        assert_eq!((f.width, f.height), (60, 12));
+        assert_eq!(view.target.as_ref().unwrap().texture, texture);
+        assert_eq!(pixel(&f, 29, 11), [255, 0, 0, 255]);
+        assert_eq!(pixel(&f, 30, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&f, 59, 11), [0, 0, 255, 255]);
+        // Much bigger: a new target.
+        view.set_size(size(px(600.0), px(20.0)), 1.0);
+        let f = frame(&mut view, &renderer);
+        assert_eq!((f.width, f.height), (600, 20));
+        assert_ne!(view.target.as_ref().unwrap().texture, texture);
+        assert_eq!(pixel(&f, 299, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&f, 300, 19), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -1524,9 +1600,10 @@ mod tests {
             "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
             &[],
         )));
-        assert!(!view.render(&renderer, Instant::now()), "on its way");
+        // Usually on its way; a small frame can come back within the call.
+        let back = view.render(&renderer, Instant::now());
         let start = Instant::now();
-        while !view.collect_frame(&renderer) {
+        while !back && !view.collect_frame(&renderer) {
             assert!(start.elapsed() < Duration::from_secs(5), "no frame");
             let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
         }
