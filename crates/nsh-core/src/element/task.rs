@@ -118,6 +118,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The app's address resolves the slot ([`crate::url_scheme`]).
+    AppUrl(AnswerSlot<Option<String>>),
+    /// The app sets its address ([`crate::url_scheme`]).
+    SetAppUrl(String),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here

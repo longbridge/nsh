@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { desktop, EmojiPanel, Log, Panel, Split, sectionSurface, ui, wide } from "./palette";
+import { desktop, EmojiPanel, Log, Panel, sectionSurface, Split, ui, wide } from "./palette";
 
 // An emoji picker as a chat app has it: the groups' tabs, search with the
 // skin tone hand, the recent emoji first, the one under the pointer named

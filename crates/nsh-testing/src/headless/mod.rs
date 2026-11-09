@@ -138,7 +138,7 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config, Vec::new(), || ApproxTextEngine)
+    launch(config, Vec::new(), || ApproxTextEngine, None)
         .map(|launched| (launched.engine, launched.batches))
 }
 
@@ -151,12 +151,27 @@ struct Launched {
     wanted: Option<Arc<AtomicBool>>,
 }
 
+/// Reports `url` as a link the system handed the app.
+fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
+    control.dispatch_event(
+        ROOT_ID,
+        EventKind::UrlScheme,
+        EventPayload::Map(vec![(
+            nsh_core::url_scheme::URL,
+            PayloadValue::Str(url.to_owned()),
+        )]),
+    );
+}
+
 /// [`start`], the platform reporting `displays` before the app first
-/// renders.
+/// renders, laying text out with the engine `text_engine` makes; `link`:
+/// the link that launched it, there before the app's code runs (as a
+/// platform sends it).
 fn launch<M, F>(
     config: EngineConfig,
     displays: Vec<nsh_core::desktop::Display>,
     text_engine: F,
+    link: Option<&str>,
 ) -> std::io::Result<Launched>
 where
     M: TextEngine + 'static,
@@ -177,6 +192,9 @@ where
         control.set_content_culling(false);
         if !displays.is_empty() {
             control.set_displays(displays);
+        }
+        if let Some(url) = link {
+            send_url_scheme(control, url);
         }
     })?;
     let _ = control.set(engine.control());
@@ -338,15 +356,34 @@ pub struct Headless {
 impl Headless {
     /// Starts `config`'s app ([`start`]).
     pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
-        Self::start_with_text_engine(config, || ApproxTextEngine)
+        Self::launched_with(config, || ApproxTextEngine, None)
+    }
+
+    /// Starts `config`'s app as the link `url` launches it: the app's
+    /// first `UrlScheme.url()` reads it, and its first `open` listener
+    /// gets it.
+    pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Headless> {
+        Self::launched_with(config, || ApproxTextEngine, Some(url))
     }
 
     /// Starts `config`'s app laying text out with the engine
     /// `text_engine` makes (on the engine's thread) instead of
     /// [`ApproxTextEngine`]: a platform's, for sizes as on screen.
     pub fn start_with_text_engine<M, F>(
+        config: EngineConfig,
+        text_engine: F,
+    ) -> std::io::Result<Headless>
+    where
+        M: TextEngine + 'static,
+        F: FnOnce() -> M + Send + 'static,
+    {
+        Self::launched_with(config, text_engine, None)
+    }
+
+    fn launched_with<M, F>(
         mut config: EngineConfig,
         text_engine: F,
+        link: Option<&str>,
     ) -> std::io::Result<Headless>
     where
         M: TextEngine + 'static,
@@ -379,7 +416,7 @@ impl Headless {
             batches,
             errors,
             wanted,
-        } = launch(config, displays, text_engine)?;
+        } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         Ok(Headless {
@@ -565,14 +602,7 @@ impl Headless {
     /// Reports `url` as a link the system handed the app, without a step:
     /// the one that launches it.
     pub fn send_url_scheme(&self, url: &str) {
-        self.engine.control().dispatch_event(
-            ROOT_ID,
-            EventKind::UrlScheme,
-            EventPayload::Map(vec![(
-                nsh_core::url_scheme::URL,
-                PayloadValue::Str(url.to_owned()),
-            )]),
-        );
+        send_url_scheme(&self.engine.control(), url);
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
