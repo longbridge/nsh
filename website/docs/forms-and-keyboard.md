@@ -362,6 +362,7 @@ An input's ref has:
 | `focus()` | `focus()` | Focuses the input and shows the keyboard. |
 | `blur()` | `blur()` | Unfocuses it. |
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
+| `insert_text(text)` | `insertText(text)` | Inserts `text` in place of the selection as the user's edit: one step of the input's undo history (Linux, the web), reported by `onChange` ([pasting](#pasting-images-and-files)). |
 
 On macOS and the web, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)).
 
@@ -521,6 +522,41 @@ Images and files are never inserted, since an input holds text. With `pasteBehav
 nothing, and the app decides what a paste does: send a long text as an attachment, or insert a cleaned-up version.
 The input decides at once, from the prop, because the system asks it on the spot.
 
+The event then comes before anything is inserted, so the app can allow the paste, cancel it or rewrite it. The
+ref's `insertText` (Rust `insert_text`) puts the text it allows in place of the selection as the user's edit:
+`maxLength` and the line rules apply, `onChange` reports it, and on Linux and the web it is one step of the input's
+undo history, so Ctrl+Z takes it out again. A new `value` replaces the text instead.
+
+```rust tabs
+let field = element_ref();
+
+input()
+    .element_ref(&field)
+    .paste_behavior(PasteBehavior::Report)
+    .on_paste(move |e: &PasteEvent| {
+        // Pasted secrets are dropped; other text goes in trimmed.
+        if !e.text.starts_with("sk-") {
+            field.insert_text(e.text.trim());
+        }
+    })
+```
+
+```tsx tabs
+import type { InputRef } from "nsh";
+import { Input } from "nsh/base";
+
+let field: InputRef | undefined;
+
+<Input
+  ref={(r) => (field = r)}
+  pasteBehavior="report"
+  onPaste={(e) => {
+    // Pasted secrets are dropped; other text goes in trimmed.
+    if (!e.text.startsWith("sk-")) field?.insertText(e.text.trim());
+  }}
+/>;
+```
+
 ```rust tabs
 let attachments = signal(Vec::<PastedFile>::new());
 
@@ -553,7 +589,8 @@ const attachments = signal<File[]>([]);
 
 Upload a pasted file as any `File`, with `fetch` and `FormData` (`form.append("image", file)`); its bytes stay
 native until they are sent. On Android, keyboards that insert images (GIFs, stickers) report them the same way. On
-Linux the clipboard is read asynchronously, so the event may come after the `onChange` of the text it inserts.
+Linux the clipboard is read asynchronously, so with `"insert"` the event may come after the `onChange` of the text it
+inserts; with `"report"` it always comes first.
 Masked inputs on macOS keep AppKit's own paste and report nothing.
 
 ## Multiline inputs that grow

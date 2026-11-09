@@ -11151,6 +11151,8 @@ mod components {
             .child(view().on_press(move |_: &()| {
                 field.focus();
                 field.set_selection(3, 3);
+                // As an app allowing a paste it heard first.
+                field.insert_text("!");
             }))
     }
 
@@ -11259,7 +11261,8 @@ mod components {
             commands,
             [
                 (input, Command::Focus),
-                (input, Command::SetSelection { start: 3, end: 3 })
+                (input, Command::SetSelection { start: 3, end: 3 }),
+                (input, Command::InsertText("!".into()))
             ]
         );
     }

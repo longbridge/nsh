@@ -360,6 +360,7 @@ mount(SignIn);
 | `focus()` | `focus()` | 让输入框获得焦点并弹出键盘。 |
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
+| `insert_text(text)` | `insertText(text)` | 以用户编辑的方式用 `text` 替换选区：是输入框撤销历史中的一步（Linux、Web），由 `onChange` 报告（[粘贴](#粘贴图片和文件)）。 |
 
 在 macOS 和 Web 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）。
 
@@ -504,6 +505,38 @@ const caret = signal<Bounds | null>(null);
 
 输入框照常自己插入粘贴的文本：事件在该文本的 `onChange` 之前到达。图片和文件从不插入，因为输入框只容纳文本。`pasteBehavior` 为 `"report"` 时输入框什么都不插入，由应用决定粘贴的效果：把长文本作为附件发送，或插入整理后的版本。由于系统要求当场作答，输入框根据这个属性立即决定。
 
+这时事件在插入任何内容之前到达，应用可以放行、取消或改写这次粘贴。ref 的 `insertText`（Rust 的 `insert_text`）以用户编辑的方式用放行的文本替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，在 Linux 和 Web 上是输入框撤销历史中的一步，Ctrl+Z 一次即可撤回。设置新的 `value` 则是替换整段文本。
+
+```rust tabs
+let field = element_ref();
+
+input()
+    .element_ref(&field)
+    .paste_behavior(PasteBehavior::Report)
+    .on_paste(move |e: &PasteEvent| {
+        // 丢弃粘贴的密钥；其他文本去掉首尾空白后插入。
+        if !e.text.starts_with("sk-") {
+            field.insert_text(e.text.trim());
+        }
+    })
+```
+
+```tsx tabs
+import type { InputRef } from "nsh";
+import { Input } from "nsh/base";
+
+let field: InputRef | undefined;
+
+<Input
+  ref={(r) => (field = r)}
+  pasteBehavior="report"
+  onPaste={(e) => {
+    // 丢弃粘贴的密钥；其他文本去掉首尾空白后插入。
+    if (!e.text.startsWith("sk-")) field?.insertText(e.text.trim());
+  }}
+/>;
+```
+
 ```rust tabs
 let attachments = signal(Vec::<PastedFile>::new());
 
@@ -534,7 +567,7 @@ const attachments = signal<File[]>([]);
 />;
 ```
 
-像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）；它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此事件可能在它插入的文本的 `onChange` 之后到达。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
+像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）；它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此 `"insert"` 时事件可能在它插入的文本的 `onChange` 之后到达；`"report"` 时它总是先到。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
 
 ## 自动增高的多行输入框
 

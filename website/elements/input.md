@@ -195,6 +195,7 @@ const height = signal(40);
 | `focus()` | `focus()` | Focuses the input and shows the keyboard. |
 | `blur()` | `blur()` | Unfocuses it. |
 | `setSelection(start, end?)` | `set_selection(start, end)` | Selects `start..end` (UTF-16 units); a caret when they are equal. |
+| `insertText(text)` | `insert_text(text)` | Inserts `text` in place of the selection as the user's edit: `maxLength` and the line rules apply, `onChange` reports it, and it is one step of the input's undo history (Linux, the web). |
 
 Moving focus to the next field on return:
 

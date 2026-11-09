@@ -1424,6 +1424,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*end)
                 .end();
         }
+        Command::InsertText(text) => {
+            out.item("cmd").num(id).str("insertText").str(text).end();
+        }
         Command::Dialog(d) => {
             out.item("cmd").num(id).str("dialog").num(d.id);
             out.opt_str(d.title.as_deref())

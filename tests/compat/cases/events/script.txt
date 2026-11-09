@@ -105,6 +105,10 @@ prop id:paste pasteBehavior report
 expect Pasted: none
 event id:paste onPaste text=hello
 expect Pasted: hello html 0 files 0 uris 0
+expect Inserted: none
+# The app inserts a paste it allowed, as the user's edit (`insertText`).
+event id:paste onPaste text=insert:hi
+expect Inserted: hi
 covers [events] onPaste
 prop id:paste pasteBehavior report
 covers [props] pasteBehavior

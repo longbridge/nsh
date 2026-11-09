@@ -750,7 +750,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::HostCall { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
-                    | Command::PickScreenColor { .. } => e.int(-1),
+                    | Command::PickScreenColor { .. }
+                    // Not carried out on Android yet: a no-op there.
+                    | Command::InsertText(_) => e.int(-1),
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
                     // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs

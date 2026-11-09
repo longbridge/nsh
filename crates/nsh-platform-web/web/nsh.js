@@ -5895,6 +5895,18 @@ class Player {
         else document.activeElement?.blur?.();
         break;
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
+      case "insertText": {
+        // As the user's typing: the browser's undo history keeps it and
+        // `input` reports it. `execCommand` edits the focused field only.
+        const field = el?._field;
+        if (!field) break;
+        if (document.activeElement !== field) field.focus();
+        if (!document.execCommand("insertText", false, args[0])) {
+          field.setRangeText(args[0], field.selectionStart, field.selectionEnd, "end");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        break;
+      }
       case "scrollTo":
         if (!el) break;
         // A textarea's text (a built-in bar's drags).
