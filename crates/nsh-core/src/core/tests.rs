@@ -3127,6 +3127,58 @@ fn input_measures_its_placeholder_and_reports_its_content_box() {
 }
 
 #[test]
+fn input_out_of_the_layout_has_no_content_box() {
+    // `display: none` around an input leaves it no box, and a platform that
+    // does not clip a view's children to it (a browser) would draw its
+    // field, placeholder and all, at the content box it had before.
+    let mut c = input_core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 2,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let content_of = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::InputContent { id: 2, content } => Some(*content),
+            _ => None,
+        })
+    };
+    let shown = Some(rect(6.0, 6.0, 308.0, 16.0));
+    assert_eq!(content_of(&c.commit().unwrap()), shown);
+    let mut toggle = |id, classes, expected: Option<Bounds<Points>>| {
+        c.apply(class_op(id, classes)).unwrap();
+        assert_eq!(
+            content_of(&c.commit().unwrap()),
+            expected,
+            "{id}: {classes}"
+        );
+    };
+    // Hidden by its parent's class, then by its own.
+    toggle(3, "hidden", Some(Bounds::default()));
+    toggle(3, "flex flex-col", shown);
+    toggle(2, "hidden", Some(Bounds::default()));
+    toggle(2, "flex", shown);
+}
+
+#[test]
 fn inputs_resolve_what_return_does() {
     use crate::{SubmitBehavior as S, mount::InputConfig};
     let config = |multiline, blur_on_submit, submit_behavior| InputConfig {
