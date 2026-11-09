@@ -343,6 +343,10 @@ pub struct ViewProps {
     pub accessibility: Accessibility,
     /// `testID`: an identifier for UI tests.
     pub test_id: Option<Arc<str>>,
+    /// `nativeID`: names the view for the embedding app's native code (a
+    /// watched scroll view, `watchScroll`), apart from `testID`, which is
+    /// for tests.
+    pub native_id: Option<Arc<str>>,
     /// `web={{ element }}`: the HTML element the web draws the view as.
     pub web_element: Option<crate::WebElement>,
     /// Where the view goes as a link (`Link`'s `href`): data for the

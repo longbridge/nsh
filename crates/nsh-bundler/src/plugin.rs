@@ -90,6 +90,13 @@ pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "web
 /// play on every platform (`docs/dev/audio-design.md`).
 pub(crate) const AUDIO_EXTENSIONS: &[&str] = &["wav", "m4a", "aac", "mp3"];
 
+/// File types imported as video: the formats `Video` plays.
+pub(crate) const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "webm"];
+
+/// The suffix that imports any file as its `asset:/` URL
+/// (`import data from "./data.bin?url"`), as Vite's does.
+pub(crate) const URL_SUFFIX: &str = "?url";
+
 /// File types imported as fonts.
 pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
@@ -342,6 +349,21 @@ impl NshPlugin {
             .replace('\\', "/")
     }
 
+    /// A module whose default export is the `asset:/` URL of `path`, which
+    /// ships with the app.
+    fn url_module(&self, path: &Path) -> HookLoadOutput {
+        self.assets
+            .lock()
+            .expect("assets lock")
+            .push(path.to_path_buf());
+        let code = format!("export default {:?};", format!("asset:/{}", self.rel(path)));
+        HookLoadOutput {
+            code: code.into(),
+            module_type: Some(ModuleType::Js),
+            ..Default::default()
+        }
+    }
+
     fn fail(&self, path: &Path, detail: &str) -> anyhow::Error {
         let message = format!("{}\n{detail}", self.rel(path));
         self.error
@@ -442,6 +464,29 @@ impl Plugin for NshPlugin {
                 modules.join(", ")
             )));
         }
+        if let Some(file) = spec.strip_suffix(URL_SUFFIX) {
+            let path = if Path::new(file).is_absolute() {
+                PathBuf::from(file)
+            } else if file.starts_with("./") || file.starts_with("../") {
+                let dir = args
+                    .importer
+                    .and_then(|i| Path::new(i).parent())
+                    .unwrap_or(&self.root);
+                dir.join(file)
+            } else {
+                return Err(self.refuse(format!(
+                    "{from}`{spec}`: a `{URL_SUFFIX}` import names its file by a relative path"
+                )));
+            };
+            if !path.is_file() {
+                return Err(self.refuse(format!("{from}`{spec}`: no such file")));
+            }
+            let path = dunce::canonicalize(&path).unwrap_or(path);
+            return Ok(Some(HookResolveIdOutput::from_id(format!(
+                "{}{URL_SUFFIX}",
+                path.to_string_lossy()
+            ))));
+        }
         // Rolldown may otherwise replace unsupported Node builtins with browser
         // shims. These are absent from the reference runtime catalog.
         if ["events", "assert", "util", "string_decoder", "fs"].contains(&spec)
@@ -480,6 +525,9 @@ impl Plugin for NshPlugin {
                 ..Default::default()
             }));
         }
+        if let Some(file) = args.id.strip_suffix(URL_SUFFIX) {
+            return Ok(Some(self.url_module(Path::new(file))));
+        }
         let path = Path::new(args.id);
         let rel = self.rel(path);
         if has_extension(path, FONT_EXTENSIONS) {
@@ -502,19 +550,10 @@ impl Plugin for NshPlugin {
                 ..Default::default()
             }));
         }
-        if has_extension(path, AUDIO_EXTENSIONS) {
-            // An audio import is its URL, for `Sound.load` and `AudioPlayer`;
-            // the file ships with the app.
-            self.assets
-                .lock()
-                .expect("assets lock")
-                .push(path.to_path_buf());
-            let code = format!("export default {:?};", format!("asset:/{rel}"));
-            return Ok(Some(HookLoadOutput {
-                code: code.into(),
-                module_type: Some(ModuleType::Js),
-                ..Default::default()
-            }));
+        if has_extension(path, AUDIO_EXTENSIONS) || has_extension(path, VIDEO_EXTENSIONS) {
+            // An audio or video import is its URL, for `Sound.load`,
+            // `AudioPlayer` and `Video`'s `src`; the file ships with the app.
+            return Ok(Some(self.url_module(path)));
         }
         if !has_extension(path, IMAGE_EXTENSIONS) {
             return Ok(None);
@@ -760,6 +799,18 @@ mod tests {
             })
         );
         let mut release = options(false);
+        // A nested entry still reads the app's root configuration.
+        std::fs::create_dir_all(dir.join("screens")).unwrap();
+        std::fs::write(
+            dir.join("screens/Home.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport { early } from \"../early\";\nmount(() => <Text>{early.version}</Text>);\n",
+        )
+        .unwrap();
+        let nested = BundleOptions {
+            entry: dir.join("screens/Home.tsx"),
+            ..options(true)
+        };
+        assert_eq!(info(&bundle(&nested).unwrap().code), development);
         release.app = crate::AppVersion {
             version: Some("2.0.0".into()),
             build: Some(9),
@@ -774,6 +825,94 @@ mod tests {
         ] {
             assert!(release.contains(part), "{part}: {release}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A video import is its `asset:/` URL, and the file ships.
+    #[test]
+    fn a_video_import_is_its_url_and_ships() {
+        let dir = std::env::temp_dir().join(format!("nsh-video-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("media")).unwrap();
+        std::fs::write(dir.join("media/intro.mp4"), b"mp4").unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Video } from \"nsh\";\nimport intro from \"./media/intro.mp4\";\nmount(() => <Video src={intro} />);\n",
+        )
+        .unwrap();
+        let bundle = bundled(&dir);
+        assert!(
+            bundle.code.contains("\"asset:/media/intro.mp4\""),
+            "{}",
+            bundle.code
+        );
+        assert_eq!(assets(&bundle), ["media/intro.mp4"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `?url` import is the file's `asset:/` URL, whatever its type, and
+    /// the file ships; a JSON file so imported is not bundled.
+    #[test]
+    fn a_url_import_is_its_url_and_ships() {
+        let dir = std::env::temp_dir().join(format!("nsh-url-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("data")).unwrap();
+        std::fs::create_dir_all(dir.join("screens")).unwrap();
+        std::fs::write(dir.join("data/model.bin"), b"\0\x01").unwrap();
+        std::fs::write(
+            dir.join("data/cities.json"),
+            b"{\"secret\":\"in-the-file\"}",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("screens/Home.tsx"),
+            "import model from \"../data/model.bin?url\";\nimport cities from \"../data/cities.json?url\";\nexport const urls = [model, cities];\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport { urls } from \"./screens/Home\";\nmount(() => <Text>{urls.join()}</Text>);\n",
+        )
+        .unwrap();
+        let bundle = bundled(&dir);
+        assert!(
+            bundle.code.contains("\"asset:/data/model.bin\""),
+            "{}",
+            bundle.code
+        );
+        assert!(
+            bundle.code.contains("\"asset:/data/cities.json\""),
+            "{}",
+            bundle.code
+        );
+        assert!(!bundle.code.contains("in-the-file"), "{}", bundle.code);
+        assert_eq!(assets(&bundle), ["data/cities.json", "data/model.bin"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `?url` import names a file that is there, by a relative path.
+    #[test]
+    fn a_url_import_needs_a_file() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-url-import-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport data from \"./data.bin?url\";\nmount(() => <Text>{data}</Text>);\n",
+        )
+        .unwrap();
+        let error = try_bundle(&dir)
+            .expect_err("a missing file fails")
+            .to_string();
+        assert!(error.contains("`./data.bin?url`: no such file"), "{error}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport data from \"some-package/data.bin?url\";\nmount(() => <Text>{data}</Text>);\n",
+        )
+        .unwrap();
+        let error = try_bundle(&dir).expect_err("a bare name fails").to_string();
+        assert!(error.contains("by a relative path"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

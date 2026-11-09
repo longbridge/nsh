@@ -772,7 +772,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `key` is `outer` or inside it.
-    fn is_within(&self, mut key: Key, outer: Key) -> bool {
+    pub(super) fn is_within(&self, mut key: Key, outer: Key) -> bool {
         while key != NO_KEY {
             if key == outer {
                 return true;

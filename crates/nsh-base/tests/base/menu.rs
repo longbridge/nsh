@@ -623,3 +623,62 @@ fn shift_f10_opens_no_context_menu_elsewhere() {
         assert!(!app.app.shows("Rename"), "{os:?}: no menu open");
     }
 }
+
+/// A row that opens a context menu and also takes presses, long presses
+/// and their releases; the text counts each.
+#[component]
+fn PressableRow() -> impl IntoElement {
+    let presses = signal(0);
+    let ups = signal(0);
+    let longs = signal(0);
+    view()
+        .pt(px(100.0))
+        .child(
+            context_menu()
+                .trigger(
+                    view()
+                        .test_id("row")
+                        .w(px(200.0))
+                        .h(px(40.0))
+                        .on_press(move || presses.update(|n| *n += 1))
+                        .on_press_up(move || ups.update(|n| *n += 1))
+                        .on_long_press(move || longs.update(|n| *n += 1))
+                        .child(text("Row")),
+                )
+                .child(menu_item().child(text("Rename"))),
+        )
+        .child(text(move || {
+            format!("p{} u{} l{}", presses.get(), ups.get(), longs.get())
+        }))
+}
+
+#[test]
+fn a_held_finger_opens_the_menu_and_presses_nothing() {
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Web);
+    // The menu opens as the finger holds; lifting it reports no press or
+    // release, while the app's own long press is still heard.
+    app.app.long_press("id:row").unwrap();
+    app.app.wait_for("Rename").unwrap();
+    app.app.wait_for("text:p0 u0 l1").unwrap();
+}
+
+#[test]
+fn a_tap_after_a_held_finger_presses_again() {
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Web);
+    app.app.long_press("id:row").unwrap();
+    app.app.wait_for("Rename").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Rename", std::time::Duration::from_secs(5))
+        .unwrap();
+    app.app.press("id:row").unwrap();
+    app.app.wait_for("text:p1 u1 l1").unwrap();
+}
+
+#[test]
+fn a_tap_on_a_context_menus_trigger_still_presses() {
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Web);
+    app.app.press("id:row").unwrap();
+    app.app.wait_for("text:p1 u1 l0").unwrap();
+    assert!(!app.app.shows("Rename"), "a tap opens no menu");
+}

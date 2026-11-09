@@ -2200,6 +2200,11 @@ pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
     true
 }
 
+/// Whether [`copy`] has a selection to copy.
+pub(crate) fn can_copy(surface: &crate::surface::Surface) -> bool {
+    surface.selection.area.has_selection() || surface.selection.with_range().is_some()
+}
+
 /// Selects all of the last pressed selectable text or selectable view (the
 /// Edit menu's Select All). False if there is none.
 pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {

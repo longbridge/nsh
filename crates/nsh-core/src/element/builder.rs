@@ -1897,7 +1897,8 @@ pub trait Interactive: Element {
         self
     }
 
-    /// The id inputs name an input accessory by (`nativeID`).
+    /// `nativeID`: names the view for others: inputs find an input accessory
+    /// by it, and the embedding app a scroll view it watches (`watchScroll`).
     fn native_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::NativeId(Some(id.into())));
         self
