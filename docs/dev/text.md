@@ -7,9 +7,10 @@
   Chrome and Android would slant them), `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,
   `textAlignVertical` (the core moves the content box down). `adjustsFontSizeToFit` shrinks the fonts (down to
   `minimumFontScale`, at least 0.1) until the text fits its box and lines (`Paragraph::fit`, a binary search in the core).
-  On iOS, a positive fixed-height box keeps its first line even when Dynamic Type makes that line taller than
-  the box. CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds
-  clip the excess. Empty and zero-height boxes stay empty.
+  On iOS and macOS, a positive fixed-height box keeps its first line even when that line is taller than the box
+  (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
+  CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
+  excess. Empty and zero-height boxes stay empty.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
   Final layouts are hit-tested by their engine too, in the content box (`TextEngine::hit_test`,
   `caret_rect`, `range_rects`): the caret position nearest a point (`TextPosition`: a UTF-16 offset and its
