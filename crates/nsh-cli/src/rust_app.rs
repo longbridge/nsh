@@ -1468,11 +1468,14 @@ panic = \"abort\"
         )?;
         self.write_rust_app(ws, root)?;
         write(&ws.join("rust-web/build.rs"), WEB_BUILD_RS)?;
+        let sets = self.rust_web_sets();
         write(
             &ws.join("rust-web/lib.rs"),
             &format!(
                 "//! The Rust app's web runtime: its root, which `nsh.js` runs, with the\n\
-                 //! `nsh/base` and the app's components; no QuickJS.\n\n\
+                 //! `nsh/base` and the app's components; no QuickJS. `nsh/base` is its\n\
+                 //! core part: the app makes its components by type, which links\n\
+                 //! only those it uses.\n\n\
                  {wasm}nsh_platform_web::rust_app!({sets}, app_root());\n\n\
                  // Off WebAssembly it is empty, as nsh-platform-web is.\n\
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_core as _;\n\
@@ -2402,6 +2405,23 @@ impl RustApp {
         format!("vec![{}]", sets.join(", "))
     }
 
+    /// The UI sets of a Rust app's web runtime: `nsh/base`'s core part
+    /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
+    /// nothing makes a component by its registered name: its code makes
+    /// each of `nsh/base`'s components by type (`nsh_base::button()`),
+    /// which links that component's code where it is used. What the app
+    /// needs of the set itself is the theme's tokens, which every set of
+    /// `nsh/base` has, and the built-in scroll bars, the core part's.
+    /// Registering every part would link every component into the module,
+    /// the ones the app never makes included (`nsh_base::registry_of`).
+    fn rust_web_sets(&self) -> String {
+        let mut sets = vec![
+            "nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])".to_owned(),
+        ];
+        sets.extend(self.crates.iter().map(|c| format!("{}()", set_fn(c))));
+        format!("vec![{}]", sets.join(", "))
+    }
+
     /// The app's own UI sets for the generated code, without `nsh/base`'s
     /// ([`Self::sets`]).
     fn app_only_sets(&self) -> String {
@@ -3233,7 +3253,10 @@ mod tests {
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
         let web = read("rust-web/lib.rs");
-        assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_base::registry(), set_app_app_native()], app_root());"), "{web}");
+        // Only `nsh/base`'s core part: the root makes the components it uses
+        // by type, so the module links those and no others.
+        assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]), set_app_app_native()], app_root());"), "{web}");
+        assert!(!web.contains("nsh_base::registry()"), "{web}");
         assert!(read("rust-web/Cargo.toml").contains("default-features = false"));
         // Linkable for `nsh package`, as the TSX app's runtime.
         assert!(read("rust-web/Cargo.toml").contains("linkable = [\"nsh-platform-web/linkable\"]"));
@@ -3921,6 +3944,12 @@ panic = \"abort\"
                 "main.rs"
             };
             let code = read(&format!("{dir}/{file}"));
+            // A Rust app's web runtime takes `nsh/base`'s core part only.
+            let sets = if dir == "rust-web" {
+                "vec![nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]), set_app_charts(), set_app_app_storage()]"
+            } else {
+                sets
+            };
             assert!(code.contains(sets), "{dir}: no {sets:?} in\n{code}");
             // Each crate's entry in its own function; one stand-in.
             for (name, package) in [("app_charts", "charts"), ("app_app_storage", "app-storage")] {
