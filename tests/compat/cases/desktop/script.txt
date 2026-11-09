@@ -10,7 +10,6 @@ expect /docs
 event id:destination onMouseLeave
 wait 20
 absent Documentation reference
-covers [props] Link.title
 # window-open
 tap id:case-window-open
 expect Windows: main
