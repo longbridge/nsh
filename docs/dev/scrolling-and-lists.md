@@ -87,6 +87,13 @@
 - **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
   a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
   (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
+- **Scrolling a view into view** (`scrollIntoView`, `ElementRef::scroll_into_view`): a command on the view that the
+  core turns into `ScrollTo` commands of the `Scroll`s around it at the commit, in place among the commands
+  (`Core::scrolls_into_view`, `core/measure.rs`), innermost first, each from where the ones inside it end up and the
+  commit's earlier scroll commands put it (`Core::scrolled_to`), along
+  each scroll view's axis and clamped to its content; a scroll view already where it would go gets none. It walks the
+  frames as `measure()` does. Lists are passed through (their offsets are their rows', `scrollToIndex`'s); platforms
+  never see the command.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in

@@ -718,6 +718,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
                     | Command::ScrollToIndex { .. }
+                    | Command::ScrollIntoView(_)
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.

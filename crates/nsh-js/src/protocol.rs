@@ -204,6 +204,30 @@ pub(crate) fn decode_command<'js>(
                 .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
                 .unwrap_or(true),
         },
+        "scrollIntoView" => {
+            let o = arg.as_object();
+            let mut options = nsh_core::ScrollIntoView::default();
+            let align = |key: &str, default| {
+                let value = o.and_then(|o| o.get::<_, Option<String>>(key).ok().flatten());
+                match value.as_deref() {
+                    None => default,
+                    Some(value) => {
+                        nsh_core::ScrollAlignment::from_name(value).unwrap_or_else(|| {
+                            log::warn!("scrollIntoView: unknown {key} {value:?}");
+                            default
+                        })
+                    }
+                }
+            };
+            options.block = align("block", options.block);
+            options.inline = align("inline", options.inline);
+            if let Some(animated) =
+                o.and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
+            {
+                options.animated = animated;
+            }
+            Command::ScrollIntoView(options)
+        }
         "layoutAnimation" => Command::LayoutAnimation(
             <LayoutAnimation as HostValue>::decode(&Js(arg), &mut HostCx::default())
                 .unwrap_or_default(),

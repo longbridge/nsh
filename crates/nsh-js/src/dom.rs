@@ -413,6 +413,16 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "scrollIntoView",
+        1,
+        decl!(
+            "(options?: { block?: \"start\" | \"center\" | \"end\" | \"nearest\"; inline?: \"start\" | \"center\" | \"end\" | \"nearest\"; animated?: boolean }): void"
+        ),
+        decl!(
+            "Scrolls the `<Scroll>`s around the view so it shows, as the DOM's `scrollIntoView` does, once this turn's changes are laid out: `block` places it along vertical scroll views (`\"start\"` by default), `inline` along horizontal ones (`\"nearest\"` by default), `\"nearest\"` moving only what it must; `animated` defaults to `true`. Each scroll view stops at its content's ends. A `List` keeps its own: use its `scrollToIndex`."
+        ),
+    ),
+    (
         "reload",
         0,
         decl!("(): void"),

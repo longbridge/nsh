@@ -560,6 +560,32 @@ let scroll!: ScrollRef;
 
 Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`; see [Lists](./lists.md#scrolling-from-code).
 
+### Scrolling a view into view
+
+Every element's ref has `scrollIntoView`, as the DOM's: it scrolls the scroll views around the view, innermost first,
+so the view shows, with the layout of the update it goes out with. `block` places the view along vertical scroll views
+and `inline` along horizontal ones: `"start"` (the default for `block`), `"center"`, `"end"`, or `"nearest"` (the
+default for `inline`), which leaves a view in full view, or one covering the viewport, where it is and otherwise brings
+the edge it is past to that edge of the viewport (a view longer than the viewport: its other edge to the viewport's
+other edge). Each scroll view stops at its content's ends. It animates by default; `animated: false` jumps.
+Rows of a `List` scroll with the list's own `scrollToIndex`.
+
+```rust tabs
+let row = element_ref();
+let mut options = ScrollIntoView::default();
+options.block = ScrollAlignment::Center;
+
+view().element_ref(&row).child(text("Quality check"))
+view().on_press(move || row.scroll_into_view(options))
+```
+
+```tsx tabs
+let row!: ViewRef;
+
+<View ref={row}>…</View>
+<View onPress={() => row.scrollIntoView({ block: "center" })}>…</View>
+```
+
 ## Scroll views and the keyboard
 
 NSH keeps a focused input visible on its own: when the keyboard shows, the scroll view around the input gets a bottom inset as tall as the keyboard and scrolls the input into view. This happens natively, with no code in your app. Use `env(keyboard-inset-height)` as a bottom padding ([Content outside scroll views](./forms-and-keyboard.md#content-outside-scroll-views)) for content outside scroll views, such as a message bar pinned to the bottom.

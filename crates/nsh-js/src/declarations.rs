@@ -270,7 +270,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
         "ViewRef",
         None,
         "A native node: what `ref` receives, and what an element is. Its methods send commands to its\nview, in order with the changes before them.",
-        &["focus", "blur", "measure"],
+        &["focus", "blur", "measure", "scrollIntoView"],
     ),
     (
         "InputRef",

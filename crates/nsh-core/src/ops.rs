@@ -1808,6 +1808,62 @@ impl WebKey {
     }
 }
 
+/// Where `scrollIntoView` puts a view along the axis of a scroll view
+/// around it: the DOM's `ScrollLogicalPosition`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollAlignment {
+    /// Its start at the start of the viewport.
+    #[default]
+    Start,
+    /// Its middle in the middle of the viewport.
+    Center,
+    /// Its end at the end of the viewport.
+    End,
+    /// Nowhere new while it is in full view or covers the viewport; else
+    /// the edge it is past at that edge of the viewport, or, when it is
+    /// longer than the viewport, its other edge at the viewport's other
+    /// edge (CSSOM View's).
+    Nearest,
+}
+
+impl ScrollAlignment {
+    /// The alignment TS names `name` (`"start"`, `"center"`, `"end"`,
+    /// `"nearest"`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "start" => Self::Start,
+            "center" => Self::Center,
+            "end" => Self::End,
+            "nearest" => Self::Nearest,
+            _ => return None,
+        })
+    }
+}
+
+/// How `scrollIntoView` scrolls
+/// ([`crate::element::ElementRef::scroll_into_view`], TS
+/// `ref.scrollIntoView(options)`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct ScrollIntoView {
+    /// Along vertical scroll views; `Start` by default, as the DOM's.
+    pub block: ScrollAlignment,
+    /// Along horizontal scroll views; `Nearest` by default, as the DOM's.
+    pub inline: ScrollAlignment,
+    /// Animate the scrolls; `true` by default, as `scrollTo`'s.
+    pub animated: bool,
+}
+
+impl Default for ScrollIntoView {
+    fn default() -> Self {
+        Self {
+            block: ScrollAlignment::Start,
+            inline: ScrollAlignment::Nearest,
+            animated: true,
+        }
+    }
+}
+
 /// An imperative call on a native view (`ref.focus()` and the like).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -1879,6 +1935,9 @@ pub enum Command {
         /// Animate the change.
         animated: bool,
     },
+    /// Scroll the scroll views around the view so it shows (resolved by
+    /// the core into their `ScrollTo`; never mounted).
+    ScrollIntoView(ScrollIntoView),
     /// Scroll a list to the end of its content.
     ScrollToEnd {
         /// Animate the change.

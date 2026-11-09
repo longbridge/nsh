@@ -560,6 +560,26 @@ let scroll!: ScrollRef;
 
 列表另外还有 `scrollToIndex`、`scrollToOffset` 和 `scrollToEnd`；见[列表](./lists.md#从代码滚动)。
 
+### 把视图滚到可见处
+
+每个元素的 ref 都有 `scrollIntoView`，与 DOM 的同名方法一样：它按这次更新的布局，从内到外滚动视图外围的滚动视图，让视图显示出来。`block` 决定视图在纵向滚动视图里的位置，`inline` 决定在横向滚动视图里的位置：`"start"`（`block` 的默认值）、`"center"`、`"end"` 或 `"nearest"`（`inline` 的默认值）。`"nearest"` 下已经完整可见或铺满视口的视图不动，否则把它越出的那一边对齐到视口的同一边（比视口长的视图则把另一边对齐到视口的另一边）。每个滚动视图都停在内容的两端。默认带动画，`animated: false` 直接跳到位置。`List` 的行用列表自己的 `scrollToIndex` 滚动。
+
+```rust tabs
+let row = element_ref();
+let mut options = ScrollIntoView::default();
+options.block = ScrollAlignment::Center;
+
+view().element_ref(&row).child(text("Quality check"))
+view().on_press(move || row.scroll_into_view(options))
+```
+
+```tsx tabs
+let row!: ViewRef;
+
+<View ref={row}>…</View>
+<View onPress={() => row.scrollIntoView({ block: "center" })}>…</View>
+```
+
 ## 滚动视图与键盘
 
 NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。滚动视图之外的内容（例如固定在底部的消息栏）以 `env(keyboard-inset-height)` 作为底部内边距（见[滚动视图之外的内容](./forms-and-keyboard.md#滚动视图之外的内容)）。

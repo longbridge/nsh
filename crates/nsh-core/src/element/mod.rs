@@ -212,9 +212,9 @@ pub use crate::{
     ListAlignment, ListViewport, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial,
     MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation, MouseButton, MouseEvent,
     PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent,
-    ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin,
-    Viewability,
+    ResizeMode, ReturnKeyType, ScreenAnimation, ScrollAlignment, ScrollIntoView, SnapAlignment,
+    StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent,
+    TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,
