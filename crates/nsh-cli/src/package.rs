@@ -162,7 +162,9 @@ impl AndroidConfig {
         use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
         let level = self.target_sdk.unwrap_or(DEFAULT_TARGET_SDK);
         if level < MIN_SDK {
-            bail!("nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 9)");
+            bail!(
+                "nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 8.0)"
+            );
         }
         Ok(level)
     }

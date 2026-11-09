@@ -7,7 +7,7 @@ group: platforms
 
 # Android
 
-NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`、
+NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 8（API 26）及以上，支持 `arm64-v8a`、
 `armeabi-v7a` 和 `x86_64`。用 Rust 和 TSX 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
@@ -84,7 +84,7 @@ dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
 构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET`
-权限，要求 **API 28**（Android 9）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
+权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
 查找运行时的类，因此 `com.longbridge.nsh` 保持原样。
 
 把它加入应用模块，例如从 `libs` 文件夹引入：
@@ -348,9 +348,11 @@ adb reverse tcp:8790 tcp:8790
 
 - **返回键。** 当应用需要处理返回键时（有打开的对话框、有被推入的页面、有 `BackHandler` 监听器），`NshView`
   会自己接收返回键，否则交给 Activity。在 Android 13 及更高版本上设置了 `android:enableOnBackInvokedCallback="true"`
-  时，它注册一个 `OnBackInvokedCallback`；其他情况下（Android 12 及更早版本，或未开启该属性），它在 Activity 的
-  `onBackPressed` 之前接收返回键事件，因此也先于 AndroidX 的 `OnBackPressedDispatcher` 和 Fragment 的回调。无论在
-  Activity 还是 Fragment 中都无需手动转发。已经把返回键转发给 `handleBack()` 的宿主照常工作：一次按键只交给应用一次。
+  时，它注册一个 `OnBackInvokedCallback`；其他情况下（Android 9 到 12，或未开启该属性），它在 Activity 的
+  `onBackPressed` 之前接收返回键事件，因此也先于 AndroidX 的 `OnBackPressedDispatcher` 和 Fragment 的回调。这些版本上
+  无论在 Activity 还是 Fragment 中都无需手动转发。在 Android 8 上，由 Activity 把返回键交给视图：在 `onBackPressed` 中
+  写 `if (!nshView.handleBack()) super.onBackPressed();`。在所有版本上都把返回键转发给 `handleBack()` 的宿主照常工作：
+  一次按键只交给应用一次。
 
   如需在 Android 13+ 上支持预测性返回，请像打包出的 NSH 应用那样，在 `<application>` 上设置
   `android:enableOnBackInvokedCallback="true"`。
