@@ -998,7 +998,7 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
                     dc.DrawRectangle(
                         &rect_f(left, top + o, glyph - o - px, glyph - o - px),
                         &brush,
-                        px,
+                        stroke,
                         None,
                     );
                     line((left + o, top + o), (left + o, top));
@@ -1007,7 +1007,7 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
                     line((right, bottom - o), (right - o, bottom - o));
                 }
                 HTMAXBUTTON => {
-                    dc.DrawRectangle(&rect_f(left, top, glyph - px, glyph - px), &brush, px, None);
+                    dc.DrawRectangle(&rect_f(left, top, glyph - px, glyph - px), &brush, stroke, None);
                 }
                 _ => {
                     line((left, top), (right + px, bottom + px));
