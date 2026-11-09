@@ -1830,6 +1830,10 @@ pub enum Command {
     LayoutAnimation(LayoutAnimation),
     /// Leave the app (Android back handling; on the root).
     ExitApp,
+    /// The app's address (`UrlScheme.setUrl`, `set_app_url`; on the root):
+    /// the web replaces the current history entry's, the native platforms
+    /// keep none ([`crate::url_scheme`]).
+    SetAppUrl(String),
     /// What the back button does when none of the app's listeners took
     /// it: the innermost stack pops (or asks, with `popOnBack` false); with
     /// none, the app leaves on Android (on the root).
@@ -1914,7 +1918,7 @@ pub enum Command {
     Announce(String),
     /// Turn the performance monitor on or off (on the root;
     /// `setFpsEnabled`): what the platform has of one, the
-    /// macOS panel or the other platforms' `nsh::perf` lines. Platforms
+    /// macOS panel or the other platforms' `nsh::fps` lines. Platforms
     /// without a monitor ignore it.
     PerfMonitor(bool),
     /// Load the image at `uri` (keeping its bytes for views that show it
@@ -2036,6 +2040,9 @@ pub enum Command {
     /// Show a notification, ask for the permission, set the app's badge
     /// (on the root; `Notifications` of `nsh`, [`crate::notifications`]).
     Notification(crate::notifications::NotificationCommand),
+    /// Play a haptic (on the root; `Haptics` of `nsh/mobile`,
+    /// [`crate::element::haptic`]). Platforms without haptics ignore it.
+    Haptic(Haptic),
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
@@ -2059,6 +2066,54 @@ pub enum Command {
         /// Its arguments (any JSON value).
         args: crate::JsonValue,
     },
+}
+
+/// A haptic the device plays ([`Command::Haptic`], TS: `Haptics` of
+/// `nsh/mobile`): grouped as UIKit's feedback generators and Expo's API —
+/// a selection that changed, an impact by weight, a task's outcome. On
+/// Android it is the view's haptic feedback. What the user feels follows
+/// the device and its settings: none with haptics turned off, or on
+/// hardware without them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Haptic {
+    /// A selection changed: a picker's value, a segment, a slider's step
+    /// (`Haptics.selection()`).
+    Selection,
+    /// An element collided; the style is its weight (`Haptics.impact`).
+    Impact(HapticImpact),
+    /// A task ended (`Haptics.notification`).
+    Notification(HapticNotification),
+}
+
+/// The weight of an impact ([`Haptic::Impact`], TS: `Haptics.impact`'s
+/// argument: `"light"` … `"rigid"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum HapticImpact {
+    /// A small, light element.
+    Light,
+    /// A moderate element.
+    Medium,
+    /// A large, heavy element.
+    Heavy,
+    /// A soft, flexible element.
+    Soft,
+    /// A hard, inflexible element.
+    Rigid,
+}
+
+/// How a task ended ([`Haptic::Notification`], TS: `Haptics.notification`'s
+/// argument: `"success"`, `"warning"`, `"error"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum HapticNotification {
+    /// It succeeded.
+    Success,
+    /// It produced a warning.
+    Warning,
+    /// It failed.
+    Error,
 }
 
 /// The status bar's look.
@@ -2502,6 +2557,10 @@ pub enum Prop {
     /// `hitSlop`: extends the touch area beyond the bounds.
     #[prop(js = "hitSlop", with = crate::js::host_values::hit_slop, reset = Prop::HitSlop(EdgeInsets::default()), ts = "number | Partial<Edges>")]
     HitSlop(EdgeInsets),
+    /// Where a link goes (`nsh/base`'s `Link` sets its `href`), carried
+    /// to the platform as data: a terminal draws the text inside the view
+    /// as a hyperlink to it. Set by the link component, never by JS.
+    Href(Option<Arc<str>>),
     /// `panActivation`: the view's touch responder waits for a pan that the
     /// platform activates past an offset on one axis (and fails past one on
     /// the other), deciding on the main thread so the scroll views around
@@ -2886,6 +2945,14 @@ pub enum Op {
         child: NodeId,
         /// Sibling to insert before; `None` appends.
         before: Option<NodeId>,
+    },
+    /// Marks detached view `id` the stand-in of an `<Each>` row not
+    /// rendered yet, sized like its rendered siblings: the core asks JS to
+    /// render the row once the view would be made
+    /// ([`crate::element::JsEvent::Rows`]).
+    Placeholder {
+        /// Node id.
+        id: NodeId,
     },
     /// Detaches `child` from `parent`. The child stays alive until released.
     Remove {

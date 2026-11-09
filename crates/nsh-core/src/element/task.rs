@@ -118,6 +118,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The app's address resolves the slot ([`crate::url_scheme`]).
+    AppUrl(AnswerSlot<Option<String>>),
+    /// The app sets its address ([`crate::url_scheme`]).
+    SetAppUrl(String),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here
@@ -483,6 +487,12 @@ impl Executor {
 
     pub(crate) fn set_runtime(&self, runtime: Handle) {
         *self.runtime.borrow_mut() = Some(runtime);
+    }
+
+    /// The runtime tasks are polled in the context of, if one is set.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn runtime(&self) -> Option<Handle> {
+        self.runtime.borrow().clone()
     }
 
     pub(crate) fn set_notify(&self, notify: Notify) {

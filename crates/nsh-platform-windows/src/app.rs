@@ -119,7 +119,7 @@ pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
     /// Logs the performance monitor's readings once a second (target
-    /// `nsh::perf`): frame rate, frame phases, commits, CPU, memory.
+    /// `nsh::fps`): frame rate, frame phases, commits, CPU, memory.
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
@@ -188,9 +188,10 @@ pub struct AppOptions {
     pub host: nsh_engine::HostChannel,
     /// The URL schemes the app opens (nsh.json `schemes`, from the
     /// package's `nsh\app.json`): [`run_app`] registers them for the
-    /// current user, sends the URL it was started with as `EventKind::UrlScheme`
-    /// and keeps one instance, a later launch with a URL handing it to the
-    /// running one. Empty: none of that.
+    /// current user, sends the URL it was started with as
+    /// `EventKind::UrlScheme` before the app's code first runs and keeps one
+    /// instance, a later launch with a URL handing it to the running one.
+    /// Empty: none of that.
     pub schemes: Vec<String>,
 }
 
@@ -432,6 +433,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(nsh_engine::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -678,6 +680,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    crate::linking::launch(view.surface());
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
         AppSource::Bundle(bundle) => view.load(App::Js(bundle)),

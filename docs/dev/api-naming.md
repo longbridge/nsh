@@ -47,6 +47,9 @@ go elsewhere under these rules rather than into them.
 - A Rust enum's variants are a string union of the same words (`DialogChangeReason::BackdropPress` →
   `"backdropPress"`).
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
+- A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
+  object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
+  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`.
 
 ## Conventions
 
@@ -187,6 +190,20 @@ giving the trigger the focus back. The list itself (the highlight, search, secti
 be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled state machine
 (`crates/nsh-base/src/listbox.rs`, which `Combobox` will share) and keeps `gpui-component`'s names for its data
 (`SearchableListItem::title`, `SearchableGroup`'s sections) while its look stays the app's.
+
+`EmojiPicker` has no counterpart in `gpui-kit`: its name is that of `gpui-base`'s `*Picker`s (`ColorPicker`,
+`DatePicker`), its behavior and names `Command`'s (`onSelect`, `onHighlightChange({ highlighted })`,
+`onQueryChange`, `onCancel`, the `searchBar` / `search` / `list` / `item` / `group` parts, `renderItem`,
+`renderGroup`, `empty`), and its features those of frimousse and AndroidX's `EmojiPickerView` (rows of `columns`
+cells, a global skin tone, recent emoji the app keeps, a newest Emoji version). The groups' tabs and the skin tone
+choice are the app's `Tabs` and controls in its slots, with `onGroupChange` and `scrollToGroup`.
+Its own names are those the emoji pickers share: `EmojiPicker` as frimousse, emoji_picker_flutter and shadcn's
+registry name it (AndroidX `EmojiPickerView`, emoji-picker-element `<emoji-picker>`); `emojiVersion`, the newest
+Emoji version shown, as frimousse, emoji-mart and emoji-picker-element; `skinTone` and its values (`"mediumLight"`, ...)
+as frimousse's and CLDR's skin tone names; `columns` as frimousse and emoji_picker_flutter; `label` as frimousse's and
+emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.txt`, emojibase's `smileys-emotion`,
+...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
+entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
 ## Shapes that can grow
 
@@ -455,7 +472,7 @@ and `Input`'s React Native names follow the rules as well.
 | Tiptap's `Link` extension (`RichEditor`'s class, was `Link`) | `RichLink` (its extension name stays `"link"`) | `RichImage`, `RichTable`, `RichTextStyle` (`rich-editor.md`) | `Link` is `gpui-base`'s component; the editor's class takes the `Rich` prefix its others take where a name is taken (decided by the user, 2026-10-28) |
 | `Link::tab_index`, `tab_stop` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
 | a link inside text (`gpui-base`'s `Link` is a `div`) | an inline box of the paragraph (`verticalAlign`, `align-text-bottom`) | `text.md` "Inline attachments" | Every view inside a `<Text>` is one: it keeps its states, focus and role, and stays on one line. A link that wraps with the paragraph's lines is a nested `<Text role="link" onPress>` span (`TextView`'s links), which is no stop of the keyboard focus |
-| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs `href` carried to the platform as a host prop and the web runtime making an anchor whose default navigation it cancels |
+| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs the web runtime making an anchor from the view's `href` (the host prop `Href`, `ViewProps::href`, which the link sets while enabled and a terminal draws as an OSC 8 hyperlink) whose default navigation it cancels |
 | (new) | `hitSlop: number \| Partial<Edges>`; Rust `.hit_slop(..)` | the host prop `hitSlop` (every view's), passed to the link's view; `Button`'s `hitSlop` | Neither `gpui-base`'s nor `gpui-component`'s `Link` has one, as with `Button`: GPUI hit-tests a pointer against the bounds, which a mouse needs. A finger needs more around a small target (an icon, a short word), so it is the host prop's name, type and meaning, with no new concept |
 | **HoverCard** (`nsh/base`) | | | |
 | `HoverCard::new(id)`, `trigger`, `content(\|state, ..\|)` / `gpui-component`'s children | `HoverCard`, slot `trigger`, children (made on each opening) | `base/src/hover_card.rs:37-72`; `component/src/hover_card.rs:65-93`, `:129` | The content builder's `HoverCardState` gives it `is_open`, which the app has as `open` / `onOpenChange` |

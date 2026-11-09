@@ -34,6 +34,7 @@ mod hover;
 mod images;
 mod js_touch;
 mod keymap;
+mod lazy_each;
 mod list;
 mod list_bench;
 mod logs;

@@ -25,6 +25,8 @@ mod script;
 #[cfg_attr(not(feature = "shader"), path = "shader_off.rs")]
 pub mod shader;
 mod shader_frame;
+#[cfg(all(feature = "shader", target_vendor = "apple"))]
+mod shader_surfaces;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js-core")]
@@ -904,6 +906,10 @@ pub struct EngineConfig {
     pub viewport: Size<Points>,
     /// Log per-commit timings (target `nsh::perf`, level info).
     pub trace: bool,
+    /// Scroll views make the native views of their content only near
+    /// their viewport (the platforms' apps); off, they make all of it
+    /// (tests, which read whole pages). [`EngineConfig::new`]: off.
+    pub content_culling: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
     pub network: Option<Arc<dyn Network>>,
     /// The host transport for WebSockets, including the browser WebSocket API.
@@ -1091,6 +1097,7 @@ impl EngineConfig {
             app: app.into(),
             viewport: Size::new(Points(390.0), Points(844.0)),
             trace: false,
+            content_culling: false,
             network: None,
             websocket: None,
             refuse_connections: None,
@@ -1172,6 +1179,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("app", &self.app)
             .field("viewport", &self.viewport)
             .field("trace", &self.trace)
+            .field("content_culling", &self.content_culling)
             .field("network", &self.network.is_some())
             .field("assets", &self.assets.is_some())
             .field("environment", &self.environment)
@@ -1205,6 +1213,7 @@ enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
     Kept(Vec<NodeId>),
+    ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
@@ -1317,6 +1326,14 @@ impl EngineControl {
     /// the last call's; none releases them.
     pub fn keep_rendered(&self, nodes: Vec<NodeId>) {
         let _ = self.tx.send(Message::Kept(nodes));
+    }
+
+    /// Whether scroll views make the native views of their content as it
+    /// comes near their viewport (the default), or all of it
+    /// (`Core::set_content_culling`): a test driver's, whose steps reach
+    /// every view of a page.
+    pub fn set_content_culling(&self, enabled: bool) {
+        let _ = self.tx.send(Message::ContentCulling(enabled));
     }
 
     /// Reports how far a multiline input's text scrolled: its offset, the
@@ -1673,9 +1690,22 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     /// Starts the app (its first frame goes to `sink` before this returns);
     /// `None` if it could not start (reported to `sink`).
     pub fn start<S: MountSink>(config: EngineConfig, text_engine: M, sink: S) -> Option<Self> {
+        Self::start_with(config, text_engine, sink, |_| {})
+    }
+
+    /// [`LocalEngine::start`], with `setup` sending input before the engine
+    /// starts, as [`Engine::start_with`]'s does: the link that launched the
+    /// app is there before its code runs.
+    pub fn start_with<S: MountSink>(
+        config: EngineConfig,
+        text_engine: M,
+        sink: S,
+        setup: impl FnOnce(&EngineControl),
+    ) -> Option<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
+        setup(&control);
         let _clock = config.clock.enter();
         let _context = config.context.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
@@ -1840,6 +1870,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
         // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
@@ -1877,6 +1908,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        // Every VM reads the core's address where it is (`UrlScheme.url()`).
+        #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
+        let app_url = core.app_url_cell();
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
         if let Some(window) = config.app.main_window() {
@@ -1950,7 +1984,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         // The embedding app's tokens sent before the start
         // (`Engine::start_with`) are there as the bundle evaluates, so its
         // first render reads them; the rest comes after it, in order.
-        // So are the displays, which the app reads as it first renders.
+        // So are the displays, which the app reads as it first renders,
+        // and the link that launched the app, which its first `url()` reads
+        // (the core keeps it for the first `open` listener too).
         let mut early = Vec::new();
         let mut displays: Arc<[nsh_core::desktop::Display]> = Arc::from(Vec::new());
         while let Ok(message) = rx.try_recv() {
@@ -1964,6 +2000,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                 Message::Displays(list) => {
                     core.set_displays(list.clone());
                     displays = list;
+                }
+                Message::Event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload) => {
+                    core.component_event(nsh_core::ROOT_ID, EventKind::UrlScheme, &payload);
                 }
                 message => early.push(message),
             }
@@ -2047,6 +2086,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             config.assets.clone(),
                             bundle,
                         ),
+                        app_url: app_url.clone(),
                         data_dir: config
                             .data_dir
                             .as_ref()
@@ -2056,6 +2096,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             let _ = system_tx.send(Message::Wake);
                         }),
                         host: Rc::new(host_bridge),
+                        lazy_rows: config.content_culling,
                     }
                 };
                 #[cfg(not(any(
@@ -2405,6 +2446,17 @@ impl<M: TextEngine + 'static> Driver<M> {
             script.collect_garbage();
             if let Some(start) = start {
                 log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
+            }
+            // What the app holds, for the performance monitor: read here,
+            // when the heap was just walked and nothing waits.
+            if let Some(monitor) = &self.state.perf {
+                let (js_heap, js_objects) = script.heap_usage();
+                monitor.set_memory(perf::MemorySample {
+                    js_heap,
+                    js_objects,
+                    nodes: self.state.core.node_count() as u64,
+                    node_ids: self.state.core.node_id_room() as u64,
+                });
             }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
@@ -3468,6 +3520,12 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Kept(nodes) => state.core.set_kept(&nodes),
+        Message::ContentCulling(enabled) => {
+            state.core.set_content_culling(enabled);
+            if let Some(script) = script {
+                script.set_lazy_rows(enabled);
+            }
+        }
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }

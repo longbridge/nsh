@@ -84,6 +84,34 @@ impl Sdk {
         };
         let clang = bin.join(format!("{clang_target}{MIN_SDK}-clang{script}"));
         let env_triple = triple.replace('-', "_");
+        // New NDKs keep the C standard headers their clang carries (stdbool.h
+        // &c.) out of the sysroot: whatever libclang bindgen of the C
+        // dependencies (quickjs-jit-sys) loads, give it that directory to
+        // search as well. Last (`-idirafter`), so the libclang's own headers
+        // still win and `#include_next` reaches the sysroot (#1282: `'stdbool.h'
+        // file not found`, `unknown type name 'uint32_t'` on Windows).
+        let clang_include = fs::read_dir(toolchain.join("lib/clang"))
+            .ok()
+            .and_then(|versions| {
+                versions
+                    .filter_map(|version| version.ok().map(|version| version.path()))
+                    .map(|version| version.join("include"))
+                    .find(|include| include.is_dir())
+            });
+        // bindgen splits this variable like a shell: quoted, with forward slashes,
+        // so that the backslashes and spaces of a Windows path survive.
+        let mut extra = format!(
+            "--target={clang_target}{MIN_SDK} --sysroot=\"{}\"",
+            toolchain
+                .join("sysroot")
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        );
+        if let Some(include) = clang_include {
+            let include = include.display().to_string().replace('\\', "/");
+            extra.push_str(&format!(" -idirafter \"{include}\""));
+        }
         let mut cmd = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         cmd.env(format!("CC_{env_triple}"), &clang)
             .env(format!("AR_{env_triple}"), bin.join("llvm-ar"))
@@ -91,19 +119,17 @@ impl Sdk {
                 format!("CARGO_TARGET_{}_LINKER", env_triple.to_uppercase()),
                 &clang,
             )
-            // bindgen splits this variable like a shell: quoted, with forward slashes,
-            // so that the backslashes and spaces of a Windows path survive.
-            .env(
-                format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"),
-                format!(
-                    "--target={clang_target}{MIN_SDK} --sysroot=\"{}\"",
-                    toolchain
-                        .join("sysroot")
-                        .display()
-                        .to_string()
-                        .replace('\\', "/")
-                ),
-            );
+            .env(format!("BINDGEN_EXTRA_CLANG_ARGS_{env_triple}"), extra);
+        // Use the NDK's own libclang when it carries one (r27+ do not);
+        // setting LIBCLANG_PATH otherwise would cut clang-sys's discovery off.
+        let ndk_libclang = bin.join(if cfg!(windows) {
+            "libclang.dll"
+        } else {
+            "libclang.so"
+        });
+        if ndk_libclang.exists() {
+            cmd.env("LIBCLANG_PATH", &bin);
+        }
         Ok(cmd)
     }
 

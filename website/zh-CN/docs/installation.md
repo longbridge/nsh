@@ -24,7 +24,7 @@ macOS 上的默认目标为 AppKit。Mac Catalyst（`--target catalyst`）和 iO
 
 ## 安装发布版本
 
-每个 [GitHub release](https://github.com/longbridge/nsh/releases) 都附带 macOS（Apple silicon）、Linux x86_64 和 Windows x86_64 的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
+每个 [GitHub release](https://github.com/longbridge/nsh/releases) 都附带 macOS（Apple silicon 和 Intel）、Linux（x86_64 和 arm64）和 Windows（x86_64 和 arm64）的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
 
 **macOS 和 Linux**，使用安装脚本：
 
@@ -42,13 +42,13 @@ irm https://nsh.dev/install.ps1 | iex
 
 它安装到 `%LOCALAPPDATA%\nsh`，并把其中的 `bin` 加入用户 `PATH`（之后打开新的终端）。`$env:NSH_VERSION` 和 `$env:NSH_INSTALL_DIR` 的用法同上。
 
-**Homebrew**（macOS 和 Linux）：
+**Homebrew**（Apple silicon Mac 和 x86_64 Linux）：
 
 ```sh
 brew install longbridge/tap/nsh
 ```
 
-**Scoop**（Windows）：
+**Scoop**（x86_64 Windows）：
 
 ```powershell
 scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json
@@ -60,10 +60,31 @@ scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.jso
 mise use -g github:longbridge/nsh
 ```
 
-压缩包（`nsh-macos-arm64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-windows-x86_64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。嵌入用的 SDK 也单独发布，供不需要 CLI 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
+压缩包（`nsh-macos-arm64.tar.gz`、`nsh-macos-x86_64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-linux-arm64.tar.gz`、`nsh-windows-x86_64.zip`、`nsh-windows-arm64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。每个压缩包包含 CLI 和所在平台自己的运行时；其他平台的运行时是[组件](#组件)，第一次用到时再安装。嵌入用的 SDK 单独发布，供嵌入 NSH 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
 
 > [!NOTE]
-> 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。目前没有 Intel Mac 和 arm64 Linux / Windows 的构建，请从源码构建。
+> 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。Homebrew 和 Scoop 安装 Apple silicon、x86_64 Linux 和 x86_64 Windows 的构建，其他平台请用安装脚本。
+
+## 组件
+
+开发所在平台之外的运行时是发布版的组件，就像 `rustup component add` 安装工具链的组成部分。第一个用到它的命令（例如 `nsh run --target android` 或 `nsh package --target web`）会从当前 `nsh` 所属的发布版下载它，校验 SHA-256，并安装到 CLI 旁边。也可以用 `nsh component` 提前管理：
+
+```sh
+nsh component list            # 本机可用的组件，以及是否已安装
+nsh component add android web # 提前安装，例如离线之前
+nsh component remove gpui     # 删除以释放空间
+```
+
+| 组件 | 内容 | 发布平台 |
+|---|---|---|
+| `android` | Android 运行时（`--target android`） | 所有平台 |
+| `android-symbols` | Android 运行时的符号，用于崩溃报告和 `ndk-stack` | 所有平台 |
+| `ios` | iOS 和 Mac Catalyst 运行时（`--target ios`、`catalyst`） | Apple silicon 的 macOS |
+| `web` | Web 运行时（`--target web`） | 所有平台 |
+| `gpui` | [GPUI](./gpui.md) 开发宿主（`--target gpui`） | 所有平台，各自构建 |
+| `tui` | 终端开发宿主（`--target tui`） | 所有平台，各自构建 |
+
+组件总是来自与 CLI 相同的构建。`nsh update` 会从更新到的发布版重新安装已安装的组件。nightly 构建的组件每晚都会替换，因此较早一晚的 nightly `nsh` 会提示先运行 `nsh update`。
 
 ## 用 Rust 编写的应用
 
@@ -103,7 +124,7 @@ dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS 
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
 ```
 
-把 `dist/nsh/bin` 加入 `PATH`（或直接调用 `dist/nsh/bin/nsh`），并保持目录完整：`nsh` 会在自身旁边的 `bin/../runtime` 中查找运行时（通过指向它的符号链接运行时也一样，安装脚本就是这样做的）。
+把 `dist/nsh/bin` 加入 `PATH`（或直接调用 `dist/nsh/bin/nsh`），并保持目录完整：`nsh` 会在自身旁边的 `bin/../runtime` 中查找运行时（通过指向它的符号链接运行时也一样，安装脚本就是这样做的）。发布用的压缩包由它生成：每个平台的压缩包保留 `bin` 和自己的运行时，其他运行时成为[组件](#组件)，`embed` 成为 SDK 压缩包。
 
 ```sh
 export PATH="$PWD/dist/nsh/bin:$PATH"
@@ -134,7 +155,7 @@ nsh update nightly            # 切换到 main 的 nightly 构建
 nsh update stable             # 回到最新正式版
 ```
 
-它下载和安装脚本相同的压缩包，校验 SHA-256，然后替换整个发行包目录。Homebrew、Scoop 和 mise 安装的 `nsh` 由它们自己更新（`brew upgrade nsh`、`scoop update nsh`、`mise upgrade`）。
+它下载和安装脚本相同的压缩包，校验 SHA-256，替换整个发行包目录，并重新安装之前已安装的组件。Homebrew、Scoop 和 mise 安装的 `nsh` 由它们自己更新（`brew upgrade nsh`、`scoop update nsh`、`mise upgrade`）。
 
 ## 从源码构建
 

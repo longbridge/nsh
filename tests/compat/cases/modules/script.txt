@@ -132,6 +132,9 @@ tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
 expect Links: none
 expect Listener: listening
+expect Address: null
+tap id:set-url
+expect Address: compat://orders/42, wrong TypeError TypeError
 tap id:stop-links
 expect Listener: stopped
 covers [nsh] UrlScheme
@@ -264,6 +267,13 @@ tap id:tab-rename
 frame id:tab-bar 0 784 390 60
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
+# mod-haptics
+tap id:case-mod-haptics
+# every call goes through; a name Haptics does not know throws.
+expect Haptics: not called
+tap id:play
+expect Haptics: done, loud refused: TypeError
+covers [nsh/mobile] Haptics
 # mod-storage
 tap id:case-mod-storage
 # a key set twice keeps its last value, and a missing key reads null.

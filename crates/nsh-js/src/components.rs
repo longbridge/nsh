@@ -55,6 +55,7 @@ const HOST_PROPS: &[&str] = &[
     "focusWithinStyle",
     "disabledStyle",
     "testID",
+    "tooltip",
     "onLayout",
 ];
 
@@ -258,6 +259,7 @@ pub(crate) fn deliver(cx: *mut JsContext, event: JsEvent) -> Result<(), JsValue>
             let data = render_data(cx, prop, &key);
             component_event(cx, host, UNRENDER, data)
         }
+        JsEvent::Rows(ids) => dom::render_rows(cx, &ids),
         JsEvent::Reply { call, result } => settle(cx, call, result),
     }
 }

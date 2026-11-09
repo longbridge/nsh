@@ -9,6 +9,7 @@ mod bindgen;
 mod build;
 mod cdp;
 mod check;
+mod component;
 mod dev;
 mod dev_port;
 mod entry;
@@ -279,10 +280,11 @@ enum Command {
         #[arg(long)]
         trace: bool,
         /// Show the performance monitor over the app: frame rate, frame and
-        /// commit costs, CPU, GPU, memory (`--target macos`, which also logs
-        /// its readings once a second; `--target linux`, `windows` and `ios`
-        /// log them). On `tui`, show FPS/idle, frame p95, apply/draw/flush
-        /// times, bytes and changed Cells; C-h p toggles the line.
+        /// commit costs, CPU, GPU, memory (`--target macos` and `linux`; on
+        /// `macos`, `linux`, `windows` and `ios` the host also logs its
+        /// readings once a second, shown with `-v`). On `tui`, show FPS/idle,
+        /// frame p95, apply/draw/flush times, bytes and changed Cells; C-h p
+        /// toggles the line.
         #[arg(long)]
         fps: bool,
         /// Where to run.
@@ -324,6 +326,13 @@ enum Command {
         /// default: the channel this nsh is on.
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
+    },
+    /// Add, remove or list the runtimes installed beside this nsh: those
+    /// of other platforms than this machine's (`android`, `ios`, `web`,
+    /// `gpui`, `tui`), which a command that needs one also adds itself.
+    Component {
+        #[command(subcommand)]
+        action: ComponentAction,
     },
     /// Write an app's update manifest (`latest.json`, signed with `--key`)
     /// from the archives `nsh package` made for each platform; publish them
@@ -560,6 +569,33 @@ struct PackageArgs {
     asset_url: Option<String>,
 }
 
+/// `nsh component`'s actions.
+#[derive(Subcommand, Clone)]
+enum ComponentAction {
+    /// The components of this machine's release, installed or not.
+    List,
+    /// Download and install components of this nsh's release.
+    Add {
+        /// Their names (`nsh component list`).
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Remove installed components.
+    Remove {
+        /// Their names.
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Move each component out of this distribution into its release
+    /// archive (the release workflow's).
+    #[command(hide = true)]
+    Pack {
+        /// The directory the archives are written to.
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
 impl Command {
     /// The entry argument of the commands that build an app.
     fn entry_mut(&mut self) -> Option<&mut PathBuf> {
@@ -574,6 +610,7 @@ impl Command {
             Command::Init { .. }
             | Command::Keygen { .. }
             | Command::Update { .. }
+            | Command::Component { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -955,6 +992,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         }
         Command::Keygen { name } => sign::keygen(&name),
         Command::Update { channel } => self_update::update(channel),
+        Command::Component { action } => match action {
+            ComponentAction::List => component::list(),
+            ComponentAction::Add { names } => component::add_named(&names),
+            ComponentAction::Remove { names } => component::remove_named(&names),
+            ComponentAction::Pack { out } => component::pack(&out),
+        },
         Command::UpdateManifest {
             archives,
             package,

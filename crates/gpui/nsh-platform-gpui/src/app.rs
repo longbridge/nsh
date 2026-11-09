@@ -130,7 +130,7 @@ pub struct AppOptions {
     pub components: crate::native::Components,
     /// The app's appearance until it sets one (`nsh.json` `"appearance"`).
     pub appearance: Appearance,
-    /// Log frame statistics once a second (`nsh::perf fps …`): see
+    /// Log frame statistics once a second (`nsh::fps fps …`): see
     /// [`AppView::set_fps_monitor`].
     pub fps: bool,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
@@ -549,7 +549,7 @@ impl AppView {
         crate::rt::flush(cx);
     }
 
-    /// Logs the surface's frame statistics once a second (`nsh::perf fps
+    /// Logs the surface's frame statistics once a second (`nsh::fps fps
     /// …`: frames drawn, their gaps, the main thread's tick and paint, what
     /// made GPUI draw), or stops.
     pub fn set_fps_monitor(&self, on: bool) {
@@ -955,6 +955,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         app,
         viewport: nsh_core::Size::default(),
         trace: options.trace,
+        content_culling: true,
         network: Some(nsh_engine::net::network()),
         websocket: None,
         refuse_connections: None,

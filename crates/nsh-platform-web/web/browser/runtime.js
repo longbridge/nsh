@@ -220,9 +220,13 @@ export function createBrowserHost(player) {
           if (delay === -2) throw new Error("browser engine startup failed");
           return delay;
         }, true);
-        // The engine's clock and a test session's network, in the realm's
-        // place before any of the app's code runs (`testing.js`).
-        scope.installTesting(realm, call, { active, wake: requestPump, network: !!player.testing });
+        // The engine's clock and a test session's sockets (`testing.js`),
+        // and `fetch` through the engine's network for the app's files and
+        // a test session's HTTP (`fetch.js`), in the realm's place before
+        // any of the app's code runs.
+        const network = !!player.testing;
+        scope.installTesting(realm, call, { active, wake: requestPump, network });
+        scope.installFetch(realm, call, { active, wake: requestPump, network });
         lists = createLists(call, values, reactive, dom, active, requestPump);
         dom.rt.list = lists.render;
         components = createComponents(call, values, reactive, dom);
@@ -238,6 +242,15 @@ export function createBrowserHost(player) {
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
+        // Where the app is the page, `setUrl` takes a URL of the page's
+        // origin, resolved once as `history.replaceState` resolves it
+        // (against the page's `<base href>`).
+        if (nsh.UrlScheme && player.history) {
+          scope.configureAddress(nsh.UrlScheme, {
+            base: () => document.baseURI,
+            origin: location.origin,
+          });
+        }
         const base = modules.exports.get("nsh/base");
         if (base) Object.assign(base, createNavigation(reactive, dom, env, animation.api));
 

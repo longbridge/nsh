@@ -552,6 +552,9 @@ UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟
 
 在 Android 上，应用运行在 `adb devices` 列出的第一个设备或模拟器上的开发 host 中，并拥有独立的存储。步骤是手指的触摸和键盘的按键，
 应用的视图收到它们的方式与在设备上相同；`back` 是系统的返回。`setColorScheme` 切换设备的深色主题，`nsh test` 会在应用结束后把它恢复原样。
+`nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给设备上的应用，与桌面上一样（`nsh run --target android`
+运行 TSX 应用时也会传递）；`PATH`、`HOME`、`TMPDIR` 以及 Android 为每个应用设置的其他路径保持设备上的值。打包的应用
+（`nsh package --target android`）使用设备上的环境。
 
 ### 从标准输入给出步骤
 

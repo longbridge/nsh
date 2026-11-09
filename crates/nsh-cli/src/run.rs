@@ -182,6 +182,11 @@ pub(crate) fn run(
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;
+    if release {
+        // The app's crates and NSH's in the host, optimized as in a
+        // package: a debug host measures debug code.
+        crate::rust_app::set_release_hosts();
+    }
     let work = dunce::canonicalize(entry)?
         .parent()
         .context("entry has no directory")?
@@ -787,6 +792,8 @@ fn run_android(
     if trace {
         start.extend(["--ez", "trace", "true"]);
     }
+    let env = android_app_env(&crate::package::read_config(entry)?);
+    start.extend(env.iter().map(String::as_str));
     let step = ui::Step::start("launching the development host");
     android::adb(&sdk, &serial, &start)?;
     step.finish();
@@ -987,13 +994,19 @@ pub(crate) fn simctl_with_env(
 pub(crate) fn simctl_app_env(
     config: &crate::package::AppConfig,
 ) -> Vec<(String, std::ffi::OsString)> {
-    let declared = config
+    simctl_child_env(&declared_env(config), |name| std::env::var_os(name))
+}
+
+/// The variable names the app's `nsh.json` declares in
+/// `capabilities.process.env`: the only ones a development host is given
+/// from this environment.
+fn declared_env(config: &crate::package::AppConfig) -> Vec<String> {
+    config
         .capabilities
         .as_ref()
         .and_then(|c| nsh_core::access::Capabilities::from_json_lenient(c).ok())
         .map(|(caps, _)| caps.process.env)
-        .unwrap_or_default();
-    simctl_child_env(&declared, |name| std::env::var_os(name))
+        .unwrap_or_default()
 }
 
 /// What the simulator sets for each app it launches: its container's paths
@@ -1022,6 +1035,63 @@ fn simctl_child_env(
         }
     }
     env
+}
+
+/// The variables of this environment that the app's `nsh.json` declares in
+/// `capabilities.process.env`, as `adb shell am start` arguments for the
+/// Android development host: `am start` starts the app in a process the
+/// system makes, so each one goes as a string extra `nsh.env.<name>`, which
+/// `DevActivity` sets in its process's environment before the app starts.
+/// The app reads them in `process.env` as the desktops' hosts, the CLI's
+/// children, do.
+pub(crate) fn android_app_env(config: &crate::package::AppConfig) -> Vec<String> {
+    android_env_extras(&declared_env(config), |name| std::env::var_os(name))
+}
+
+/// What Android sets for each app process: its paths and the runtime's
+/// (`PATH`, `ANDROID_ROOT`, `BOOTCLASSPATH`, ...). The app reads the
+/// device's values; the computer's would point it at files the device does
+/// not have.
+fn android_system_env(name: &str) -> bool {
+    ["PATH", "HOME", "TMPDIR", "EXTERNAL_STORAGE"].contains(&name)
+        || name.starts_with("LD_")
+        || name.starts_with("ANDROID_")
+        || name.ends_with("CLASSPATH")
+}
+
+/// [`android_app_env`] over the environment `var` reads: `--es
+/// nsh.env.<name> <value>` for each declared name with a value, once. Only
+/// names of letters, digits and `_` (the extra's key is a word of the
+/// command line) and UTF-8 values (an extra is a Java string) go.
+fn android_env_extras(
+    declared: &[String],
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Vec<String> {
+    let mut extras = Vec::new();
+    let mut passed: Vec<&str> = Vec::new();
+    for name in declared {
+        let plain =
+            !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !plain || android_system_env(name) || passed.contains(&name.as_str()) {
+            continue;
+        }
+        let Some(value) = var(name).and_then(|v| v.into_string().ok()) else {
+            continue;
+        };
+        passed.push(name);
+        extras.extend([
+            "--es".to_owned(),
+            format!("nsh.env.{name}"),
+            shell_quote(&value),
+        ]);
+    }
+    extras
+}
+
+/// `text` as one word of a POSIX shell's command line: `adb shell` joins its
+/// arguments into a line the device's shell parses again.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 #[derive(Deserialize)]
@@ -1163,7 +1233,10 @@ fn info_plist(target: Target) -> String {
 mod tests {
     use clap::ValueEnum as _;
 
-    use super::{HostWindow, Target, simctl_app_env, simctl_child_env};
+    use super::{
+        HostWindow, Target, android_app_env, android_env_extras, shell_quote, simctl_app_env,
+        simctl_child_env,
+    };
 
     /// The simulator's app gets the declared variables this environment
     /// has, prefixed for simctl, each once; undeclared ones stay behind,
@@ -1219,6 +1292,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["SIMCTL_CHILD_CARGO_PKG_NAME"]
         );
+    }
+
+    /// The Android host gets the declared variables this environment has,
+    /// each once, as string extras with quoted values; undeclared ones stay
+    /// behind, and so do those Android sets for its apps, names that are
+    /// not plain and values that are not UTF-8.
+    #[test]
+    fn android_passes_only_declared_variables() {
+        let vars = |name: &str| -> Option<std::ffi::OsString> {
+            match name {
+                "NSH_GALLERY_DEMO" => Some("accordion".into()),
+                "API_TOKEN" => Some("it's $HOME".into()),
+                "EMPTY" => Some("".into()),
+                #[cfg(unix)]
+                "BINARY" => Some(
+                    <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"\xff").into(),
+                ),
+                "PATH" | "HOME" | "TMPDIR" | "LD_PRELOAD" | "ANDROID_ROOT" | "BOOTCLASSPATH"
+                | "EXTERNAL_STORAGE" | "A-B" | "A B" => Some("system".into()),
+                _ => None,
+            }
+        };
+        let declared = [
+            "NSH_GALLERY_DEMO",
+            "NSH_GALLERY_SECTION",
+            "NSH_GALLERY_DEMO",
+            "API_TOKEN",
+            "EMPTY",
+            "BINARY",
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "LD_PRELOAD",
+            "ANDROID_ROOT",
+            "BOOTCLASSPATH",
+            "EXTERNAL_STORAGE",
+            "A-B",
+            "A B",
+            "",
+        ]
+        .map(String::from);
+        assert_eq!(
+            android_env_extras(&declared, vars),
+            [
+                "--es",
+                "nsh.env.NSH_GALLERY_DEMO",
+                "'accordion'",
+                "--es",
+                "nsh.env.API_TOKEN",
+                r"'it'\''s $HOME'",
+                "--es",
+                "nsh.env.EMPTY",
+                "''",
+            ]
+        );
+        assert!(android_env_extras(&[], vars).is_empty());
+    }
+
+    /// An app without a declaration of `process.env` gets nothing on
+    /// Android either; one that declares a name gets it (`cargo test` sets
+    /// `CARGO_PKG_NAME`).
+    #[test]
+    fn android_passes_nothing_undeclared() {
+        let mut config = crate::package::AppConfig::default();
+        assert!(android_app_env(&config).is_empty());
+        config.capabilities = Some(serde_json::json!({ "process": { "env": ["CARGO_PKG_NAME"] } }));
+        assert_eq!(
+            android_app_env(&config),
+            ["--es", "nsh.env.CARGO_PKG_NAME", "'nsh-cli'"]
+        );
+    }
+
+    /// A value is one word for the device's shell, whatever it holds.
+    #[test]
+    fn shell_quote_keeps_one_word() {
+        assert_eq!(shell_quote(""), "''");
+        assert_eq!(shell_quote("a b"), "'a b'");
+        assert_eq!(shell_quote(r#"$HOME `x` "q""#), r#"'$HOME `x` "q"'"#);
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_quote("''"), r"''\'''\'''");
     }
 
     /// Only phones and browsers that may be on the network get a dev

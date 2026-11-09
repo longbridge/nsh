@@ -749,8 +749,7 @@ mod template_tests {
     /// A 1×1 opaque red pixel, as an SVG template's stroke renders.
     fn red() -> gdk::Texture {
         let bytes = glib::Bytes::from_static(&[0, 0, 255, 255]);
-        gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, 4)
-            .upcast()
+        gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, 4).upcast()
     }
 
     #[test]
