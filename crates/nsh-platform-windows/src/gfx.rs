@@ -644,3 +644,16 @@ impl SwapChain {
         result
     }
 }
+
+/// Waits until DWM has composed the frame just presented for a resize.
+///
+/// DWM shows a window at its new size at its next composition, but a flip
+/// model frame presented for that size only at the one after: until then
+/// the window's new area shows the swap chain's background (white edges)
+/// and the content trails the pointer. The sizing loop sends the next
+/// `WM_SIZE` only once this one returns, so waiting here keeps each size
+/// and its frame in the same composition, at most one size per refresh.
+pub(crate) fn await_composition() {
+    // SAFETY: a plain call; it fails (not composing) without waiting.
+    let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+}
