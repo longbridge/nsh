@@ -1,6 +1,6 @@
 import { platform, signal, Text, View } from "nsh";
-import { Link } from "nsh/base";
-import { Button, Caption, Card, colors, DemoPage, density, linkColor, linkLook, LinkText, mono, Toggle } from "../ui";
+import { Link, TextView } from "nsh/base";
+import { Button, Caption, Card, colors, DemoPage, density, linkColor, linkLook, LinkText, mono, textViewLinkClasses, Toggle } from "../ui";
 
 // `nsh/base`'s `Link` owns presses, Return and Space, the keyboard focus,
 // the disabled state and the link role; the look is the gallery's: the
@@ -28,6 +28,7 @@ const remember = (href: string) => visited.set(new Set(visited()).add(href));
 function TextLink(props: {
   href: string;
   label: string;
+  title?: string;
   openWith?: "system" | "app";
   onRoute?: (href: string) => void;
   disabled?: boolean;
@@ -43,6 +44,7 @@ function TextLink(props: {
     <Link
       testID={props.testID}
       href={props.href}
+      title={props.title}
       openWith={props.openWith ?? "app"}
       disabled={props.disabled}
       current={props.current}
@@ -195,5 +197,42 @@ export function LinkDemo() {
     );
   }
 
-  return <DemoPage cards={[Paragraph, Navigation, External, Footer, Events]} />;
+  function Destinations() {
+    return (
+      <Card
+        title="Where it goes"
+        subtitle={pointer ? "Rest the pointer on a link: its URL shows, the host never cut" : "On a desktop or the web, resting the pointer on a link shows its URL"}
+      >
+        <View style={{ gap: 10 }}>
+          <TextLink href="https://nsh.dev/" label="A short address" openWith="system" icon testID="where-short" />
+          <TextLink
+            href="https://nsh.dev/docs/elements/link"
+            title="Link reference"
+            label="A titled link"
+            openWith="system"
+            icon
+            testID="where-titled"
+          />
+          <TextLink href={LONG_URL} label="A long address" openWith="system" icon testID="where-long" />
+          <TextLink href={LOOK_ALIKE_URL} label={"exаmple.com, with a Cyrillic а"} openWith="system" icon testID="where-idn" />
+        </View>
+        <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.line }}>
+          <TextView markdown={TITLED} classes={textViewLinkClasses} onLinkPress={({ url }) => note(`onLinkPress ${url}`)} />
+        </View>
+        <Caption label="A title shows above the address; a long path loses its middle; a look-alike host shows as its ASCII form" />
+      </Card>
+    );
+  }
+
+  return <DemoPage cards={[Paragraph, Navigation, External, Destinations, Footer, Events]} />;
 }
+
+/** A path and query longer than a hint's line: the middle gives way. */
+const LONG_URL = "https://docs.example.com/guides/getting-started/installation/linux/packages?channel=stable&arch=arm64#verify";
+
+/** A host whose "а" is Cyrillic (U+0430): its hint shows the punycode it really is. */
+const LOOK_ALIKE_URL = "https://exаmple.com/account/sign-in";
+
+/** A Markdown link with a title: the title above the URL. */
+const TITLED =
+  'Markdown links show their title over the address: read [the changelog](https://nsh.dev/changelog "What changed in this release") before you update.';

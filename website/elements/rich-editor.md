@@ -347,6 +347,9 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
   `https`, `ftp`, `ftps`, `mailto`, `tel`, `callto`, `sms`, `cid`, `xmpp` and those in `protocols`, so
   `setLink({ href })`, `toggleLink(attrs?)` and autolinking keep scripts (`javascript:`) and data URLs out.
   `unsetLink()` removes the link around the selection.
+  On the desktops and the web in the desktop idiom, the pointer resting on linked text shows the link's `title` and
+  destination below the pointer, as [TextView's links](./text-view.md) do; pressing and typing in the link work as
+  before. Text an app's mark view renders shows what the app's element shows.
 - `characterCount(options?)`: `editor.characters(mode?)` counts the text's characters (`"textSize"`, UTF-16 units as
   JS's `length`) or the document's positions (`"nodeSize"`); `editor.words()` counts its words (Unicode word
   boundaries). With `limit`, changes that would go past it are refused and pasted content is trimmed to what fits;
