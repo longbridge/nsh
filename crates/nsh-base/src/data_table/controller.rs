@@ -1618,9 +1618,9 @@ mod tests {
     fn a_rest_at_the_top_retargets_the_anchor_without_moving() {
         // A million rows of 28 points, dragged back to the top: the scroll
         // view is at 0 and shows the top, already where the bar stands, while
-        // the anchor still stands for content further down.
+        // the anchor still stands for scaled content further down.
         let axis = Axis::new(28_000_000.0, 600.0);
-        let mut anchor = axis.anchor_at(900.0, 2.0);
+        let mut anchor = axis.anchor_at(900_000.0, 2.0);
         assert!(axis.content_offset_from(58.0, anchor) > 500.0);
         let moved = settle(&axis, 0.0, 2.0, &mut anchor, Points::ZERO);
         assert_eq!(moved, None, "the scroll view stays at the top");

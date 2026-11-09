@@ -371,3 +371,57 @@ fn web_desktop_wheel_offsets_are_not_amplified_by_the_table_extent() {
     control.scroll(id, point(px(0.0), px(34.0)), 0);
     app.wait_for("First row 1").unwrap();
 }
+
+#[test]
+fn touch_reverse_scroll_after_settling_near_top_stays_one_to_one() {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            os: Os::Android,
+            idiom: Idiom::Phone,
+            window: viewport,
+            pixel_ratio: 3.0,
+            ..Default::default()
+        },
+        ..EngineConfig::new(Root::of::<HugeWebTable>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let vertical = Arc::new(Mutex::new(None));
+    let found = vertical.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ScrollConfig {
+                id,
+                horizontal: false,
+                ..
+            } = item
+            {
+                *found.lock().unwrap() = Some(*id);
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let id = vertical
+        .lock()
+        .unwrap()
+        .expect("the table's vertical hit layer");
+
+    let control = app.engine().control();
+    // Scroll down 50 rows (50 * 34 = 1700pt) and let the gesture settle.
+    let down = point(px(0.0), px(1700.0));
+    control.scroll(id, down, 0);
+    app.wait_for("First row 50").unwrap();
+    control.dispatch_event(
+        id,
+        nsh_core::EventKind::ScrollEnd,
+        nsh_core::EventPayload::Scroll(down),
+    );
+    app.wait_for("First row 50").unwrap();
+
+    // A reverse gesture of 204pt (6 rows) must move up 6 rows to row 44
+    // rather than accelerating across the compressed top interval to row 0.
+    let up = point(px(0.0), px(1496.0));
+    control.scroll(id, up, 0);
+    app.wait_for("First row 44").unwrap();
+}

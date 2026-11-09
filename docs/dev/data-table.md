@@ -51,7 +51,8 @@ and offsets the table scrolls to (`scrollToRow`, revealing the selection) land o
 way on the horizontal axis. On touch devices drags move the content one to one. Web desktop wheels and keys also
 follow a local anchor, so a small input is independent of the table's size. Explicit web desktop drags span the
 full content from the point where they start; releasing the drag restores local following without moving the rows.
-At rest the invisible hit layer recenters to where its scrollbar represents the content. On the desktops dragging
+At rest the invisible hit layer recenters to where its scrollbar represents the content, keeping one-to-one scroll
+room near the top and bottom edges so a reverse gesture does not accelerate into the end. On the desktops dragging
 the bar reaches the whole content.
 
 In a terminal a body row is one Cell, whatever `rowHeight` is (`terminal::row_height`): rows on another step

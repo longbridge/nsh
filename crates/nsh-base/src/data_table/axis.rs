@@ -111,16 +111,23 @@ impl Axis {
 
     /// The anchor that shows content offset `content` with the scroll view
     /// where its bar stands for it: [`Self::scroll_offset`] on a device
-    /// pixel of `pixel_ratio`, where the platforms keep a scroll offset.
+    /// pixel of `pixel_ratio`, where the platforms keep a scroll offset,
+    /// keeping enough native scroll room near either end so a reverse gesture
+    /// follows the content one to one instead of accelerating across it.
     pub(crate) fn anchor_at(&self, content: f64, pixel_ratio: f64) -> Anchor {
         let max = (self.total - self.viewport).max(0.0);
         let content = content.clamp(0.0, max);
+        let room = (self.extent() - self.viewport).max(0.0);
+        let pad = (room / 64.0).min(room / 2.0);
+        let scroll = self
+            .scroll_offset(content)
+            .clamp(content.min(pad), (room - (max - content).min(pad)).max(0.0));
         let ratio = pixel_ratio.max(f64::MIN_POSITIVE);
-        let scroll = (self.scroll_offset(content) * ratio).round() / ratio;
+        let scroll = (scroll * ratio).round() / ratio;
         // The `f32` the scroll view reports, so the anchor's offset is met
         // exactly when the scroll comes back to it.
         Anchor {
-            scroll: f64::from(scroll as f32),
+            scroll: f64::from((scroll as f32).clamp(0.0, room as f32)),
             content,
         }
     }
@@ -247,10 +254,10 @@ mod tests {
     #[test]
     fn a_stale_anchor_at_the_origin_jumps_until_it_is_retargeted() {
         // A million rows of 28 points. The scroll view was brought back to 0
-        // while the anchor still stood for content further down (a rest that
-        // skipped retargeting because the offset was already the bar's).
+        // while the anchor still stood for scaled content further down (a rest
+        // that skipped retargeting because the offset was already the bar's).
         let axis = Axis::new(28_000_000.0, 600.0);
-        let stale = axis.anchor_at(900.0, 2.0);
+        let stale = axis.anchor_at(900_000.0, 2.0);
         assert!(
             axis.content_offset_from(0.0, stale).abs() < 1.0,
             "the origin still shows the top"
@@ -262,6 +269,35 @@ mod tests {
         );
         let fresh = axis.anchor_at(0.0, 2.0);
         assert!((axis.content_offset_from(58.0, fresh) - 58.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resting_near_either_end_keeps_reverse_scrolls_one_to_one() {
+        // A million rows of 28 points. After settling a few dozen rows from
+        // the top, a reverse gesture must have one-to-one scroll room all the
+        // way back to row 0 instead of compressing 900pt into 96.5pt.
+        let axis = Axis::new(28_000_000.0, 600.0);
+        let near_top = axis.anchor_at(900.0, 2.0);
+        assert_eq!(near_top.scroll, 900.0);
+        for step in [60.0, 240.0, 600.0, 900.0] {
+            let at = axis.content_offset_from(near_top.scroll - step, near_top);
+            assert!(
+                (at - (900.0 - step)).abs() < 1e-6,
+                "step {step} back from 900 landed at {at}"
+            );
+        }
+
+        let cmax = 28_000_000.0 - 600.0;
+        let smax = MAX_EXTENT - 600.0;
+        let near_bottom = axis.anchor_at(cmax - 900.0, 2.0);
+        assert_eq!(near_bottom.scroll, smax - 900.0);
+        for step in [60.0, 240.0, 600.0, 900.0] {
+            let at = axis.content_offset_from(near_bottom.scroll + step, near_bottom);
+            assert!(
+                (at - (cmax - 900.0 + step)).abs() < 1e-6,
+                "step {step} forward from cmax - 900 landed at {at}"
+            );
+        }
     }
 
     #[test]
