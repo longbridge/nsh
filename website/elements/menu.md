@@ -19,7 +19,8 @@ by the secondary button (a right click) at the pointer, by a finger held on its 
 trigger by the keyboard in the browser and on Linux, and by screen readers on macOS and Windows.
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
-with it on its last; the arrow keys then move between the items. A press opens it with no item focused.
+with it on its last; the arrow keys then move between the items. A press opens it with no item focused; on the desktops Down or Home then
+focuses the first enabled item and Up or End the last.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item.
 

@@ -241,7 +241,8 @@ struct View {
     canvas_node: bool,
 }
 
-/// A span of a text view's text that takes presses ([`nsh_core::TextLink`]).
+/// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
+/// presses, or one a hint watches (the pointer only).
 #[derive(Debug, Clone)]
 struct Span {
     /// The text view showing it.

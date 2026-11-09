@@ -2148,7 +2148,7 @@ expect Group: recent
 expect Lit: none
 absent NoEmoji
 # A press chooses, with the skin tone.
-tap label:"grinning face"
+tap text:😀
 expect Chosen: 😀 😀 dark grinning face
 # The ref scrolls to a group, which is reported, and looks an emoji up.
 tap text:ToPeople
@@ -2170,6 +2170,12 @@ type label:SearchEmoji zz
 expect Query: xiaokuzz
 expect NoEmoji
 expect Lit: none
+# Emoji newer than the app's `emojiVersion` (15) are left out: the
+# shaking face (15) shows, the head shaking sideways (15.1) does not.
+tap text:ToShaking
+expect Query: shaking
+expect 🫨
+absent 🙂‍↔️
 # Without a search field: the app's cells (`renderItem`).
 expect <chequered flag>
 absent text:FindEmoji

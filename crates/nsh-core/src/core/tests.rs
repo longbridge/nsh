@@ -13402,6 +13402,231 @@ mod components {
         // A piece added between a span and the view goes in its place.
         assert_eq!(t.text, "Tapped 1 the link, bold and more\u{fffc}");
     }
+
+    /// A sentence whose link has a hint (as `nsh-base` gives a link its
+    /// URL): an overlay inside the span.
+    #[component]
+    fn HintedLink() -> impl IntoElement {
+        view().child(
+            text("Read ")
+                .child(
+                    text("the docs").on_press(|_: &()| {}).child(
+                        crate::element::overlay()
+                            .hint(std::time::Duration::from_millis(500))
+                            .pointer_events(crate::props::PointerEvents::None)
+                            .child(text("https://example.com/docs")),
+                    ),
+                )
+                .child(" today"),
+        )
+    }
+
+    #[test]
+    fn a_link_of_a_text_is_its_hints_anchor_where_the_pointer_came() {
+        let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<HintedLink>(|| ()));
+        let mut paragraph = None;
+        for _ in 0..2 {
+            if let Some(batch) = c.commit() {
+                for item in &batch.items {
+                    if let MountItem::Text { text, .. } = item
+                        && text.text.starts_with("Read")
+                    {
+                        paragraph = Some(text.clone());
+                    }
+                }
+            }
+        }
+        let t = paragraph.expect("the paragraph");
+        assert_eq!(t.text, "Read the docs today", "the hint is no text of it");
+        let link = t.links[0];
+        // The platforms tell the link when the pointer comes over its
+        // characters and leaves them.
+        assert!(link.events.contains(EventKind::MouseEnter));
+        assert!(link.events.contains(EventKind::MouseLeave));
+
+        let at = crate::geometry::point(px(60.0), px(8.0));
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            at,
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(link.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("the hint shows");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs"),
+            "{:?}",
+            texts(&batch)
+        );
+        // Below where the pointer came (the default placement), not
+        // against the whole paragraph.
+        let overlay = inserts(&batch)
+            .into_iter()
+            .find(|&(p, ..)| p == ROOT_ID)
+            .map(|(_, child, _)| child)
+            .expect("the hint in the root view");
+        let frame = frame_of(&batch, overlay).expect("placed");
+        assert!(frame.origin.y >= px(8.0), "{frame:?}");
+
+        // Leaving the link hides it.
+        c.component_event(link.node, EventKind::MouseLeave, &mouse);
+        let batch = c.commit().expect("the hint hides");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay))
+        );
+    }
+
+    /// A link of a text that takes no presses (as a `RichEditor`'s link
+    /// mark: the editor's touches place the caret), in a scroll view, with
+    /// a hint; beside a span taking presses with one inside it.
+    #[component]
+    fn HoverOnlyLink() -> impl IntoElement {
+        let hint = |url: &'static str| {
+            crate::element::overlay()
+                .hint(std::time::Duration::from_millis(500))
+                .pointer_events(crate::props::PointerEvents::None)
+                .child(text(url))
+        };
+        scroll().h(px(100.0)).child(
+            view().h(px(1000.0)).child(
+                text("Read ")
+                    .child(text("the docs").child(hint("https://example.com/docs")))
+                    .child(" or ")
+                    .child(
+                        text("pressed ")
+                            .on_press(|_: &()| {})
+                            .child(text("inner").child(hint("https://example.com/inner"))),
+                    ),
+            ),
+        )
+    }
+
+    #[test]
+    fn a_link_taking_no_presses_hears_the_pointer_for_its_hint_only() {
+        let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<HoverOnlyLink>(|| ()));
+        let mut paragraph = None;
+        let mut scroller = None;
+        // The hint's watch comes after the first merge: the span is a
+        // link of its text from the next.
+        for _ in 0..3 {
+            if let Some(batch) = c.commit() {
+                for item in &batch.items {
+                    match item {
+                        MountItem::Text { text, .. } if text.text.starts_with("Read") => {
+                            paragraph = Some(text.clone());
+                        }
+                        MountItem::Create { id, kind } if *kind == ViewKind::Scroll => {
+                            scroller = Some(*id);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let t = paragraph.expect("the paragraph");
+        let scroller = scroller.expect("the scroll view");
+        assert_eq!(t.text, "Read the docs or pressed inner");
+        let docs = *t
+            .links
+            .iter()
+            .find(|l| (l.start, l.end) == (5, 13))
+            .expect("the hinted span is a link of its text");
+        // The pointer only: no press, no stop of Tab.
+        assert!(docs.events.contains(EventKind::MouseEnter));
+        assert!(docs.events.contains(EventKind::MouseLeave));
+        assert!(!docs.events.contains(EventKind::Press));
+        assert!(!docs.focus_stop);
+        // Inside a span taking presses, a hinted span is no link: the
+        // pressable one stays the innermost link of those characters.
+        let inner = t.link_at(26).expect("a link there");
+        assert!(inner.events.contains(EventKind::Press), "{inner:?}");
+        assert_eq!((inner.start, inner.end), (17, 30));
+
+        let at = crate::geometry::point(px(60.0), px(8.0));
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            at,
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("the hint shows");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs"),
+            "{:?}",
+            texts(&batch)
+        );
+        let overlay = inserts(&batch)
+            .into_iter()
+            .find(|&(p, ..)| p == ROOT_ID)
+            .map(|(_, child, _)| child)
+            .expect("the hint in the root view");
+        // Placed where the pointer came, against the span, not the block.
+        let frame = frame_of(&batch, overlay).expect("placed");
+        assert!(frame.origin.y >= px(8.0), "{frame:?}");
+
+        // The content scrolls under a still pointer: the link moved away
+        // from where the hint points, so it hides.
+        c.set_scroll_offset(
+            scroller,
+            crate::geometry::point(px(0.0), px(40.0)),
+            u32::MAX,
+        );
+        let batch = c.commit().expect("the hint hides");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay)),
+            "{:?}",
+            batch.items
+        );
+        // The pointer coming over the link again shows it there.
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("shown again");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs")
+                || inserts(&batch)
+                    .iter()
+                    .any(|&(p, child, _)| p == ROOT_ID && child == overlay),
+            "{:?}",
+            batch.items
+        );
+    }
 }
 
 /// Rust components' touches and responder (`touch.rs`).
@@ -14826,6 +15051,49 @@ fn window_drag_is_a_view_prop() {
     assert!(batch.items.iter().any(
         |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.window_drag.is_none())
     ));
+}
+
+/// `web={{ element }}` reaches the platform in the view's props (the web
+/// draws the view as that HTML element), and clearing it sends the props
+/// again.
+#[test]
+fn web_element_is_a_view_prop() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::WebElement(Some(crate::WebElement::Nav)),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element == Some(crate::WebElement::Nav)
+    )));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::WebElement(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element.is_none()
+    )));
 }
 
 /// `focusable={false}` reaches the platform in the view's props.
@@ -20484,7 +20752,9 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         view()
             .disabled(move || disabled.get())
             .on_press(move |_: &()| disabled.set(true))
-            .on_file_drag_enter(|_: &()| {})
+            .on_file_drag_enter(move |event: &crate::element::FileDragEvent| {
+                received.set(format!("enter {}", event.uris.join("\n")))
+            })
             .on_file_drag_leave(|_: &()| {})
             .on_file_drop(move |event: &crate::element::FileDropEvent| {
                 received.set(event.uris.join("\n"))
@@ -20506,6 +20776,14 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         "file:///tmp/a%20b.txt".into(),
         "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
     ];
+    assert!(c.component_event(
+        host,
+        EventKind::FileDragEnter,
+        &EventPayload::FileDrop(uris.clone())
+    ));
+    let entered = c.commit().unwrap();
+    assert!(entered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == format!("enter {}", uris.join("\n")))));
     assert!(c.component_event(
         host,
         EventKind::FileDrop,
@@ -22566,6 +22844,46 @@ fn overlays_in_a_modal_show_in_it() {
     let batch = c.commit().unwrap();
     assert!(inserts(&batch).contains(&(2, 6, None)));
     assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
+}
+
+#[test]
+fn an_anchored_overlay_lands_on_whole_device_pixels() {
+    use StyleValue::Number;
+    for ratio in [1.0, 2.0, 3.0] {
+        let mut c = core();
+        at_ratio(&mut c, ratio);
+        add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(480.0))]);
+        add(&mut c, 10, Tag::Overlay, 2, &[]);
+        add(
+            &mut c,
+            12,
+            Tag::View,
+            10,
+            &[("width", Number(120.0)), ("height", Number(60.0))],
+        );
+        // A pointer between pixels, as a context menu opens at.
+        apply(
+            &mut c,
+            vec![overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                    px(100.38),
+                    px(50.71),
+                ))),
+            )],
+        );
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 10).expect("overlay frame");
+        for v in [frame.origin.x.0, frame.origin.y.0] {
+            let pixels = v * ratio;
+            assert!(
+                (pixels - pixels.round()).abs() < 1.0e-3,
+                "{v} is not on a device pixel at {ratio}"
+            );
+        }
+        // Still centred on the pointer (100.38 - 120 / 2), within a pixel.
+        assert!((frame.origin.x.0 - 40.38).abs() <= 1.0 / ratio);
+    }
 }
 
 #[test]

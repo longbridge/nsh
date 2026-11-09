@@ -3209,4 +3209,50 @@ mod tests {
         assert!(seen.load(Ordering::Relaxed) > 0);
         assert!(app.shows("Label"));
     }
+
+    // Escape bound in the main window and in a window of the app's own.
+    #[component]
+    fn WindowKeys() -> impl IntoElement {
+        let main = signal(0);
+        let settings = signal(0);
+        on_key("escape", move |_| main.update(|n| *n += 1));
+        view()
+            .child(
+                text(move || format!("keys {} {}", main.get(), settings.get()))
+                    .test_id("in-main")
+                    .on_press(|_: &()| {}),
+            )
+            .child(
+                nsh_core::element::desktop::window()
+                    .id("settings")
+                    .default_size(size(px(300.0), px(100.0)))
+                    .content(move || {
+                        on_key("escape", move |_| settings.update(|n| *n += 1));
+                        view()
+                            .test_id("in-settings")
+                            .on_press(|_: &()| {})
+                            .w(px(100.0))
+                            .h(px(40.0))
+                    }),
+            )
+    }
+
+    #[test]
+    fn a_key_fires_the_bindings_of_the_focused_window() {
+        let mut config = EngineConfig::new(Root::of::<WindowKeys>());
+        config.environment.os = nsh_core::platform::Os::MacOs;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("keys 0 0").unwrap();
+        // Settings opened focused: its binding takes the key, main's not.
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 0 1").unwrap();
+        // A press in the main window focuses it, and then its binding.
+        app.press("id:in-main").unwrap();
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 1 1").unwrap();
+        app.press("id:in-settings").unwrap();
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 1 2").unwrap();
+    }
 }
