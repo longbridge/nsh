@@ -16,6 +16,7 @@ mod entry;
 mod init;
 mod logger;
 mod package;
+mod platforms;
 mod play;
 mod publish_ios;
 mod run;
@@ -622,7 +623,17 @@ impl Command {
 
 /// Runs the command line; errors are printed.
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    // `--target` naming a platform outside NSH: its executable runs the
+    // command (`platforms.rs`).
+    let args: Vec<_> = std::env::args_os().collect();
+    if let Some(result) = platforms::dispatch(&args) {
+        return result.unwrap_or_else(|e| {
+            ui::init(false);
+            ui::report(&e);
+            ExitCode::FAILURE
+        });
+    }
+    let cli = Cli::parse_from(args);
     ui::init(cli.verbose);
     logger::init();
     let result = run(cli.command);

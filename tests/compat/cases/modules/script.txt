@@ -186,6 +186,7 @@ covers [nsh/desktop] Application
 # mod-device
 tap id:case-mod-device
 # iOS phone at 1 pixel per point, in the light scheme.
+expect Platform: ios
 expect OS: ios
 expect Idiom: phone
 expect Desktop: false
@@ -304,6 +305,13 @@ event id:heard onHost type=event event=tick payload=2
 wait 50
 expect Host heard: [1]
 covers [nsh] host
+# mod-web
+tap id:case-mod-web
+# No page here: a head renders nothing, before and after its props change.
+expect Title: Notes
+tap id:retitle
+expect Title: Q3 earnings
+covers [nsh/web] Head
 # mod-fps
 tap id:case-mod-fps
 # no performance monitor headless: it reports none, and the calls go through.
