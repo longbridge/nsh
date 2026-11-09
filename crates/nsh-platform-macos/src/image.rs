@@ -999,17 +999,23 @@ fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
 /// `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`): reads the
 /// image's bytes (into the loader's memory and disk caches) and reports its
 /// size in pixels (an SVG's: its intrinsic size in points), from its
-/// header when it says, else by decoding it.
+/// header when it says, else by decoding it. The answer goes to the engine
+/// from the loader thread that has it: the main thread has nothing to do
+/// with it, and `Image.prefetch` is called most while it is busiest
+/// (lists scrolling).
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     let Command::ImageInfo { id, uri } = command else {
         return;
     };
     let request = *id;
-    let weak = Rc::downgrade(surface);
+    // The command came from this surface's engine; without one there is no
+    // JS left to answer.
+    let mut engine = None;
+    surface.control(|control| engine = Some(control.clone()));
+    let Some(engine) = engine else {
+        return;
+    };
     let report = move |result: Result<Natural, String>| {
-        let Some(surface) = weak.upgrade() else {
-            return;
-        };
         let mut fields = vec![("id", PayloadValue::Number(request as f64))];
         match result {
             Ok(natural) => {
@@ -1019,7 +1025,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
             Err(message) => fields.push(("error", PayloadValue::Str(message))),
         }
-        surface.event(
+        engine.dispatch_event(
             nsh_core::ROOT_ID,
             EventKind::ImageInfo,
             EventPayload::Map(fields),
@@ -1030,7 +1036,6 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         report(Err(format!("unsupported image source `{uri}`")));
         return;
     };
-    let (_, report) = on_main(report);
     let decode = Request {
         location: location.clone(),
         context: context.clone(),
