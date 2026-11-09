@@ -7,7 +7,7 @@ group: platforms
 
 # Android
 
-NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`,
+NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 8 (API 26), on `arm64-v8a`,
 `armeabi-v7a` and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
 can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
@@ -92,7 +92,7 @@ dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
-`INTERNET` permission and needs **API 28** (Android 9) or newer. It carries its R8 rules (`proguard.txt`), which a
+`INTERNET` permission and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
 minified build applies on its own: the native library finds the runtime's classes by name, so `com.longbridge.nsh`
 stays as it is.
 
@@ -374,10 +374,11 @@ config of the app may override it). The release `nsh.aar` does not.
 
 - **Back button.** `NshView` gets back presses by itself while the app wants them (an open dialog, a pushed page, a
   `BackHandler` listener), and leaves them to the activity otherwise. With `android:enableOnBackInvokedCallback="true"`
-  on Android 13 and newer it registers an `OnBackInvokedCallback`; elsewhere (Android 12 and older, or the attribute
+  on Android 13 and newer it registers an `OnBackInvokedCallback`; elsewhere (Android 9 to 12, or the attribute
   off) it takes the back key before the activity's `onBackPressed`, so before AndroidX's `OnBackPressedDispatcher`
-  and the fragments' callbacks. No forwarding is needed, in an activity or a fragment. A host that already forwards
-  presses to `handleBack()` keeps working: a press goes to the app once.
+  and the fragments' callbacks. No forwarding is needed there, in an activity or a fragment. On Android 8 the activity
+  hands its back presses to the view: `if (!nshView.handleBack()) super.onBackPressed();` in `onBackPressed`. A host
+  that forwards presses to `handleBack()` on every version keeps working: a press goes to the app once.
 
   For predictive back on Android 13+, set `android:enableOnBackInvokedCallback="true"` on the `<application>`, as
   packaged NSH apps do.

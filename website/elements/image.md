@@ -171,5 +171,5 @@ None of its own.
 - The cache key includes the decode size and the blur radius: the same URL shown at two sizes is decoded twice but
   downloaded once.
 - iOS plays animated images as a keyframe animation (up to 600 frames); a tinted animated image shows its first frame.
-- Android plays animated images from API 28 (`AnimatedImageDrawable`), uncached and unblurred.
+- Android plays animated images from API 28 (`AnimatedImageDrawable`) and GIFs from API 26, uncached and unblurred.
 - On Android borders are drawn above the image, as on iOS.

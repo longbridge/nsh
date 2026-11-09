@@ -2297,4 +2297,82 @@ mod tests {
         }
         assert!(drawn_area(&parent).is_none());
     }
+
+    /// The painted extent (x0, y0, x1, y1) in pixels of what is red.
+    fn red_extent(data: &[u8], size: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+        let mut out: Option<(u32, u32, u32, u32)> = None;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                let i = ((y * size.0 + x) * 4) as usize;
+                let (b, g, r) = (data[i], data[i + 1], data[i + 2]);
+                if r > 180 && g < 100 && b < 100 {
+                    out = Some(match out {
+                        None => (x, y, x + 1, y + 1),
+                        Some((a, b, c, d)) => (a.min(x), b.min(y), c.max(x + 1), d.max(y + 1)),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_tinted_image_fills_its_frame_at_any_scale() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        for scale in [1.0f32, 1.25, 1.75, 2.0] {
+            for (transformed, faded) in [(false, false), (true, false), (false, true)] {
+                let size = ((60.0 * scale).ceil() as u32, (60.0 * scale).ceil() as u32);
+                let surface = Surface::new(Default::default());
+                surface.resized(size, scale);
+                let root = surface.root.clone();
+                let button = view(Some(&root), 2, ViewKind::View, rect(10.0, 10.0, 40.0, 40.0));
+                button.state_mut().style.background_color = Color(0xddddddff);
+                if transformed {
+                    let mut s = button.state_mut();
+                    s.style.transform.push(TransformKind::TranslateY, -1.0);
+                }
+                if faded {
+                    // Drawn through a layer: the icon still shows red
+                    // enough over the light background.
+                    button.state_mut().style.opacity = 0.9;
+                }
+                let icon = view(
+                    Some(&button),
+                    4,
+                    ViewKind::Image,
+                    rect(11.0, 11.0, 18.0, 18.0),
+                );
+                {
+                    let mut s = icon.state_mut();
+                    s.style.tint_color = Some(Color(0xff0000ff));
+                    s.image = Some(crate::image::ImageState::loaded_for_test(
+                        (18.0 * scale).ceil() as u32,
+                        18.0,
+                    ));
+                }
+                let into = target(&gfx, size);
+                draw_into(&surface, &gfx, &into, scale, false, None, None, None).unwrap();
+                let got = red_extent(&read(&gfx, &into, size), size);
+                let dy = if transformed { -1.0 } else { 0.0 };
+                let want = (
+                    (21.0 * scale).round(),
+                    ((21.0 + dy) * scale).round(),
+                    (39.0 * scale).round(),
+                    ((39.0 + dy) * scale).round(),
+                );
+                eprintln!(
+                    "scale {scale} transformed {transformed} faded {faded}: got {got:?} want {want:?}"
+                );
+                let (x0, y0, x1, y1) = got.expect("the icon is drawn");
+                for (g, w) in [(x0, want.0), (y0, want.1), (x1, want.2), (y1, want.3)] {
+                    assert!(
+                        (g as f32 - w).abs() <= 1.0,
+                        "scale {scale}: {got:?} vs {want:?}"
+                    );
+                }
+            }
+        }
+    }
 }
