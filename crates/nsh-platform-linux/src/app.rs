@@ -106,7 +106,7 @@ pub enum AppSource {
 pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
-    /// Logs the performance monitor's readings once a second (`nsh::perf`:
+    /// Logs the performance monitor's readings once a second (`nsh::fps`:
     /// frame rate, frame and commit costs, CPU, memory).
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
@@ -263,7 +263,8 @@ impl AppView {
     }
 
     /// Hands the app a URL the system opened it with (`UrlScheme.on("open",
-    /// ...)` hears it; the app's listener may come later).
+    /// ...)` hears it; the app's listener may come later). Before an app
+    /// loads, the next one loaded starts at it (`UrlScheme.url()`).
     pub fn open_url(&self, url: &str) {
         self.surface.open_url(url);
     }
@@ -311,6 +312,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(nsh_engine::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -501,9 +503,17 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     };
     let shown: Rc<RefCell<Option<Shown>>> = Rc::default();
     let shown_open = shown.clone();
+    // The URLs the app was launched with: the view gets them before its app
+    // loads, so they are its address when its code first runs.
+    let launch_links: Rc<RefCell<Vec<String>>> = Rc::default();
+    let launch_open = launch_links.clone();
     app.connect_open(move |app, files, _| {
         if shown_open.borrow().is_none() {
+            launch_open
+                .borrow_mut()
+                .extend(files.iter().map(|file| file.uri().to_string()));
             app.activate();
+            return;
         }
         if let Some((window, view)) = &*shown_open.borrow() {
             for file in files {
@@ -572,6 +582,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             Some(surface) => crate::window::main_close_request(&surface),
             None => glib::Propagation::Proceed,
         });
+        for url in launch_links.take() {
+            view.open_url(&url);
+        }
         match app_of {
             Ok(app) => view.load(app),
             #[cfg(feature = "dev")]

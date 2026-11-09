@@ -113,6 +113,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(320.0), px(500.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,

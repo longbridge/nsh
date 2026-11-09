@@ -16,9 +16,9 @@ NSH 运行在手机、桌面、终端和网页上：iOS、Android、macOS、Wind
 | 平台 | 后端；文本 | 运行环境 | 开发 | 打包 |
 |---|---|---|---|---|
 | [iOS](./ios.md) | UIKit；CoreText | iOS 15.0+，真机和模拟器 | `nsh run --target ios` | `.app`（模拟器）、签名的 `.ipa` |
-| [Android](./android.md) | Android 视图；`StaticLayout` | Android 9（API 28）+，`arm64-v8a`、`armeabi-v7a` 和 `x86_64` | `nsh run --target android` | 签名的 `.apk` |
+| [Android](./android.md) | Android 视图；`StaticLayout` | Android 8（API 26）+，`arm64-v8a`、`armeabi-v7a` 和 `x86_64` | `nsh run --target android` | 签名的 `.apk` |
 | [macOS](./macos.md) | AppKit 与 Core Animation；CoreText | macOS 14+ | `nsh run --target macos` | ad hoc 签名的 `.app` |
-| [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录和一个 `.zip` |
+| [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录、一个 `.zip` 和一个安装程序 |
 | [Linux](./linux.md) | GTK 4 控件；Pango | GTK 4.14+ | `nsh run`（Linux 上的默认目标） | 一个目录和一个 `.tar.gz` |
 | [GPUI](./gpui.md) | GPUI；GPUI 的文字系统 | macOS、Windows、Linux（Vulkan） | 在你的 GPUI 应用里；TSX 也可用 `nsh run --target gpui` | 随嵌入它的 GPUI 应用发布 |
 | [Web](./web.md) | HTML 与 CSS；浏览器的字体 | 现代浏览器，桌面和手机 | `nsh run --target web` | 一个静态网站 |

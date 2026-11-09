@@ -206,7 +206,9 @@ public class NshView extends FrameLayout {
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
-        addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
+        // Android 8 has no such listener: there the activity's
+        // `onBackPressed` hands the press to `handleBack`.
+        if (Build.VERSION.SDK_INT >= 28) addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
         // Apps keep their data in <dataDir>/<app id>: nsh in the files
         // directory unless the development host's test session says.
         // ... and the images they download in <cacheDir>/<app id>/images: nsh
@@ -559,7 +561,8 @@ public class NshView extends FrameLayout {
 
     /**
      * Hands the app a URL the system opened it with, as its {@code onLink} event (a scheme the app registered, nsh.json
-     * {@code schemes}). URLs given before the app listens are kept until it does. UI thread.
+     * {@code schemes}). URLs given before the app listens are kept until it does; given before an app loads, they are
+     * the address of the next one loaded when its code first runs ({@code UrlScheme.url()}). UI thread.
      *
      * @param url the URL
      */

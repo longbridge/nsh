@@ -7,11 +7,13 @@
 //! and is shown by its container's layer's `sublayerTransform` while it
 //! moves; the container's bounds origin (as `NSClipView` scrolls) takes it
 //! once the view and the display link rest ([`commit_due`]), as
-//! `setBoundsOrigin:` walks the whole subtree. AppKit's geometry (hit
+//! `setBoundsOrigin:` walks the whole subtree. Scroll views containing
+//! inputs instead update the bounds each frame so AppKit draws newly
+//! visible fields at the live offset. AppKit's geometry (hit
 //! tests, conversions, `visibleRect`) follows the bounds, so what asks it
 //! commits first ([`commit_pending`], [`commit_ancestors`]); NSH's own
 //! (picking, [`bounds_origin`]) follows the live offset.
-//! Every change goes through [`moved_to`], which moves the transform,
+//! Every change goes through [`moved_to`], which moves the container,
 //! pins the sticky cells, feeds the native scroll value in the same frame
 //! and queues a report to the engine. Reports are coalesced to one per
 //! frame by the view's frame callback, which also runs animated
@@ -438,17 +440,24 @@ const COMMIT_MS: u64 = 140;
 /// hosted views sync their remote state, per scroll step, which is the
 /// jank on long lists). The bounds commit once it settles ([`commit`])
 /// puts AppKit's model right for the price of one walk per scroll.
+/// Inputs need live bounds instead: AppKit clips their drawing by its
+/// visible rectangles, which do not follow the layer transform.
 fn apply_offset(surface: &Rc<Surface>, view: &NshView) {
     let origin = bounds_origin(view);
     // Every offset, inset and mirroring change comes through here: what
     // shows under it changed ([`crate::sight`]).
     crate::sight::moved();
-    let committed = view.container_bounds_origin();
-    view.set_layer_scroll(committed.0 - origin.0, committed.1 - origin.1);
-    // What it shows moved without a view moving: the effects around it
-    // (and a screen effect reading the surface) picture it again.
+    let inputs = view.state().input_count != 0;
+    if inputs {
+        view.commit_bounds_origin(origin.0, origin.1);
+    } else {
+        let committed = view.container_bounds_origin();
+        view.set_layer_scroll(committed.0 - origin.0, committed.1 - origin.1);
+        arm_commit(surface, view);
+    }
+    // The effects around it (and a screen effect reading the surface)
+    // picture the changed viewport again.
     crate::shader::ui_changed(view);
-    arm_commit(surface, view);
 }
 
 /// Schedules the trailing bounds commit, `COMMIT_MS` after the offset

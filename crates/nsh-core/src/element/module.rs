@@ -357,6 +357,11 @@ impl ModuleCx {
         self.actions.push(super::services::announce(message.into()));
     }
 
+    /// The device plays `haptic` (TS: `Haptics` of `nsh/mobile`).
+    pub fn haptic(&mut self, haptic: crate::Haptic) {
+        self.actions.push(super::services::haptic(haptic));
+    }
+
     /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
     pub fn set_clipboard(&mut self, text: impl Into<String>) {
         self.actions

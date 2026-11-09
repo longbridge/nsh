@@ -59,6 +59,8 @@ pub(crate) struct Shared {
     pub(crate) system_filesystem:
         RefCell<Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>>,
     pub(crate) system_updater: RefCell<Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>>,
+    /// The core's address (`UrlScheme.url()`).
+    pub(crate) system_app_url: RefCell<nsh_core::url_scheme::AppUrlCell>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
@@ -636,6 +638,18 @@ impl Host {
         });
     }
 
+    /// Whether `<Each>` leaves the rows the core may cull unrendered, as
+    /// placeholders, until the core asks for them (`content_culling`);
+    /// off by default. Set before evaluating the bundle.
+    pub fn set_lazy_rows(&self, lazy: bool) {
+        self.cx.with(|cx| {
+            // SAFETY: the state of this host's context.
+            unsafe { &(*crate::state::state(cx.as_raw().as_ptr())).dom }
+                .lazy_rows
+                .set(lazy);
+        });
+    }
+
     /// Asks a `List` to render items into cells: `(slot, item index)`
     /// pairs.
     pub fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
@@ -715,6 +729,11 @@ impl Host {
     /// Installs what `nsh/updater` runs on.
     pub fn set_updater(&self, updater: Option<std::sync::Arc<dyn nsh_core::runtime::UpdaterHost>>) {
         *self.shared.system_updater.borrow_mut() = updater;
+    }
+
+    /// Shares the core's address with the VM's modules (`UrlScheme.url()`).
+    pub fn set_app_url(&self, app_url: nsh_core::url_scheme::AppUrlCell) {
+        *self.shared.system_app_url.borrow_mut() = app_url;
     }
 
     /// Installs the host WebSocket transport.

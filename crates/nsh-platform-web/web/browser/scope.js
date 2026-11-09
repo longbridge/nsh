@@ -17,6 +17,7 @@ export { createI18n } from "./i18n.js";
 export { installTesting } from "./testing.js";
 export { installFetch } from "./fetch.js";
 export { createHot } from "./hot.js";
+export { configureAddress } from "./address.js";
 
 
 // Public wrappers must share the app's Function/Error/Promise intrinsics.
