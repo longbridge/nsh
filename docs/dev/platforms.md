@@ -16,7 +16,7 @@ User-facing page: `website/docs/platform-extensions.md`.
 | Mount batches | `nsh_engine::MountSink`, `nsh_core::MountItem` | Receives one batch per commit and applies its items to the platform's views |
 | Text | `nsh_core::TextEngine` | Measures and lays out text on the engine's side, with the platform's fonts |
 | Input | `nsh_engine::EngineControl` | Sends events, scroll offsets, sizes, environment changes and display frames to the engine |
-| The environment | `nsh_core::platform::Environment`, `Os::External(name)` | Says where the app runs: `platform.os` is the platform's own name |
+| The environment | `nsh_core::platform::Environment`: `platform`, `os`, `idiom` | Says where the app runs: `platform` is the platform's own name (`platform.name`), `os` the device's OS |
 | Host services | `EngineConfig`'s `network`, `storage`, `filesystem`, `assets`, `clipboard`, ... | Optional: each is the platform's implementation of a service apps use |
 | The command line | `nsh <dev\|run\|test\|package> --target <name>` → `nsh-platform-<name>` | Builds, runs and packages apps for the platform (`crates/nsh-cli/src/platforms.rs`) |
 | A Rust app's root | `.nsh/rust/rust-app` (`nsh_rust_app`): `ui_sets()`, `app_ui_sets()`, `root()` | Links the app's crates into the platform's runner without generating that code itself |
@@ -35,7 +35,7 @@ surface with nothing else; set what the platform has over it:
 ```rust
 let config = EngineConfig {
     viewport: Size::new(Points(width), Points(height)),
-    environment: Environment { os: Os::External("miniprogram"), idiom: Idiom::Phone, ..Environment::default() },
+    environment: Environment { os: Os::Ios /* the device's */, platform: Some("miniprogram"), idiom: Idiom::Phone, ..Environment::default() },
     header_heights: nsh_core::NO_NATIVE_HEADER, // the platform draws no header of its own
     ui_sets,
     ..EngineConfig::new(App::Rust(root))
@@ -91,10 +91,17 @@ the render layer each line's text and position, so the page draws lines exactly 
 `EventKind::Press` with `EventPayload::None` where the platform does not know the pointer), `scroll(id, offset,
 applied)`, `resize(size)`, `set_environment(environment)` (appearance, safe areas, locale, ...), `frame()`.
 
-`Environment::os` is the platform: `Os::External(name)` for a platform built outside NSH, whose `name` apps read as
-`platform.os` (TSX) and `os().name()` (Rust). The name is lower case
-and none of NSH's (`ios`, `android`, `macos`, `windows`, `linux`, `web`); it is the same name as the command line's
-`--target`. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`) or mobile (`Phone`, `Pad`).
+`Environment::platform` names a platform built outside NSH (`Some("miniprogram")`); NSH's own platforms leave it
+`None`. Apps read it as `platform.name` (TSX) and `platform_name()` (Rust, `nsh_core::prelude`), which is the OS's
+name (`ios`, `web`, ...) on NSH's own platforms (`Environment::platform_name`). The name is lower case and none of
+`Os`'s; it is the same name as the command line's `--target`. A Mini Program is a platform that runs on an operating
+system, so the environment holds both: the platform's name and the OS beneath it.
+
+`Environment::os` is always the device's real OS (`platform.os`, `os()`), so a community platform picks the `Os` it
+runs on: the Mini Program platform reports iOS or Android from `wx.getDeviceInfo().platform`, and in WeChat DevTools
+the simulated device's `system`. The OS's props (`ios={{…}}`, `android={{…}}`) then apply as they do on that OS, and
+the backend skips the mount items it does not show. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`)
+or mobile (`Phone`, `Pad`).
 
 ## WebAssembly hosts
 
@@ -160,7 +167,7 @@ outside NSH. Its layout:
 
 | Part | What it does | Extension points |
 |---|---|---|
-| `crates/nsh-platform-miniprogram` | The backend, a library built for `wasm32-unknown-unknown`: `Runtime` (a `LocalEngine`), `encode.rs` (mount items → JSON operations), `text.rs` (a `TextEngine` on the host's `measureText`), `ffi.rs` (the module's exports and imports) | The engine, mount batches, text, input, `Os::External("miniprogram")`, the WebAssembly host imports |
+| `crates/nsh-platform-miniprogram` | The backend, a library built for `wasm32-unknown-unknown`: `Runtime` (a `LocalEngine`), `encode.rs` (mount items → JSON operations), `text.rs` (a `TextEngine` on the host's `measureText`), `ffi.rs` (the module's exports and imports) | The engine, mount batches, text, input, `Environment::platform` (`"miniprogram"`) with the device's `Os`, the WebAssembly host imports |
 | `crates/nsh-platform-miniprogram-cli` | `nsh-platform-miniprogram`: `package`, `run` / `dev`; writes the runner, builds it, checks its imports, writes the Mini Program project with the module brotli-compressed | External targets, `nsh_rust_app` |
 | `runtime/` | The Mini Program's side: `nsh/nsh-mp.js` (loads the module, timers, events), `nsh/tree.js` (the tree and its `setData` paths), the recursive `nsh-node` component, the page | — |
 

@@ -23,7 +23,7 @@ nsh package my-app --target miniprogram --out dist   # 生成一个可以用微�
 nsh run my-app --target miniprogram                  # 构建后在微信开发者工具中打开
 ```
 
-应用判断平台的方式与其他平台相同：在 TSX 中 `platform.os` 是平台的名字 `"miniprogram"`，在 Rust 中是 `os().name()`。平台自己的 README 列出了它能显示的内容和支持的命令。
+应用判断平台的方式与其他平台相同：在 TSX 中 `platform.name` 是 `"miniprogram"`，在 Rust 中是 `platform_name()`。`platform.os`（Rust 中是 `os()`）是设备的操作系统 iOS 或 Android，因此应用的 `ios={{…}}` 和 `android={{…}}` 属性在小程序中照常生效。平台自己的 README 列出了它能显示的内容和支持的命令。
 
 ## 平台的组成
 
@@ -45,7 +45,7 @@ nsh-platform-<name> 命令行的 target：为该平台构建、运行和打包�
 
 ## 1. 启动引擎
 
-引擎在平台的线程上运行应用：`Engine` 有自己的线程，`LocalEngine` 则由平台的事件循环驱动（适用于没有可阻塞线程的 WebAssembly）。用一个说明应用运行环境的 `EngineConfig` 启动它。在 NSH 之外构建的平台用 `Os::External` 给自己命名：
+引擎在平台的线程上运行应用：`Engine` 有自己的线程，`LocalEngine` 则由平台的事件循环驱动（适用于没有可阻塞线程的 WebAssembly）。用一个说明应用运行环境的 `EngineConfig` 启动它。在 NSH 之外构建的平台把自己的名字放在 `platform` 中，把设备的操作系统放在 `os` 中：小程序是运行在 iOS 或 Android 上的平台。小程序平台从 `wx.getDeviceInfo().platform` 读取操作系统，在微信开发者工具中则读取模拟设备的 `system`。
 
 ```rust
 use nsh_core::{Points, Size, platform::{Idiom, Os}};
@@ -54,7 +54,8 @@ use nsh_engine::{App, EngineConfig, Environment, LocalEngine};
 let config = EngineConfig {
     viewport: Size::new(Points(375.0), Points(667.0)),
     environment: Environment {
-        os: Os::External("miniprogram"), // 应用中的 platform.os
+        os: Os::Ios,                    // 设备的操作系统：应用中的 platform.os
+        platform: Some("miniprogram"),  // 应用中的 platform.name
         idiom: Idiom::Phone,
         ..Environment::default()
     },

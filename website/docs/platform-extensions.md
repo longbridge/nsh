@@ -23,7 +23,7 @@ nsh package my-app --target miniprogram --out dist   # a project WeChat DevTools
 nsh run my-app --target miniprogram                  # builds it and opens it in WeChat DevTools
 ```
 
-Apps check the platform as they check any other: `platform.os` is the platform's name, `"miniprogram"`, in TSX, and `os().name()` in Rust. The platform's own README lists what it shows and which commands it has.
+Apps check the platform as they check any other: `platform.name` is `"miniprogram"` in TSX, and `platform_name()` in Rust. `platform.os` (`os()` in Rust) is the device's operating system, iOS or Android, so the app's `ios={{…}}` and `android={{…}}` props apply as they do there. The platform's own README lists what it shows and which commands it has.
 
 ## How a platform fits together
 
@@ -45,7 +45,7 @@ A backend has four jobs, each with one interface in NSH:
 
 ## 1. Start the engine
 
-The engine runs the app on the platform's thread: `Engine` on a thread of its own, or `LocalEngine` where the platform's event loop drives it (WebAssembly, where there are no threads to block). Start it with an `EngineConfig` that says where the app runs. A platform built outside NSH names itself with `Os::External`:
+The engine runs the app on the platform's thread: `Engine` on a thread of its own, or `LocalEngine` where the platform's event loop drives it (WebAssembly, where there are no threads to block). Start it with an `EngineConfig` that says where the app runs. A platform built outside NSH puts its name in `platform` and the device's operating system in `os`: a Mini Program is a platform that runs on iOS or Android. The Mini Program platform reads the OS from `wx.getDeviceInfo().platform`, and in WeChat DevTools from the simulated device's `system`.
 
 ```rust
 use nsh_core::{Points, Size, platform::{Idiom, Os}};
@@ -54,7 +54,8 @@ use nsh_engine::{App, EngineConfig, Environment, LocalEngine};
 let config = EngineConfig {
     viewport: Size::new(Points(375.0), Points(667.0)),
     environment: Environment {
-        os: Os::External("miniprogram"), // platform.os in the app
+        os: Os::Ios,                    // the device's: platform.os in the app
+        platform: Some("miniprogram"),  // platform.name in the app
         idiom: Idiom::Phone,
         ..Environment::default()
     },
