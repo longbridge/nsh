@@ -207,6 +207,22 @@ fn gtk_window(surface: &Surface, id: NodeId) -> Option<gtk::Window> {
     }
 }
 
+/// Blocks AT activation in the direct parent of a shown modal managed by this surface.
+/// GTK's wider window-group grab scope is not covered by this guard.
+pub(crate) fn blocked_by_modal(surface: &Surface, view: &NshView) -> bool {
+    let Some(parent) = view.root().and_downcast::<gtk::Window>() else {
+        return false;
+    };
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return true;
+    };
+    windows.values().any(|w| {
+        w.window.is_visible()
+            && w.window.is_modal()
+            && w.window.transient_for().as_ref() == Some(&parent)
+    })
+}
+
 /// The root node of `window`.
 fn id_of(surface: &Surface, window: &gtk::Window) -> Option<NodeId> {
     if main_window(surface).as_ref() == Some(window) {
@@ -1582,6 +1598,20 @@ pub(crate) fn root_view(surface: &Surface, id: NodeId) -> Option<NshView> {
     } else {
         surface.windows.borrow().get(&id)?.view.upgrade()
     }
+}
+
+/// The root node of the window `view` is in, unless the windows are being changed.
+pub(crate) fn try_root_id(surface: &Surface, view: &NshView) -> Option<NodeId> {
+    let windows = surface.windows.try_borrow().ok()?;
+    Some(
+        windows
+            .iter()
+            .find_map(|(&id, window)| {
+                let root = window.view.upgrade()?;
+                (root == *view || view.is_ancestor(&root)).then_some(id)
+            })
+            .unwrap_or(ROOT_ID),
+    )
 }
 
 /// The root view of the window `view` is in.

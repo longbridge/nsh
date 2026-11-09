@@ -19,6 +19,9 @@ function App() {
         <Text role="button" onPress={() => picker.scrollToGroup("peopleBody", false)}>
           ToPeople
         </Text>
+        <Text role="button" onPress={() => query.set("shaking")}>
+          ToShaking
+        </Text>
         <Text
           role="button"
           onPress={() => {

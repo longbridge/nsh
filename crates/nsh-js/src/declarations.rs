@@ -90,7 +90,7 @@ export interface IOSProps extends IOSHostProps {}
 export interface DesktopProps extends DesktopHostProps {}
 
 /** Web-only props of every element (`web={{…}}`). */
-export interface WebProps {}
+export interface WebProps extends WebHostProps {}
 
 /** Android-only props of every element (`android={{…}}`). */
 export interface AndroidProps extends AndroidHostProps {}
