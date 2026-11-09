@@ -227,7 +227,7 @@ final class ModalHost {
                     | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
             to.setSystemBarsAppearance(from.getSystemBarsAppearance() & mask, mask);
         } else {
-            int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             View decor = window.getDecorView();
             int own = activity.getWindow().getDecorView().getSystemUiVisibility() & mask;
             decor.setSystemUiVisibility(decor.getSystemUiVisibility() & ~mask | own);

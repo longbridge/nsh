@@ -185,6 +185,15 @@ impl WindowRef {
         matches!(self.target, Target::Main)
     }
 
+    /// The ref on a window of the app's own's dialog root (its node is the
+    /// window's root node); `None` for the main window.
+    pub(crate) fn dialog_root(&self) -> Option<super::ElementRef> {
+        match &self.target {
+            Target::Main => None,
+            Target::Own(element) => Some(*element),
+        }
+    }
+
     fn command(&self, command: DesktopCommand) {
         match self.target {
             Target::Main => super::ambient::desktop_command(command),

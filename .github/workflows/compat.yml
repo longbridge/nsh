@@ -129,4 +129,4 @@ jobs:
         working-directory: nsh-compat
         run: |
           cp ../nsh/Cargo.lock .
-          cargo test --target-dir ../nsh/target --features nsh-core/shader
+          cargo test --target-dir ../nsh/target --features nsh-core/shader,nsh-base/emoji-picker
