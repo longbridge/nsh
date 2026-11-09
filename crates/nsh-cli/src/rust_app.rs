@@ -1246,7 +1246,7 @@ impl RustApp {
         // A Rust app's runners too (`nsh.json` "root"), only then: they
         // name its root component.
         let rust = if self.root.is_some() {
-            ", \"rust-linux\", \"rust-macos\", \"rust-windows\", \"rust-ios\", \"rust-android\", \"rust-web\""
+            ", \"rust-linux\", \"rust-macos\", \"rust-windows\", \"rust-ios\", \"rust-android\", \"rust-web\", \"rust-app\""
         } else {
             ""
         };
@@ -1466,6 +1466,7 @@ panic = \"abort\"
                     .dep("nsh-platform-web", ", default-features = false"),
             ),
         )?;
+        self.write_rust_app(ws, root)?;
         write(&ws.join("rust-web/build.rs"), WEB_BUILD_RS)?;
         write(
             &ws.join("rust-web/lib.rs"),
@@ -1478,6 +1479,44 @@ panic = \"abort\"
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_base as _;\n{}{}",
                 self.app_sets(wasm),
                 self.root_fn(wasm, root),
+            ),
+        )
+    }
+
+    /// Writes `<ws>/rust-app`: the Rust app's UI sets and root as a library
+    /// of no platform, `nsh_rust_app`, for the runners of platforms
+    /// implemented outside NSH (`docs/dev/platforms.md`), which depend on it
+    /// by path instead of generating this code themselves.
+    fn write_rust_app(&self, ws: &Path, root: &RootConfig) -> anyhow::Result<()> {
+        write(
+            &ws.join("rust-app/Cargo.toml"),
+            &format!(
+                "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [lib]\nname = \"nsh_rust_app\"\npath = \"lib.rs\"\n\n\
+                 [dependencies]\nnsh-core = {}\nnsh-base = {}\n{}\n",
+                self.bin("rust-app"),
+                self.nsh.dep("nsh-core", ""),
+                self.nsh.dep("nsh-base", HIGHLIGHT),
+                self.dependencies(),
+            ),
+        )?;
+        write(
+            &ws.join("rust-app/lib.rs"),
+            &format!(
+                "//! The Rust app's UI sets and root, on no platform: what the runner of a\n\
+                 //! platform implemented outside NSH starts (`docs/dev/platforms.md`).\n\n\
+                 /// The UI sets the app serves: `nsh/base`, then the app's crates'.\n\
+                 pub fn ui_sets() -> Vec<nsh_core::element::Registry> {{\n    {}\n}}\n\n\
+                 /// The app's crates' UI sets without `nsh/base`'s: what a platform that runs\n\
+                 /// no TSX serves (their files, such as fonts), so that its module links only\n\
+                 /// the base components the app's code uses.\n\
+                 pub fn app_ui_sets() -> Vec<nsh_core::element::Registry> {{\n    {}\n}}\n\n\
+                 /// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and status bar.\n\
+                 pub fn root() -> nsh_core::element::Root {{\n    app_root()\n}}\n{}{}",
+                self.sets(),
+                self.app_only_sets(),
+                self.app_sets(""),
+                self.root_fn("", root),
             ),
         )
     }
@@ -2345,6 +2384,17 @@ impl RustApp {
         format!("vec![{}]", sets.join(", "))
     }
 
+    /// The app's own UI sets for the generated code, without `nsh/base`'s
+    /// ([`Self::sets`]).
+    fn app_only_sets(&self) -> String {
+        let sets: Vec<String> = self
+            .crates
+            .iter()
+            .map(|c| format!("{}()", set_fn(c)))
+            .collect();
+        format!("vec![{}]", sets.join(", "))
+    }
+
     /// The web runtime's gates of the app's sets: one
     /// `nsh_platform_web::ui_set!` per crate, exporting
     /// [`crate::web::ui_set_gate`] of its specifier, which registers the
@@ -3130,7 +3180,7 @@ mod tests {
         app.write_workspace().unwrap();
         let read = |file: &str| std::fs::read_to_string(app.workspace.join(file)).unwrap();
         let manifest = read("Cargo.toml");
-        assert!(manifest.contains("\"rust-linux\", \"rust-macos\", \"rust-windows\", \"rust-ios\", \"rust-android\", \"rust-web\"]"), "{manifest}");
+        assert!(manifest.contains("\"rust-linux\", \"rust-macos\", \"rust-windows\", \"rust-ios\", \"rust-android\", \"rust-web\", \"rust-app\"]"), "{manifest}");
         for (dir, lib, platform) in [
             ("rust-linux", "nsh-linux-app", "nsh-platform-linux"),
             ("rust-macos", "nsh-macos-app", "nsh-platform-macos"),
@@ -3177,7 +3227,19 @@ mod tests {
             test.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
             "{test}"
         );
-        assert!(manifest.contains("\"rust-web\"]"), "{manifest}");
+        // Platforms outside NSH start the root and sets of `nsh_rust_app`.
+        let rust_app = read("rust-app/lib.rs");
+        assert!(rust_app.contains("pub fn ui_sets() -> Vec<nsh_core::element::Registry> {\n    vec![nsh_base::registry(), set_app_app_native()]\n}"), "{rust_app}");
+        assert!(rust_app.contains("pub fn app_ui_sets() -> Vec<nsh_core::element::Registry> {\n    vec![set_app_app_native()]\n}"), "{rust_app}");
+        assert!(
+            rust_app.contains("pub fn root() -> nsh_core::element::Root {\n    app_root()\n}"),
+            "{rust_app}"
+        );
+        assert!(
+            rust_app.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
+            "{rust_app}"
+        );
+        assert!(read("rust-app/Cargo.toml").contains("name = \"nsh_rust_app\""));
         // GPUI has no runner: a Rust app is embedded in GPUI apps instead.
         app.gpui_workspace().unwrap();
         assert!(!read("gpui/Cargo.toml").contains("rust-gpui"));
@@ -3764,6 +3826,7 @@ panic = \"abort\"
             "rust-ios",
             "rust-android",
             "rust-web",
+            "rust-app",
         ] {
             let cargo = read(&format!("{dir}/Cargo.toml"));
             for (name, package, path) in [
@@ -3776,7 +3839,11 @@ panic = \"abort\"
                 );
                 assert!(cargo.contains(&line), "{dir}: no {line:?} in\n{cargo}");
             }
-            let file = if dir == "android" || dir.ends_with("web") || dir == "rust-android" {
+            let file = if dir == "android"
+                || dir.ends_with("web")
+                || dir == "rust-android"
+                || dir == "rust-app"
+            {
                 "lib.rs"
             } else {
                 "main.rs"

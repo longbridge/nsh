@@ -44,10 +44,11 @@ const currentLanguage = menu.find((l) => l.code === locale)?.name ?? locale;
 const pagePath = versionPath(currentPath, BASE).replace(isMachinePage ? new RegExp(`^/${locale}(?=/|$)`) : /$^/, '');
 const currentLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 const appsHref = isLatestVersion ? url(isZh ? 'zh-CN/apps' : 'apps') : isZh ? '/zh-CN/apps' : '/apps';
+const directoryHref = isLatestVersion ? url(isZh ? 'zh-CN/directory' : 'directory') : isZh ? '/zh-CN/directory' : '/directory';
 const releasesHref = isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases';
 // App Stories and the release notes are the same in every version: the menu
 // there stays on them.
-const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
+const onRootPage = /^\/(zh-CN\/)?(apps|directory|releases)(\/|$)/.test(pagePath);
 ---
 
 <header class="site-nav">
@@ -105,6 +106,13 @@ const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
         aria-current={activeSection === 'apps' ? 'true' : undefined}
       >
         {isZh ? '应用案例' : 'App Stories'}
+      </a>
+      <a
+        href={directoryHref}
+        class:list={['site-nav__link', { active: activeSection === 'directory' }]}
+        aria-current={activeSection === 'directory' ? 'true' : undefined}
+      >
+        {isZh ? '社区生态' : 'Directory'}
       </a>
       <a
         href={releasesHref}

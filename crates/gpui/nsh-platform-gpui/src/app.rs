@@ -587,7 +587,7 @@ impl AppView {
         cx: &mut Context<Self>,
     ) {
         let (x, y) = self.root_point(event.event.position);
-        crate::file_drop::update(&self.surface, x, y);
+        crate::file_drop::update(&self.surface, x, y, event.drag(cx).paths());
         crate::rt::flush(cx);
     }
 

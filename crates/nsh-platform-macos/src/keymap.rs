@@ -24,7 +24,9 @@ use nsh_core::{
     platform::Os,
 };
 use objc2::{rc::Retained, runtime::AnyObject};
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSView, NSWindow};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSEventModifierFlags, NSTextInputClient, NSTextView, NSView, NSWindow,
+};
 
 use crate::surface::Surface;
 
@@ -112,6 +114,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     };
     let own = root.ns() != surface.root.ns();
+    let window_root = root.id();
     if crate::window::blocked(surface, own.then_some(&root)) {
         return false;
     }
@@ -119,6 +122,9 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(editing) = editing(surface, &window) else {
         return false;
     };
+    if composing(&window) {
+        return false;
+    }
     if crate::input::control_activation_target(surface, event).is_some() {
         return false;
     }
@@ -129,7 +135,8 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     if cfg!(feature = "dev") && keystroke.reloads(Os::MacOs) {
         return false;
     }
-    let found = table.find(keystroke, editing, event.isARepeat());
+    // Only the bindings of the window the key is in (and JS's) take it.
+    let found = table.find_in(window_root, keystroke, editing, event.isARepeat());
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
@@ -138,6 +145,18 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         );
     }
     found.consumed()
+}
+
+/// Whether an input method is composing in the focused text view (it has
+/// marked text: pinyin, kana). Every key is then the input method's:
+/// Backspace deletes a letter of the composition, Return and Space
+/// commit it, arrows move through its candidates. A binding taking one
+/// first would leave the composition stuck.
+fn composing(window: &NSWindow) -> bool {
+    window
+        .firstResponder()
+        .and_then(|r| r.downcast::<NSTextView>().ok())
+        .is_some_and(|t| t.hasMarkedText())
 }
 
 /// Where the keyboard focus is: `Some(true)` in a text input or hosted
