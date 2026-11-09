@@ -776,7 +776,7 @@ interface TrayModule {
 | `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
 | `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
 | `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
-| `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too). |
+| `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too), with `{ bounds }`: where the icon is ([below](#a-window-at-the-icon)). |
 
 Call `set` again to change it; inside an `effect` it follows the signals it reads.
 
@@ -794,6 +794,49 @@ Tray.set({
     { role: "quit" },
   ],
 });
+```
+
+### A window at the icon
+
+`onClick`'s `bounds` is the icon's frame on the screen when it was clicked, in points, in the coordinates of `displays()` and `setBounds`: from the primary display's top left corner, `y` growing down. On macOS it is the status item's place in the menu bar, on Windows the icon's place in the notification area or its overflow. On Linux it is `null`, as the window manager places the app's windows there; it is `null` too whenever the system reports a click without a frame. A popup window opened from it shows next to the icon: below a menu bar at the top of the screen, above a taskbar at the bottom.
+
+```tsx
+import type { Bounds, Point, Size } from "nsh";
+import { Tray, Window, displays } from "nsh/desktop";
+import { TrayPanel } from "./TrayPanel";
+
+const size = { width: 320, height: 240 };
+
+Tray.set({
+  icon,
+  onClick: ({ bounds }) => {
+    if (!bounds) return Window.get("main")?.focus();
+    Window.open(TrayPanel, {
+      id: "tray-panel",
+      kind: "popup",
+      defaultSize: size,
+      defaultPosition: atIcon(bounds, size),
+    }).focus();
+  },
+});
+
+/** Centered on the icon, on the side of its display with more room, kept
+ * in the display's visible area. */
+function atIcon(icon: Bounds, size: Size): Point {
+  const inside = (b: Bounds, p: Point) =>
+    p.x >= b.origin.x && p.x < b.origin.x + b.size.width && p.y >= b.origin.y && p.y < b.origin.y + b.size.height;
+  const display = displays().find(d => inside(d.bounds, icon.origin)) ?? displays()[0];
+  if (!display) return { x: icon.origin.x, y: icon.origin.y + icon.size.height };
+  const area = display.visibleBounds;
+  const below = icon.origin.y < area.origin.y + area.size.height / 2;
+  const x = icon.origin.x + (icon.size.width - size.width) / 2;
+  const y = below ? icon.origin.y + icon.size.height + 4 : icon.origin.y - size.height - 4;
+  const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+  return {
+    x: clamp(x, area.origin.x, area.origin.x + area.size.width - size.width),
+    y: clamp(y, area.origin.y, area.origin.y + area.size.height - size.height),
+  };
+}
 ```
 
 TSX only for now; Rust components have no tray yet.

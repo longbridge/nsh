@@ -2259,6 +2259,120 @@ fn menus_reach_the_platform_and_call_back() {
     )));
 }
 
+const TRAY: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tray } from "nsh/desktop";
+
+const log = signal([]);
+const add = (entry) => log.set([...log(), entry]);
+const where = ({ bounds }) =>
+  bounds === null ? "null" : `${bounds.origin.x},${bounds.origin.y} ${bounds.size.width}x${bounds.size.height}`;
+Tray.set({
+  tooltip: "Mail",
+  menu: [{ label: "Open", onSelect: (...args) => add(`open ${args.length}`) }],
+  onClick: (event) => {
+    add(where(event));
+    // Set again from its own click, with a click that takes no event.
+    if (event.bounds === null) {
+      Tray.set({
+        onClick: () => add("replaced"),
+        menu: [{ label: "Remove", onSelect: () => (Tray.set(null), add("removed")) }],
+      });
+    }
+  },
+});
+
+mount(() => <Text>{log().join(" | ") || "none"}</Text>);
+"#;
+
+/// A tray click reaches `onClick` with the icon's frame the platform
+/// reports, `null` without one; the tray's menu items still get no
+/// argument, and a tray set again answers only its own click.
+#[test]
+fn tray_clicks_report_the_icons_bounds() {
+    use nsh_core::{
+        desktop::{DesktopCommand, MenuItem, Tray},
+        geometry::{Bounds, point, size},
+    };
+
+    // The trays the platform is told to show, in order (`None`: removed).
+    fn trays(batches: &[MountBatch]) -> Vec<Option<Tray>> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => match &**command {
+                    DesktopCommand::SetTray(tray) => Some(tray.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+    fn item(tray: &Tray, label: &str) -> u32 {
+        tray.menu
+            .iter()
+            .find_map(|item| match item {
+                MenuItem::Action(action) if action.label == label => Some(action.id),
+                _ => None,
+            })
+            .expect(label)
+    }
+
+    let (engine, rx) = start_in(
+        TRAY,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let wait = |text: &str| {
+        let batches = until(&rx, |batch| shows(batch, text));
+        assert!(
+            batches.iter().any(|b| shows(b, text)),
+            "{text}: {batches:?}"
+        );
+        batches
+    };
+    let control = engine.control();
+    let click = |id: u32, bounds: Option<Bounds<Points>>| {
+        let mut payload = vec![("id", PayloadValue::Number(f64::from(id)))];
+        if let Some(bounds) = bounds {
+            payload.push(("bounds", PayloadValue::Bounds(bounds)));
+        }
+        control.dispatch_event(ROOT_ID, EventKind::Menu, EventPayload::Map(payload));
+    };
+    let frame = Bounds::new(
+        point(Points(1200.0), Points(0.0)),
+        size(Points(30.0), Points(24.0)),
+    );
+
+    let set = trays(&wait("none"));
+    let [Some(first)] = &set[..] else {
+        panic!("one tray: {set:?}");
+    };
+    assert_ne!(first.click, 0);
+    click(first.click, Some(frame));
+    wait("1200,0 30x24");
+    click(item(first, "Open"), None);
+    wait("1200,0 30x24 | open 0");
+    click(first.click, None);
+    let set_again = trays(&wait("1200,0 30x24 | open 0 | null"));
+    let [Some(second)] = &set_again[..] else {
+        panic!("the tray set again: {set_again:?}");
+    };
+    assert_ne!(second.click, first.click);
+    // The first tray's click is gone: had it run, `null` would show twice.
+    click(first.click, None);
+    click(second.click, Some(frame));
+    wait("1200,0 30x24 | open 0 | null | replaced");
+    click(item(second, "Remove"), None);
+    let removed = wait("1200,0 30x24 | open 0 | null | replaced | removed");
+    assert_eq!(trays(&removed), [None]);
+}
+
 const QUIT: &str = r#"import { mount, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
