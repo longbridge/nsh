@@ -35,7 +35,6 @@ const t = zh
       ctaTitle: '你为 Native Shell 做了库或工具？',
       ctaLead: '在 Showcase 仓库的 directory/ 下添加一个 manifest.json 并提交 PR，审核合并后自动列在本页。应用请提交到应用案例。',
       ctaAction: '提交项目',
-      view: '查看',
     }
   : {
       kicker: 'Directory',
@@ -51,7 +50,6 @@ const t = zh
       ctaTitle: 'Built a library or tool for Native Shell?',
       ctaLead: 'Add a manifest.json under directory/ in the Showcase repository and open a PR. Merged entries are published here automatically. Apps go to App Stories.',
       ctaAction: 'Submit a project',
-      view: 'View',
     };
 ---
 
@@ -85,7 +83,7 @@ const t = zh
             </div>
             <div class="directory-item__side">
               {e.stars != null && <span class="directory-item__stars" aria-label={`${e.stars} GitHub Stars`}>★ {e.stars}</span>}
-              <Button href={e.source} variant="outline" size="sm" target="_blank" rel="noopener noreferrer">{t.view}</Button>
+              <svg class="directory-item__arrow" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
             </div>
           </li>
         ))}
@@ -130,7 +128,7 @@ const t = zh
   .directory-count { color: var(--muted-foreground); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
   .directory-pending { padding: 3rem 1rem; border: 1px dashed var(--border); border-radius: var(--radius-card); color: var(--muted-foreground); text-align: center; }
   .directory-list { margin: 1rem 0 0; padding: 0; list-style: none; }
-  .directory-item { display: flex; align-items: center; gap: 1rem; margin: 0; padding: 1rem 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+  .directory-item { position: relative; display: flex; align-items: center; gap: 1rem; margin: 0; padding: 1rem 0.75rem; margin-inline: -0.75rem; border-radius: 0.5rem; transition: background-color 120ms; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
   .directory-item:first-child { border-top: 0; }
   .directory-item[hidden] { display: none; }
   .directory-item__mark { display: grid; place-items: center; flex-shrink: 0; width: 2.5rem; height: 2.5rem; border-radius: 0.625rem; background: hsl(var(--mark-hue) 70% 94%); color: hsl(var(--mark-hue) 55% 34%); font-size: 1.0625rem; font-weight: 650; }
@@ -138,7 +136,11 @@ const t = zh
   .directory-item__body { flex: 1; min-width: 0; }
   .directory-item__head { display: flex; align-items: baseline; gap: 0.5rem; }
   .directory-item__name { color: var(--foreground); font-weight: 600; text-decoration: none; }
-  .directory-item__name:hover { text-decoration: underline; }
+  .directory-item__name::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+  .directory-item:hover { background: color-mix(in oklab, var(--foreground) 4%, transparent); }
+  .directory-item:hover + .directory-item, .directory-item:hover { border-top-color: transparent; }
+  .directory-item__arrow { width: 1rem; height: 1rem; color: var(--muted-foreground); transition: transform 120ms, color 120ms; }
+  .directory-item:hover .directory-item__arrow { color: var(--foreground); transform: translate(2px, -2px); }
   .directory-item__category { color: var(--muted-foreground); font-size: 0.75rem; }
   .directory-item__desc { margin: 0.25rem 0 0; color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.5; }
   .directory-item__side { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
