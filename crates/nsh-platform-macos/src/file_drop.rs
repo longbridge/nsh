@@ -209,7 +209,7 @@ pub(crate) fn text_updated(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> Option<NSDragOperation> {
-    if !surface.file_drop.offered.get() {
+    if surface.file_drop.uris.borrow().is_empty() {
         return None;
     }
     Some(update(surface, sender)).filter(|operation| *operation == NSDragOperation::Copy)
@@ -221,7 +221,8 @@ pub(crate) fn text_performed(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> Option<bool> {
-    (surface.file_drop.offered.get() && target(surface, sender).is_some())
+    let offered = !surface.file_drop.uris.borrow().is_empty();
+    (offered && target(surface, sender).is_some())
         .then(|| perform(surface, sender))
 }
 
