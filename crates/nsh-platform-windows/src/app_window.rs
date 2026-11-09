@@ -748,7 +748,15 @@ pub(crate) fn handle(
             }
             Some(Some(LRESULT(0)))
         }
-        WM_ERASEBKGND => Some(Some(LRESULT(1))),
+        WM_ERASEBKGND => {
+            // As the main window's: what DWM shows past the last frame while
+            // a resize's is on its way.
+            let color = background(surface, id);
+            if color.0 & 0xff != 0 {
+                crate::window::fill(hwnd, color);
+            }
+            Some(Some(LRESULT(1)))
+        }
         WM_SIZE => {
             if let Some(window) = &window {
                 resized(surface, window);

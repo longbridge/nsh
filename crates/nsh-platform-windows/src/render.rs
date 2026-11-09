@@ -1345,7 +1345,6 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    chain.set_background(crate::system::window_background(surface));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
@@ -1668,8 +1667,6 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    // Its own background (its scheme, see-through or not).
-    chain.set_background(crate::app_window::background(surface, root.id()));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");

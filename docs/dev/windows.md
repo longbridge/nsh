@@ -86,7 +86,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   resize done; the area the window grew by then shows the window's background until the layout arrives.
   A window's swap chain never stretches (`DXGI_SCALING_NONE`): DWM shows the window at its new size before that frame
   is presented, and a stretched last frame would move everything by part of a pixel on each step of a resize. The last
-  frame stays where it is, and the swap chain's background color (`system::window_background`) fills the rest.
+  frame stays where it is, and DWM shows the window's redirection surface past it, which `WM_ERASEBKGND` fills with the
+  window's background (`window::fill`; a window swap chain's own background color is never shown, so the rest was
+  black).
 - **Text is typeset on the engine thread** with DirectWrite's shared, free-threaded factory; the final layout is plain
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
