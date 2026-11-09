@@ -1130,9 +1130,9 @@ impl Surface {
             self.control(|c| c.frame());
         }
         // A batch changes more than moves count (clips, deletions); else
-        // only a move can show a view put off. An endless animation keeps
-        // the frames coming without moving any view (transforms and
-        // opacity are not looked at): no pass on each of its frames.
+        // only a move can show a view put off. A transform counts only
+        // when its subtree has deferred drawing or placement, so an
+        // endless animation elsewhere does not force a pass every frame.
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }

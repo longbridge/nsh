@@ -228,6 +228,8 @@ impl<N> Sights<N> {
                     match tree.transform(node) {
                         None => admits(sight, frame),
                         transform => {
+                            // Clip the inverse-mapped sight to the local box:
+                            // a nonempty box conservatively admits the frame.
                             inner(sight, frame, (0.0, 0.0), true, transform) != Sight::Hidden
                         }
                     }
