@@ -77,7 +77,7 @@ booleans and strings show as text. Rust gives the rows a field at a time, each o
 | `fitPadding` | Extra room for the app's padding, icons or badges, added to the widest title or cell text when fitting the column. |
 | `align` | `"start"` (the default), `"center"` or `"end"`, for numbers. Cells and title alike. |
 | `sortable` | Its title has a sort button that asks for a sort (see [Sorting](#sorting)). |
-| `fixed` | Where it stays while the other columns scroll under it: `true` or `"start"` at the left, leading the others; `"end"` at the right, after them (right after the scrolling columns while they fit, at the table's right edge once they overflow it). Fixed columns keep their order. |
+| `fixed` | Where it stays while the other columns scroll under it: `true` or `"left"` at the left, leading the others; `"right"` at the right, after them (right after the scrolling columns while they fit, at the table's right edge once they overflow it). Fixed columns keep their order. |
 | `resizable`, `movable` | Whether a drag of its edge resizes it and a drag of its title moves it. Default the table's `resizableColumns` and `movableColumns`. |
 | `selectable` | Whether it takes part in selection. A column of buttons or checkboxes sets `false`. Default `true`. |
 | `cellClass` | Classes of the column's cells, after the `cell` part's: paddings or alignment of one column. |

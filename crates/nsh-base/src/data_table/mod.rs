@@ -35,49 +35,49 @@ pub enum DataTableAlign {
 }
 
 /// Where a column stays while the others scroll sideways (`fixed`): JS's
-/// `true` is [`DataTableFixed::Start`], `false` [`DataTableFixed::None`].
+/// `true` is [`DataTableFixed::Left`], `false` [`DataTableFixed::None`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DataTableFixed {
     /// It scrolls with the others.
     #[default]
     None,
-    /// It stays at the start (the left in left-to-right text), with the
-    /// other columns fixed there, before them in their order.
-    Start,
-    /// It stays at the end, with the other columns fixed there, after
+    /// It stays at the left, with the other columns fixed there, before
+    /// them in their order.
+    Left,
+    /// It stays at the right, with the other columns fixed there, after
     /// them in their order: right after the scrolling columns while they
-    /// fit in the table, at its end edge once they overflow it.
-    End,
+    /// fit in the table, at its right edge once they overflow it.
+    Right,
 }
 
 impl From<bool> for DataTableFixed {
     fn from(fixed: bool) -> Self {
-        if fixed { Self::Start } else { Self::None }
+        if fixed { Self::Left } else { Self::None }
     }
 }
 
 impl JsValue for DataTableFixed {
     fn ts_type(_: &mut TsTypes) -> String {
-        r#"boolean | "start" | "end""#.into()
+        r#"boolean | "left" | "right""#.into()
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
         match value.kind() {
             JsKind::Bool => bool::from_js(value).map(Self::from),
             JsKind::String => match value.as_string().as_deref() {
-                Some("start") => Ok(Self::Start),
-                Some("end") => Ok(Self::End),
-                _ => Err(value.expected(r#"true, false, "start" or "end""#)),
+                Some("left") => Ok(Self::Left),
+                Some("right") => Ok(Self::Right),
+                _ => Err(value.expected(r#"true, false, "left" or "right""#)),
             },
-            _ => Err(value.expected(r#"true, false, "start" or "end""#)),
+            _ => Err(value.expected(r#"true, false, "left" or "right""#)),
         }
     }
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         match self {
             Self::None => false.to_js(host),
-            Self::Start => "start".to_owned().to_js(host),
-            Self::End => "end".to_owned().to_js(host),
+            Self::Left => "left".to_owned().to_js(host),
+            Self::Right => "right".to_owned().to_js(host),
         }
     }
 }
@@ -123,8 +123,8 @@ pub struct DataTableColumn {
     #[prop(default)]
     pub sortable: bool,
     /// Where it stays while the other columns scroll under it: at the
-    /// start (`true` or `"start"`), leading the others, or at the end
-    /// (`"end"`), after them; fixed columns keep their order.
+    /// left (`true` or `"left"`), leading the others, or at the right
+    /// (`"right"`), after them; fixed columns keep their order.
     #[prop(default)]
     pub fixed: DataTableFixed,
     /// Whether a drag of its edge resizes it (default the table's

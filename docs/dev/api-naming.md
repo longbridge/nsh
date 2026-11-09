@@ -207,8 +207,8 @@ entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
 `DataTable`'s column `fixed` goes past `gpui-component`'s `ColumnFixed`, which fixes columns at the left only: a
 table of orders or tickets keeps its actions column at the right while the others scroll, as Ant Design's and MUI's
-tables do (`fixed: "right"`, `pinned: "right"`). The values are logical (`"start"`, `"end"`), as `align`'s; `true`
-stays `"start"`, `gpui-component`'s one side.
+tables do (`fixed: "right"`, `pinned: "right"`). The values are `"left"` and `"right"`, the words those tables use
+(decided by the owner, 2026-11-09); `true` stays `"left"`, `gpui-component`'s one side.
 
 ## Shapes that can grow
 

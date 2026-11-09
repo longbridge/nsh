@@ -28,9 +28,9 @@ pub(crate) struct Spec {
 /// The zone of a column with `fixed`, in display order.
 fn zone(fixed: DataTableFixed) -> u8 {
     match fixed {
-        DataTableFixed::Start => 0,
+        DataTableFixed::Left => 0,
         DataTableFixed::None => 1,
-        DataTableFixed::End => 2,
+        DataTableFixed::Right => 2,
     }
 }
 
@@ -61,7 +61,7 @@ impl Columns {
         let mut order: Vec<usize> = (0..specs.len()).collect();
         crate::sort::sort_by_key(&mut order, |&i| zone(specs[i].fixed));
         let count = |f| specs.iter().filter(|s| s.fixed == f).count();
-        let (fixed, end) = (count(DataTableFixed::Start), count(DataTableFixed::End));
+        let (fixed, end) = (count(DataTableFixed::Left), count(DataTableFixed::Right));
         let mut columns = Columns {
             specs,
             widths,
@@ -344,7 +344,7 @@ mod tests {
             spec(100.0, false),
             spec(60.0, true),
             spec(80.0, false),
-            spec(50.0, DataTableFixed::End),
+            spec(50.0, DataTableFixed::Right),
             spec(120.0, false),
         ])
     }
@@ -383,8 +383,8 @@ mod tests {
     fn columns_fixed_at_the_end_move_among_themselves() {
         let mut c = Columns::new(vec![
             spec(10.0, false),
-            spec(20.0, DataTableFixed::End),
-            spec(30.0, DataTableFixed::End),
+            spec(20.0, DataTableFixed::Right),
+            spec(30.0, DataTableFixed::Right),
         ]);
         assert_eq!(c.order(), [0, 1, 2]);
         assert!(!c.move_to(0, 2), "a scrolling column stays among them");

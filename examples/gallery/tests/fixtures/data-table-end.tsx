@@ -19,7 +19,7 @@ function App() {
     { key: "name", title: "Name", width: 100, fixed: true },
     { key: "a", title: "A", width: 150 },
     { key: "b", title: "B", width: 150 },
-    { key: "act", title: "Act", width: 80, fixed: "end" },
+    { key: "act", title: "Act", width: 80, fixed: "right" },
     { key: "c", title: "C", width: 150 },
     { key: "d", title: "D", width: 150 },
   ];

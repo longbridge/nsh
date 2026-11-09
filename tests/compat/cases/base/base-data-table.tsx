@@ -8,14 +8,14 @@
 // rows 1 and 2 of five); the ref scrolls to one (`scrollToRow`), the rows
 // in view are reported (`onVisibleRowsChange`) and read (`visibleRows`).
 // `renderCell` draws a cell the app's way, with the text the table would
-// show. A column fixed at the end (`fixed: "end"`) closes the columns.
+// show. A column fixed at the end (`fixed: "right"`) closes the columns.
 import { Text, View, signal } from "nsh";
 import { DataTable, type DataTableRef, type DataTableSort } from "nsh/base";
 
 const columns = [
   { key: "name", title: "Name", width: 120, sortable: true, cellClass: "justify-start", headerClass: "justify-start" },
   { key: "qty", title: "Qty", width: 80, align: "end" as const },
-  { key: "act", title: "Act", width: 60, fixed: "end" as const },
+  { key: "act", title: "Act", width: 60, fixed: "right" as const },
 ];
 const NAMES = ["pear", "apple", "fig"];
 const rows = (descending: boolean) => {
