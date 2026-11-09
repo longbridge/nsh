@@ -72,7 +72,7 @@ nsh package --target windows [--run]           # a Rust app, from its directory
 nsh package App.tsx --target windows [--run]   # a TSX app
 ```
 
-Writes a directory and the same as an archive:
+Writes a directory, the same as an archive, and an installer:
 
 ```text
 .nsh\out\<Name>\
@@ -81,6 +81,8 @@ Writes a directory and the same as an archive:
   nsh\assets\…           the assets it imports (a Rust crate's `assets!()` too)
   nsh\app.json           the window title, the app id, the version and the appearance
 .nsh\out\<Name>.zip
+.nsh\out\<Name>.iss        the Inno Setup script for the installer
+.nsh\out\<Name>-setup.exe  the installer, when Inno Setup 6 is installed
 ```
 
 The executable finds `nsh\` next to itself; copy the whole directory (or unpack the `.zip`) wherever the app should
