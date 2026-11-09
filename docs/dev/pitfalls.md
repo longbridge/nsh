@@ -642,7 +642,10 @@ Things that were found the hard way. Read the section of the area you change bef
   batch's animated values are written (`Surface::write_animations`, once the batches are applied), so
   `Surface::apply` writes them before each one. Without that, a window growing to its content (`sizeToContent`) as
   it opened drew a view entering with a motion as its style is while hidden, then at the motion's start, and showed
-  the first frame while the second waited for room in its swap chain: the content flashed.
+  the first frame while the second waited for room in its swap chain: the content flashed. Only the views' values
+  are written early: registered components' animated props (`set_animated_number`, `set_animated_color`) still reach
+  them after the batches (`native::component_animated`), so a component that draws in its view
+  (`NativeComponent::draw`) draws such a frame without the values its batch set.
 
 ## Web, browsers
 
