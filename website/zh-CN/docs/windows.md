@@ -64,7 +64,7 @@ nsh package --target windows [--run]           # Rust 应用，在它的目录�
 nsh package App.tsx --target windows [--run]   # TSX 应用
 ```
 
-会写出一个目录，以及同样内容的压缩包：
+会写出一个目录、同样内容的压缩包，以及安装程序：
 
 ```text
 .nsh\out\<Name>\
@@ -73,9 +73,15 @@ nsh package App.tsx --target windows [--run]   # TSX 应用
   nsh\assets\…           应用导入的资源（也包括 Rust crate 的 `assets!()`）
   nsh\app.json           窗口标题、应用 id、版本和外观
 .nsh\out\<Name>.zip
+.nsh\out\<Name>.iss        安装程序的 Inno Setup 脚本
+.nsh\out\<Name>-setup.exe  安装程序，装有 Inno Setup 6 时生成
 ```
 
-可执行文件会在自身旁边找到 `nsh\`；把整个目录复制到（或把 `.zip` 解压到）应用要放的位置即可，不需要安装。`nsh.json`
+可执行文件会在自身旁边找到 `nsh\`；把整个目录复制到（或把 `.zip` 解压到）应用要放的位置即可，也可以分发安装程序。`nsh package` 还会写出
+`.nsh\out\<Name>.iss`，一个 [Inno Setup](https://jrsoftware.org/isinfo.php) 脚本；装有 Inno Setup 6 时（`winget install
+JRSoftware.InnoSetup`）会把它编译成 `.nsh\out\<Name>-setup.exe`。安装程序不需要管理员权限：它为当前用户安装到
+`%LOCALAPPDATA%\Programs\<Name>`，添加开始菜单快捷方式（带应用 id，任务栏和通知都用它），并在“已安装的应用”中添加可卸载它的条目。
+它的 AppId 就是应用 id，所以新版本的安装程序会先关闭应用，再原地升级已安装的版本；升级和卸载都不会动应用的数据。`nsh.json`
 中的图标会直接嵌入可执行文件（资源管理器和任务栏都会显示它），不需要额外的工具；在其他系统上打包则保留默认图标。应用 id
 用于在任务栏中归组应用的窗口。`--run` 会在打包后启动应用。可执行文件没有签名：要分发，请用你自己的证书签名（`signtool`）。
 

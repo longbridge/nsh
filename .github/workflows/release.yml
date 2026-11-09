@@ -20,15 +20,17 @@ name: Release
 #   builds nothing. There is one `nightly` tag, moved to each build's commit,
 #   never a tag per night. Running it by hand with *nightly* publishes one now.
 #
-# Pull requests and the merge queue never run it: its three builds are CI's
+# Pull requests and the merge queue never run it: its builds are CI's
 # longest and held the runners every queued pull request waited for.
 #
-# Asset names carry no version (`nsh-macos-arm64.tar.gz`, each with a
-# `.sha256`), so `releases/latest/download/<asset>` always resolves: the
-# installers (`website/public/install.sh`, `install.ps1`, also attached to
-# each release), mise's `github:` backend and the Scoop manifest download by
-# that name. Every archive holds one directory, `nsh/`, laid out as
-# `dist/nsh`: a platform's archive the CLI and that machine's runtime, and
+# Asset names carry no version (`nsh-macos-arm64.tar.gz`,
+# `nsh-macos-x86_64.tar.gz`, `nsh-linux-x86_64.tar.gz`,
+# `nsh-linux-arm64.tar.gz`, `nsh-windows-x86_64.zip`, `nsh-windows-arm64.zip`,
+# each with a `.sha256`), so `releases/latest/download/<asset>` always
+# resolves: the installers (`website/public/install.sh`, `install.ps1`, also
+# attached to each release), mise's `github:` backend and the Scoop manifest
+# download by that name. Every archive holds one directory, `nsh/`, laid out
+# as `dist/nsh`: a platform's archive the CLI and that machine's runtime, and
 # the components (`nsh-android.tar.gz`, `nsh-web.tar.gz`,
 # `nsh-android-symbols.tar.gz`, `nsh-ios-macos-arm64.tar.gz`,
 # `nsh-gpui-<platform>.tar.gz`, `nsh-tui-<platform>.tar.gz`) the other
@@ -111,17 +113,34 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The CLI, the desktop runtime and the GPUI and terminal hosts are
+        # built for the runner's processor, so each architecture has a runner
+        # of its own. `embed` names the embedding SDK a build releases. The
+        # components the same everywhere (Android, web) come from x86_64
+        # Linux's build, so the arm64 Linux and Windows builds skip Android
+        # (`no_android`; the NDK has no toolchain for arm64 Linux). It also
+        # sets `NSH_DIST_NO_ANDROID`, so xtask skips it where an SDK is found.
         include:
-          # The iOS runtimes and SDK need Xcode; the macOS runtime is built
-          # for this machine (Apple silicon).
+          # The iOS runtimes and SDK need Xcode and Apple silicon; the macOS
+          # runtime is built for this machine.
           - name: macos-arm64
             os: macos-15
+            embed: ios
+          - name: macos-x86_64
+            os: macos-15-intel
           # 24.04 has GTK 4.14 and Pango 1.52+, what the Linux runtime needs;
           # its binaries need glibc 2.39 and GTK 4.14 or newer where they run.
           - name: linux-x86_64
             os: ubuntu-24.04
+            embed: android
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            no_android: true
           - name: windows-x86_64
             os: windows-latest
+          - name: windows-arm64
+            os: windows-11-arm
+            no_android: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -169,10 +188,12 @@ jobs:
       # The Android runtime: `javac` + `d8` (Java 17), the SDK's
       # `platforms;android-35` and an NDK (the images have the SDK and NDKs).
       - uses: actions/setup-java@v4
+        if: ${{ !matrix.no_android }}
         with:
           distribution: temurin
           java-version: "17"
       - name: Install the Android platform
+        if: ${{ !matrix.no_android }}
         run: |
           if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
             sdkmanager=$(ls "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager* | head -1)
@@ -248,6 +269,7 @@ jobs:
       - name: Build the distribution
         env:
           NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
+          NSH_DIST_NO_ANDROID: ${{ matrix.no_android && '1' || '' }}
         run: cargo xtask dist -v
 
       # The packaged CLI makes and bundles a new app.
@@ -269,16 +291,15 @@ jobs:
           cp -R ../../dist/nsh nsh
           cp ../../README.md ../../LICENSE-APACHE nsh/
           # The embedding SDKs on their own, for native apps that embed nsh
-          # and need no CLI (iOS from macOS, Android from Linux); the CLI's
-          # archive holds none.
+          # and need no CLI (iOS from Apple silicon, Android from x86_64
+          # Linux); the CLI's archive holds none.
           embed() {
             local name="nsh-embed-$1"
             mkdir -p "$name"
             cp -R "nsh/embed/$1/." "$name/"
             zip -qry "$name.zip" "$name"
           }
-          [[ "$RUNNER_OS" != macOS ]] || embed ios
-          [[ "$RUNNER_OS" != Linux ]] || embed android
+          [[ -z "${{ matrix.embed }}" ]] || embed "${{ matrix.embed }}"
           rm -rf nsh/embed
           # The runtimes of other platforms than this machine's are
           # components (`nsh component`), each an archive of its own that an
@@ -287,8 +308,8 @@ jobs:
           nsh=nsh/bin/nsh
           [[ "$RUNNER_OS" != Windows ]] || nsh=nsh/bin/nsh.exe
           "$nsh" component pack --out .
-          # Components the same on every machine come from Linux's build.
-          if [[ "$RUNNER_OS" != Linux ]]; then
+          # Components the same on every machine come from x86_64 Linux's build.
+          if [[ "${{ matrix.name }}" != linux-x86_64 ]]; then
             rm -f nsh-android.tar.gz nsh-android-symbols.tar.gz nsh-web.tar.gz
           fi
           if [[ "$RUNNER_OS" == Windows ]]; then

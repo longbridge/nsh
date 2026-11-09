@@ -6,9 +6,9 @@
 //!   its argument. Written at startup by the release runner ([`start`]) when
 //!   the command differs from what is there: the app may have moved. The
 //!   development host registers nothing.
-//! - Launch: an argument that is a URL of one of the app's schemes is sent to
-//!   the root surface once it exists ([`attach`]); the core keeps it until JS
-//!   listens.
+//! - Launch: an argument that is a URL of one of the app's schemes goes to
+//!   the root surface before its app loads ([`launch`]), whose engine applies
+//!   it before the app's code first runs; the core keeps it until JS listens.
 //! - One instance: the first instance of an app with schemes owns a named
 //!   mutex keyed by the app id and marks its top-level window with a property
 //!   ([`attach`]). A later launch with a URL finds that window, lets it take
@@ -22,6 +22,7 @@ use std::{
 };
 
 use nsh_core::{EventKind, EventPayload, PayloadValue, ROOT_ID};
+use nsh_engine::EngineControl;
 use windows::{
     Win32::{
         Foundation::{
@@ -114,8 +115,16 @@ pub(crate) fn start(id: &str, name: &str, schemes: &[String]) -> Start {
     Start::Run
 }
 
-/// Marks `surface`'s top-level window as the app's, hears URLs forwarded to
-/// it and sends the launch URL. After the app is loaded.
+/// Hands the URL the process was started with to `surface`, whose engine
+/// applies it as it starts. Before the app is loaded.
+pub(crate) fn launch(surface: &Surface) {
+    if let Some(url) = LAUNCH.with(|l| l.borrow_mut().take()) {
+        surface.set_launch_link(url);
+    }
+}
+
+/// Marks `surface`'s top-level window as the app's and hears URLs forwarded
+/// to it. After the app is loaded.
 pub(crate) fn attach(surface: &Rc<Surface>) {
     let Some(property) = PROPERTY.with(|p| p.borrow().clone()) else {
         return;
@@ -128,16 +137,18 @@ pub(crate) fn attach(surface: &Rc<Surface>) {
         let _ = SetPropW(window, &property, Some(HANDLE(std::ptr::dangling_mut())));
         let _ = SetWindowSubclass(window, Some(link_proc), SUBCLASS, 0);
     }
-    if let Some(url) = LAUNCH.with(|l| l.borrow_mut().take()) {
-        send(surface, url);
-    }
 }
 
 fn send(surface: &Surface, url: String) {
-    surface.event(
+    surface.control(|control| dispatch(control, url));
+}
+
+/// Reports `url` as a link the system opened the app with.
+pub(crate) fn dispatch(control: &EngineControl, url: String) {
+    control.dispatch_event(
         ROOT_ID,
         EventKind::UrlScheme,
-        EventPayload::Map(vec![("url", PayloadValue::Str(url))]),
+        EventPayload::Map(vec![(nsh_core::url_scheme::URL, PayloadValue::Str(url))]),
     );
 }
 

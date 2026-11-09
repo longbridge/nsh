@@ -209,8 +209,11 @@ fn asset() -> anyhow::Result<String> {
 pub(crate) fn host() -> anyhow::Result<&'static str> {
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "macos-arm64",
+        ("macos", "x86_64") => "macos-x86_64",
         ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "aarch64") => "linux-arm64",
         ("windows", "x86_64") => "windows-x86_64",
+        ("windows", "aarch64") => "windows-arm64",
         (os, arch) => bail!("no prebuilt nsh for {os} {arch}; build it from source"),
     })
 }

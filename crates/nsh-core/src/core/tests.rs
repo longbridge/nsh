@@ -3127,6 +3127,58 @@ fn input_measures_its_placeholder_and_reports_its_content_box() {
 }
 
 #[test]
+fn input_out_of_the_layout_has_no_content_box() {
+    // `display: none` around an input leaves it no box, and a platform that
+    // does not clip a view's children to it (a browser) would draw its
+    // field, placeholder and all, at the content box it had before.
+    let mut c = input_core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 2,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let content_of = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::InputContent { id: 2, content } => Some(*content),
+            _ => None,
+        })
+    };
+    let shown = Some(rect(6.0, 6.0, 308.0, 16.0));
+    assert_eq!(content_of(&c.commit().unwrap()), shown);
+    let mut toggle = |id, classes, expected: Option<Bounds<Points>>| {
+        c.apply(class_op(id, classes)).unwrap();
+        assert_eq!(
+            content_of(&c.commit().unwrap()),
+            expected,
+            "{id}: {classes}"
+        );
+    };
+    // Hidden by its parent's class, then by its own.
+    toggle(3, "hidden", Some(Bounds::default()));
+    toggle(3, "flex flex-col", shown);
+    toggle(2, "hidden", Some(Bounds::default()));
+    toggle(2, "flex", shown);
+}
+
+#[test]
 fn inputs_resolve_what_return_does() {
     use crate::{SubmitBehavior as S, mount::InputConfig};
     let config = |multiline, blur_on_submit, submit_behavior| InputConfig {
@@ -19499,6 +19551,119 @@ mod rust_windows {
     }
 
     #[component]
+    fn SetsOwnTitle() -> impl IntoElement {
+        view().child(window().id("settings").title("Static title").content(|| {
+            let me = current_window();
+            effect(move || {
+                me.set(WindowAttributes {
+                    title: Some("Set in content".into()),
+                    ..Default::default()
+                });
+                me.set(WindowAttributes {
+                    resizable: Some(false),
+                    ..Default::default()
+                });
+            });
+            text("settings")
+        }))
+    }
+
+    // #1344: attributes a window's own content sets while it first opens
+    // reach the window, after the open and over its options.
+    #[test]
+    fn attributes_set_while_a_window_opens_are_kept() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<SetsOwnTitle>());
+        let mut commands = desktop_commands(&c.commit().unwrap());
+        // An effect may run in the next commit: collect both.
+        if let Some(batch) = c.commit() {
+            commands.extend(desktop_commands(&batch));
+        }
+        // It opens with them (or gets them right after): what it ends up with.
+        let mut id = None;
+        let mut merged = WindowAttributes::default();
+        for (at, command) in &commands {
+            match command {
+                DesktopCommand::OpenWindow(open) => {
+                    id = Some(*at);
+                    merged.merge(&open.options.attributes);
+                }
+                DesktopCommand::SetAttributes(a) if Some(*at) == id => merged.merge(a),
+                _ => {}
+            }
+        }
+        assert!(id.is_some(), "the window opens: {commands:?}");
+        assert_eq!(
+            merged.title.as_deref(),
+            Some("Set in content"),
+            "{commands:?}"
+        );
+        assert_eq!(merged.resizable, Some(false), "{commands:?}");
+        // Sent once: nothing more on the next commit.
+        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
+    }
+
+    fn opened_title(c: &mut Core<FakeEngine>) -> Option<String> {
+        let mut title = None;
+        while let Some(batch) = c.commit() {
+            for (_, command) in desktop_commands(&batch) {
+                match command {
+                    DesktopCommand::OpenWindow(open) => title = open.options.attributes.title,
+                    DesktopCommand::SetAttributes(a) if a.title.is_some() => title = a.title,
+                    _ => {}
+                }
+            }
+        }
+        title
+    }
+
+    // #1344, `open_window` and a window opened again: each opening keeps
+    // what its content set then, not what an earlier one did.
+    #[test]
+    fn attributes_set_while_an_opened_window_opens_are_kept_each_time() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit();
+        let open = |title: &'static str| {
+            open_window(window().id("doc").title("Static").content(move || {
+                let me = current_window();
+                effect(move || {
+                    me.set(WindowAttributes {
+                        title: Some(title.into()),
+                        ..Default::default()
+                    });
+                });
+                text("doc")
+            }))
+            .expect("opens on a desktop")
+        };
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            open("First")
+        };
+        assert_eq!(opened_title(&mut c).as_deref(), Some("First"));
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = opened_title(&mut c);
+        {
+            let _entered = c.components.runtime.enter();
+            open("Second");
+        }
+        assert_eq!(opened_title(&mut c).as_deref(), Some("Second"));
+    }
+
+    #[component]
     fn WithNotes() -> impl IntoElement {
         view().child(window().id("notes").content(|| text("Notes")))
     }
@@ -25474,6 +25639,40 @@ fn a_fixed_text_span_can_return_to_its_inline_parent() {
     let node = &c.nodes[c.key(3).unwrap() as usize];
     assert!(node.inline);
     assert!(node.layout.is_none());
+}
+
+#[test]
+fn a_span_moved_out_of_its_text_is_laid_out_with_its_style() {
+    let mut c = core();
+    add(&mut c, 2, Tag::Text, ROOT_ID, &[]);
+    add(
+        &mut c,
+        3,
+        Tag::Text,
+        2,
+        &[("width", StyleValue::Number(40.0))],
+    );
+    c.commit();
+    assert!(c.nodes[c.key(3).unwrap() as usize].layout.is_none());
+    // Styled while a span, then a block of its own.
+    c.apply(style_op(3, &[("width", StyleValue::Number(60.0))]))
+        .unwrap();
+    let insert = |c: &mut Core<FakeEngine>, parent| {
+        c.apply(Op::Insert {
+            parent,
+            child: 3,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+    };
+    insert(&mut c, ROOT_ID);
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(60.0));
+    // A span again, and a block again, with the style it had as a block.
+    insert(&mut c, 2);
+    assert!(c.nodes[c.key(3).unwrap() as usize].layout.is_none());
+    insert(&mut c, ROOT_ID);
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(60.0));
 }
 
 /// A view of `height` in `parent`, with `style` on top.
