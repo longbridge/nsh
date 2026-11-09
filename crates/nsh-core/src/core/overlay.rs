@@ -1031,6 +1031,18 @@ impl<M: TextEngine> Core<M> {
                 self.nodes[key as usize].rtl,
             ),
         };
+        // On the device pixel grid, as every other frame is (`round`): an
+        // origin between two pixels (a context menu at the pointer, a
+        // popup centred on a trigger of odd width) would have the window
+        // resample the whole overlay, its text included, and draw it soft.
+        let ratio = self.pixel_ratio();
+        let placed = Placed {
+            origin: point(
+                Points(super::round(placed.origin.x.0, ratio)),
+                Points(super::round(placed.origin.y.0, ratio)),
+            ),
+            ..placed
+        };
         let bounds = Bounds {
             origin: placed.origin,
             size: frame.size,
