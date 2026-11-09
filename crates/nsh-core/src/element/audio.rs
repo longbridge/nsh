@@ -153,7 +153,10 @@ pub async fn load_sound(src: &str) -> Result<Sound, AudioFailure> {
     // Before any byte is read (the core checks again, and alone on the web,
     // where the platform fetches).
     #[cfg(not(target_arch = "wasm32"))]
-    let uri = granted_uri(&loader::context().access, src, uri)?;
+    let uri = {
+        let context = loader::context();
+        granted_uri(&context.access, &context.media_files, src, uri)?
+    };
     // Nothing to read for where nothing plays it.
     if !audio_available().await {
         return Err(AudioFailure::new(
@@ -254,6 +257,7 @@ async fn wait(pending: &Pending) -> Result<Rc<Buffer>, AudioFailure> {
 #[cfg(not(target_arch = "wasm32"))]
 fn granted_uri(
     access: &crate::access::Access,
+    files: &crate::access::MediaFiles,
     src: &str,
     uri: String,
 ) -> Result<String, AudioFailure> {
@@ -263,12 +267,16 @@ fn granted_uri(
             "sound is not granted: add `\"audio\": true` to capabilities in nsh.json",
         ));
     }
-    match access.media_url(&uri, None) {
+    match access.media_url(&uri, None, Some(files)) {
         Some(std::borrow::Cow::Owned(granted)) => Ok(granted),
         Some(std::borrow::Cow::Borrowed(_)) => Ok(uri),
         None => Err(AudioFailure::new(
             AudioError::NotAllowed,
-            format!("`{src}` is not granted by capabilities.network in nsh.json"),
+            format!(
+                "`{src}` is not granted by capabilities.{}: {}",
+                crate::access::media_capability(&uri, None),
+                crate::access::media_grant_advice(&uri, None)
+            ),
         )),
     }
 }
@@ -702,7 +710,9 @@ mod tests {
             .unwrap(),
             granted: None,
         };
-        let load = |src: &str| granted_uri(&access, src, asset_uri(src)).map_err(|f| f.error);
+        let files = crate::access::MediaFiles::default();
+        let load =
+            |src: &str| granted_uri(&access, &files, src, asset_uri(src)).map_err(|f| f.error);
         assert_eq!(
             load("https://EXAMPLE.com/private/../public/a.wav"),
             Ok("https://example.com/public/a.wav".to_owned())
@@ -711,5 +721,44 @@ mod tests {
         assert!(load("https://example.com/public/%2e%2e/private/a.wav").is_err());
         assert!(load("//example.com/public/a.wav").is_err());
         assert_eq!(load("click.wav"), Ok("asset:/click.wav".to_owned()));
+    }
+
+    /// A local sound is read under `capabilities.fs.read`, and a refusal
+    /// says so.
+    #[cfg(unix)]
+    #[test]
+    fn local_sounds_need_an_fs_read_grant() {
+        use super::granted_uri;
+        let base =
+            std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let dir = base.join(format!("sound-files-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        let dir = crate::access::canonicalize(&dir).unwrap();
+        let sounds = dir.join("sounds").to_str().unwrap().to_owned();
+        let access = crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "audio": true, "fs": { "read": [sounds.clone()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = crate::access::MediaFiles::new(
+            &access,
+            None,
+            &crate::access::TrustedPaths::default(),
+            true,
+        );
+        let load = |src: &str| granted_uri(&access, &files, src, asset_uri(src));
+        assert_eq!(
+            load(&format!("{sounds}/x/../a.wav")).ok(),
+            Some(format!("{sounds}/a.wav"))
+        );
+        let refused = load(&format!("{sounds}/../b.wav")).unwrap_err();
+        assert!(
+            refused.message.contains("capabilities.fs"),
+            "{}",
+            refused.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

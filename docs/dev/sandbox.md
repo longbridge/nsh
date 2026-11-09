@@ -128,7 +128,13 @@ dot segments and `%2e` ones resolved (`Access::allows_http`), and what loads is 
 canvas images, videos, sounds, `Image.getSize` / `prefetch`) return the WHATWG serialization, which the core writes
 back over the source. A media source with no scheme that starts with `//` is resolved against the bundle's base URL
 (`Bundle::base_url`, the page's on the web; `Core::set_base_url`, `System::base_url`) and refused without one; other
-sources without a scheme, and `asset:`, `file:`, `data:`, `blob:` (any case) and drive paths, stay as written. Whether a
+sources without a scheme, and `asset:`, `data:`, `blob:` (any case), stay as written. A local file (`file:`, or with
+no base an absolute or drive path) is read under `capabilities.fs.read` (`MediaFiles`: the declared and granted roots,
+expanded and canonicalized once: the engine's for the core, `Core::set_media_files`, and the image loader's
+`Context::media_files`, a VM's own for `Image.getSize`), only where `fs/promises` has a file system; the path is
+canonicalized at the check (remembered per path, at most 1024), since the platforms' loaders open what they get with
+nothing to confine them, and loads in the form it was written. A link made in a granted root between the check and the
+load is followed: unlike `fs/promises`, which works in the opened root, a loader has no root to work in. Whether a
 source names a host is read after WHATWG's stripping (spaces and C0 controls around it, tabs and newlines in it); one
 that stripping changed is ambiguous. The spellings of a key are merged and may appear together (gpui-shell's
 `scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot

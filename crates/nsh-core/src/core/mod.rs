@@ -1297,6 +1297,9 @@ pub struct Core<M: TextEngine> {
     /// What media sources starting with `//` resolve against
     /// ([`Core::set_base_url`]).
     base_url: Option<Arc<str>>,
+    /// The roots local media files are read under
+    /// ([`Core::set_media_files`]).
+    media_files: Arc<crate::access::MediaFiles>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
     /// The windows' attribute records, by root node (the main window's is
@@ -1380,6 +1383,7 @@ impl<M: TextEngine> Core<M> {
             max_nodes: usize::MAX,
             access: Arc::default(),
             base_url: None,
+            media_files: Arc::default(),
             denied: Default::default(),
             windows: Default::default(),
             window_ids: Default::default(),
@@ -1615,6 +1619,14 @@ impl<M: TextEngine> Core<M> {
     /// without capabilities loads it ([`crate::access::Access::media_url`]).
     pub fn set_base_url(&mut self, url: Option<Arc<str>>) {
         self.base_url = url;
+    }
+
+    /// Sets the `capabilities.fs.read` roots the app's local media files
+    /// (absolute paths, `file:` URLs) are read under; without them such a
+    /// source of an app with capabilities loads nothing
+    /// ([`crate::access::Access::media_url`]).
+    pub fn set_media_files(&mut self, files: Arc<crate::access::MediaFiles>) {
+        self.media_files = files;
     }
 
     /// Sets what the core's own image loads (an [`crate::element::svg`]'s
@@ -2306,12 +2318,13 @@ impl<M: TextEngine> Core<M> {
                 if !self.access.is_unrestricted() {
                     let access = self.access.clone();
                     let base = self.base_url.clone();
+                    let files = self.media_files.clone();
                     let mut refused = Vec::new();
                     // An image draws what the check granted
                     // (`Access::media_url`).
                     drawing.ops.retain_mut(|op| match op {
                         crate::canvas::CanvasOp::DrawImage { image, .. } => {
-                            match access.media_url(&image.uri, base.as_deref()) {
+                            match access.media_url(&image.uri, base.as_deref(), Some(&files)) {
                                 Some(std::borrow::Cow::Owned(url)) => {
                                     image.uri = url.into();
                                     true
@@ -4062,7 +4075,10 @@ impl<M: TextEngine> Core<M> {
     /// against [`Core::set_base_url`]'s URL): `Some(None)` as written,
     /// `Some(Some(url))` the URL to load in its place, `None` refused.
     fn media_source(&self, uri: &str) -> Option<Option<Arc<str>>> {
-        match self.access.media_url(uri, self.base_url.as_deref())? {
+        match self
+            .access
+            .media_url(uri, self.base_url.as_deref(), Some(&self.media_files))?
+        {
             std::borrow::Cow::Borrowed(_) => Some(None),
             std::borrow::Cow::Owned(url) => Some(Some(url.into())),
         }

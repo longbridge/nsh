@@ -160,6 +160,11 @@ WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https
 `https://…`）。其他带协议的源都按 URL 检查，加载的就是检查过的 URL。如果一个源要等 URL 解析器去掉首尾空格或其中的制表符、换行后才
 指向某个主机，那么和其他各平台读法不同的 URL 一样，只有 `*` 能授权它。
 
+媒体源中的本地文件（`file:` URL，或原生应用中的绝对路径，例如 `/Users/a/x.png`、`C:\pictures\x.png`）和
+`fs/promises` 读文件一样，按 [`fs`](../modules/standard-modules.md) 能力的 `read` 根目录检查，因此只在桌面上可用。设置源时
+会先解析其中的符号链接，平台加载的也是解析后的路径，所以这时授权根目录里的链接不会把加载引到根目录之外。在 Web 上，
+`/x.png` 是页面自己的路径。没有声明 `capabilities` 的应用照旧加载本地文件。
+
 ### `webview`
 
 | 键 | 类型 | 说明 |

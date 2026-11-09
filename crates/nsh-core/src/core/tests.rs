@@ -8151,6 +8151,83 @@ fn media_sources_load_the_url_the_check_granted() {
     );
 }
 
+/// A local image loads its canonical path when `capabilities.fs.read` holds
+/// it, in the form it was written, and nothing when it leaves the root.
+#[cfg(unix)]
+#[test]
+fn local_images_load_the_path_the_fs_grant_holds() {
+    let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let root = base.join(format!("core-media-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("allowed")).unwrap();
+    std::fs::create_dir_all(root.join("outside")).unwrap();
+    let root = crate::access::canonicalize(&root).unwrap();
+    let allowed = root.join("allowed").to_str().unwrap().to_owned();
+    let access = Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "fs": { "read": [allowed.clone()] } }),
+        )
+        .unwrap(),
+        granted: None,
+    });
+    let mut c = core();
+    c.set_access(access.clone());
+    c.set_media_files(Arc::new(crate::access::MediaFiles::new(
+        &access,
+        None,
+        &crate::access::TrustedPaths::default(),
+        true,
+    )));
+    let image = |id, uri: String| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = image(2, format!("{allowed}/./a.png"));
+    ops.extend(image(4, format!("file://{allowed}/sub/../a.png")));
+    ops.extend(image(6, format!("{allowed}/../outside/b.png")));
+    ops.extend(image(8, format!("file://{allowed}/%2e%2e/outside/b.png")));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let images: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, source, .. } => {
+                Some((*id, source.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        images,
+        [
+            (2, Some(format!("{allowed}/a.png"))),
+            (4, Some(format!("file://{allowed}/a.png"))),
+            (6, None),
+            (8, None),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A canvas image draws, and `Image.getSize` / `prefetch` loads, the URL the
 /// check granted; one naming a host the app is not granted is dropped.
 #[test]

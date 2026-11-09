@@ -28,7 +28,9 @@ use crate::{
 fn thrown(failure: AudioFailure, src: &str) -> JsError {
     match failure.error {
         AudioError::NotAllowed => {
-            let permission = if failure.message.contains("network") {
+            let permission = if failure.message.contains("capabilities.fs") {
+                "fs"
+            } else if failure.message.contains("network") {
                 "network"
             } else {
                 "audio"

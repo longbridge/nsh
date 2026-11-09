@@ -5302,8 +5302,11 @@ impl<M: TextEngine> Core<M> {
                         None => {
                             sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
                             sink.close();
+                            let base = self.base_url.as_deref();
+                            let capability = crate::access::media_capability(src, base);
+                            let advice = crate::access::media_grant_advice(src, base);
                             self.deny(format!(
-                                "`{src}` is not granted by capabilities.network in nsh.json"
+                                "`{src}` is not granted by capabilities.{capability}: {advice}"
                             ));
                             return;
                         }

@@ -324,6 +324,178 @@ impl TrustedPaths {
     }
 }
 
+/// `path` without `.` and `..`, resolved by its text.
+pub(crate) fn lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => (),
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// The canonical form of the nearest existing ancestor, with the rest
+/// appended.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn resolved(path: &Path) -> Result<PathBuf, String> {
+    let mut current = path.to_path_buf();
+    let mut tail = Vec::new();
+    loop {
+        if let Ok(mut real) = canonicalize(&current) {
+            real.extend(tail.into_iter().rev());
+            return Ok(real);
+        }
+        let name = current
+            .file_name()
+            .ok_or("invalid filesystem path")?
+            .to_owned();
+        if !current.pop() {
+            return Err("invalid filesystem path".into());
+        }
+        tail.push(name);
+    }
+}
+
+/// The rest of `path` past `root`, when `path` is in it (component by
+/// component; ignoring ASCII case on Windows, as its file systems do).
+pub(crate) fn inside(path: &Path, root: &Path) -> Option<PathBuf> {
+    let mut rest = path.components();
+    for part in root.components() {
+        let next = rest.next()?;
+        let same = if cfg!(windows) {
+            next.as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&part.as_os_str().to_string_lossy())
+        } else {
+            next == part
+        };
+        if !same {
+            return None;
+        }
+    }
+    Some(rest.collect())
+}
+
+/// The rest of `path` in root `(expanded, canonical)`: under either form
+/// (`/var/…` and `/private/var/…` on macOS).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -> Option<PathBuf> {
+    inside(path, canonical).or_else(|| inside(path, expanded))
+}
+
+/// The `capabilities.fs.read` roots local media files are read under, as
+/// `fs/promises` reads files: the app's declared roots and the host's grant
+/// (which narrows them), their anchors (`${dataDir}`, `${pluginDir}`,
+/// `${homeDir}`) expanded and resolved once, when they are made
+/// ([`Access::media_url`]).
+#[derive(Debug, Default)]
+#[non_exhaustive]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub struct MediaFiles {
+    /// The declared roots' canonical forms.
+    declared: Vec<PathBuf>,
+    /// The host grant's, when it has one.
+    granted: Option<Vec<PathBuf>>,
+    /// Paths checked already, by their lexical form: their canonical form
+    /// if the roots hold them. A canvas checks its images on every draw;
+    /// resolving a path costs system calls.
+    checked: std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>,
+}
+
+impl Clone for MediaFiles {
+    fn clone(&self) -> Self {
+        Self {
+            declared: self.declared.clone(),
+            granted: self.granted.clone(),
+            checked: Default::default(),
+        }
+    }
+}
+
+/// The most paths [`MediaFiles`] remembers; past it, it starts over.
+#[cfg(not(target_arch = "wasm32"))]
+const CHECKED_PATHS: usize = 1024;
+
+impl MediaFiles {
+    /// `access`'s read roots, expanded against `data_dir` and `paths`.
+    /// Where the platform has no file system for apps (`available`
+    /// false: iOS, Android, as for `fs/promises`), none.
+    pub fn new(
+        access: &Access,
+        data_dir: Option<&Path>,
+        paths: &TrustedPaths,
+        available: bool,
+    ) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (access, data_dir, paths, available);
+            Self::default()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !available {
+                return Self::default();
+            }
+            let data = data_dir.map(Path::to_path_buf).unwrap_or_default();
+            let roots = |grants: &Capabilities| {
+                grants
+                    .fs
+                    .read
+                    .iter()
+                    .filter_map(|root| {
+                        let expanded = lexical(&paths.resolve_root(root, &data).ok()?);
+                        resolved(&expanded).ok()
+                    })
+                    .collect()
+            };
+            Self {
+                declared: roots(&access.declared),
+                granted: access.granted.as_ref().map(roots),
+                checked: Default::default(),
+            }
+        }
+    }
+
+    /// `path`'s canonical form, if a declared root holds it and the host's
+    /// grant does too. Symlinks are resolved here, not by the loader: the
+    /// platform's loaders open what they are given, with nothing to keep
+    /// them in a root (`fs/promises` works in the opened root instead).
+    fn readable(&self, path: &Path) -> Option<PathBuf> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !absolute(path) || self.declared.is_empty() {
+                return None;
+            }
+            let path = lexical(path);
+            let mut checked = self.checked.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(known) = checked.get(&path) {
+                return known.clone();
+            }
+            let real = resolved(&path).ok().filter(|real| {
+                let holds =
+                    |roots: &[PathBuf]| roots.iter().any(|root| inside(real, root).is_some());
+                holds(&self.declared) && self.granted.as_deref().is_none_or(holds)
+            });
+            if checked.len() >= CHECKED_PATHS {
+                checked.clear();
+            }
+            checked.insert(path, real.clone());
+            real
+        }
+    }
+}
+
 /// Virtual browser paths use Unix roots. `Path::is_absolute` on
 /// wasm32-unknown-unknown always returns false because it has no OS prefix.
 pub(crate) fn absolute(path: &Path) -> bool {
@@ -490,10 +662,13 @@ pub(crate) fn grant_advice(url: &str, capability: &str) -> String {
 }
 
 /// [`grant_advice`] for a media source, read as [`Access::media_url`] reads
-/// it: a protocol-relative source (`//host/…`) names the host it resolves to
-/// against `base`, the page's address, and without one has no scheme to load
-/// with.
+/// it: a local file is the `fs` capability's; a protocol-relative source
+/// (`//host/…`) names the host it resolves to against `base`, the page's
+/// address, and without one has no scheme to load with.
 pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
+    if media_capability(uri, base) == "fs" {
+        return LOCAL_FILE_ADVICE.to_owned();
+    }
     let unambiguous = !uri.contains('\\') && !uri.bytes().any(|b| b.is_ascii_control());
     if scheme_of(uri).is_none() && uri.starts_with("//") && unambiguous {
         let resolved = base
@@ -507,6 +682,18 @@ pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
     grant_advice(uri, "network")
 }
 
+/// The capability that grants media source `uri` against `base`, as
+/// [`Access::media_url`] reads it: `"fs"` for a local file (a `file:` URL;
+/// with no base, an absolute or drive path), else `"network"`.
+pub(crate) fn media_capability(uri: &str, base: Option<&str>) -> &'static str {
+    let local =
+        (base.is_none() || starts_with_ignoring_case(uri, "file:")) && local_file(uri).is_some();
+    if local { "fs" } else { "network" }
+}
+
+/// [`media_grant_advice`] for a local file.
+const LOCAL_FILE_ADVICE: &str = "a local file is read under capabilities.fs.read in nsh.json: add a root that holds it (desktop apps)";
+
 /// [`media_grant_advice`] for a protocol-relative source without a base.
 const NO_SCHEME_ADVICE: &str =
     "it names no scheme and has no page to take one from: write it as an http(s) URL";
@@ -514,16 +701,58 @@ const NO_SCHEME_ADVICE: &str =
 /// [`grant_advice`] for a URL without parts.
 const NO_HOST_ADVICE: &str = "it names no host a grant could add: write it as an http(s) URL with a host, a backslash as `%5C` and no control characters";
 
-/// Whether media source `uri` is the app's own or a local file, which stay
-/// as written: a bundled file (`asset:`), bytes it has (`data:`, `blob:`, an
-/// in-memory image's `data:…;nsh-key=` key), a `file:` URL or a Windows
-/// drive path (`C:\…`, `C:/…`), which WHATWG's parser would take for a
-/// one-letter scheme.
+/// Whether media source `uri` is the app's own, which stays as written: a
+/// bundled file (`asset:`) or bytes it has (`data:`, `blob:`, an in-memory
+/// image's `data:…;nsh-key=` key).
 fn is_own_media(uri: &str) -> bool {
-    ["asset:", "file:", "data:", "blob:"].iter().any(|prefix| {
-        uri.get(..prefix.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-    }) || matches!(uri.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic())
+    ["asset:", "data:", "blob:"]
+        .iter()
+        .any(|prefix| starts_with_ignoring_case(uri, prefix))
+}
+
+/// Whether `text` starts with `prefix`, ignoring ASCII case.
+fn starts_with_ignoring_case(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+/// The local file media source `uri` names, if it names one: a `file:` URL's
+/// path (`Some(None)` when it names none), an absolute path, or a Windows
+/// drive path (`C:\…`, `C:/…`, which WHATWG's parser would take for a
+/// one-letter scheme). A path starting with `//` or `/\` names a host.
+fn local_file(uri: &str) -> Option<Option<PathBuf>> {
+    if starts_with_ignoring_case(uri, "file:") {
+        return Some(file_url_path(uri));
+    }
+    let drive = matches!(uri.as_bytes(), [d, b':', b'\\' | b'/', ..] if d.is_ascii_alphabetic());
+    let rooted = uri.starts_with('/') && !uri.starts_with("//") && !uri.starts_with("/\\");
+    (drive || rooted).then(|| Some(PathBuf::from(uri)))
+}
+
+/// The path `file:` URL `uri` names. The web has no local files to name.
+fn file_url_path(uri: &str) -> Option<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = uri;
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        url::Url::parse(uri).ok()?.to_file_path().ok()
+    }
+}
+
+/// The `file:` URL of `path` (which [`file_url_path`] reads back).
+fn file_url_of(path: &Path) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = path;
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        url::Url::from_file_path(path).ok().map(String::from)
+    }
 }
 
 /// `uri` as WHATWG's parser reads it: without leading and trailing spaces
@@ -550,7 +779,7 @@ fn scheme_of(uri: &str) -> Option<&str> {
 /// its sources were read as WHATWG's parser reads them, anything without
 /// `://`, and URLs `allows_http` grants.
 fn media_as_written(uri: &str, allows_http: impl Fn(&str) -> bool) -> bool {
-    !uri.contains("://") || is_own_media(uri) || allows_http(uri)
+    !uri.contains("://") || is_own_media(uri) || local_file(uri).is_some() || allows_http(uri)
 }
 
 /// `serialized`, or `written` when the two are the same.
@@ -1704,17 +1933,21 @@ impl Access {
     }
 
     /// Whether a media URL (image, video, canvas image) may be loaded:
-    /// [`Self::media_url`] with no base, so a `//` source names no URL.
+    /// [`Self::media_url`] with no base, so a `//` source names no URL, and
+    /// no file roots, so an app with capabilities loads no local file.
     pub fn allows_media(&self, uri: &str) -> bool {
-        self.media_url(uri, None).is_some()
+        self.media_url(uri, None, None).is_some()
     }
 
     /// What a media source (image, video, canvas image, sound) loads, if the
     /// app may load it. `asset:` URIs are the app's own files; `data:` URIs
     /// and `blob:` URLs (`URL.createObjectURL`) are bytes the app already
-    /// has; a `file:` URL is a file path, as an absolute path is; a source
-    /// with no scheme that does not start with `//` or a backslash is
-    /// relative, the app's own: these stay as written. A source with a
+    /// has; a source with no scheme that does not start with `/` or a
+    /// backslash is relative, the app's own: these stay as written. A local
+    /// file (a `file:` URL; with no base, as in native apps, an absolute
+    /// path; on the web `/…` is the page's) is read under `files`, the
+    /// `capabilities.fs.read` roots ([`MediaFiles`]; `None`: none), and
+    /// loads as its canonical path, in the form it was written. A source with a
     /// scheme, or one that starts with `//` (resolved against `base`, the
     /// page's URL on the web, whose scheme it takes; with no base it names
     /// no URL, as `fetch`'s), names a host: it is checked as WHATWG's parser
@@ -1723,13 +1956,30 @@ impl Access {
     /// read differently by other parsers (Foundation's `NSURL`): only a
     /// grant of every host covers such a source, as written. An app without
     /// capabilities loads what it writes, unchecked.
-    pub fn media_url<'a>(&self, uri: &'a str, base: Option<&str>) -> Option<Cow<'a, str>> {
+    pub fn media_url<'a>(
+        &self,
+        uri: &'a str,
+        base: Option<&str>,
+        files: Option<&MediaFiles>,
+    ) -> Option<Cow<'a, str>> {
         if is_own_media(uri) {
             return Some(Cow::Borrowed(uri));
         }
         if self.is_unrestricted() {
             return media_as_written(uri, |url| self.allows_http("GET", url))
                 .then_some(Cow::Borrowed(uri));
+        }
+        let file_url = starts_with_ignoring_case(uri, "file:");
+        if (base.is_none() || file_url)
+            && let Some(path) = local_file(uri)
+        {
+            let real = files?.readable(&path?)?;
+            let loads = if file_url {
+                file_url_of(&real)?
+            } else {
+                real.into_os_string().into_string().ok()?
+            };
+            return Some(written_or(uri, loads));
         }
         // WHATWG's parser reads the source with leading and trailing spaces
         // and C0 controls and every tab and newline dropped.
@@ -2494,8 +2744,10 @@ mod tests {
         assert!(!access.allows_media("https://example.com/a.png"));
         assert!(access.allows_media("asset:/logo.png"));
         assert!(access.allows_media("logo.png"));
-        assert!(access.allows_media("/home/a/logo.png"));
-        assert!(access.allows_media("file:///home/a/logo.png"));
+        // Local files are `capabilities.fs.read`'s (#1180), which this
+        // declaration does not grant.
+        assert!(!access.allows_media("/home/a/logo.png"));
+        assert!(!access.allows_media("file:///home/a/logo.png"));
         assert!(access.allows_media("data:image/png;base64,iVBORw0KGgo="));
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
@@ -3019,12 +3271,16 @@ mod tests {
             "ht\ttps://bank.example/x.png",
             "\u{1}https://bank.example/x.png",
         ] {
-            assert_eq!(a.media_url(uri, page), None, "{uri:?} on the web");
-            assert_eq!(a.media_url(uri, None), None, "{uri:?} in a native app");
+            assert_eq!(a.media_url(uri, page, None), None, "{uri:?} on the web");
+            assert_eq!(
+                a.media_url(uri, None, None),
+                None,
+                "{uri:?} in a native app"
+            );
         }
         // What stays relative after stripping stays the app's own.
         assert_eq!(
-            a.media_url(" icons/a.png", page),
+            a.media_url(" icons/a.png", page, None),
             Some(Cow::Borrowed(" icons/a.png"))
         );
         // Hosts are checked as WHATWG writes them, and load as checked.
@@ -3033,18 +3289,138 @@ mod tests {
             granted: None,
         };
         assert_eq!(
-            local.media_url("http://0x7f.1/a.png", None),
+            local.media_url("http://0x7f.1/a.png", None, None),
             Some(Cow::Owned("http://127.0.0.1/a.png".into()))
         );
-        assert_eq!(a.media_url("http://0x7f.1/a.png", None), None);
+        assert_eq!(a.media_url("http://0x7f.1/a.png", None, None), None);
         // Schemes ignore case, the app's own sources' too.
         for own in [
             "DATA:image/png;base64,AA",
             "Asset:/a.png",
             "BLOB:https://app.example/1",
         ] {
-            assert_eq!(a.media_url(own, page), Some(Cow::Borrowed(own)), "{own}");
+            assert_eq!(
+                a.media_url(own, page, None),
+                Some(Cow::Borrowed(own)),
+                "{own}"
+            );
         }
+    }
+
+    /// A local file in a media source (an absolute path, a `file:` URL) is
+    /// read under `capabilities.fs.read`, as `fs/promises` reads it, and
+    /// loads as its canonical path, so a symlink in a granted root cannot
+    /// lead the platform's loader out of it.
+    #[cfg(unix)]
+    #[test]
+    fn local_media_files_need_an_fs_read_grant() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let root = base.join(format!("media-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("allowed")).unwrap();
+        std::fs::create_dir_all(root.join("outside")).unwrap();
+        std::fs::write(root.join("allowed/a.png"), b"png").unwrap();
+        std::fs::write(root.join("outside/b.png"), b"png").unwrap();
+        symlink(root.join("outside"), root.join("allowed/link")).unwrap();
+        // Canonical, so only the symlink below differs from its text.
+        let root = canonicalize(&root).unwrap();
+        let data = root.join("allowed");
+        let access = Access {
+            declared: caps(
+                r#"{ "network": { "hosts": ["docs.example.com"] }, "fs": { "read": ["${dataDir}"] } }"#,
+            ),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, Some(&data), &TrustedPaths::default(), true);
+        let real = canonicalize(&data).unwrap();
+        let path = |p: &Path| p.to_str().unwrap().to_owned();
+        let load = |uri: &str| {
+            access
+                .media_url(uri, None, Some(&files))
+                .map(Cow::into_owned)
+        };
+
+        let granted = path(&real.join("a.png"));
+        assert_eq!(load(&path(&data.join("a.png"))), Some(granted.clone()));
+        assert_eq!(
+            load(&format!("file://{}", path(&data.join("a.png")))),
+            Some(format!("file://{granted}"))
+        );
+        assert_eq!(
+            load(&format!("FILE://{}", path(&data.join("a.png")))),
+            Some(format!("file://{granted}"))
+        );
+        // `..`, percent-encoded or not, and a symlink lead out of the root.
+        assert_eq!(load(&path(&data.join("../outside/b.png"))), None);
+        assert_eq!(
+            load(&format!("file://{}/%2e%2e/outside/b.png", path(&data))),
+            None
+        );
+        assert_eq!(load(&path(&data.join("link/b.png"))), None);
+        assert_eq!(load(&path(&root.join("outside/b.png"))), None);
+        // No roots to read from: none granted, or no file system here.
+        assert_eq!(
+            access.media_url(&path(&data.join("a.png")), None, None),
+            None
+        );
+        let mobile = MediaFiles::new(&access, Some(&data), &TrustedPaths::default(), false);
+        assert_eq!(
+            access.media_url(&path(&data.join("a.png")), None, Some(&mobile)),
+            None
+        );
+        let network_only = Access {
+            declared: caps(r#"{ "network": { "hosts": ["docs.example.com"] } }"#),
+            granted: None,
+        };
+        let none = MediaFiles::new(&network_only, Some(&data), &TrustedPaths::default(), true);
+        assert_eq!(
+            network_only.media_url(&path(&data.join("a.png")), None, Some(&none)),
+            None
+        );
+        // The host's grant narrows the app's.
+        let narrowed = Access {
+            declared: caps(r#"{ "fs": { "read": ["${dataDir}"] } }"#),
+            granted: Some(caps(r#"{ "fs": { "read": ["${dataDir}/sub"] } }"#)),
+        };
+        let files = MediaFiles::new(&narrowed, Some(&data), &TrustedPaths::default(), true);
+        assert_eq!(
+            narrowed.media_url(&path(&data.join("a.png")), None, Some(&files)),
+            None
+        );
+        // On the web, `/x` is the page's; an app without capabilities loads
+        // what it names, as before.
+        let page = Some("https://app.example/index.html");
+        assert_eq!(
+            access.media_url("/icons/a.png", page, None),
+            Some(Cow::Borrowed("/icons/a.png"))
+        );
+        // An app without capabilities loads local files as written, as
+        // before.
+        for local in [
+            path(&root.join("outside/b.png")),
+            format!("FILE://{}", path(&root.join("outside/b.png"))),
+            "C:\\pictures\\x.png".to_owned(),
+            "/x.png".to_owned(),
+        ] {
+            assert_eq!(
+                Access::default().media_url(&local, None, None),
+                Some(Cow::Borrowed(local.as_str())),
+                "{local}"
+            );
+        }
+        // A path checked again answers the same, from what was checked.
+        let files = MediaFiles::new(&access, Some(&data), &TrustedPaths::default(), true);
+        for _ in 0..2 {
+            let again = |uri: &str| {
+                access
+                    .media_url(uri, None, Some(&files))
+                    .map(Cow::into_owned)
+            };
+            assert_eq!(again(&path(&data.join("a.png"))), Some(granted.clone()));
+            assert_eq!(again(&path(&data.join("link/b.png"))), None);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A refused source's advice names the host it resolves to, as the
@@ -3071,6 +3447,25 @@ mod tests {
             media_grant_advice("https://cdn.example.com/a.png", page),
             "add `cdn.example.com` to capabilities.network in nsh.json"
         );
+        // A local file is the `fs` capability's, in a native app; `/x` is
+        // the page's on the web.
+        assert_eq!(
+            media_grant_advice("/Users/a/x.png", None),
+            LOCAL_FILE_ADVICE
+        );
+        assert_eq!(
+            media_grant_advice("file:///Users/a/x.png", page),
+            LOCAL_FILE_ADVICE
+        );
+        // A refusal names the capability that would grant the source.
+        assert_eq!(media_capability("/Users/a/x.png", None), "fs");
+        assert_eq!(media_capability("C:\\pictures\\x.png", None), "fs");
+        assert_eq!(media_capability("FILE:///Users/a/x.png", page), "fs");
+        assert_eq!(media_capability("/icons/a.png", page), "network");
+        assert_eq!(
+            media_capability("https://cdn.example.com/a.png", None),
+            "network"
+        );
     }
 
     /// What a loader loads is what the check granted: a source naming a host
@@ -3085,7 +3480,7 @@ mod tests {
         };
         let https = Some("https://app.example/index.html");
         let http = Some("http://127.0.0.1:8080/");
-        let loads = |uri, base| a.media_url(uri, base).map(|u| u.into_owned());
+        let loads = |uri, base| a.media_url(uri, base, None).map(|u| u.into_owned());
         assert_eq!(
             loads("https://DOCS.example.com/a/../x.png", None).as_deref(),
             Some("https://docs.example.com/x.png")
@@ -3106,13 +3501,13 @@ mod tests {
         assert_eq!(loads("//bank.example/x.png", https), None);
         for own in ["asset:/a.png", "img/a.png", "data:image/png;base64,AAAA"] {
             assert!(
-                matches!(a.media_url(own, https), Some(std::borrow::Cow::Borrowed(u)) if u == own),
+                matches!(a.media_url(own, https, None), Some(std::borrow::Cow::Borrowed(u)) if u == own),
                 "{own}"
             );
         }
         // Without capabilities, nothing is checked or rewritten.
         assert!(matches!(
-            Access::default().media_url("//bank.example/x.png", None),
+            Access::default().media_url("//bank.example/x.png", None, None),
             Some(std::borrow::Cow::Borrowed("//bank.example/x.png"))
         ));
     }

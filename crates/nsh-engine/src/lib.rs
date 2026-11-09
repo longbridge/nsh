@@ -1895,6 +1895,26 @@ impl<M: TextEngine + 'static> Driver<M> {
             // What `//` media sources resolve against, as `fetch`'s URLs do.
             core.set_base_url(bundle.base_url.clone());
         }
+        // The roots local media files are read under, as `fs/promises`
+        // reads files (where it has a file system: the desktops).
+        let media_files = Arc::new(match &config.app {
+            App::Js(bundle) => nsh_core::access::MediaFiles::new(
+                &access,
+                config
+                    .data_dir
+                    .as_ref()
+                    .map(|root| root.join(app_dir_name(config.app.app_id())))
+                    .as_deref(),
+                &bundle_system_paths(bundle),
+                cfg!(any(
+                    target_os = "linux",
+                    target_os = "macos",
+                    target_os = "windows"
+                )) && config.environment.os.is_desktop(),
+            ),
+            _ => nsh_core::access::MediaFiles::default(),
+        });
+        core.set_media_files(media_files.clone());
         #[cfg(not(target_arch = "wasm32"))]
         core.set_image_context(nsh_core::image::loader::Context {
             asset_base: config.assets.as_ref().and_then(|a| a.base()),
@@ -1902,6 +1922,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                 Arc::new(move |uri: &str| assets.read(uri)) as nsh_core::image::loader::ReadAsset
             }),
             access: access.clone(),
+            media_files,
             // The same cache as the platform's ([`Engine::image_cache`]).
             disk: config.cache.open_images(config.app.app_id()),
             // The platform's, if it set one ([`nsh_core::image::loader::set_transport`]).
