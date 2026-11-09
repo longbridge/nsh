@@ -160,6 +160,21 @@ pub struct WindowProgress {
     pub state: ProgressState,
 }
 
+/// The look of the window controls a hidden title bar draws over the app
+/// ([`TitleBarOptions::caption_buttons`]; Windows' caption buttons). A
+/// field left out keeps Windows 11's own: one device pixel strokes,
+/// 10-point icons and 46-point buttons.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default, JsObject)]
+pub struct CaptionButtonOptions {
+    /// The icons' stroke width in points (one device pixel without it).
+    pub stroke_width: Option<Points>,
+    /// The icons' size in points, the square each is drawn in (10).
+    pub icon_size: Option<Points>,
+    /// One button's width in points (46).
+    pub button_width: Option<Points>,
+}
+
 /// The title bar a window has (`titleBar`).
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Default, JsObject)]
@@ -174,6 +189,9 @@ pub struct TitleBarOptions {
     /// Where the system's window controls go in a hidden title bar, from the
     /// window's top left corner (macOS's traffic lights).
     pub controls_offset: Option<Point<Points>>,
+    /// The look of the window controls drawn over a hidden title bar
+    /// (Windows' caption buttons).
+    pub caption_buttons: Option<CaptionButtonOptions>,
 }
 
 /// How a window follows its content's laid-out size (`sizeToContent`).
@@ -595,9 +613,10 @@ impl WindowAttributes {
         self.pointer_events == Some(WindowPointerEvents::None)
     }
 
-    /// Keeps the values in their ranges: a size not finite and positive and
-    /// a progress out of 0 to 1 are left out (with `false`), the title bar's height capped as
-    /// [`super::title_bar_height`] does.
+    /// Keeps the values in their ranges: a size not finite and positive, a
+    /// progress out of 0 to 1 and a caption button's metric not finite and
+    /// positive are left out (with `false`), the title bar's height capped
+    /// as [`super::title_bar_height`] does.
     pub fn sanitize(&mut self) -> bool {
         let mut fine = true;
         let size_ok = |s: &Size<Points>| {
@@ -623,6 +642,16 @@ impl WindowAttributes {
         }
         if let Some(t) = &mut self.title_bar {
             t.height = super::title_bar_height(t.height);
+            if let Some(c) = &mut t.caption_buttons {
+                for metric in [&mut c.stroke_width, &mut c.icon_size, &mut c.button_width] {
+                    if let Some(p) = *metric
+                        && !(p.0.is_finite() && p.0 > 0.0)
+                    {
+                        *metric = None;
+                        fine = false;
+                    }
+                }
+            }
         }
         fine
     }

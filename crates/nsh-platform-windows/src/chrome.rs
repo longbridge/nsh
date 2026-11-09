@@ -86,8 +86,36 @@ use crate::{
 /// (Windows 11's caption).
 const DEFAULT_CAPTION_HEIGHT: f32 = 32.0;
 
-/// A caption button's width, in points.
+/// A caption button's width, in points (Windows 11's).
 const BUTTON_WIDTH: f32 = 46.0;
+
+/// The square a caption button's icon is drawn in, in points (Windows 11's).
+const ICON_SIZE: f32 = 10.0;
+
+/// The drawn caption buttons' metrics in points: the app's where set
+/// (`titleBar`'s `caption_buttons`), Windows 11's where not.
+#[derive(Clone, Copy)]
+struct Metrics {
+    /// The icons' stroke width (`None`: one device pixel).
+    stroke: Option<f32>,
+    /// The square each icon is drawn in.
+    icon: f32,
+    /// One button's width.
+    button: f32,
+}
+
+impl Metrics {
+    /// What `attrs` draws with.
+    fn of(attrs: &crate::shell::Attrs) -> Self {
+        let app = attrs.title_bar.caption_buttons.unwrap_or_default();
+        let set = |v: Option<Points>| v.filter(|p| p.0.is_finite() && p.0 > 0.0).map(|p| p.0);
+        Metrics {
+            stroke: set(app.stroke_width),
+            icon: set(app.icon_size).unwrap_or(ICON_SIZE),
+            button: set(app.button_width).unwrap_or(BUTTON_WIDTH),
+        }
+    }
+}
 
 /// The undocumented messages that draw the menu bar (uxtheme's
 /// "UAH" menus): the whole bar, then each item.
@@ -283,7 +311,9 @@ pub(crate) fn title_bar_area(hwnd: HWND) -> Edges<Points> {
     match framed_attrs(hwnd) {
         Some(attrs) if attrs.hidden_title_bar() => Edges {
             top: Points(caption_height(hwnd)),
-            right: Points(crate::shell::caption_buttons(&attrs).len() as f32 * BUTTON_WIDTH),
+            right: Points(
+                crate::shell::caption_buttons(&attrs).len() as f32 * Metrics::of(&attrs).button,
+            ),
             bottom: Points(0.0),
             left: Points(0.0),
         },
@@ -621,7 +651,7 @@ fn caption_at(surface: &Surface, hwnd: HWND, x: f32, y: f32) -> Option<u32> {
     if from_right < 0.0 {
         return None;
     }
-    let i = (from_right / BUTTON_WIDTH).floor() as usize;
+    let i = (from_right / Metrics::of(&attrs).button).floor() as usize;
     crate::shell::caption_buttons(&attrs).get(i).copied()
 }
 
@@ -822,7 +852,7 @@ pub(crate) fn press_close_button(hwnd: HWND) -> Result<(), String> {
             let mut client = RECT::default();
             let _ = GetClientRect(hwnd, &mut client);
             let scale = crate::window::dpi(hwnd) as f32 / 96.0;
-            p.x = client.right - (BUTTON_WIDTH * scale / 2.0) as i32;
+            p.x = client.right - (Metrics::of(&attrs).button * scale / 2.0) as i32;
             p.y = (caption_height(hwnd) * scale / 2.0) as i32;
             let _ = ClientToScreen(hwnd, &mut p);
         } else {
@@ -895,16 +925,19 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
         return;
     };
     let dark = crate::shell::dark(surface, hwnd);
-    // Lines one device pixel wide, on pixel centers.
+    let metrics = Metrics::of(&attrs);
+    // Lines on pixel centers, one device pixel wide unless the app sets
+    // its own stroke width.
     let px = 1.0 / scale;
+    let stroke = metrics.stroke.unwrap_or(px);
     let snap = |v: f32| (v * scale).round() / scale + px / 2.0;
-    let glyph = 10.0;
+    let glyph = metrics.icon;
     let caption = caption_height(hwnd);
     for (i, code) in crate::shell::caption_buttons(&attrs)
         .into_iter()
         .enumerate()
     {
-        let x = width - BUTTON_WIDTH * (i + 1) as f32;
+        let x = width - metrics.button * (i + 1) as f32;
         // A window that cannot close shows its close button dimmed, inert.
         let enabled = code != HTCLOSE || attrs.closable;
         let hovered = enabled && shell.hover.get() == code;
@@ -937,12 +970,12 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
             if let Some(bg) = background
                 && let Ok(brush) = dc.CreateSolidColorBrush(&color_f(bg), None)
             {
-                dc.FillRectangle(&rect_f(x, 0.0, BUTTON_WIDTH, caption), &brush);
+                dc.FillRectangle(&rect_f(x, 0.0, metrics.button, caption), &brush);
             }
             let Ok(brush) = dc.CreateSolidColorBrush(&color_f(foreground), None) else {
                 continue;
             };
-            let left = snap(x + (BUTTON_WIDTH - glyph) / 2.0);
+            let left = snap(x + (metrics.button - glyph) / 2.0);
             let top = snap((caption - glyph) / 2.0);
             let (right, bottom) = (left + glyph - px, top + glyph - px);
             let line = |a: (f32, f32), b: (f32, f32)| {
@@ -950,7 +983,7 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
                     Vector2 { X: a.0, Y: a.1 },
                     Vector2 { X: b.0, Y: b.1 },
                     &brush,
-                    px,
+                    stroke,
                     None,
                 );
             };

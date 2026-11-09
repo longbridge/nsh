@@ -22,10 +22,10 @@ pub mod window;
 mod window_state;
 
 pub use window::{
-    Backdrop, CloseReason, MainWindowOptions, OpenWindow, ProgressState, ResizeEdge, SizeToContent,
-    TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause, WindowControl, WindowEvent,
-    WindowKind, WindowMode, WindowOptions, WindowPointerEvents, WindowPosition, WindowProgress,
-    WindowRequest, Workspaces,
+    Backdrop, CaptionButtonOptions, CloseReason, MainWindowOptions, OpenWindow, ProgressState,
+    ResizeEdge, SizeToContent, TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause,
+    WindowControl, WindowEvent, WindowKind, WindowMode, WindowOptions, WindowPointerEvents,
+    WindowPosition, WindowProgress, WindowRequest, Workspaces,
 };
 pub use window_state::{Display, DisplayId, WindowPlacement, WindowState};
 

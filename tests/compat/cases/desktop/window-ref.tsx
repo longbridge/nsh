@@ -18,7 +18,7 @@ function App() {
         onPress={() => {
           const win = Window.open(() => <Text>Document</Text>, { id: "doc", defaultSize: { width: 500, height: 400 }, defaultMode: "normal", restoreBounds: true });
           for (const w of [win, main]) {
-            w.set({ title: "Doc", titleBar: { style: "hidden", height: 44, controlsOffset: { x: 12, y: 14 } }, frame: "default" });
+            w.set({ title: "Doc", titleBar: { style: "hidden", height: 44, controlsOffset: { x: 12, y: 14 }, captionButtons: { strokeWidth: 1.5, iconSize: 12, buttonWidth: 50 } }, frame: "default" });
             w.set({ minSize: { width: 300, height: 200 }, maxSize: null, sizeToContent: "width" });
             w.set({ resizable: true, movable: true, minimizable: true, maximizable: true, closable: true, focusable: true, activate: true });
             w.set({ closeOnPress: false, closeOnEscape: true, closeOnBlur: false });
