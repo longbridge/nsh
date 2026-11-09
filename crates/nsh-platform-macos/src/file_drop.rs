@@ -1,5 +1,5 @@
 //! AppKit file-list drops, routed by the same hit testing as pointer input.
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use nsh_core::{EventKind, EventPayload};
 use objc2::runtime::ProtocolObject;
@@ -11,7 +11,7 @@ use crate::{input, surface::Surface, view::NshView};
 #[derive(Default)]
 pub(crate) struct State {
     target: RefCell<Option<NshView>>,
-    offered: Cell<bool>,
+    uris: RefCell<Vec<String>>,
     destinations: RefCell<Destinations>,
 }
 
@@ -118,13 +118,17 @@ fn set_target(surface: &Surface, target: Option<NshView>) {
     if let Some(next) = &target
         && next.state().events.contains(EventKind::FileDragEnter)
     {
-        surface.event(next.id(), EventKind::FileDragEnter, EventPayload::None);
+        surface.event(
+            next.id(),
+            EventKind::FileDragEnter,
+            EventPayload::FileDrop(surface.file_drop.uris.borrow().clone()),
+        );
     }
     *current = target;
 }
 
 pub(crate) fn clear(surface: &Surface) {
-    surface.file_drop.offered.set(false);
+    surface.file_drop.uris.borrow_mut().clear();
     set_target(surface, None);
 }
 
@@ -144,7 +148,7 @@ pub(crate) fn begin(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> NSDragOperation {
-    surface.file_drop.offered.set(!read_uris(sender).is_empty());
+    *surface.file_drop.uris.borrow_mut() = read_uris(sender);
     update(surface, sender)
 }
 
@@ -152,7 +156,7 @@ pub(crate) fn update(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> NSDragOperation {
-    let next = if surface.file_drop.offered.get() {
+    let next = if !surface.file_drop.uris.borrow().is_empty() {
         target(surface, sender)
     } else {
         None
@@ -176,6 +180,7 @@ pub(crate) fn perform(surface: &Surface, sender: &ProtocolObject<dyn NSDraggingI
         clear(surface);
         return false;
     }
+    *surface.file_drop.uris.borrow_mut() = uris.clone();
     set_target(surface, Some(destination.clone()));
     surface.event(
         destination.id(),
@@ -204,7 +209,7 @@ pub(crate) fn text_updated(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> Option<NSDragOperation> {
-    if !surface.file_drop.offered.get() {
+    if surface.file_drop.uris.borrow().is_empty() {
         return None;
     }
     Some(update(surface, sender)).filter(|operation| *operation == NSDragOperation::Copy)
@@ -216,8 +221,8 @@ pub(crate) fn text_performed(
     surface: &Surface,
     sender: &ProtocolObject<dyn NSDraggingInfo>,
 ) -> Option<bool> {
-    (surface.file_drop.offered.get() && target(surface, sender).is_some())
-        .then(|| perform(surface, sender))
+    let offered = !surface.file_drop.uris.borrow().is_empty();
+    (offered && target(surface, sender).is_some()).then(|| perform(surface, sender))
 }
 
 fn read_uris(sender: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
@@ -258,6 +263,23 @@ pub(crate) fn local_file_uri(uri: &NSString) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finder_references_expose_the_filename_before_drop() {
+        let path = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("nsh-drag-{}-a b.png", std::process::id()));
+        std::fs::write(&path, b"metadata only").unwrap();
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+        let reference = url.fileReferenceURL().unwrap().absoluteString().unwrap();
+        assert!(reference.to_string().contains("/.file/id="));
+        assert_eq!(
+            local_file_uri(&reference),
+            url.absoluteString().map(|s| s.to_string())
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn registration_lasts_until_the_final_destination_is_removed() {

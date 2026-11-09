@@ -150,7 +150,7 @@ without Gradle. Requirements:
   `libnsh.so`.
 
 The app targets API 35 (`targetSdkVersion`, what Google Play requires) unless `nsh.json` names another level, and
-needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
+needs API 26 (Android 8) or newer. It contains native code for the ABIs of phones,
 `arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
 yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
 

@@ -1013,6 +1013,18 @@ fn dialog_label(text: &str, class: &str, sheet: bool) -> gtk::Label {
     label
 }
 
+/// Native dialog controls own input over this NSH subtree until dismissal.
+pub(crate) fn blocks_activation(view: &NshView) -> bool {
+    SYSTEM.with(|system| {
+        system.try_borrow().map_or(true, |system| {
+            system.overlays.iter().any(|overlay| {
+                matches!(overlay.kind, OverlayKind::Dialog { .. })
+                    && (view == &overlay.root || view.is_ancestor(&overlay.root))
+            })
+        })
+    })
+}
+
 /// Shows `dialog` over the surface: a card in the middle (an alert) or at
 /// the bottom (an action sheet) over a dimmed backdrop. Answers the
 /// button's index; -1 when dismissed (a click outside or Escape, when
@@ -1582,6 +1594,19 @@ pub(crate) fn simulate_system_scheme(dark: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_query_fails_closed_during_overlay_mutation() {
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            assert!(!blocks_activation(&surface.root));
+            SYSTEM.with(|system| {
+                let _borrow = system.borrow_mut();
+                assert!(blocks_activation(&surface.root));
+            });
+            assert!(!blocks_activation(&surface.root));
+        });
+    }
 
     #[test]
     fn kernel_versions() {

@@ -60,9 +60,15 @@ impl Headless {
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
         // A hardware keyboard fires the app's shortcuts (`on_key`,
-        // `keymap.bind`), on every platform.
+        // `keymap.bind`), on every platform: those of the focused window
+        // and those of no window, as the desktops match them.
+        let window = self
+            .windows
+            .as_ref()
+            .and_then(|w| w.focused())
+            .unwrap_or(ROOT_ID);
         let found = match self.screen.keymap() {
-            Some(keymap) => keymap.find(stroke, editing, false),
+            Some(keymap) => keymap.find_in(window, stroke, editing, false),
             None => KeyMatch::None,
         };
         if let Some(id) = found.fired() {

@@ -356,6 +356,9 @@ pub(crate) struct Ivars {
     /// A subview that may not stay ours ([`stays_ours`]) can have come in
     /// since a scan of its subviews last found none ([`first_foreign`]).
     foreign: Cell<bool>,
+    /// Deferred drawing and placement marks in this subtree, including
+    /// this view. Only their transforms can reveal deferred work.
+    waiting: Cell<usize>,
 }
 
 define_class!(
@@ -1458,6 +1461,7 @@ impl NshView {
             unplaced: Cell::new(false),
             // Not known until a first scan.
             foreign: Cell::new(true),
+            waiting: Cell::new(0),
         });
         // SAFETY: NSView's designated initializer.
         let obj: Retained<ViewObj> = unsafe { msg_send![super(obj), initWithFrame: NSRect::ZERO] };
@@ -1645,7 +1649,11 @@ impl NshView {
     /// Marks its content as changed out of sight (or not); whether that
     /// changed the mark.
     pub(crate) fn set_stale(&self, stale: bool) -> bool {
-        self.ivars().stale.replace(stale) != stale
+        if self.ivars().stale.replace(stale) == stale {
+            return false;
+        }
+        self.adjust_waiting(1, stale);
+        true
     }
 
     /// Whether its content changed out of sight and waits to show
@@ -1656,7 +1664,29 @@ impl NshView {
 
     /// Marks whether its frame waits to be placed; true if that changed.
     pub(crate) fn set_unplaced(&self, unplaced: bool) -> bool {
-        self.ivars().unplaced.replace(unplaced) != unplaced
+        if self.ivars().unplaced.replace(unplaced) == unplaced {
+            return false;
+        }
+        self.adjust_waiting(1, unplaced);
+        true
+    }
+
+    /// Carries changed marks (or a moved subtree's marks) up the tree.
+    /// Transform frames only read the count; they never walk descendants.
+    fn adjust_waiting(&self, count: usize, added: bool) {
+        if count == 0 {
+            return;
+        }
+        let mut at = Some(self.clone());
+        while let Some(view) = at {
+            let waiting = &view.ivars().waiting;
+            waiting.set(if added {
+                waiting.get() + count
+            } else {
+                waiting.get() - count
+            });
+            at = view.parent_view();
+        }
     }
 
     /// Draws its content (text, canvas) again, if it draws any.
@@ -1881,8 +1911,6 @@ impl NshView {
         };
         if !root && self.ns().frame() != rect {
             self.ns().setFrame(rect);
-            // A transform or opacity alone (an endless animation) does
-            // not count: views out of sight stay so ([`crate::sight`]).
             crate::sight::moved();
             self.size_container();
             crate::native::resized(self);
@@ -1932,6 +1960,10 @@ impl NshView {
         layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
         layer.setPosition(self.ns().frame().origin);
         let t = transform.as_ref().map_or(IDENTITY, ca_transform);
+        // Unrelated spinners must not rescan a long list's deferred rows.
+        if self.ivars().waiting.get() != 0 && layer.transform() != t {
+            crate::sight::moved();
+        }
         layer.setTransform(t);
         layer.setOpacity(opacity.clamp(0.0, 1.0));
         layer.setHidden(hidden);
@@ -1993,6 +2025,7 @@ impl NshView {
         }
         let inputs = self.state().input_count;
         parent.track_inputs(inputs, true);
+        parent.adjust_waiting(self.ivars().waiting.get(), true);
         self.place();
         if inputs != 0 {
             crate::scroll::commit_ancestors(self);
@@ -2003,6 +2036,7 @@ impl NshView {
     pub(crate) fn unparent(&self) {
         if let Some(parent) = self.parent_view() {
             parent.track_inputs(self.state().input_count, false);
+            parent.adjust_waiting(self.ivars().waiting.get(), false);
         }
         self.ns().removeFromSuperview();
     }
@@ -2079,10 +2113,9 @@ impl NshView {
 /// `visibleRect` follows the bounds as AppKit has them committed; while a
 /// scroll offset shows as a layer transform the truth is the scroll state,
 /// so each ancestor's content shows from its scroll-state origin
-/// ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)). Ancestor
-/// transforms are not applied: nearly all are identity, and a transformed
-/// clip at most defers or draws early. Frames are the placed ones
-/// (`ns().frame()`: a sticky shift and mirroring applied), not the logical
+/// ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)). Transforms
+/// map each ancestor's visible part into its content space. Frames are the
+/// placed ones (`ns().frame()`: a sticky shift and mirroring applied), not the logical
 /// ones, for the view and its ancestors alike: the clip spaces are the
 /// ancestors' containers'. Hidden views are AppKit's (a screen under the
 /// top one), looked at once per view a pass resolves; the containers
@@ -2111,6 +2144,10 @@ impl crate::sight::Tree for Views {
 
     fn frame(&self, node: &NshView) -> crate::sight::Span {
         crate::sight::placed(node.ns().frame())
+    }
+
+    fn transform(&self, node: &NshView) -> Option<Matrix> {
+        node.state().transform()
     }
 
     fn content(&self, node: &NshView) -> ((f32, f32), bool) {
@@ -2151,6 +2188,10 @@ impl crate::sight::Tree for Planned {
             return Views.frame(node);
         }
         crate::sight::placed(node.placed_rect())
+    }
+
+    fn transform(&self, node: &NshView) -> Option<Matrix> {
+        Views.transform(node)
     }
 
     fn content(&self, node: &NshView) -> ((f32, f32), bool) {
