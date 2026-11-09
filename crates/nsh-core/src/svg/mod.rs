@@ -924,25 +924,25 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if resources.is_empty() {
             return Ok(());
         }
-        let elements = doc
-            .descendants()
-            .filter(roxmltree::Node::is_element)
-            .count()
-            .max(1) as u64;
         let vertices = self.vertices.max(1);
+        // A stylesheet can apply to every element the document expands to,
+        // including the copies a `<use>` makes; the walk's node count bounds
+        // both.
+        let expanded = total.nodes.max(1);
         for (id, resource) in resources {
             if resource.kind.cached(resource.node) && self.counted.contains(id) {
                 continue;
             }
             let body = self.resource_body(id, resource, 0, visiting)?;
             let multiplier = match resource.kind {
-                ResourceKind::Marker => vertices,
+                // A marker is laid out for each end and each vertex of every
+                // element the rule matches.
+                ResourceKind::Marker => expanded.saturating_mul(vertices),
                 // A cached resource is converted once however many rules
                 // name it; an objectBoundingBox clip path or mask is
-                // converted per element, and a stylesheet can apply to any
-                // element.
+                // converted per element.
                 kind if kind.cached(resource.node) => 1,
-                _ => elements,
+                _ => expanded,
             };
             total.add(body.scaled(multiplier)?)?;
         }

@@ -777,6 +777,18 @@ fn svg_safety_text_in_filters_is_bounded_per_reference() {
 }
 
 #[test]
+fn svg_safety_stylesheet_resources_follow_use_copies() {
+    // A style rule applies to every copy a `<use>` makes, so a mask named
+    // only by a class is laid out once per copy, not once per source element.
+    let text = "a".repeat(1000);
+    let uses = r##"<use href="#g"/>"##.repeat(100);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>.m{{mask:url(#m)}}</style><defs><mask id="m"><text x="0" y="9">{text}</text></mask><g id="g"><rect class="m" width="10" height="10"/></g></defs>{uses}</svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
 fn svg_safety_text_in_patterns_is_bounded() {
     // A pattern is converted once, so a small text stays under the bound
     // however many elements fill with it; a pattern over the bound is refused
