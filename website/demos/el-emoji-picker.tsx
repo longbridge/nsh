@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { desktop, EmojiPanel, Log, Panel, Split, ui, wide } from "./palette";
+import { desktop, EmojiPanel, Log, Panel, Split, sectionSurface, ui, wide } from "./palette";
 
 // An emoji picker as a chat app has it: the groups' tabs, search with the
 // skin tone hand, the recent emoji first, the one under the pointer named
@@ -31,11 +31,10 @@ function App() {
       >
         <View
           style={{
-            ...ui().card,
+            ...sectionSurface(),
             width: wide() ? 342 : undefined,
             height: desktop ? 400 : 440,
             alignSelf: wide() ? "center" : "stretch",
-            borderRadius: 12,
             overflow: "hidden",
           }}
         >
