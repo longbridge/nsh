@@ -10,8 +10,10 @@ import WindowElement from "./window-element";
 import WindowOpen from "./window-open";
 import WindowProps from "./window-props";
 import WindowRef from "./window-ref";
+import LinkHover from "./link-hover";
 
 const cases: Record<string, () => JSX.Element> = {
+  "link-hover": LinkHover,
   "window-open": WindowOpen,
   "window-element": WindowElement,
   "window-ref": WindowRef,

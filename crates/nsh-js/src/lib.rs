@@ -42,6 +42,7 @@ mod state;
 mod timers;
 mod touch;
 mod web;
+mod web_page;
 mod window;
 
 // The typed API check (docs/dev/geometry.md, "Typed API"): the scan is

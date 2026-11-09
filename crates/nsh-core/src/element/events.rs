@@ -21,6 +21,15 @@ pub struct FileDropEvent {
     pub page_position: Option<Point<Points>>,
 }
 
+/// Local files or directories a drag offers to an element while it enters
+/// (`on_file_drag_enter`); nothing has been dropped yet.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct FileDragEvent {
+    /// Absolute `file:` URLs in platform order; encoded filenames are preserved.
+    pub uris: Vec<String>,
+}
+
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollEvent {
@@ -569,6 +578,15 @@ pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
             uris: uris.clone(),
             page_position: Some(*page_position),
         })),
+        _ => None,
+    }
+}
+
+pub(crate) fn file_drag(p: &EventPayload) -> Option<Cow<'_, FileDragEvent>> {
+    match p {
+        EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
+            Some(Cow::Owned(FileDragEvent { uris: uris.clone() }))
+        }
         _ => None,
     }
 }

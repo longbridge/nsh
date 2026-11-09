@@ -55,7 +55,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
         return false;
     }
     let editing = crate::text_input::focused(surface).is_some();
-    let found = table.find(keystroke, editing, event.repeat);
+    // Only the bindings of the window the key is in (and JS's) take it.
+    let window = surface.input_root().id();
+    let found = table.find_in(window, keystroke, editing, event.repeat);
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,

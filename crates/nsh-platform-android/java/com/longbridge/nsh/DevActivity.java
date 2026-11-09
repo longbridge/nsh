@@ -152,7 +152,10 @@ public final class DevActivity extends Activity {
         } else {
             android.view.View decor = activity.getWindow().getDecorView();
             int flags = decor.getSystemUiVisibility();
-            int light = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            // Both bars, as above: the navigation bar's buttons are drawn
+            // over the app (edge to edge), so they follow its mode too.
+            int light = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             decor.setSystemUiVisibility(dark ? flags & ~light : flags | light);
         }
     }

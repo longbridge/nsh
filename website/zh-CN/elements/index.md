@@ -376,6 +376,40 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
 
+### 页面的标记
+
+在 Web 上，每个视图都是一个 HTML 元素，即它的属性所表明的元素，让搜索引擎和屏幕阅读器看到页面的标题、段落、链接和地标区域；布局、样式和事件仍是视图自己的。其他平台照常绘制视图。
+
+| 视图是什么 | Web 上的元素 |
+|---|---|
+| `role="header"`，`accessibilityLevel` 为 1 到 6（Rust 中为 `.role(AccessibilityRole::Header)`、`.accessibility_level(n)`） | `h1` … `h6`（没有级别时为 `h2`） |
+| 带 `href` 的 [`Link`](./link.md) | 指向 `href` 的 `a` |
+| `web={{ element }}`（Rust 中为 `.web_element(WebElement::P)`） | 它指定的元素：`"p"`、`"nav"`、`"header"`、`"footer"`、`"main"`、`"article"`、`"section"`、`"aside"`、`"ul"`、`"ol"`、`"li"`、`"strong"`、`"em"`、`"blockquote"`、`"figure"`、`"figcaption"`、`"time"`、`"address"`；优先于 `role` |
+| 其他 | `div` |
+
+链接的按压归 `Link`：普通点击触发它的 `onOpen`（配合 `openWith="app"`，应用照常导航）；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时像浏览器链接一样打开它。
+
+```rust tabs
+use nsh_base::{LinkOpenWith, link};
+use nsh_core::{WebElement, prelude::*};
+
+link()
+    .href("/notes/q3-earnings")
+    .open_with(LinkOpenWith::App)
+    .on_open(move |_: &SharedString| routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").role(AccessibilityRole::Header).accessibility_level(2))
+    .child(text("Revenue grew 12%.").web_element(WebElement::P))
+```
+
+```tsx tabs
+<Link href="/notes/q3-earnings" openWith="app" onOpen={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text role="header" accessibilityLevel={2}>Q3 earnings</Text>
+  <Text web={{ element: "p" }}>Revenue grew 12%.</Text>
+</Link>
+```
+
+[Web](../docs/web.md#搜索引擎) 展示了用这种方式构建的完整站点。
+
 ### 驱动动画值的手势
 
 这些属性把手势绑定到[原生动画值](../modules/nsh.md#animation)，值在 UI 线程上变化，每帧都不经过应用代码。参见[触摸与手势](../docs/touch-and-gestures.md)。

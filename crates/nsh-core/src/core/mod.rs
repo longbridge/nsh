@@ -1790,7 +1790,9 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
         let mut dependents = false;
+        let mut moved = false;
         if let Some(scroll) = node.scroll.as_mut() {
+            moved = scroll.offset != (x, y);
             scroll.offset = (x, y);
             if !scroll.dependents.is_empty() {
                 scroll.pending.retain(|&(n, _)| n > applied);
@@ -1803,6 +1805,11 @@ impl<M: TextEngine> Core<M> {
         self.cull_moved(key);
         if dependents {
             self.dependents_dirty(key);
+        }
+        // A link's hint placed where the pointer came over it would be left
+        // behind by the content (`Core::overlay_scrolled`).
+        if moved && !self.overlays.is_empty() {
+            self.overlay_scrolled(key);
         }
     }
 
@@ -5085,6 +5092,13 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::WebElement(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.web_element != value {
+                    props.web_element = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::WindowDrag(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.window_drag != value {
@@ -6829,7 +6843,7 @@ impl<M: TextEngine> Core<M> {
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
         let mut alignments = crate::AttachmentAlignments::default();
-        self.collect_text(key, base, &mut text, &mut alignments);
+        self.collect_text(key, base, &mut text, &mut alignments, false);
         if multiplier != 1.0 {
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
@@ -6888,12 +6902,15 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
+    /// The text of `key`'s children into `out`; `in_press`: inside a span
+    /// taking presses.
     fn collect_text(
         &self,
         key: Key,
         style: ResolvedTextStyle,
         out: &mut AttributedText,
         alignments: &mut crate::AttachmentAlignments,
+        in_press: bool,
     ) {
         for &c in &self.nodes[key as usize].children {
             let child = &self.nodes[c as usize];
@@ -6908,14 +6925,29 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
-                    self.collect_text(c, inner, out, alignments);
-                    if pressable(child.events) {
+                    let press = pressable(child.events);
+                    let hinted = child.overlay_watched & overlay::watch::HINT != 0;
+                    self.collect_text(c, inner, out, alignments, in_press || press);
+                    // A link with a hint (its URL) hears the pointer come
+                    // over its characters and leave them. A span that takes
+                    // no presses (a `RichEditor`'s link mark: the editor's
+                    // touches place the caret and open it) is one only for
+                    // its hint: no press, no stop of Tab. Inside a span that
+                    // takes presses it is none, so that span, the innermost
+                    // link there, keeps the press of those characters.
+                    if press || (hinted && !in_press) {
+                        let mut events = child.events;
+                        if hinted {
+                            events.set(EventKind::MouseEnter, true);
+                            events.set(EventKind::MouseLeave, true);
+                        }
                         out.links.push(crate::text::TextLink {
                             start,
                             end: out.len_utf16(),
                             node: child.id,
-                            events: child.events,
-                            focus_stop: child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
+                            events,
+                            focus_stop: press
+                                && child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
                         });
                     }
                     if let Some(test_id) = child.props.as_ref().and_then(|p| p.test_id.clone()) {

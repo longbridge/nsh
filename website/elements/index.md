@@ -437,6 +437,44 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
 
+### The page's markup
+
+On the web each view is an HTML element, the one its props say it is, so search engines and screen readers see the
+page's headings, paragraphs, links and landmarks; its layout, styles and events stay the view's. The other platforms
+draw the view as they always do.
+
+| What the view is | Element on the web |
+|---|---|
+| `role="header"` with `accessibilityLevel` 1 to 6 (Rust `.role(AccessibilityRole::Header)`, `.accessibility_level(n)`) | `h1` … `h6` (`h2` without a level) |
+| A [`Link`](./link.md) with an `href` | `a`, to the `href` |
+| `web={{ element }}` (Rust `.web_element(WebElement::P)`) | The element it names: `"p"`, `"nav"`, `"header"`, `"footer"`, `"main"`, `"article"`, `"section"`, `"aside"`, `"ul"`, `"ol"`, `"li"`, `"strong"`, `"em"`, `"blockquote"`, `"figure"`, `"figcaption"`, `"time"`, `"address"`; it wins over the role |
+| Anything else | `div` |
+
+A link is the `Link`'s to press: a plain click is its `onOpen` (with `openWith="app"`, the app navigates as it always
+does); crawlers follow the `href`, and a click with a modifier key or the middle button opens it as a browser link
+does.
+
+```rust tabs
+use nsh_base::{LinkOpenWith, link};
+use nsh_core::{WebElement, prelude::*};
+
+link()
+    .href("/notes/q3-earnings")
+    .open_with(LinkOpenWith::App)
+    .on_open(move |_: &SharedString| routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").role(AccessibilityRole::Header).accessibility_level(2))
+    .child(text("Revenue grew 12%.").web_element(WebElement::P))
+```
+
+```tsx tabs
+<Link href="/notes/q3-earnings" openWith="app" onOpen={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text role="header" accessibilityLevel={2}>Q3 earnings</Text>
+  <Text web={{ element: "p" }}>Revenue grew 12%.</Text>
+</Link>
+```
+
+[The web](../docs/web.md#search-engines) shows a whole site built this way.
+
 ### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh.md#animation) that move on the UI thread, with no
