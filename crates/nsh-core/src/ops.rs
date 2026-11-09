@@ -233,7 +233,7 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination (payload: [`EventPayload::FileDrop`]).",
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
@@ -833,7 +833,7 @@ pub enum EventPayload {
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.
     Press(PressEvent),
-    /// Local file URLs dropped by the user, in the platform's order.
+    /// Local file URLs offered on drag entry or dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// [`Self::FileDrop`] with where the files were let go, in the
     /// window's coordinates, from backends that know it.
