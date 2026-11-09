@@ -20082,7 +20082,7 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         view()
             .disabled(move || disabled.get())
             .on_press(move |_: &()| disabled.set(true))
-            .on_file_drag_enter(move |event: &crate::element::FileDropEvent| {
+            .on_file_drag_enter(move |event: &crate::element::FileDragEvent| {
                 received.set(format!("enter {}", event.uris.join("\n")))
             })
             .on_file_drag_leave(|_: &()| {})

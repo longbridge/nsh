@@ -169,7 +169,7 @@ view()
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | The mouse came over the view (or a view inside it) / left it or the window ([hover](./index.md#hover)); `onMouseLeave`'s is where it was last. |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | The mouse moved over the view (or a view inside it), with or without a button down, or a modifier key was pressed or released while it rests there with none down: `position`, `pagePosition` (`Point`s), `modifiers` and `pressedButton` (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"` or `null`); at most once a frame. |
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
-| `onFileDragEnter` | `.on_file_drag_enter` | `{ uris }` (`FileDropEvent`) | A local-file drag entered the active desktop destination with its offered file list. |
+| `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
 | `onFileDrop` | `.on_file_drop` | `{ uris: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
@@ -190,7 +190,7 @@ Use the entry list to preview filenames or counts before release. It contains me
 again at drop time. AppKit resolves Finder file references to path URLs. GTK reports entry when its asynchronous
 file-list preload finishes, including when the pointer stays still, and ignores completion after leave or reset.
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
-preview. Rust entry handlers receive `&FileDropEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
+preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
 
 ```rust tabs
 let hovering = signal(false);

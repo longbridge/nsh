@@ -57,6 +57,7 @@ pub use crate::element::{
     EventPayload,
     Extrapolate,
     // Typed events.
+    FileDragEvent,
     FileDropEvent,
     FluentBuilder,
     FontAsset,

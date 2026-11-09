@@ -156,24 +156,24 @@ impl IntoListener<PressEvent, ()> for Listener<()> {
     }
 }
 
-/// A file listener may ignore the metadata, as before it was reported.
-impl<F: Fn() + 'static> IntoListener<events::FileDropEvent, WithoutEvent> for F {
-    fn into_listener(self) -> Listener<events::FileDropEvent> {
-        Listener::new(Rc::new(move |_: &events::FileDropEvent| self()))
+/// A drag-entry listener may ignore the offered files, as before they were reported.
+impl<F: Fn() + 'static> IntoListener<events::FileDragEvent, WithoutEvent> for F {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        Listener::new(Rc::new(move |_: &events::FileDragEvent| self()))
     }
 }
 
-/// A file listener may keep its original unit argument.
-impl<F: Fn(&()) + 'static> IntoListener<events::FileDropEvent, OfUnit> for F {
-    fn into_listener(self) -> Listener<events::FileDropEvent> {
-        Listener::new(Rc::new(move |_: &events::FileDropEvent| self(&())))
+/// A drag-entry listener may keep its original unit argument.
+impl<F: Fn(&()) + 'static> IntoListener<events::FileDragEvent, OfUnit> for F {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        Listener::new(Rc::new(move |_: &events::FileDragEvent| self(&())))
     }
 }
 
-/// A stored unit listener may ignore a file event's metadata.
-impl IntoListener<events::FileDropEvent, ()> for Listener<()> {
-    fn into_listener(self) -> Listener<events::FileDropEvent> {
-        self.map(|_: &events::FileDropEvent| ())
+/// A stored unit listener may ignore a drag entry's files.
+impl IntoListener<events::FileDragEvent, ()> for Listener<()> {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        self.map(|_: &events::FileDragEvent| ())
     }
 }
 
@@ -1430,10 +1430,10 @@ pub trait Interactive: Element {
     /// A local file drag entered this desktop drop destination. The URLs
     /// describe the offered files; their contents are not read. GTK waits
     /// for its file-list preload before reporting entry.
-    fn on_file_drag_enter<M>(self, listener: impl IntoListener<events::FileDropEvent, M>) -> Self {
+    fn on_file_drag_enter<M>(self, listener: impl IntoListener<events::FileDragEvent, M>) -> Self {
         self.on(
             EventKind::FileDragEnter,
-            events::typed(listener.into_listener(), events::file_drop),
+            events::typed(listener.into_listener(), events::file_drag),
         )
     }
 
@@ -2789,7 +2789,7 @@ mod file_listener_tests {
             view().on_file_drag_enter(move || a.set(a.get() + 1)),
             view().on_file_drag_enter(move |_: &()| b.set(b.get() + 1)),
             view().on_file_drag_enter(unit),
-            view().on_file_drag_enter(move |e: &events::FileDropEvent| {
+            view().on_file_drag_enter(move |e: &events::FileDragEvent| {
                 assert_eq!(e.uris, ["file:///tmp/a%20b.png"]);
                 d.set(d.get() + 1);
             }),
