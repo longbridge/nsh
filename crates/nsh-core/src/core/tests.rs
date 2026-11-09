@@ -214,6 +214,43 @@ fn calls_into_rust_settle_their_promises_whatever_happens() {
 }
 
 #[test]
+fn a_call_into_rust_that_is_not_async_spawns_tasks_and_makes_signals() {
+    use std::rc::Rc;
+
+    use crate::element::{RustCall, RustOp, ToJs, signal, spawn};
+    let mut c = core();
+    let done = Rc::new(Cell::new(0));
+    let seen = done.clone();
+    c.apply(Op::Rust(RustOp {
+        call: 1,
+        run: RustCall::Op(Box::new(move |_| {
+            let count = signal(1);
+            spawn(async move {
+                count.update(|n| *n += 1);
+                seen.set(count.get_untracked());
+            });
+            Ok(Box::new(()) as Box<dyn ToJs>)
+        })),
+    }))
+    .unwrap();
+    for _ in 0..10 {
+        if done.get() != 0 {
+            break;
+        }
+        c.run_component_tasks();
+    }
+    assert_eq!(done.get(), 2);
+    let replies: Vec<_> = js_events(&mut c)
+        .into_iter()
+        .map(|(_, _, payload)| match payload {
+            EventPayload::Native { data, .. } => data,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(replies, [serde_json::json!({ "c": 1, "v": null })]);
+}
+
+#[test]
 fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
     use crate::element::{JsHost, JsOwned, JsValue, PropError, RustCall, RustOp, ToJs, TsTypes};
     /// Panics as it drops.
