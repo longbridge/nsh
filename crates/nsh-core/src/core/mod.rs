@@ -5647,6 +5647,12 @@ impl<M: TextEngine> Core<M> {
                     .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
+            // A dialog opening in content a scroll view has not made yet
+            // makes the views around it: it shows over everything.
+            let parent_created = parent_created
+                || (child_kind == Kind::Modal
+                    && self.nodes[parent as usize].culled
+                    && self.uncull(parent));
             // An overlay's native view goes to its root view
             // (`sync_overlays`).
             if parent_created
