@@ -134,6 +134,9 @@ pub struct WindowRef {
     /// The close presses of a window of the app's own: how many, and the
     /// last one's reason (the main window's are the environment's).
     close_press: Option<Signal<(u64, CloseReason)>>,
+    /// What a window of the app's own was set to before its element was
+    /// mounted (its content's first render): opened with it.
+    early: Option<Signal<WindowAttributes>>,
 }
 
 impl fmt::Debug for WindowRef {
@@ -159,6 +162,7 @@ pub fn main_window() -> WindowRef {
         title_bar: None,
         close: None,
         close_press: None,
+        early: None,
     }
 }
 
@@ -193,7 +197,16 @@ impl WindowRef {
     fn command(&self, command: DesktopCommand) {
         match self.target {
             Target::Main => super::ambient::desktop_command(command),
-            Target::Own(element) => element.send(Command::Desktop(Box::new(command))),
+            // Not mounted yet (set while it first renders): the attributes
+            // join the options it opens with, nothing else reaches it.
+            Target::Own(element) => match (command, self.early) {
+                (DesktopCommand::SetAttributes(attributes), Some(early))
+                    if element.node().is_none() =>
+                {
+                    early.update(|e| e.merge(&attributes));
+                }
+                (command, _) => element.send(Command::Desktop(Box::new(command))),
+            },
         }
     }
 
@@ -595,21 +608,25 @@ impl IntoElement for Window {
         let bound = Rc::new(bound);
         let reactive = Rc::new(reactive);
         super::when(is_open, move || {
-            let (element, state, title_bar, close_press) = match &opened {
+            let (element, state, title_bar, close_press, early) = match &opened {
                 Some(WindowRef {
                     target: Target::Own(element),
                     state: Some(state),
                     title_bar: Some(title_bar),
                     close_press: Some(close_press),
+                    early: Some(early),
                     ..
-                }) => (*element, *state, *title_bar, *close_press),
+                }) => (*element, *state, *title_bar, *close_press, *early),
                 _ => (
                     super::element_ref(),
                     super::signal(None::<WindowState>),
                     super::signal(Edges::<Points>::default()),
                     super::signal((0u64, CloseReason::default())),
+                    super::signal(WindowAttributes::default()),
                 ),
             };
+            // A window opened again starts from its options.
+            super::untracked(|| early.set(WindowAttributes::default()));
             let close: Rc<dyn Fn(WindowCloseCause)> = {
                 let on_open_change = on_open_change.clone();
                 Rc::new(move |cause: WindowCloseCause| {
@@ -629,13 +646,13 @@ impl IntoElement for Window {
                 title_bar: Some(title_bar),
                 close: Some(close.clone()),
                 close_press: Some(close_press),
+                early: Some(early),
             };
             LiveWindows::add(this.clone());
             super::provide_context(this);
             let mut modal = super::modal().element_ref(&element);
             {
                 let node = modal.node();
-                let dynamic = !bound.is_empty() || !reactive.is_empty();
                 let options = options.clone();
                 let bound = bound.clone();
                 let reactive = reactive.clone();
@@ -647,16 +664,15 @@ impl IntoElement for Window {
                     for r in reactive.iter() {
                         o.attributes.merge(&r.get());
                     }
+                    early.with(|e| o.attributes.merge(e));
                     o
                 };
                 let apply = |attrs: &mut super::Attrs, o: WindowOptions| {
                     attrs.window = Some(Box::new(o));
                 };
-                if !dynamic {
-                    node.bind_attr(super::Reactive::Static(resolve()), apply);
-                } else {
-                    node.bind_attr(super::Reactive::Bound(Rc::new(resolve)), apply);
-                }
+                // Bound even with static options: what its content sets
+                // while it first renders (`early`) joins them.
+                node.bind_attr(super::Reactive::Bound(Rc::new(resolve)), apply);
                 let on_close_press = on_close_press.clone();
                 let close_on_dismiss = close.clone();
                 node.handlers.push((
@@ -853,6 +869,7 @@ pub fn open_window(mut window: Window) -> Option<WindowRef> {
                 })
             }),
             close_press: Some(super::signal((0, CloseReason::default()))),
+            early: Some(super::signal(WindowAttributes::default())),
         })
     });
     window.on_open_change = Some(on_open_change);

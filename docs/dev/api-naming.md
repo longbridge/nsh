@@ -47,6 +47,9 @@ go elsewhere under these rules rather than into them.
 - A Rust enum's variants are a string union of the same words (`DialogChangeReason::BackdropPress` →
   `"backdropPress"`).
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
+- A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
+  object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
+  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`.
 
 ## Conventions
 
@@ -187,6 +190,20 @@ giving the trigger the focus back. The list itself (the highlight, search, secti
 be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled state machine
 (`crates/nsh-base/src/listbox.rs`, which `Combobox` will share) and keeps `gpui-component`'s names for its data
 (`SearchableListItem::title`, `SearchableGroup`'s sections) while its look stays the app's.
+
+`EmojiPicker` has no counterpart in `gpui-kit`: its name is that of `gpui-base`'s `*Picker`s (`ColorPicker`,
+`DatePicker`), its behavior and names `Command`'s (`onSelect`, `onHighlightChange({ highlighted })`,
+`onQueryChange`, `onCancel`, the `searchBar` / `search` / `list` / `item` / `group` parts, `renderItem`,
+`renderGroup`, `empty`), and its features those of frimousse and AndroidX's `EmojiPickerView` (rows of `columns`
+cells, a global skin tone, recent emoji the app keeps, a newest Emoji version). The groups' tabs and the skin tone
+choice are the app's `Tabs` and controls in its slots, with `onGroupChange` and `scrollToGroup`.
+Its own names are those the emoji pickers share: `EmojiPicker` as frimousse, emoji_picker_flutter and shadcn's
+registry name it (AndroidX `EmojiPickerView`, emoji-picker-element `<emoji-picker>`); `emojiVersion`, the newest
+Emoji version shown, as frimousse, emoji-mart and emoji-picker-element; `skinTone` and its values (`"mediumLight"`, ...)
+as frimousse's and CLDR's skin tone names; `columns` as frimousse and emoji_picker_flutter; `label` as frimousse's and
+emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.txt`, emojibase's `smileys-emotion`,
+...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
+entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
 ## Shapes that can grow
 
