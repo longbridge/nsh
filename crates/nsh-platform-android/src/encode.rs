@@ -1341,6 +1341,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         e.opt_string(action.label.as_deref());
     }
     e.opt_string(p.test_id.as_deref());
+    e.opt_string(p.native_id.as_deref());
     e.float(p.long_press_delay.unwrap_or(-1.0));
     match p.ripple {
         Some(r) => {

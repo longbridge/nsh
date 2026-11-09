@@ -37,6 +37,9 @@ pub(crate) struct TargetIvars {
     scrolls_applied: std::cell::RefCell<rustc_hash::FxHashMap<NodeId, u32>>,
     /// The app's keyboard shortcuts, matched as keys are pressed.
     keymap: crate::keymap::KeymapState,
+    /// The scroll views of the surface the embedding app may watch
+    /// ([`crate::scroll_watch`]).
+    scrolls: crate::scroll_watch::SurfaceScrolls,
 }
 
 define_class!(
@@ -336,6 +339,9 @@ define_class!(
                 .control
                 .scroll(id, point(px(offset.x as f32), px(offset.y as f32)), applied);
             self.with_mounter(move |m| m.scrolled(id, offset));
+            // The host's handle hears it in this frame, without the mounter
+            // (its listener may scroll, which calls back in).
+            self.ivars().scrolls.scrolled(id);
             // A text area scrolling moves its caret, and a built-in bar's
             // thumb.
             if scroll.downcast_ref::<input::Area>().is_some() {
@@ -498,12 +504,14 @@ impl EventTarget {
         mtm: MainThreadMarker,
         control: EngineControl,
         mounter: SharedMounter,
+        scrolls: crate::scroll_watch::SurfaceScrolls,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(TargetIvars {
             control,
             mounter,
             scrolls_applied: Default::default(),
             keymap: Default::default(),
+            scrolls,
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -705,6 +713,13 @@ impl EventTarget {
     /// only dismiss it (`keyboardShouldPersistTaps` "never").
     pub(crate) fn press_allowed(&self, view: &UIView) -> bool {
         self.keyboard_tap(view) != Some(KeyboardTaps::Never) || on_input(view)
+    }
+
+    /// The host stopped `scroll`'s glide ([`crate::ScrollHandle::stop_scrolling`]):
+    /// UIKit reports no end of it, so the app hears it here.
+    pub(crate) fn glide_stopped(&self, scroll: &UIScrollView) {
+        self.scroll_event(scroll, EventKind::MomentumEnd);
+        self.scroll_event(scroll, EventKind::ScrollEnd);
     }
 
     fn scroll_event(&self, scroll: &UIScrollView, event: EventKind) {

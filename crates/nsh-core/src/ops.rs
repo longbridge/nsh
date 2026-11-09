@@ -2578,8 +2578,9 @@ pub enum Prop {
     /// (`nsh/ios`) shown over the keyboard while the input has focus.
     #[prop(ios = "inputAccessoryViewID", on = INPUT)]
     InputAccessoryViewId(Option<Box<str>>),
-    /// `nativeID`: names the view for others (an input accessory's for
-    /// `inputAccessoryViewID`).
+    /// `nativeID`: names the view for others: an input accessory's for
+    /// `inputAccessoryViewID`, a scroll view's for the embedding app's
+    /// `watchScroll`.
     #[prop(js = "nativeID")]
     NativeId(Option<Box<str>>),
     /// The highlight of an input's or a selectable text's selection (Rust
