@@ -852,7 +852,8 @@ impl Screen {
 
     /// The views of [`Screen::attached`] (below the root, of a stack only
     /// its top screen, spans of text aside), in tree order, as layout
-    /// placed them.
+    /// placed them. Each one's [`LayoutNode::parent`] is the root or a view
+    /// before it in the list.
     pub fn layout_nodes(&self) -> Vec<LayoutNode> {
         let mut out = Vec::new();
         // A view, the view it is in, the origin of that view's content in
@@ -869,6 +870,12 @@ impl Screen {
                 None if id == ROOT => &root,
                 None => continue,
             };
+            // A view the core never created is not on screen, nor is what
+            // it holds: leaving out the whole subtree keeps every node's
+            // parent in the list.
+            if id != ROOT && view.kind.is_none() {
+                continue;
+            }
             let hidden = hidden || view.hidden;
             let origin = if view.kind == Some(ViewKind::Modal) {
                 Point::default()
@@ -2548,6 +2555,30 @@ mod tests {
         screen.apply(&batch(vec![content(2000.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
         assert!(screen.take_scrolled().is_empty());
+    }
+
+    #[test]
+    fn layout_nodes_leave_out_what_is_in_a_view_never_created() {
+        let mut screen = Screen::default();
+        // 2 is inserted without being created: what it holds is not on
+        // screen either, and no node names it as its parent.
+        screen.apply(&batch(vec![
+            create(4, ViewKind::View),
+            create(6, ViewKind::View),
+            frame(4, 0.0, 0.0, 100.0, 20.0),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(1, 6),
+        ]));
+        let nodes = screen.layout_nodes();
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        assert_eq!(ids, [6]);
+        assert!(
+            nodes
+                .iter()
+                .all(|n| n.parent == ROOT || ids.contains(&n.parent))
+        );
     }
 
     #[test]
