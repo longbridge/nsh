@@ -306,6 +306,15 @@ fn headless_desktops_play_the_platform_s_windows() {
 }
 
 #[test]
+fn menu_shortcuts_choose_the_application_menu_s_items() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/menus");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn apps_run_under_the_capabilities_their_nsh_json_declares() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/capabilities");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
