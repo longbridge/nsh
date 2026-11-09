@@ -17,7 +17,8 @@ const zh = lang === 'zh-CN';
 const SINGULAR: Record<string, [string, string]> = { library: ['Library', '功能库'], component: ['Component', '组件'], template: ['Template', '模板'], tool: ['Tool', '工具'] };
 const categoryLabel = Object.fromEntries(Object.entries(SINGULAR).map(([id, [en, cn]]) => [id, zh ? cn : en]));
 const submitUrl = `${SHOWCASES_URL}#submit-a-directory-entry`;
-const owner = (source: string) => source.replace(/^https:\/\/github\.com\//, '').split('/')[0];
+// A stable hue per project so the letter marks differ without any image.
+const hue = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
 const t = zh
   ? {
@@ -74,7 +75,7 @@ const t = zh
       <ul class="directory-list" data-list>
         {entries.map((e) => (
           <li class="directory-item" data-search={[e.name, e.author, e.description, e.category, ...e.platforms].join(' ').toLowerCase()}>
-            <img class="directory-item__avatar" src={`https://github.com/${owner(e.source)}.png?size=80`} alt="" width="40" height="40" loading="lazy" />
+            <span class="directory-item__mark" aria-hidden="true" style={`--mark-hue: ${hue(e.name)}`}>{e.name.trim().charAt(0).toUpperCase()}</span>
             <div class="directory-item__body">
               <div class="directory-item__head">
                 <a class="directory-item__name" href={e.website ?? e.source} target="_blank" rel="noopener noreferrer">{e.name}</a>
@@ -128,11 +129,12 @@ const t = zh
   .directory-actions { display: flex; align-items: center; gap: 1rem; margin-top: 1.25rem; }
   .directory-count { color: var(--muted-foreground); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
   .directory-pending { padding: 3rem 1rem; border: 1px dashed var(--border); border-radius: var(--radius-card); color: var(--muted-foreground); text-align: center; }
-  .directory-list { margin: 1rem 0 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
-  .directory-item { display: flex; align-items: center; gap: 1rem; margin: 0; padding: 1rem; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+  .directory-list { margin: 1rem 0 0; padding: 0; list-style: none; }
+  .directory-item { display: flex; align-items: center; gap: 1rem; margin: 0; padding: 1rem 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
   .directory-item:first-child { border-top: 0; }
   .directory-item[hidden] { display: none; }
-  .directory-item__avatar { flex-shrink: 0; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: var(--muted); }
+  .directory-item__mark { display: grid; place-items: center; flex-shrink: 0; width: 2.5rem; height: 2.5rem; border-radius: 0.625rem; background: hsl(var(--mark-hue) 70% 94%); color: hsl(var(--mark-hue) 55% 34%); font-size: 1.0625rem; font-weight: 650; }
+  .dark .directory-item__mark { background: hsl(var(--mark-hue) 35% 20%); color: hsl(var(--mark-hue) 70% 78%); }
   .directory-item__body { flex: 1; min-width: 0; }
   .directory-item__head { display: flex; align-items: baseline; gap: 0.5rem; }
   .directory-item__name { color: var(--foreground); font-weight: 600; text-decoration: none; }
