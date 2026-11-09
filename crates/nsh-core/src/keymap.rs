@@ -444,10 +444,8 @@ impl Keystroke {
                 Key::F(11) if m == Modifiers::default() => Some("it toggles full screen"),
                 _ => None,
             },
-            // The browser keeps its own keys: the page never sees them; an
-            // external platform's host keeps what it reserves before NSH
-            // sees it.
-            Os::Web | Os::External(_) => None,
+            // The browser keeps its own keys: the page never sees them.
+            Os::Web => None,
         }
     }
 
@@ -589,7 +587,7 @@ pub fn shifted(c: char) -> char {
 pub fn apple_keys(os: Os, apple_keyboard: bool) -> bool {
     match os {
         Os::MacOs | Os::Ios => true,
-        Os::Web | Os::External(_) => apple_keyboard,
+        Os::Web => apple_keyboard,
         Os::Android | Os::Windows | Os::Linux => false,
     }
 }
