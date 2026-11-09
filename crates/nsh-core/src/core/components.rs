@@ -640,6 +640,9 @@ pub(super) struct Components {
     /// Elements whose transitions' time to tell once this commit is
     /// styled ([`crate::element::ElementRef::transition_time`]).
     pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
+    /// Presses to pass on inside elements once this commit is laid out
+    /// ([`crate::element::ElementRef::press_at`]).
+    pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
@@ -741,6 +744,7 @@ impl Default for Components {
             animations: FxHashMap::default(),
             measures: Vec::new(),
             transition_times: Vec::new(),
+            presses: Vec::new(),
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
@@ -1575,8 +1579,14 @@ impl<M: TextEngine> Core<M> {
             RustCall::Op(run) => {
                 let mut cx = ModuleCx::default();
                 // The app's code: a panic rejects the call (its actions are
-                // dropped) instead of unwinding through the engine.
-                let result = match caught(|| run(&mut cx)) {
+                // dropped) instead of unwinding through the engine. It runs
+                // in the graph, as a listener does: it may `spawn` and use
+                // signals.
+                let ran = {
+                    let _entered = self.components.runtime.enter();
+                    caught(|| run(&mut cx))
+                };
+                let result = match ran {
                     Ok(result) => {
                         for action in std::mem::take(&mut cx.actions) {
                             self.apply_action(action);
@@ -3056,6 +3066,18 @@ impl<M: TextEngine> Core<M> {
         host: NodeId,
         inst: &mut Instance,
     ) -> (Vec<Expanded>, Option<usize>) {
+        // Kept rows update through their item bindings. In the same order,
+        // matching would only move these elements into the output unchanged.
+        if old.len() == new.len()
+            && old.iter().zip(&new).all(|(previous, (owner, el))| {
+                owner.is_none()
+                    && matches!(&el.kind, ElKind::Keep)
+                    && el.key.is_some()
+                    && el.key == previous.key
+            })
+        {
+            return (old, None);
+        }
         // `children_each`: one wrapper per JS child, keyed by it; in a view,
         // a region following them.
         let new = if new
@@ -4813,6 +4835,10 @@ impl<M: TextEngine> Core<M> {
     }
 
     fn dispatch_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        // A cancelled press's release reaches no one, JS included.
+        if self.drop_cancelled_press(id, kind, payload) {
+            return true;
+        }
         // Touches come on the root with the listening nodes around each
         // finger: the components hear theirs, JS its own.
         if kind == EventKind::Touch && id == ROOT_ID {
@@ -4824,7 +4850,11 @@ impl<M: TextEngine> Core<M> {
         }
         // Hints follow the pointer on their anchors, whoever else listens.
         if matches!(kind, EventKind::MouseEnter | EventKind::MouseLeave) {
-            self.overlay_hover(id, kind);
+            let at = match payload {
+                EventPayload::Mouse(mouse) => Some(mouse.page_position),
+                _ => None,
+            };
+            self.overlay_hover(id, kind, at);
         }
         if self.platform_event(id, kind, payload) {
             return true;
@@ -5073,6 +5103,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The app's address, which the engine shares with every VM's
     /// `System` (`UrlScheme.url()` reads it there).
+    #[doc(hidden)]
     pub fn app_url_cell(&self) -> crate::url_scheme::AppUrlCell {
         self.components.url_schemes.address.clone()
     }
@@ -5384,6 +5415,7 @@ impl<M: TextEngine> Core<M> {
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
+            Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
             Action::ImageInfo(_, answer)
@@ -6147,8 +6179,12 @@ impl<M: TextEngine> Core<M> {
     /// the table JS's and theirs make, listened to while either has one.
     pub(super) fn sync_keys(&mut self) {
         let rust = {
+            // The windows' refs read the graph.
+            let _entered = self.components.runtime.enter();
             let mut keys = self.components.executor.keys.borrow_mut();
-            if !std::mem::take(&mut keys.changed) {
+            // A binding of a window that was not mounted yet is placed
+            // once it is.
+            if !std::mem::take(&mut keys.changed) && !keys.unplaced {
                 return;
             }
             !keys.list.is_empty()
@@ -6171,18 +6207,24 @@ impl<M: TextEngine> Core<M> {
     /// The surface's table: JS's bindings, then the views' (the newest that
     /// may fire wins, so a view's wins over JS's of the same keystroke).
     fn keymap(&self) -> Arc<crate::keymap::Keymap> {
-        let keys = self.components.executor.keys.borrow();
+        let mut keys = self.components.executor.keys.borrow_mut();
         let overlay = self.overlay_key_binding();
         if keys.list.is_empty() && overlay.is_none() {
+            keys.unplaced = false;
             return self.components.js_keymap.clone();
         }
+        let views = {
+            let _entered = self.components.runtime.enter();
+            keys.bindings()
+        };
+        drop(keys);
         let bindings = self
             .components
             .js_keymap
             .bindings()
             .iter()
             .copied()
-            .chain(keys.list.iter().map(|k| k.binding))
+            .chain(views)
             .chain(overlay)
             .collect();
         Arc::new(crate::keymap::Keymap::new(bindings))

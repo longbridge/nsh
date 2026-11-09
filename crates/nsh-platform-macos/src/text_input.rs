@@ -960,6 +960,17 @@ macro_rules! define_text_view {
             impl $name {
                 $($methods)*
 
+                /// The Edit menu's Copy (Cmd+C): the editor's own selection,
+                /// else the text selected around the input while it keeps
+                /// the focus (a chat's messages above its composer).
+                #[unsafe(method(copy:))]
+                fn copy(&self, sender: Option<&AnyObject>) {
+                    if !copies_selection_around(self, $surface(self)) {
+                        // SAFETY: NSTextView's own method.
+                        let _: () = unsafe { msg_send![super(self), copy: sender] };
+                    }
+                }
+
                 #[unsafe(method(draggingEntered:))]
                 fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
                     $surface(self)
@@ -1100,11 +1111,16 @@ define_text_view!(
         }
 
         /// Paste is offered for images and files too while the app
-        /// listens.
+        /// listens; Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
             if item.action() == Some(sel!(paste:)) && self.ivars().get().is_some_and(Ctx::pastes_more) {
+                return objc2::runtime::Bool::YES;
+            }
+            if item.action() == Some(sel!(copy:))
+                && copy_falls_through(self, area_surface(self).as_deref())
+            {
                 return objc2::runtime::Bool::YES;
             }
             // SAFETY: NSTextView's own method.
@@ -1116,6 +1132,22 @@ define_text_view!(
 /// The surface of text area `area`, for its drags.
 fn area_surface(area: &TextArea) -> Option<Rc<Surface>> {
     area.ivars().get()?.surface.upgrade()
+}
+
+/// Whether a copy in `text_view` takes the text selected in `surface`
+/// instead: the editor has nothing of its own selected, and the surface
+/// has a selection (an input keeps the focus while text around it is
+/// selected).
+fn copy_falls_through(text_view: &NSTextView, surface: Option<&Surface>) -> bool {
+    text_view.selectedRange().length == 0 && surface.is_some_and(crate::text::can_copy)
+}
+
+/// A copy in `text_view` (an input's editor): copies the text selected
+/// around it, if [`copy_falls_through`]. False if the editor copies its
+/// own.
+fn copies_selection_around(text_view: &NSTextView, surface: Option<Rc<Surface>>) -> bool {
+    let surface = surface.as_deref();
+    copy_falls_through(text_view, surface) && surface.is_some_and(crate::text::copy)
 }
 
 /// A test's paste (`nsh test --target macos`): `content` on a pasteboard of
@@ -1229,11 +1261,16 @@ define_text_view!(
         }
 
         /// Paste is offered for images and files too while the app
-        /// listens.
+        /// listens; Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
             if item.action() == Some(sel!(paste:)) && field_ctx(self).is_some_and(|cx| cx.pastes_more()) {
+                return objc2::runtime::Bool::YES;
+            }
+            if item.action() == Some(sel!(copy:))
+                && copy_falls_through(self, editor_surface(self).as_deref())
+            {
                 return objc2::runtime::Bool::YES;
             }
             // SAFETY: NSTextView's own method.

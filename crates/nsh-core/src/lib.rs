@@ -95,7 +95,7 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
+        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
         HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot, HeaderSystemItem,
         IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle, ListViewport, ModalAnimation,
@@ -104,7 +104,7 @@ pub use crate::{
         ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp,
         ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
         SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
-        WebInput, WebKey, WebLoad, WebSource,
+        WebElement, WebInput, WebKey, WebLoad, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

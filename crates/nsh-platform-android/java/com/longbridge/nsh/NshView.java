@@ -206,7 +206,9 @@ public class NshView extends FrameLayout {
         }
         // The back key where the window has no OnBackInvokedCallback in
         // effect (below Android 13, or `enableOnBackInvokedCallback` off).
-        addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
+        // Android 8 has no such listener: there the activity's
+        // `onBackPressed` hands the press to `handleBack`.
+        if (Build.VERSION.SDK_INT >= 28) addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
         // Apps keep their data in <dataDir>/<app id>: nsh in the files
         // directory unless the development host's test session says.
         // ... and the images they download in <cacheDir>/<app id>/images: nsh
@@ -478,6 +480,35 @@ public class NshView extends FrameLayout {
             return;
         }
         mounter.components.put(name, factory);
+    }
+
+    /** Hears a scroll view the host watches ({@link #watchScroll}) come and go, on the UI thread. */
+    public interface ScrollWatcher {
+        /**
+         * The scroll view is there: at once when it already is, and again
+         * with a new handle when the app replaces the element or reloads.
+         *
+         * @param handle follows and drives it
+         */
+        void onAttached(NshScrollHandle handle);
+
+        /** The scroll view is gone (deleted, its {@code nativeID} changed or its app stopped): its handle is dead. */
+        void onDetached();
+    }
+
+    /**
+     * Watches the app's {@code <Scroll>} whose {@code nativeID} is
+     * {@code nativeId}, for native UI of the host that follows or drives the
+     * app's scrolling in the frame of the scroll, without JS (a sheet under
+     * the content, say): {@code watcher} gets a {@link NshScrollHandle} when
+     * the scroll view is there. With several of the same {@code nativeID},
+     * the newest one is watched. One watcher per {@code nativeID}.
+     *
+     * @param nativeId the scroll view's {@code nativeID}
+     * @param watcher the watcher (UI thread), or null to stop watching
+     */
+    public void watchScroll(String nativeId, ScrollWatcher watcher) {
+        mounter.watchScroll(nativeId, watcher);
     }
 
     /**

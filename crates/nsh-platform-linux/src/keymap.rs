@@ -21,7 +21,7 @@ use std::{
 
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{
-    EventKind, EventPayload, PayloadValue, ROOT_ID,
+    EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
     keymap::{Key, Keymap, Keystroke},
     platform::Os,
 };
@@ -35,10 +35,10 @@ pub(crate) struct KeymapState {
     keymap: RefCell<Option<Arc<Keymap>>>,
     /// A controller on each window's root view.
     controllers: RefCell<Vec<(glib::WeakRef<NshView>, gtk::ShortcutController)>>,
-    /// Each binding's trigger and whether it fires in a text field
-    /// (`KeyBinding::in_text`), for [`claims`]; a binding passing its key
-    /// through claims none.
-    triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool)>>,
+    /// Each binding's trigger, whether it fires in a text field
+    /// (`KeyBinding::in_text`) and its window (`KeyBinding::window`), for
+    /// [`claims`]; a binding passing its key through claims none.
+    triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool, Option<NodeId>)>>,
     /// The binding whose key is held down (GDK does not mark auto-repeats):
     /// it does not fire again until a key is released.
     held: Rc<Cell<Option<u32>>>,
@@ -62,7 +62,7 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
         if let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key))
             .and_then(|t| gtk::ShortcutTrigger::parse_string(&t))
         {
-            triggers.push((trigger, binding.in_text));
+            triggers.push((trigger, binding.in_text, binding.window));
         }
     }
     *surface.keymap.triggers.borrow_mut() = triggers;
@@ -100,8 +100,10 @@ pub(crate) fn attach(surface: &Rc<Surface>, root: &NshView) {
     // the key first, and `when: "always"` could not take Ctrl+A from it.
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     let display = root.display();
+    // Only the window's own bindings (and JS's, of no window).
+    let window = root.id();
     for binding in keymap.bindings().iter().rev() {
-        if skipped(binding) {
+        if skipped(binding) || binding.window.is_some_and(|w| w != window) {
             continue;
         }
         let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key)) else {
@@ -169,8 +171,11 @@ pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
     let Some(keymap) = keymap else {
         return false;
     };
+    let root = crate::window::key_root(surface);
     let fired = keymap.bindings().iter().rev().find(|b| {
-        b.keystroke == stroke && fires(crate::window::key_root(surface).upcast_ref(), b.in_text)
+        b.keystroke == stroke
+            && b.window.is_none_or(|w| w == root.id())
+            && fires(root.upcast_ref(), b.in_text)
     });
     if let Some(binding) = fired {
         surface.event(
@@ -196,8 +201,9 @@ pub(crate) fn claims(surface: &Surface, event: &gtk::gdk::Event) -> bool {
         .triggers
         .borrow()
         .iter()
-        .any(|(trigger, in_text)| {
+        .any(|(trigger, in_text, window)| {
             trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
+                && window.is_none_or(|w| w == root.id())
                 && fires(root.upcast_ref(), *in_text)
         })
 }

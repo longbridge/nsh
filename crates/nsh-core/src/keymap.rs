@@ -721,6 +721,10 @@ pub struct KeyBinding {
     /// ([`KeyMatch::Notify`]): Tab still moves the focus, a text input
     /// still types. Else the platform consumes the key.
     pub pass_through: bool,
+    /// The window it belongs to, as its root node ([`crate::ROOT_ID`] for
+    /// the main window, a dialog root for a window of the app's own): it
+    /// fires only for keys pressed there. `None`: in any window.
+    pub window: Option<crate::NodeId>,
 }
 
 impl KeyBinding {
@@ -738,7 +742,15 @@ impl KeyBinding {
             in_text,
             repeat,
             pass_through: false,
+            window: None,
         }
+    }
+
+    /// The binding firing only in the window of root node `window`
+    /// ([`Self::window`]).
+    pub fn in_window(mut self, window: crate::NodeId) -> KeyBinding {
+        self.window = Some(window);
+        self
     }
 
     /// The binding firing without consuming the key when `pass_through`
@@ -812,12 +824,26 @@ impl Keymap {
     /// fires bindings that ask for it. A binding that passes the key
     /// through gives [`KeyMatch::Notify`], and its held key's auto-repeats
     /// go on ([`KeyMatch::None`]) unless it repeats.
+    /// The key is pressed in the main window ([`Self::find_in`]).
     pub fn find(&self, keystroke: Keystroke, editing: bool, repeat: bool) -> KeyMatch {
-        let found = self
-            .bindings
-            .iter()
-            .rev()
-            .find(|b| b.keystroke == keystroke && (b.in_text || !editing));
+        self.find_in(crate::ROOT_ID, keystroke, editing, repeat)
+    }
+
+    /// [`Self::find`] for a key pressed in the window of root node
+    /// `window`: only that window's bindings and those of no window
+    /// ([`KeyBinding::window`]) take it.
+    pub fn find_in(
+        &self,
+        window: crate::NodeId,
+        keystroke: Keystroke,
+        editing: bool,
+        repeat: bool,
+    ) -> KeyMatch {
+        let found = self.bindings.iter().rev().find(|b| {
+            b.keystroke == keystroke
+                && (b.in_text || !editing)
+                && b.window.is_none_or(|w| w == window)
+        });
         match found {
             None => KeyMatch::None,
             Some(b) if repeat && !b.repeat && b.pass_through => KeyMatch::None,
@@ -831,6 +857,28 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_binding_takes_only_its_windows_keys() {
+        let escape = Keystroke::parse_with("escape", true).unwrap();
+        let k = |id| KeyBinding::new(id, escape, When::Always, false);
+        // JS's (any window), the main window's, then window 7's.
+        let table = Keymap::new(vec![
+            k(1),
+            k(2).in_window(crate::ROOT_ID),
+            k(3).in_window(7),
+        ]);
+        assert_eq!(table.find_in(7, escape, false, false), KeyMatch::Fire(3));
+        assert_eq!(
+            table.find_in(crate::ROOT_ID, escape, false, false),
+            KeyMatch::Fire(2)
+        );
+        assert_eq!(table.find(escape, false, false), KeyMatch::Fire(2));
+        // A window with none of its own: the one of no window.
+        assert_eq!(table.find_in(9, escape, false, false), KeyMatch::Fire(1));
+        let only = Keymap::new(vec![k(3).in_window(7)]);
+        assert_eq!(only.find_in(9, escape, false, false), KeyMatch::None);
+    }
 
     #[test]
     fn shift_types_the_us_layouts_characters() {

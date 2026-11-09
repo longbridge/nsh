@@ -356,6 +356,189 @@ mod href {
     }
 }
 
+/// Where a link goes shows while the pointer rests on it (its URL, the
+/// host whole, or its path as written), on the desktops and the web:
+/// inside a text too, never for a disabled link, and never on touch
+/// screens.
+mod url_hint {
+    use std::time::Duration;
+
+    use nsh_base::link;
+    use nsh_core::{
+        Size,
+        element::Root,
+        platform::{Idiom, Os},
+        prelude::*,
+    };
+    use nsh_engine::EngineConfig;
+    use nsh_testing::Headless;
+
+    fn start<C: Component<Props = ()>>(os: Os, idiom: Idiom) -> Headless {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(390.0), px(844.0)),
+            clock: nsh_engine::Clock::manual(std::time::SystemTime::UNIX_EPOCH),
+            ..EngineConfig::new(Root::of::<C>())
+        };
+        config.environment.os = os;
+        config.environment.idiom = idiom;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        // Inline attachments publish their hint listeners after their first layout.
+        app.wait(Duration::from_millis(32)).unwrap();
+        app
+    }
+
+    /// A link inside a sentence, a path of the app's and a disabled link.
+    #[component]
+    fn Hinted() -> impl IntoElement {
+        view()
+            .child(
+                text("Read ")
+                    .child(
+                        link()
+                            .href("https://example.com/pricing")
+                            .child(text("pricing")),
+                    )
+                    .child(" first."),
+            )
+            .child(link().href("/settings").child(text("Settings")))
+            .child(
+                link()
+                    .href("https://example.com/old")
+                    .disabled(true)
+                    .child(text("Old")),
+            )
+    }
+
+    #[test]
+    fn resting_on_a_link_in_a_text_shows_its_url_until_the_pointer_leaves() {
+        let mut app = start::<Hinted>(Os::MacOs, Idiom::Desktop);
+        app.hover("text:pricing").unwrap();
+        app.wait(Duration::from_millis(600)).unwrap();
+        // One line of two parts: the scheme and host, then the rest. A URL
+        // is written with `text:` (its `https:` would be read as a
+        // selector's prefix); `shows` compares texts as written.
+        app.wait_for("text:https://example.com").unwrap();
+        assert!(app.shows("/pricing"));
+        app.hover("text:Settings").unwrap();
+        app.wait(Duration::from_millis(1000)).unwrap();
+        // A path of the app's shows as written.
+        app.wait_for("text:/settings").unwrap();
+        assert!(!app.shows("https://example.com"), "it left");
+        assert!(!app.shows("/pricing"), "it left");
+    }
+
+    /// A link whose title and destination follow the layout direction, so
+    /// switching the environment's direction changes both while the
+    /// pointer rests on it (no press, which would hide the hint).
+    #[component]
+    fn Changing() -> impl IntoElement {
+        let rtl = nsh_core::element::layout_rtl;
+        view().child(
+            link()
+                .href(Prop::bind(move || {
+                    Some(SharedString::from(if rtl() {
+                        "https://example.org/after"
+                    } else {
+                        "https://example.com/before"
+                    }))
+                }))
+                .title(Prop::bind(move || {
+                    Some(SharedString::from(if rtl() { "After" } else { "Before" }))
+                }))
+                .child(text("Moving")),
+        )
+    }
+
+    /// The text views showing `want`, as layout placed them.
+    fn laid_out(app: &Headless, want: &str) -> nsh_testing::LayoutNode {
+        let nodes = app.screen().layout_nodes();
+        let found: Vec<_> = nodes
+            .into_iter()
+            .filter(|n| n.text.as_ref().is_some_and(|t| t.text.text == want))
+            .collect();
+        assert_eq!(found.len(), 1, "one text reading {want}");
+        found.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn a_links_title_and_url_follow_their_props_while_it_shows() {
+        let mut app = start::<Changing>(Os::MacOs, Idiom::Desktop);
+        app.hover("text:Moving").unwrap();
+        app.wait(Duration::from_millis(600)).unwrap();
+        app.wait_for("text:https://example.com").unwrap();
+        assert!(app.shows("/before"));
+        // The title is in the same bubble, above the URL.
+        assert!(app.shows("Before"));
+        let title = laid_out(&app, "Before");
+        let head = laid_out(&app, "https://example.com");
+        assert!(
+            title.bounds.origin.y.0 < head.bounds.origin.y.0,
+            "the title above the URL"
+        );
+        app.set_environment("rtl", |env| env.rtl = true).unwrap();
+        app.wait_for("text:https://example.org").unwrap();
+        assert!(app.shows("/after"));
+        assert!(app.shows("After"));
+        assert!(!app.shows("https://example.com"), "no stale URL");
+        assert!(!app.shows("Before"), "no stale title");
+    }
+
+    #[test]
+    fn a_urls_host_comes_first_and_only_its_path_is_cut_in_the_middle_in_rtl() {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(390.0), px(844.0)),
+            clock: nsh_engine::Clock::manual(std::time::SystemTime::UNIX_EPOCH),
+            ..EngineConfig::new(Root::of::<Hinted>())
+        };
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = Idiom::Desktop;
+        config.environment.rtl = true;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        // Inline attachments publish their hint listeners after their first layout.
+        app.wait(Duration::from_millis(32)).unwrap();
+        app.hover("text:pricing").unwrap();
+        app.wait(Duration::from_millis(600)).unwrap();
+        app.wait_for("text:https://example.com").unwrap();
+        let head = laid_out(&app, "https://example.com");
+        let rest = laid_out(&app, "/pricing");
+        // Left to right in a right-to-left app: scheme and host, then the
+        // path.
+        assert!(
+            head.bounds.origin.x.0 < rest.bounds.origin.x.0,
+            "head {:?} before rest {:?}",
+            head.bounds,
+            rest.bounds
+        );
+        // The host: one line, never cut. The rest: one line, cut in its
+        // middle.
+        let head_text = &head.text.as_ref().unwrap().text;
+        assert_eq!(head_text.max_lines, 1);
+        let rest_text = &rest.text.as_ref().unwrap().text;
+        assert_eq!(rest_text.max_lines, 1);
+        assert_eq!(rest_text.ellipsize, nsh_core::EllipsizeMode::Middle);
+    }
+
+    #[test]
+    fn a_disabled_link_shows_no_url() {
+        let mut app = start::<Hinted>(Os::MacOs, Idiom::Desktop);
+        app.hover("text:Old").unwrap();
+        app.wait(Duration::from_millis(1000)).unwrap();
+        assert!(!app.shows("https://example.com"));
+        assert!(!app.shows("/old"));
+    }
+
+    #[test]
+    fn a_touch_screen_shows_no_url_on_hover() {
+        // The web on a phone: a pointer may pass, nothing follows it.
+        let mut app = start::<Hinted>(Os::Web, Idiom::Phone);
+        app.hover("text:pricing").unwrap();
+        app.wait(Duration::from_millis(1000)).unwrap();
+        assert!(!app.shows("https://example.com"));
+    }
+}
+
 /// An enabled link, a disabled one, and one whose app class sets its own
 /// cursor.
 #[component]
@@ -387,6 +570,7 @@ fn a_link_shows_the_pointing_hand_unless_disabled_or_the_app_says_otherwise() {
 
     let config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::UNIX_EPOCH),
         ..EngineConfig::new(Root::of::<Cursors>())
     };
     let mut app = Headless::start(config).unwrap();
@@ -400,6 +584,8 @@ fn a_link_shows_the_pointing_hand_unless_disabled_or_the_app_says_otherwise() {
         }
     });
     app.first_render().unwrap();
+    // Inline attachments publish their hint listeners after their first layout.
+    app.wait(Duration::from_millis(32)).unwrap();
     let cursor = |app: &Headless, label: &str| {
         let id = app
             .screen()

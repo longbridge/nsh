@@ -188,6 +188,11 @@ Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building
 
 See [nsh/desktop](../modules/nsh-desktop.md).
 
+### nsh/web
+
+In browsers the app is a page of a site. `nsh/web`'s `Head` sets the page's title, description, canonical URL and
+metadata while it is mounted, for search engines and link previews. On the other platforms `Head` renders nothing. See [nsh/web](../modules/nsh-web.md) and [the web](./web.md#search-engines).
+
 ### The status bar
 
 On both platforms the status bar belongs to the page or dialog on top, as in UIKit, where the topmost view controller decides it: [`NavPage` and `Dialog` take `statusBar`](../modules/nsh-base.md#status-bar) (in Rust `.status_bar(StatusBarStyle::Light)`, or a `StatusBarSetting` for the other fields) with `foreground` (`"auto"`, `"light"` for dark backgrounds, `"dark"` for light ones), `hidden` and `animated`. The page or dialog shown most recently wins, field by field, and the one below it applies again when it goes away. `nsh.json`'s `"statusBar"` is the app's default under them.
@@ -221,7 +226,7 @@ In an app embedded in a native one, the host app's view controller decides the s
 
 ## platform.os and platform.select
 
-`os()` in Rust and the `platform` constant from `nsh` in TSX tell you where the app runs: `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web`, and `platform.os` `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `platform.catalyst` in either of its idioms; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when `platform.desktop` is `true`). See [Device and environment](./device-and-environment.md#the-platform) for the version, the idiom and the rest.
+`os()` in Rust and the `platform` constant from `nsh` in TSX tell you where the app runs: `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web`, and `platform.os` `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `platform.catalyst` in either of its idioms; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when `platform.desktop` is `true`). `platform_name()` in Rust and `platform.name` in TSX name the platform itself: the OS's name on NSH's own platforms, and a [platform built outside NSH](./platform-extensions.md) its own (`"miniprogram"`), with `platform.os` the OS of the device it runs on. See [Device and environment](./device-and-environment.md#the-platform) for the version, the idiom and the rest.
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};

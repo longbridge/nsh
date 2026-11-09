@@ -157,6 +157,12 @@ pub struct Screen {
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
+    /// The edit menu an input opened (`Command::OpenEditMenu`) and what it
+    /// offers, until it is chosen from or closed.
+    edit_menu: Option<(NodeId, Vec<nsh_core::EditAction>)>,
+    /// The application menu the app set (`Menu.setApplicationMenu`), whose
+    /// shortcuts the keyboard chooses.
+    app_menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
     /// The window's size, when the driver knows it: what lies outside it
     /// (and no scroll view brings in) is not on screen.
     viewport: Option<Size<Points>>,
@@ -241,7 +247,8 @@ struct View {
     canvas_node: bool,
 }
 
-/// A span of a text view's text that takes presses ([`nsh_core::TextLink`]).
+/// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
+/// presses, or one a hint watches (the pointer only).
 #[derive(Debug, Clone)]
 struct Span {
     /// The text view showing it.
@@ -635,6 +642,9 @@ impl Screen {
                 nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } => {
                     self.menu = Some(items.clone());
                 }
+                nsh_core::desktop::DesktopCommand::SetMenu(items) => {
+                    self.app_menu = items.clone();
+                }
                 nsh_core::desktop::DesktopCommand::OpenWindow(open)
                     if !self.windows.iter().any(|(root, _)| *root == id) =>
                 {
@@ -642,6 +652,12 @@ impl Screen {
                 }
                 _ => {}
             },
+            Command::OpenEditMenu { actions, .. } => self.edit_menu = Some((id, actions.clone())),
+            Command::CloseEditMenu
+                if self.edit_menu.as_ref().is_some_and(|(open, _)| *open == id) =>
+            {
+                self.edit_menu = None;
+            }
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -851,7 +867,8 @@ impl Screen {
 
     /// The views of [`Screen::attached`] (below the root, of a stack only
     /// its top screen, spans of text aside), in tree order, as layout
-    /// placed them.
+    /// placed them. Each one's [`LayoutNode::parent`] is the root or a view
+    /// before it in the list.
     pub fn layout_nodes(&self) -> Vec<LayoutNode> {
         let mut out = Vec::new();
         // A view, the view it is in, the origin of that view's content in
@@ -868,6 +885,12 @@ impl Screen {
                 None if id == ROOT => &root,
                 None => continue,
             };
+            // A view the core never created is not on screen, nor is what
+            // it holds: leaving out the whole subtree keeps every node's
+            // parent in the list.
+            if id != ROOT && view.kind.is_none() {
+                continue;
+            }
             let hidden = hidden || view.hidden;
             let origin = if view.kind == Some(ViewKind::Modal) {
                 Point::default()
@@ -1626,6 +1649,51 @@ impl Screen {
         }
     }
 
+    /// Where a press on `target` at `at` (in its window's root) goes when
+    /// `target` takes no pointer (it or a view around it has
+    /// `pointerEvents: none`): the view around what a pointer there reaches
+    /// that hears presses, and the point in it. `None` for a target that
+    /// takes a pointer, or when the press would reach it all the same.
+    pub(crate) fn routed_press(
+        &self,
+        target: NodeId,
+        at: Point<Points>,
+    ) -> Option<(NodeId, Point<Points>)> {
+        if self.receives_pointer(target) {
+            return None;
+        }
+        let hit = self.hit_pointer(at, self.window_of(target));
+        let to = self.up_to(hit, |v| v.events.contains(EventKind::Press))?;
+        if to == target {
+            return None;
+        }
+        let origin = self.bounds_in_root(to)?.origin;
+        Some((
+            to,
+            nsh_core::geometry::point(at.x - origin.x, at.y - origin.y),
+        ))
+    }
+
+    /// Whether a pointer can reach `id`: neither it nor a view around it
+    /// has `pointerEvents: none` or is hidden, and no view around it takes
+    /// touches only for itself (`box-only`).
+    fn receives_pointer(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(current) = at {
+            let Some(view) = self.nodes.get(&current) else {
+                break;
+            };
+            if view.pointer_events == PointerEvents::None
+                || view.hidden
+                || (current != id && view.pointer_events == PointerEvents::BoxOnly)
+            {
+                return false;
+            }
+            at = view.parent;
+        }
+        true
+    }
+
     /// The view a pointer at `at` (in the root of `window`, a window's
     /// root) reaches in that window: the topmost, innermost one there that
     /// receives touches. Canvas nodes are not views, and the windows of the
@@ -2040,9 +2108,27 @@ impl Screen {
         self.menu.as_deref()
     }
 
+    /// The application menu the app set, if it set one.
+    pub(crate) fn app_menu(&self) -> Option<&[nsh_core::desktop::MenuItem]> {
+        self.app_menu.as_deref()
+    }
+
     /// The open context menu was chosen from or closed.
     pub(crate) fn menu_closed(&mut self) {
         self.menu = None;
+    }
+
+    /// The edit menu an input opened over a selection it draws: the input
+    /// and what the menu offers, if one is open.
+    pub(crate) fn edit_menu(&self) -> Option<(NodeId, &[nsh_core::EditAction])> {
+        self.edit_menu
+            .as_ref()
+            .map(|(id, actions)| (*id, actions.as_slice()))
+    }
+
+    /// The open edit menu was chosen from or closed.
+    pub(crate) fn edit_menu_closed(&mut self) {
+        self.edit_menu = None;
     }
 
     /// The view a right click on `id` asks for a context menu: it, or the
@@ -2502,6 +2588,30 @@ mod tests {
         screen.apply(&batch(vec![content(2000.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
         assert!(screen.take_scrolled().is_empty());
+    }
+
+    #[test]
+    fn layout_nodes_leave_out_what_is_in_a_view_never_created() {
+        let mut screen = Screen::default();
+        // 2 is inserted without being created: what it holds is not on
+        // screen either, and no node names it as its parent.
+        screen.apply(&batch(vec![
+            create(4, ViewKind::View),
+            create(6, ViewKind::View),
+            frame(4, 0.0, 0.0, 100.0, 20.0),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(1, 6),
+        ]));
+        let nodes = screen.layout_nodes();
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        assert_eq!(ids, [6]);
+        assert!(
+            nodes
+                .iter()
+                .all(|n| n.parent == ROOT || ids.contains(&n.parent))
+        );
     }
 
     #[test]

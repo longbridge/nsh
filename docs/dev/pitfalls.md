@@ -360,6 +360,19 @@ Things that were found the hard way. Read the section of the area you change bef
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
   the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
   so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+- **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
+  `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
+  - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's
+    aliases (`sans-serif-thin`, `-light`, `-medium`, `-black`, with `BOLD` for 600 and 700); other faces get bold and
+    italic synthesized only where the face is lighter or upright (`TextLayouts.weighted`).
+  - Text measurement: `PrecomputedText` is API 28; `prepare` hands `StaticLayout` the spanned text itself, which measures
+    it again for each width with the same breaks.
+  - Shadows: a hardware canvas ignores `Paint.setShadowLayer` on shapes (text keeps its shadows) before API 28.
+    `Decor` draws box shadows with the same code into a software bitmap of the smallest box with the same corners and
+    stretches it in nine slices (`drawShadowSlices`, shared through an 8 MiB LRU); a `<Canvas>` drawing that sets a
+    shadow is replayed into a software bitmap of the view.
+  Animated images other than GIFs (which play from a `Movie`) show their first frame there (`AnimatedImageDrawable` is
+  API 28).
 - **Android 9, GIFs cannot play from an `AnimatedImageDrawable`**: its later frames decode on hwui's `AnimatedImageTh`, and
   reading the source bytes there (`ByteArrayStream::read`, `SkGIFFrameContext`) needs a JNIEnv that thread does not have: the
   process aborts with "Failed to get JNIEnv for JavaVM". Any `ImageDecoder` source backed by memory hits it; animated WebP does
@@ -590,6 +603,12 @@ Things that were found the hard way. Read the section of the area you change bef
   The picture lags the last `CATransaction` commit by a frame or two: flush and wait (50 ms) before taking it.
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
+- `NSApplication.activate()` only asks since macOS 14, and macOS turns it down after a click on the app's status item
+  (macOS 27.2, a user's clicks over Screen Sharing): asked from the item's action at once, 100 ms later, or as
+  `focus()` does after a JS round trip, the app stayed inactive and the keyboard with the app in front, in a plain
+  AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
+  `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
+  it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and
@@ -636,6 +655,16 @@ Things that were found the hard way. Read the section of the area you change bef
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and
   `name:stream` writes an NTFS alternate data stream. `nsh-package` refuses paths with `:`, as with `\` or `..`.
+- **Sizing or showing a window can paint it before the call returns**: `SetWindowPos` sends `WM_SIZE` when the size
+  changes, where NSH's windows draw at once (for a resize not to show stale pixels), and `window::show` calls
+  `UpdateWindow`, which paints what is invalid. A desktop command runs in the middle of `Surface::apply`, before the
+  batch's animated values are written (`Surface::write_animations`, once the batches are applied), so
+  `Surface::apply` writes them before each one. Without that, a window growing to its content (`sizeToContent`) as
+  it opened drew a view entering with a motion as its style is while hidden, then at the motion's start, and showed
+  the first frame while the second waited for room in its swap chain: the content flashed. Only the views' values
+  are written early: registered components' animated props (`set_animated_number`, `set_animated_color`) still reach
+  them after the batches (`native::component_animated`), so a component that draws in its view
+  (`NativeComponent::draw`) draws such a frame without the values its batch set.
 
 ## Web, browsers
 

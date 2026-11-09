@@ -71,6 +71,20 @@ const ARIA_ROLES = {
   search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
 };
 
+/**
+ * The HTML element a view or text is drawn as, from what its props say it
+ * is: a heading (`role="header"`, `h1` to `h6` by `accessibilityLevel`,
+ * `h2` without one, as ARIA's default), a link (`role="link"` with an
+ * `href`, as `Link` sets), else the element `web={{ element }}` names, else
+ * a `div`.
+ */
+export function elementTag(props) {
+  if (props.element) return props.element;
+  if (props.role === "header") return `h${Math.min(6, Math.max(1, props.level ?? 2))}`;
+  if (props.role === "link" && props.href != null) return "a";
+  return "div";
+}
+
 /** How far a refreshable scroll view is pulled to refresh, and the room its spinner takes while refreshing (as on Linux and macOS), unless the app draws its own indicator (`refreshIndicator`: its height is both). */
 const REFRESH_PULL = 64;
 const REFRESH_SPACE = 56;
@@ -131,6 +145,11 @@ const KEYFRAMES = `
   touch-action: none; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
+/* Views drawn as document elements (headings, links, \`web={{ element }}\`) look as a view does: none of
+   the browser's margins, fonts, colors, underlines or list markers. */
+:is(h1, h2, h3, h4, h5, h6, p, a, ul, ol, li, strong, em, blockquote, figure, figcaption, time, address, nav, header,
+  footer, main, article, section, aside).nsh-v { display: block; font: inherit; color: inherit; text-decoration: none;
+  list-style: none; }
 /* The keyboard focus shows as the app draws it (focus: styles), as
    on the desktop backends: no ring of the browser's or the runtime's. */
 .nsh-v:focus { outline: none; }
@@ -2463,6 +2482,34 @@ class Player {
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
+    if (spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
+      this.installLinkHover(el);
+    }
+  }
+
+  /**
+   * The mouse over the links of text `el` (the `_link` of the run spans
+   * under it): a link listening hears `onMouseEnter` when the mouse comes
+   * over its characters (on any of its lines) and `onMouseLeave` when it
+   * leaves them, as the other desktops report a link's hover (the core
+   * shows a link's hint, its URL, by them). Installed once per text; the
+   * listeners read the spans the runs have now.
+   */
+  installLinkHover(el) {
+    if (el._linkHover !== undefined) return;
+    el._linkHover = null;
+    const follow = (e) => {
+      if (e.pointerType !== "mouse") return;
+      const link = e.type === "pointerleave" ? null : (e.target?._link ?? null);
+      const old = el._linkHover;
+      if ((old?.node ?? null) === (link?.node ?? null)) return;
+      el._linkHover = link;
+      if (old?.events.has("onMouseLeave")) this.event(old.node, "onMouseLeave", this.mouseEvent(el, e, true));
+      if (link?.events.has("onMouseEnter")) this.event(link.node, "onMouseEnter", this.mouseEvent(el, e, true));
+    };
+    el.addEventListener("pointerover", follow);
+    el.addEventListener("pointermove", follow);
+    el.addEventListener("pointerleave", follow);
   }
 
 
@@ -2550,8 +2597,11 @@ class Player {
   }
 
   op_vp([, id, props]) {
-    const el = this.view(id);
+    let el = this.view(id);
     if (!el) return;
+    el = this.retag(el, elementTag(props));
+    if (props.href != null) el.setAttribute("href", props.href);
+    else el.removeAttribute("href");
     el._props = props;
     // A list in its parent's viewport: its cells are read in screen order.
     if (el._screenOrder !== props.screenOrder) {
@@ -2566,6 +2616,30 @@ class Player {
     el.classList.toggle("nsh-area", !!props.selectableView);
     this.updateFocusable(el);
     this.updateTouchAction(el);
+  }
+
+  /**
+   * The view drawn as the HTML element `elementTag` gives it (`h1`, `a`,
+   * `p`, `nav`, ...), else a `div`: the element is replaced by one of that
+   * tag carrying its attributes, children and fields, so search engines
+   * and the page's markup see the document's structure while the layout,
+   * styles and events stay the view's. Views whose element holds a
+   * control of its own (images, scroll views, canvases, ...) keep theirs.
+   */
+  retag(el, tag) {
+    if (el.localName === tag || (el._kind !== "view" && el._kind !== "text")) return el;
+    const next = document.createElement(tag);
+    for (const { name, value } of el.attributes) next.setAttribute(name, value);
+    for (const key of Object.keys(el)) next[key] = el[key];
+    next.append(...el.childNodes);
+    el.replaceWith(next);
+    this.views.set(el._id, next);
+    if (el._mouseEvents) {
+      next._mouseEvents = false;
+      this.installMouse(next);
+    }
+    if (tag === "a") next.draggable = false;
+    return next;
   }
 
   op_al([, id, label]) {
@@ -7079,6 +7153,13 @@ class Player {
   installInput() {
     const root = this.root;
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
+    // A link (`Link` with an `href`) is the app's to press: a plain click
+    // stays in the app (its `onPress`), a click with a modifier or the
+    // middle button opens its `href` as the browser would.
+    root.addEventListener("click", (e) => {
+      const link = e.target instanceof Element ? e.target.closest("a.nsh-v[href]") : null;
+      if (link && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) e.preventDefault();
+    });
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
@@ -7163,6 +7244,9 @@ class Player {
         });
         return true;
       }
+      // A link (`Link` with an `href`) the app shows no menu for has
+      // the browser's: open in a new tab, copy the link.
+      if (el.localName === "a" && el.hasAttribute("href")) return true;
       if (el.matches(".nsh-field, .nsh-selectable")) return false;
     }
     return false;

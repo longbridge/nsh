@@ -1586,7 +1586,8 @@ impl Headless {
         let parsed = Selector::parse(selector)?;
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
-        let id = self.picked(pick, selector, "pressable view")?;
+        let mut id = self.picked(pick, selector, "pressable view")?;
+        let mut routed = None;
         // A real finger lands where the view is drawn: a view drawn over it
         // there takes the press, so the step fails as the user would. The
         // finger goes on the part of the view that is visible — a view
@@ -1594,7 +1595,9 @@ impl Headless {
         // its laid-out center lying below the fold, on the bar under it; a
         // view nothing of which is on screen (a target scrolled out of
         // view) keeps its laid-out center, which a press still reaches as
-        // before.
+        // before. A view that takes no pointer (in a `pointerEvents: none`
+        // subtree, as a data table's cells under its hit layer) is pressed
+        // where it is, by the view a pointer there reaches.
         if let Some(target) = self.screen.bounds_in_root(id) {
             let point = self
                 .screen
@@ -1605,7 +1608,9 @@ impl Headless {
                 Some(visible) => visible.center(),
                 None => point,
             };
-            if let Some(cover) = self.screen.covering(id, point) {
+            if let Some((to, inside)) = self.screen.routed_press(id, point) {
+                (id, routed) = (to, Some(inside));
+            } else if let Some(cover) = self.screen.covering(id, point) {
                 return Err(format!(
                     "{}; {}",
                     failure::covered(selector, &self.screen.selector_of(cover)),
@@ -1635,7 +1640,7 @@ impl Headless {
         {
             self.move_focus(Some(id));
         }
-        let inside = self.screen.press_point(&parsed, id);
+        let inside = routed.or_else(|| self.screen.press_point(&parsed, id));
         let payload = self.press_payload(id, inside);
         for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
             self.send(id, kind, payload.clone());
@@ -1747,7 +1752,8 @@ impl Headless {
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
         }
-        let payload = self.press_payload(id, None);
+        let inside = self.screen.press_point(&parsed, id);
+        let payload = self.press_payload(id, inside);
         self.send(id, EventKind::PressDown, payload.clone());
         self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
         self.send(id, EventKind::LongPress, payload.clone());
@@ -1809,17 +1815,24 @@ impl Headless {
     /// (`onChange`), no keys.
     pub fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
         let id = self.input_step(selector, format!("paste({selector})"))?;
+        self.paste_into(id, content);
+        self.done()
+    }
+
+    /// The user's paste of `content` into input `id`: it hears `onPaste`,
+    /// then its text goes in as `pasteBehavior` says.
+    pub(crate) fn paste_into(&mut self, id: NodeId, content: &nsh_core::PasteEvent) {
         self.send(
             id,
             EventKind::Paste,
             EventPayload::Paste(Box::new(content.clone())),
         );
         let Some(input) = self.screen.input_mut(id) else {
-            return self.done();
+            return;
         };
         if input.config.paste_behavior != nsh_core::PasteBehavior::Insert || content.text.is_empty()
         {
-            return self.done();
+            return;
         }
         let mut text = nsh_core::text_edit::pasted(&content.text, input.config.multiline);
         if let Some(max) = input.config.max_length {
@@ -1834,7 +1847,7 @@ impl Headless {
                 .collect();
         }
         if text.is_empty() {
-            return self.done();
+            return;
         }
         input.text.push_str(&text);
         input.count += 1;
@@ -1846,7 +1859,6 @@ impl Headless {
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
         self.report_selection(id);
-        self.done()
     }
 
     /// The step `submit(<selector>)`: the return key in the input
@@ -3203,5 +3215,51 @@ mod tests {
         app.first_render().unwrap();
         assert!(seen.load(Ordering::Relaxed) > 0);
         assert!(app.shows("Label"));
+    }
+
+    // Escape bound in the main window and in a window of the app's own.
+    #[component]
+    fn WindowKeys() -> impl IntoElement {
+        let main = signal(0);
+        let settings = signal(0);
+        on_key("escape", move |_| main.update(|n| *n += 1));
+        view()
+            .child(
+                text(move || format!("keys {} {}", main.get(), settings.get()))
+                    .test_id("in-main")
+                    .on_press(|_: &()| {}),
+            )
+            .child(
+                nsh_core::element::desktop::window()
+                    .id("settings")
+                    .default_size(size(px(300.0), px(100.0)))
+                    .content(move || {
+                        on_key("escape", move |_| settings.update(|n| *n += 1));
+                        view()
+                            .test_id("in-settings")
+                            .on_press(|_: &()| {})
+                            .w(px(100.0))
+                            .h(px(40.0))
+                    }),
+            )
+    }
+
+    #[test]
+    fn a_key_fires_the_bindings_of_the_focused_window() {
+        let mut config = EngineConfig::new(Root::of::<WindowKeys>());
+        config.environment.os = nsh_core::platform::Os::MacOs;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("keys 0 0").unwrap();
+        // Settings opened focused: its binding takes the key, main's not.
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 0 1").unwrap();
+        // A press in the main window focuses it, and then its binding.
+        app.press("id:in-main").unwrap();
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 1 1").unwrap();
+        app.press("id:in-settings").unwrap();
+        app.press_key("escape").unwrap();
+        app.wait_for("keys 1 2").unwrap();
     }
 }
