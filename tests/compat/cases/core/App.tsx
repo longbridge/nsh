@@ -20,11 +20,13 @@ import CoreResource from "./core-resource";
 import CoreScrollIntoView from "./core-scroll-into-view";
 import CoreShader from "./core-shader";
 import CoreShaderEffects from "./core-shader-effects";
+import AssetImports from "./asset-imports";
 import ModuleUrl from "./module-url";
 import WebLoad from "./web-load";
 import Steps from "./steps";
 
 const cases: Record<string, () => JSX.Element> = {
+  "asset-imports": AssetImports,
   "context": Context,
   "core-animated": CoreAnimated,
   "core-canvas": CoreCanvas,

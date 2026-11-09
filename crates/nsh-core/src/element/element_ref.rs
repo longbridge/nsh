@@ -27,8 +27,8 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
-    geometry::{Percentage, Point, Points},
+    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    geometry::{Bounds, Percentage, Point, Points},
 };
 
 /// An element of a view: made with [`super::element_ref`], put on
@@ -147,6 +147,14 @@ impl ElementRef {
         self.send(Command::Focus);
     }
 
+    /// Ends the press going on in the element (or inside it) without its
+    /// release: no `on_press_up` or `on_press` follow, and its `active:`
+    /// styles reset (`nsh-base`'s context menu opened by a held finger).
+    #[doc(hidden)]
+    pub fn cancel_press(&self) {
+        self.send(Command::CancelPress);
+    }
+
     /// Unfocuses an input, or takes the keyboard focus off a view that
     /// takes presses.
     pub fn blur(&self) {
@@ -177,6 +185,26 @@ impl ElementRef {
     /// Selects `start..end` of an input (UTF-16 units; a caret when equal).
     pub fn set_selection(&self, start: u32, end: u32) {
         self.send(Command::SetSelection { start, end });
+    }
+
+    /// Opens the system's edit menu over `bounds` (in the root view) on a
+    /// focused input, offering `actions` ([`Command::OpenEditMenu`]): a
+    /// chosen action comes back as [`super::EventKind::EditAction`], a
+    /// paste as the input's `on_paste`.
+    pub fn open_edit_menu(
+        &self,
+        bounds: Bounds<Points>,
+        actions: impl IntoIterator<Item = EditAction>,
+    ) {
+        self.send(Command::OpenEditMenu {
+            bounds,
+            actions: actions.into_iter().collect(),
+        });
+    }
+
+    /// Closes the edit menu [`ElementRef::open_edit_menu`] opened.
+    pub fn close_edit_menu(&self) {
+        self.send(Command::CloseEditMenu);
     }
 
     /// Scrolls a scroll view to a content offset.
@@ -316,6 +344,27 @@ impl ElementRef {
 }
 
 impl ElementRef {
+    /// Passes a press on into the element: the innermost, topmost view in
+    /// it under `press.page_position` (in its root view, as a pointer's)
+    /// that hears presses gets `onPress`, its `position` in that view, with
+    /// the layout of the commit this call goes out with. Answers whether a
+    /// view took it. For a component whose own hit layer lies over content
+    /// the app renders (a table's cells): that content's pressable views
+    /// get the presses on them. The element's own `pointerEvents` do not
+    /// count; hover and press states stay the hit layer's. Await it in a
+    /// task.
+    pub fn press_at(&self, press: crate::PressEvent) -> Answer<bool> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::PressAt(node, press, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(false);
+        }
+        answer
+    }
+
     /// How long the element's transitions run (`transition*`: the
     /// longest duration plus its delay), with the styles of the commit
     /// this call goes out with, so a class or style set before it counts;

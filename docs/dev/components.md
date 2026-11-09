@@ -292,6 +292,9 @@ reasons: `reactive-components.md`.
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.
+  The core reuses retained `each` rows in the same key order while their item bindings update the content
+  (`core/components.rs`). Region placement checks the actual child order before moving nodes
+  (`core/views.rs`), after updating anchors and slots.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; `.fill_style_from_view(initial)`, `.stroke_style_from_view(initial)`,
@@ -496,7 +499,8 @@ parameters at the end may be left out). The signature decides how a call runs (`
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
   the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
-  (`RustCall::Op`, in order with the ops before it). As for a method: returning `()`, it gives `void`, with no
+  (`RustCall::Op`, in order with the ops before it), which the core runs in the reactive graph, as a listener: it
+  may `spawn` a task (one of no owner, which runs to its end) and make signals. As for a method: returning `()`, it gives `void`, with no
   reply (a conversion error throws); returning `Result<(), E>`, `Promise<void>`; returning a value, `Promise<T>`,
   settled like a method's (a conversion error rejects it).
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions

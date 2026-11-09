@@ -4,6 +4,37 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
+`nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
+culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:
+
+| Paragraphs | Before (ms/edit) | After (ms/edit) |
+|---|---|---|
+| 1,000 | 7.56 | 6.16 |
+| 5,000 | 88.18 | 52.39 |
+| 10,000 | 315.43 | 128.07 |
+
+Four warmup edits precede alternating single-character insertions and deletions. These are medians of process
+means: seven alternating rounds of 32 measured edits for 1,000 paragraphs, three rounds of four for the larger
+sizes. Every measured edit emits one Text and zero Create, Delete or Frame items. Timing covers session dispatch,
+controller synchronization, reactive updates and Core commit/settling; setup, QuickJS and native text shaping,
+mounting and drawing are excluded. The two checks were measured as one variant. RichEditor's own block walk and
+other document-wide work remain, so these measurements describe the saved matching and placement work rather than
+linear complete-editor updates.
+
+Follow-up `nsh test examples/bench/RichEditor.tsx --trace` against `41100f2b` (2026-11-09, Linux x86_64,
+Ryzen 9 7950X, pinned to CPU 0, the same package optimization settings): three alternating runs, four warmup edits
+then four measured edits per run. The median of each run's mean commit time is **15.00 → 9.91 ms** for 1,000
+paragraphs. Every edit's complete mount batch matches between versions; measured commits keep 0 ops / 4 items /
+4,011 nodes (one Text and three selection Frames, zero Create, Delete, Insert or Remove). Initial counts stay at
+19 ops / 9,048 items / 4,011 nodes. This JS-driven headless control keeps content culling disabled and measures the
+commit log, excluding the controller work outside the commit and native input, shaping, mounting and drawing.
+It is separate from the Rust audit above.
+
+The counter control (`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --trace`, one run per
+version) keeps 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after the press. Commit times
+are 335 / 219 → 290 / 213 µs, a smoke check of unchanged work rather than a benchmark.
+
 Markdown TeX preprocessing (`text_view/markdown/latex.rs`, 2026-11-08, Linux x86_64,
 release, against `3b4f2abf`): a paragraph of
 ``"`a` x ".repeat(k) + "\\(x^2\\)"``, math enabled, streaming off. Eleven alternating

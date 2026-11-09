@@ -1508,7 +1508,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PerfMonitor(on) => surface.set_stats(*on),
         // The status bar is a phone's; layout animations arrive as mount
         // items. `Back` and `Desktop` are routed by the mounter.
-        Command::StatusBar(_) | Command::SetStatusBar(_) | Command::LayoutAnimation(_) => {}
+        Command::StatusBar(_)
+        | Command::SetStatusBar(_)
+        | Command::LayoutAnimation(_)
+        | Command::CancelPress => {}
         other => log::debug!("gpui: command {other:?} is not supported"),
     }
 }

@@ -393,6 +393,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `app.paste(selector, { text, html, files, uris })` pastes as the user does (files are paths whose bytes are read):
   headless, and on macOS and iOS through a pasteboard of the test's own (`TestStep::Paste`), the machine's
   clipboard untouched. `onPaste` is kind 64: `EventMask` has two words.
+- **Edit menu** (internal, for components that draw their own selection: `RichEditor` on touch screens):
+  `ElementRef::open_edit_menu(bounds, actions)` on a focused input (`Command::OpenEditMenu`, `bounds` in the root
+  view) opens the system's menu there offering `actions`, `close_edit_menu` closes it. The actions are
+  `EditAction`s, named as gpui-base's input actions (`Cut`, `Copy`, `Paste`, `SelectAll`); the component leaves out
+  what cannot apply rather than disabling it. iOS (`input.rs`): a `UIEditMenuInteraction` on the field
+  (`UIMenuController` before iOS 16), its target rect the bounds, preferring above them; while the menu is the
+  component's, `canPerformAction:` offers only what it asked for (Paste with something on the pasteboard) and `cut:` /
+  `copy:` / `selectAll:` report instead of acting. Android (`InputBox.openEditMenu`): a floating `ActionMode` with
+  the system's Cut, Copy, Paste and Select all. Chosen actions come back as `EventKind::EditAction` (`action`: `cut`,
+  `copy`, `selectAll`); Paste is the input's own paste (`onPaste`). Other platforms ignore it. Headless, `app.menu()` lists
+  it with the platform's labels and `chooseMenuItem` chooses from it (Paste pastes the test's clipboard).
 
 Text, styles, scrolling and lists, animation, canvases and images have their own pages.
 

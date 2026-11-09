@@ -95,7 +95,7 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
+        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
         HapticNotification, HeaderSlot, HeaderSystemItem, IMAGE_SCALES, ImageProp, ImageScales,
         ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
         ListAlignment, ListContentStyle, ListViewport, ModalAnimation, ModalPresentation,

@@ -2391,6 +2391,14 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id,
+                command: Command::CancelPress,
+            } => {
+                self.key(id)?;
+                self.cancel_press(id);
+                Ok(())
+            }
+            Op::Command {
                 command: Command::ClearJsResponder,
                 ..
             } => {
@@ -2878,6 +2886,18 @@ impl<M: TextEngine> Core<M> {
                     self.commands.push((id, command));
                 }
             }
+        }
+        // Presses a component passes on, onto this commit's layout.
+        for (id, press, answer) in std::mem::take(&mut self.components.presses) {
+            let target = self.press_target(id, press.page_position);
+            if let Some((node, position)) = target {
+                self.events.push(crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Press,
+                    EventPayload::Press(crate::PressEvent { position, ..press }),
+                ));
+            }
+            answer.borrow_mut().deliver(target.is_some());
         }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
@@ -5240,8 +5260,16 @@ impl<M: TextEngine> Core<M> {
                     if attached {
                         self.accessory_attached(key, true);
                     }
+                    return Ok(());
                 }
-                return Ok(());
+                // Other views: the embedding app finds them by it
+                // (`watchScroll`).
+                let value: Option<Arc<str>> = name.as_deref().map(Into::into);
+                let props = node.props.get_or_insert_default();
+                if props.native_id != value {
+                    props.native_id = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
             }
             Prop::Modal(prop) => {
                 if let Some(root) = node.root.as_mut() {

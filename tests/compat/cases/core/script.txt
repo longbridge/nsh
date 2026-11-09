@@ -328,6 +328,11 @@ expect Child gone
 absent Child: pending
 expect Child aborts: 1
 covers [nsh] resource
+# asset-imports
+tap id:case-asset-imports
+# an imported video, and any file imported with `?url`, is its URL
+expect Video: asset:/media/intro.mp4
+expect File: asset:/data/model.bin
 # module-url
 tap id:case-module-url
 expect Module URL: true
@@ -384,7 +389,7 @@ expect Fruit Fig
 expect Fruit Kiwi
 expect Not checked
 tap id:check
-expect functions true context true gradient true path true
+expect functions true context true gradient true path true blob 3x2
 covers [nsh] Image
 covers [nsh] Video
 covers [nsh] WebView

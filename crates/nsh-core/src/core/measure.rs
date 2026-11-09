@@ -71,6 +71,80 @@ fn valid(r: &Bounds<Points>) -> bool {
 }
 
 impl<M: TextEngine> Core<M> {
+    /// The view a pointer pressing at `page` (in the root view `id` is in)
+    /// would press inside `id`, with the last layout: the innermost,
+    /// topmost one there that hears presses, and the point in it. `id`'s
+    /// own `pointerEvents` do not count: the component asking lies a hit
+    /// layer of its own over it.
+    pub(super) fn press_target(
+        &self,
+        id: NodeId,
+        page: Point<Points>,
+    ) -> Option<(NodeId, Point<Points>)> {
+        let origin = self.measure(id)?.page;
+        let key = self.key(id).ok()?;
+        self.press_target_in(key, point(page.x - origin.x, page.y - origin.y), true)
+    }
+
+    fn press_target_in(
+        &self,
+        key: Key,
+        p: Point<Points>,
+        top: bool,
+    ) -> Option<(NodeId, Point<Points>)> {
+        use crate::props::PointerEvents;
+        let node = &self.nodes[key as usize];
+        if node.layout.is_none() || !valid(&node.frame) || node.view_style.hidden {
+            return None;
+        }
+        let pointer = match node.props.as_deref().map(|p| p.pointer_events) {
+            Some(PointerEvents::Auto) | None => node.class_pointer,
+            Some(set) => set,
+        };
+        let pointer = if top { PointerEvents::Auto } else { pointer };
+        if pointer == PointerEvents::None {
+            return None;
+        }
+        let size = node.frame.size;
+        let inside = p.x.0 >= 0.0 && p.y.0 >= 0.0 && p.x < size.width && p.y < size.height;
+        let clips = node.view_style.overflow_hidden
+            || matches!(node.kind, Kind::Scroll | Kind::List | Kind::Stack);
+        if !inside && (clips || pointer == PointerEvents::BoxOnly) {
+            return None;
+        }
+        if pointer != PointerEvents::BoxOnly {
+            let inner = match node.scroll.as_deref() {
+                Some(scroll) => point(
+                    Points((p.x.0 + scroll.offset.0) / scroll.zoom),
+                    Points((p.y.0 + scroll.offset.1) / scroll.zoom),
+                ),
+                None => p,
+            };
+            // Topmost first: the last of the highest `zIndex`.
+            let mut children: Vec<Key> = node
+                .children
+                .iter()
+                .copied()
+                .filter(|&c| {
+                    let child = &self.nodes[c as usize];
+                    !child.inline && !child.is_overlay()
+                })
+                .collect();
+            children.sort_by_key(|&c| self.nodes[c as usize].z_index);
+            for &child in children.iter().rev() {
+                let origin = self.nodes[child as usize].frame.origin;
+                let at = point(inner.x - origin.x, inner.y - origin.y);
+                if let Some(hit) = self.press_target_in(child, at, false) {
+                    return Some(hit);
+                }
+            }
+        }
+        (inside
+            && pointer != PointerEvents::BoxNone
+            && node.mounted_events().contains(crate::EventKind::Press))
+        .then_some((node.id, p))
+    }
+
     /// Where view `id` is, from the last layout; `None` when it is not in
     /// the tree or was never laid out.
     pub fn measure(&self, id: NodeId) -> Option<Measurement> {
