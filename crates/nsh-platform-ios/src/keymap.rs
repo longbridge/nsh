@@ -238,13 +238,6 @@ fn schedule(target: &EventTarget, code: isize, generation: u64, delay: Duration)
         .ok();
 }
 
-/// The event target of text input `view` (its delegate).
-fn input_target(view: &UIView) -> Option<Retained<EventTarget>> {
-    // SAFETY: both input classes have a `delegate`, set to the target.
-    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![view, delegate] };
-    delegate?.downcast::<EventTarget>().ok()
-}
-
 /// `pressesBegan:withEvent:` of text input `view`: whether the table
 /// consumed `presses`. While an input method composes, its keys are its
 /// own (choosing a candidate, committing).
@@ -252,12 +245,12 @@ pub(crate) fn input_began(view: &UIView, presses: &AnyObject) -> bool {
     if crate::input::marked_text(view).is_some() {
         return false;
     }
-    input_target(view).is_some_and(|target| began(&target, presses, true))
+    crate::input::target_of(view).is_some_and(|target| began(&target, presses, true))
 }
 
 /// `pressesEnded:` / `pressesCancelled:` of text input `view`.
 pub(crate) fn input_ended(view: &UIView, presses: &AnyObject) -> bool {
-    input_target(view).is_some_and(|target| ended(&target, presses))
+    crate::input::target_of(view).is_some_and(|target| ended(&target, presses))
 }
 
 /// `pressesBegan:withEvent:` of the surface's root view, which gets the

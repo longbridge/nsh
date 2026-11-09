@@ -139,7 +139,7 @@ pub struct Chunk {
     pub imports: Vec<String>,
 }
 
-/// The `"capabilities"` of the `nsh.json` next to the entry, checked.
+/// The `"capabilities"` of the `nsh.json` in `dir` (the app's), checked.
 pub fn capabilities(
     dir: &std::path::Path,
 ) -> Result<Option<nsh_core::access::Capabilities>, BundleError> {
@@ -167,7 +167,7 @@ pub fn capabilities(
         .transpose()
 }
 
-/// The schemes of the `"schemes"` of the `nsh.json` next to the entry,
+/// The schemes of the `"schemes"` of the `nsh.json` in `dir` (the app's),
 /// checked ([`nsh_core::url_scheme::schemes_from_json`]).
 pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
     let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
@@ -339,8 +339,8 @@ fn theme_json(
 }
 
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` next to the entry, checked. `"theme"` is shadcn's `cssVars`
-/// ([`theme_json`]).
+/// `nsh.json` in `dir` (the app's, [`app_dir`]), checked. `"theme"` is
+/// shadcn's `cssVars` ([`theme_json`]).
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
@@ -445,6 +445,33 @@ fn warn_ignored(section: &str, ignored: &[String]) {
     }
 }
 
+/// The directory of the app whose entry is in `dir`, where its `nsh.json`
+/// is: `dir` itself, or, when `dir` has neither an `nsh.json` nor an
+/// `App.tsx`, the nearest directory up with an `nsh.json`. An entry a test
+/// opens (`tests/MenuApp.tsx`), or the one `nsh test` makes for a test file
+/// (`.nsh/test/<file>.run.js`), is built with its app's theme, translations
+/// and the rest of its `nsh.json`, as the app is.
+fn app_dir(dir: &std::path::Path) -> PathBuf {
+    let is_app = |d: &std::path::Path| {
+        d.join("nsh.json").is_file()
+            || std::fs::read_dir(d).is_ok_and(|entries| {
+                entries.filter_map(Result::ok).any(|e| {
+                    e.file_name()
+                        .to_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("App.tsx"))
+                })
+            })
+    };
+    if is_app(dir) {
+        return dir.to_owned();
+    }
+    dir.ancestors()
+        .skip(1)
+        .find(|d| d.join("nsh.json").is_file())
+        .unwrap_or(dir)
+        .to_owned()
+}
+
 /// Bundles an app, blocking the current thread.
 pub fn bundle(options: &BundleOptions) -> Result<Bundle, BundleError> {
     tokio::runtime::Builder::new_current_thread()
@@ -465,10 +492,11 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         .to_path_buf();
     let cwd_for_errors = cwd.clone();
     let cwd_root = cwd.clone();
-    let tailwind = tailwind_setup(&cwd)?;
-    let capabilities = capabilities(&cwd)?;
-    let url_schemes = url_schemes(&cwd)?;
-    let resolve = ResolveSetup::read(&cwd)?;
+    let app = app_dir(&cwd);
+    let tailwind = tailwind_setup(&app)?;
+    let capabilities = capabilities(&app)?;
+    let url_schemes = url_schemes(&app)?;
+    let resolve = ResolveSetup::read(&app)?;
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
@@ -862,10 +890,11 @@ pub async fn bundle_hot_async(
     let preloads = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
-    let tailwind = tailwind_setup(&cwd)?;
-    let capabilities = capabilities(&cwd)?;
-    let url_schemes = url_schemes(&cwd)?;
-    let resolve = ResolveSetup::read(&cwd)?;
+    let app = app_dir(&cwd);
+    let tailwind = tailwind_setup(&app)?;
+    let capabilities = capabilities(&app)?;
+    let url_schemes = url_schemes(&app)?;
+    let resolve = ResolveSetup::read(&app)?;
     let mut bundler_options = BundlerOptions {
         input: Some(vec![InputItem {
             import: entry.to_string_lossy().into_owned(),
@@ -1410,6 +1439,56 @@ mod tests {
         let setup = ResolveSetup::read(&dir).unwrap();
         assert_eq!(setup.conditions, None);
         assert_eq!(setup.alias, [("b".to_owned(), vec![None])]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An entry in a directory of its app (`tests/MenuApp.tsx`, which a
+    /// test opens) is built with the app's `nsh.json`: its theme's tokens
+    /// are classes, not unknown ones, and the renderer gets its theme.
+    #[test]
+    fn an_entry_below_its_app_is_built_with_the_apps_nsh_json() {
+        let dir = std::env::temp_dir().join(format!("nsh-app-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r##"{ "theme": "theme.json", "appearance": "dark" }"##,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("theme.json"),
+            r##"{ "cssVars": { "light": { "overlay-strong": "#123456" } } }"##,
+        )
+        .unwrap();
+        let code = "import { mount, View } from \"nsh\";\n\
+                    mount(() => <View class=\"bg-overlay-strong\" />);\n";
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        let entry = dir.join("tests/MenuApp.tsx");
+        std::fs::write(&entry, code).unwrap();
+        // The renderer gets the app's theme ...
+        let bundle = bundle(&BundleOptions {
+            entry,
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+        .unwrap();
+        assert!(bundle.code.contains("#123456"), "{}", bundle.code);
+        for sub in ["tests", ".nsh/test"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+            assert_eq!(app_dir(&dir.join(sub)), dir, "{sub}");
+        }
+        // ... and the class check knows its tokens: the same setup.
+        let setup = tailwind_setup(&app_dir(&dir.join("tests"))).unwrap();
+        assert_eq!(
+            crate::classes::check(code, oxc::span::SourceType::tsx(), &setup.theme),
+            []
+        );
+        // An app of its own in a directory of another keeps its own.
+        let inner = dir.join("examples/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("App.tsx"), code).unwrap();
+        assert_eq!(app_dir(&inner), inner);
         let _ = std::fs::remove_dir_all(dir);
     }
 

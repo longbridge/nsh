@@ -126,6 +126,27 @@
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.
+- **Watched scroll views** (`NshView.watchScroll`, `NshScrollHandle`): native UI of the host that moves with the
+  app's content in every frame (a sheet the end of the content pulls up) follows a `<Scroll>` by its `nativeID`, on
+  the UI thread, in the frame of the scroll: `onScroll` through JS would be a frame late. `nativeID` (not `testID`,
+  which is for tests) reaches the platforms in `ViewProps::native_id`. Both axes, and the same names on Android, iOS
+  (Swift, C, Rust): `onAttached`/`onDetached`, `scrollX`/`scrollY`, `contentWidth`/`contentHeight`,
+  `viewportWidth`/`viewportHeight`, `contentView`, `scrollBy(dx, dy, animated)`, `stopScrolling`, `onScroll(scrollX,
+  scrollY, dx, dy)`, `onContentSizeChange(contentWidth, contentHeight)`; only listener removal follows each platform
+  (Android `remove…Listener`, Swift a returned closure, C/Rust an id). The mounter keys a `ScrollBox` by the
+  `nativeID` of its props (`Mounter.keyScroll`, the newest of an id wins) and unkeys it when it is deleted, loses the
+  id or its app stops (`destroyComponents`), which tells the watcher and kills its handle (`isAlive`, by the box's
+  `hostKey`). Host listeners run in the platform scroll view's scroll callback after the core's report, and from
+  `setContentSize` when the size changes without a scroll. Host scrolls are the user's kind, not the core's
+  (`applied` stays): the app hears them; `hostStop` ends a fling with two empty smooth scrolls (a zero fling would
+  leave one running). Nothing runs for a scroll view no host watches but an empty-list check.
+  On iOS (`NshAppView.watchScroll`, `scroll_watch.rs`; `AppView::watch_scroll`, `nsh_app_watch_scroll`) the
+  watchers live in the view's options (`ScrollWatchers`) and a surface's keyed scroll views in `SurfaceScrolls`,
+  shared by its mounter (props, content sizes, deletes, its drop when the app stops) and its event target, which calls
+  the listeners from `scrollViewDidScroll` without borrowing the mounter (a listener may scroll, which calls back in).
+  Offsets count from the start of the content (the adjusted insets added back); `stop_scrolling` sets the current
+  offset without animation, which ends UIKit's glide or animation, and reports the glide's end to the app, as UIKit
+  does not. Desktop and web have no equivalent: they are not embedded.
 - **Native modules** (`nsh`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
   written in Rust gives its engines a UI set of its own (`Registry::ui_set("host/trading")` with its `#[module]`s,
   `#[class]`es and Rust components) next to NSH's (`set_ui_sets` of the platform crate, `EngineConfig::ui_sets`), and

@@ -358,6 +358,15 @@ pub fn os() -> Os {
         .with_untracked(|e| e.os)
 }
 
+/// The platform's name (TS: `platform.name`): the OS's on NSH's own
+/// platforms (`"ios"`, `"web"`, ...), a platform built outside NSH's own
+/// (`"miniprogram"`), whose OS is [`os`]; it does not change.
+pub fn platform_name() -> &'static str {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.platform_name())
+}
+
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
 /// else `None`: for code that also runs outside an engine (a unit test of
 /// a component's model).

@@ -721,7 +721,51 @@ final class Mounter {
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+            if (v instanceof ScrollBox) {
+                ((ScrollBox) v).unmounted = true;
+                unkeyScroll((ScrollBox) v);
+            }
         }
+    }
+
+    // Scroll views the host watches (`NshView.watchScroll`), by `nativeID`.
+    private final java.util.Map<String, NshView.ScrollWatcher> scrollWatchers = new java.util.HashMap<>();
+    private final java.util.Map<String, ScrollBox> keyedScrolls = new java.util.HashMap<>();
+
+    void watchScroll(String key, NshView.ScrollWatcher watcher) {
+        if (watcher == null) {
+            scrollWatchers.remove(key);
+            return;
+        }
+        scrollWatchers.put(key, watcher);
+        ScrollBox box = keyedScrolls.get(key);
+        if (box != null) watcher.onAttached(new NshScrollHandle(box, key));
+    }
+
+    /** A scroll view's props were applied, with {@code key} its {@code nativeID} (null: none). */
+    private void keyScroll(ScrollBox box, String key) {
+        if (java.util.Objects.equals(box.hostKey, key)) return;
+        unkeyScroll(box);
+        if (key == null) return;
+        // Another scroll view of the same id makes way: the newest is watched.
+        ScrollBox previous = keyedScrolls.get(key);
+        if (previous != null) unkeyScroll(previous);
+        box.hostKey = key;
+        keyedScrolls.put(key, box);
+        NshView.ScrollWatcher watcher = scrollWatchers.get(key);
+        if (watcher != null) watcher.onAttached(new NshScrollHandle(box, key));
+    }
+
+    /** The scroll view is gone or lost its key: its handle goes dead and its watcher hears it. */
+    private void unkeyScroll(ScrollBox box) {
+        String key = box.hostKey;
+        if (key == null) return;
+        box.hostKey = null;
+        box.hostListeners.clear();
+        if (keyedScrolls.get(key) != box) return;
+        keyedScrolls.remove(key);
+        NshView.ScrollWatcher watcher = scrollWatchers.get(key);
+        if (watcher != null) watcher.onDetached();
     }
 
     /** The app's sounds and players (one per engine), made at its first audio command. UI thread. */
@@ -907,6 +951,10 @@ final class Mounter {
         if (v instanceof WebBox) ((WebBox) v).destroy();
         if (v instanceof VideoBox) ((VideoBox) v).destroy();
         if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+        if (v instanceof ScrollBox) {
+            ((ScrollBox) v).unmounted = true;
+            unkeyScroll((ScrollBox) v);
+        }
         if (v == focused) focused = null;
         views.remove(id);
         headerItems.remove(id);
@@ -1557,6 +1605,7 @@ final class Mounter {
             a.actionLabels[i] = string(objects, b.getInt());
         }
         a.testId = string(objects, b.getInt());
+        String nativeId = string(objects, b.getInt());
         float longPressDelay = b.getFloat();
         int ripple = b.getInt();
         Integer rippleColor = null;
@@ -1596,6 +1645,7 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
         a11y.put(id, a);
         a.apply(v);
+        if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
     private static String string(Object[] objects, int index) {
@@ -2232,6 +2282,15 @@ final class Mounter {
                 if (v instanceof InputBox) ((InputBox) v).select(start, end);
                 break;
             }
+            case 49: {
+                float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
+                int actions = b.getInt();
+                if (v instanceof InputBox) ((InputBox) v).openEditMenu(x, y, w, h, actions);
+                break;
+            }
+            case 50:
+                if (v instanceof InputBox) ((InputBox) v).closeEditMenu();
+                break;
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());

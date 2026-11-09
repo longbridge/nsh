@@ -33,6 +33,7 @@ pub(crate) struct State {
     destinations: RefCell<Destinations>,
     registered: Cell<bool>,
     offered: Cell<bool>,
+    uris: RefCell<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -110,6 +111,7 @@ pub(crate) fn reset(surface: &Surface) {
     }
     *surface.file_drop.destinations.borrow_mut() = Destinations::default();
     surface.file_drop.offered.set(false);
+    surface.file_drop.uris.borrow_mut().clear();
     set_target(surface, None);
 }
 
@@ -129,7 +131,11 @@ fn set_target(surface: &Surface, next: Option<NshView>) {
     if let Some(next) = next
         && next.state().events.contains(EventKind::FileDragEnter)
     {
-        surface.event(next.id(), EventKind::FileDragEnter, EventPayload::None);
+        surface.event(
+            next.id(),
+            EventKind::FileDragEnter,
+            EventPayload::FileDrop(surface.file_drop.uris.borrow().clone()),
+        );
     }
 }
 
@@ -233,10 +239,19 @@ impl IDropTarget_Impl for Destination_Impl {
     ) -> Result<()> {
         if let Some(surface) = self.surface.upgrade() {
             // SAFETY: QueryGetData checks availability without reading files.
-            surface.file_drop.offered.set(
-                data.as_ref()
-                    .is_some_and(|data| unsafe { data.QueryGetData(&format()) }.is_ok()),
-            );
+            let offered = data
+                .as_ref()
+                .is_some_and(|data| unsafe { data.QueryGetData(&format()) }.is_ok());
+            surface.file_drop.offered.set(offered);
+            // Eligibility stays with QueryGetData; the URLs are best effort, so
+            // a source whose CF_HDROP fails to render at entry is still
+            // accepted. CF_HDROP holds filenames only; keep them for target
+            // changes during DragOver, which receives no IDataObject.
+            *surface.file_drop.uris.borrow_mut() = if offered {
+                data.as_ref().map(files).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             update(&surface, point, effect);
         } else if !effect.is_null() {
             // SAFETY: OLE's callback output pointer.
@@ -263,6 +278,7 @@ impl IDropTarget_Impl for Destination_Impl {
     fn DragLeave(&self) -> Result<()> {
         if let Some(surface) = self.surface.upgrade() {
             surface.file_drop.offered.set(false);
+            surface.file_drop.uris.borrow_mut().clear();
             set_target(&surface, None);
         }
         Ok(())
@@ -296,6 +312,7 @@ impl IDropTarget_Impl for Destination_Impl {
                 unsafe { *effect = DROPEFFECT_NONE };
             }
             surface.file_drop.offered.set(false);
+            surface.file_drop.uris.borrow_mut().clear();
             set_target(&surface, None);
         } else if !effect.is_null() {
             // SAFETY: OLE's callback output pointer.

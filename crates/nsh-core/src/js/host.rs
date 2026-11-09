@@ -672,8 +672,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::FileDragEnter,
         on::ALL,
-        "() => void",
-        "A local file drag entered this desktop destination.",
+        "(e: { uris: string[] }) => void",
+        "A local file drag entered this desktop destination with its offered file URLs; GTK waits for its file-list preload.",
     ),
     (
         EventKind::FileDragLeave,
@@ -967,6 +967,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::UrlScheme,
     EventKind::Audio,
     EventKind::Window,
+    EventKind::EditAction,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

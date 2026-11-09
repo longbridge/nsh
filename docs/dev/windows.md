@@ -73,7 +73,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   the window's (the process is per-monitor DPI aware, v2).
 - **One hop per commit.** The engine runs on its own thread (`nsh_engine::Engine`); its sink queues each commit and
   posts one `WM_NSH_WAKE` to the window, and the main thread applies every queued batch in order (`surface.rs`,
-  `mount.rs`). The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
+  `mount.rs`). The animated values go into the views after those batches (`Surface::write_animations`) and before
+  each desktop command in one, which can paint its window before the batch ends (docs/dev/pitfalls.md, "Windows").
+  The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
   input and hosted items find views by id while a batch is being applied. Worker threads (image decoding, media
   callbacks, the dev client) run code back on a UI thread with `UiThread::invoke`: each UI thread has a message-only
   dispatcher window of its own, a surface records the `UiThread` it was made on (`Surface::ui_thread`), and work
@@ -86,7 +88,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   resize done; the area the window grew by then shows the window's background until the layout arrives.
   A window's swap chain never stretches (`DXGI_SCALING_NONE`): DWM shows the window at its new size before that frame
   is presented, and a stretched last frame would move everything by part of a pixel on each step of a resize. The last
-  frame stays where it is, and the swap chain's background color (`system::window_background`) fills the rest.
+  frame stays where it is, and DWM shows the window's redirection surface past it, which `WM_SIZE` fills with the
+  window's background before it waits for the layout (`window::fill`; DWM never shows a window swap chain's own
+  background color).
 - **Text is typeset on the engine thread** with DirectWrite's shared, free-threaded factory; the final layout is plain
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
@@ -264,7 +268,12 @@ waitable object and one frame in flight (two buffers), and a window draws only w
 (`SwapChain::ready`, a non-blocking poll). Otherwise `render::frame` returns before drawing, the damage and the
 invalid flag stay, and a thread pool wait on the object posts `WM_NSH_PAINT` to the window when a frame is free
 (posted, not `InvalidateRect`: a posted message comes before the `WM_PAINT`s that wait for the thread's other
-messages). A resized window draws at once, so it never shows stretched pixels.
+messages). A resized window draws in its `WM_SIZE` once it holds the token (`SwapChain::wait_ready`): it waits for its
+frame in flight to be shown, at most 50 ms, so a drag runs at the display's rate with one frame in flight and the
+window keeps up with the pointer. This is the one place a window's present holds its thread up, for a vblank at most:
+an embedding app that resizes an `NshView`, or an app resizing a window again and again, has its UI thread paced
+to that window's display meanwhile. A window DWM does not show (hidden, minimized, cloaked) only polls, and a resized
+window without the token waits for `WM_NSH_PAINT` as any other.
 
 The gate is what lets several windows share a UI thread (`Window.open`, several `AppView`s in an embedding app): a
 blocking `Present(1)` waited for the vertical blank of the other windows' frames, about 60 presents a second for the
@@ -369,7 +378,8 @@ window. The embedding UI thread must initialize OLE, as for other embedded COM
 features (`OleInitialize`); the standalone runner already does so. Registration
 ends when the last destination disappears or the surface stops.
 
-`DragEnter` checks for `CF_HDROP` without retrieving the file list. Enter and
+`DragEnter` reads and retains the `CF_HDROP` filename list (not file contents)
+for `onFileDragEnter`. Moves between destinations reuse it. Enter and
 over callbacks convert screen pixels to client points and use retained view hit
 testing, stopping at a modal root. Eligible targets advertise Copy. Drop reads
 the local file list in native order and converts absolute paths to escaped file

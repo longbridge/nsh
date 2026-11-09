@@ -205,6 +205,13 @@ emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.t
 ...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
 entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
+`DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
+component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its
+`Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;
+`true` remains a shorthand for `"left"`, and `false` leaves the column scrolling. NSH's
+`ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
+Left-fixed columns lead the order and right-fixed columns close it.
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
