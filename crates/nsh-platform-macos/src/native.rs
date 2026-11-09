@@ -1719,6 +1719,22 @@ fn describe(object: &AnyObject) -> String {
     d.to_string()
 }
 
+/// The folder a `file://` page may read: the file's own, nothing above it.
+/// `None` for any other URL, which loads as a request, and for a file at
+/// the root, whose folder is the whole disk.
+fn file_read_scope(uri: &str) -> Option<&str> {
+    const SCHEME: &str = "file://";
+    if !uri
+        .get(..SCHEME.len())
+        .is_some_and(|s| s.eq_ignore_ascii_case(SCHEME))
+    {
+        return None;
+    }
+    let path = uri.split(['?', '#']).next().unwrap_or(uri);
+    let end = path.rfind('/')? + 1;
+    (end > SCHEME.len() + 1).then(|| &uri[..end])
+}
+
 /// A JS string literal for `s`.
 fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -1889,10 +1905,18 @@ impl WebHost {
             if first || p.source != old.source || scripts_changed {
                 match &p.source {
                     WebSource::Uri(uri) => {
-                        if let (Some(url), Some(cls)) = (
-                            NSURL::URLWithString(&NSString::from_str(uri)),
-                            class(c"NSURLRequest"),
-                        ) {
+                        let url = NSURL::URLWithString(&NSString::from_str(uri));
+                        let scope = file_read_scope(uri)
+                            .and_then(|dir| NSURL::URLWithString(&NSString::from_str(dir)));
+                        if let (Some(url), Some(scope)) = (&url, scope) {
+                            // A request for a file URL shows nothing: WebKit
+                            // reads a local file only where it is let.
+                            let _: Option<Retained<AnyObject>> = msg_send![
+                                web,
+                                loadFileURL: &**url,
+                                allowingReadAccessToURL: &*scope
+                            ];
+                        } else if let (Some(url), Some(cls)) = (url, class(c"NSURLRequest")) {
                             let request: Retained<AnyObject> =
                                 msg_send![cls, requestWithURL: &*url];
                             let _: Option<Retained<AnyObject>> =
@@ -2183,6 +2207,33 @@ mod tests {
             Some(Location::Path("/Users/me/a.mp4".into()))
         );
         assert_eq!(locate("", None), None);
+    }
+
+    #[test]
+    fn a_file_url_reads_its_own_folder_and_nothing_wider() {
+        assert_eq!(
+            file_read_scope("file:///Users/a/Caches/opened/7f/Invoice%20May.pdf"),
+            Some("file:///Users/a/Caches/opened/7f/")
+        );
+        assert_eq!(
+            file_read_scope("FILE:///tmp/x/a.pdf#page=2"),
+            Some("FILE:///tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/a.pdf?/b/c"),
+            Some("file:///tmp/x/"),
+            "a slash after the path is no folder"
+        );
+        assert_eq!(file_read_scope("file:///a.pdf"), None, "not the whole disk");
+        for uri in [
+            "http://127.0.0.1:8790/file/raw/m1/a.pdf",
+            "https://example.com/a.pdf",
+            "about:blank",
+            "/Users/a/b.pdf",
+            "",
+        ] {
+            assert_eq!(file_read_scope(uri), None, "{uri}");
+        }
     }
 
     #[test]
