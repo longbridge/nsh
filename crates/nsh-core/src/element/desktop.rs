@@ -966,9 +966,9 @@ pub struct MenuItem {
     enabled: bool,
     checked: Option<bool>,
     icon: Option<ImageSrc>,
-    /// An SF Symbol name on Apple platforms; see [`Self::symbol`].
+    /// An SF Symbol name for iOS header menus; see [`Self::symbol`].
     symbol: Option<String>,
-    /// Destructive on platforms that show it; see [`Self::destructive`].
+    /// Destructive on iOS; ignored on the desktops; see [`Self::destructive`].
     destructive: bool,
     /// Inline section when this is a submenu; see [`Self::inline`].
     inline: bool,
@@ -1074,22 +1074,22 @@ impl MenuItem {
     /// off the main thread and shows once it has (one that fails to load
     /// leaves the item without an icon, with a warning). GTK's menus show
     /// no icons beside labels, and a terminal shows no images. For an SF
-    /// Symbol name on Apple platforms, use [`Self::symbol`] instead.
+    /// Symbol name for iOS header menus, use [`Self::symbol`] instead.
     pub fn icon(mut self, src: impl Into<ImageSrc>) -> Self {
         self.icon = Some(src.into());
         self
     }
 
-    /// An SF Symbol name beside its label on Apple platforms (iOS header
-    /// menus; macOS menus may use it). Other platforms ignore it. Takes
-    /// the place of [`Self::icon`] when both are set.
+    /// An SF Symbol name beside its label in iOS header menus; ignored
+    /// elsewhere (including macOS). Takes the place of [`Self::icon`] when
+    /// both are set.
     pub fn symbol(mut self, name: impl Into<String>) -> Self {
         self.symbol = Some(name.into());
         self
     }
 
     /// Marks the action destructive: iOS draws it red; the desktops ignore
-    /// it for now.
+    /// it.
     pub fn destructive(mut self, destructive: bool) -> Self {
         self.destructive = destructive;
         self

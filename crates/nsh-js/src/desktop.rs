@@ -1335,13 +1335,13 @@ export type MenuItem =
        * menu bar show their titles alone, and so do GPUI's native menus on
        * macOS. GTK's menus show no icon beside a label: GTK draws a menu
        * item's icon only when it has no text. A terminal shows no images.
-       * For an SF Symbol name on Apple platforms, use `symbol` instead. */
+       * For an SF Symbol name in iOS header menus, use `symbol` instead. */
       icon?: ImageAsset | string;
-      /** An SF Symbol name beside its label on Apple platforms (iOS header
-       * menus; macOS menus may use it). Other platforms ignore it. Takes
-       * the place of `icon` when both are set. */
+      /** An SF Symbol name beside its label in iOS header menus; ignored
+       * elsewhere (including macOS). Takes the place of `icon` when both
+       * are set. */
       symbol?: string;
-      /** Destructive: iOS draws it red; the desktops ignore it for now. */
+      /** Destructive: iOS draws it red; the desktops ignore it. */
       destructive?: boolean;
       /** Its items: makes it a submenu (`label` is required). With
        * `inline: true`, an inline section: on iOS,

@@ -682,13 +682,11 @@ pub struct MenuAction {
     pub when: When,
     /// What it shows beside its label, the app's own image ([`menu_icon`]).
     pub icon: Option<ImageSource>,
-    /// An SF Symbol name beside its label on Apple platforms (iOS header
-    /// menus; macOS menus may use it). Other platforms ignore it. Prefer
-    /// this over putting a symbol name in [`Self::icon`], which is an
-    /// image source.
+    /// An SF Symbol name beside its label in iOS header menus; ignored
+    /// elsewhere (including macOS). Prefer this over putting a symbol name
+    /// in [`Self::icon`], which is an image source.
     pub symbol: Option<String>,
-    /// Shown as a destructive action where the platform has one (iOS:
-    /// red; the desktops ignore it for now).
+    /// Shown as a destructive action on iOS (red); the desktops ignore it.
     pub destructive: bool,
 }
 
@@ -725,8 +723,8 @@ pub enum MenuItem {
         /// What it shows beside its label ([`menu_icon`]), but for the
         /// top-level menus of a menu bar, which show their titles alone.
         icon: Option<ImageSource>,
-        /// An SF Symbol name beside its label on Apple platforms; other
-        /// platforms ignore it.
+        /// An SF Symbol name beside its label in iOS header menus; ignored
+        /// elsewhere (including macOS).
         symbol: Option<String>,
         /// An inline section: on iOS, `UIMenuOptions.displayInline` with
         /// `label` as the section title; on the desktops, its items between
@@ -741,6 +739,7 @@ impl MenuItem {
     /// shown), for the desktops. Nested non-inline submenus are kept;
     /// their children are expanded the same way. iOS header menus keep
     /// inline sections as they are.
+    #[doc(hidden)]
     pub fn with_inline_expanded(items: &[MenuItem]) -> Vec<MenuItem> {
         let mut out = Vec::new();
         for item in items {
@@ -773,6 +772,9 @@ impl MenuItem {
                     symbol: symbol.clone(),
                     inline: false,
                 }),
+                // An explicit separator after an inline section would
+                // otherwise double the one the expansion already pushed.
+                MenuItem::Separator if matches!(out.last(), Some(MenuItem::Separator)) => {}
                 other => out.push(other.clone()),
             }
         }
@@ -1208,6 +1210,31 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             ["A", "B"]
+        );
+        // An explicit separator after an inline section must not double.
+        let after_inline = MenuItem::with_inline_expanded(&[
+            action("A"),
+            MenuItem::Submenu {
+                label: "Group".into(),
+                enabled: true,
+                items: vec![action("B")],
+                icon: None,
+                symbol: None,
+                inline: true,
+            },
+            MenuItem::Separator,
+            action("C"),
+        ]);
+        assert_eq!(
+            after_inline
+                .iter()
+                .map(|i| match i {
+                    MenuItem::Separator => "—",
+                    MenuItem::Action(a) => a.label.as_str(),
+                    _ => "?",
+                })
+                .collect::<Vec<_>>(),
+            ["A", "—", "B", "—", "C"]
         );
     }
 }

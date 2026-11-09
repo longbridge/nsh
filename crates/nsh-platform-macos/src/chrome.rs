@@ -924,32 +924,14 @@ pub(crate) fn menu(
                 enabled,
                 items,
                 icon,
-                inline,
                 ..
             } => {
-                if *inline {
-                    // Inline section: items between separators. A section
-                    // header (macOS 14+) is left for a follow-up.
-                    if !last_separator {
-                        menu.addItem(&NSMenuItem::separatorItem(mtm));
-                    }
-                    let nested = self::menu(surface, "", items, loads);
-                    while nested.numberOfItems() > 0 {
-                        if let Some(item) = nested.itemAtIndex(0) {
-                            nested.removeItemAtIndex(0);
-                            menu.addItem(&item);
-                        } else {
-                            break;
-                        }
-                    }
-                    menu.addItem(&NSMenuItem::separatorItem(mtm));
-                    last_separator = true;
-                } else {
-                    let ns = holder(surface, label, *enabled, items, loads);
-                    set_icon(surface, &ns, icon.as_ref(), loads);
-                    menu.addItem(&ns);
-                    last_separator = false;
-                }
+                // Inline sections are expanded in the core / nsh-js before
+                // any menu reaches the desktops.
+                let ns = holder(surface, label, *enabled, items, loads);
+                set_icon(surface, &ns, icon.as_ref(), loads);
+                menu.addItem(&ns);
+                last_separator = false;
             }
         }
     }

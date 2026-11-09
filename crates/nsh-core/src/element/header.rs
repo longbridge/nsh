@@ -163,26 +163,95 @@ fn decode_item(
     }
 }
 
-/// Whether two lists describe the same trailing buttons for UIKit's
-/// identity (count, keys or contents, and whether each has a menu). Menus'
-/// contents, labels and `disabled` can change without rebuilding the bar
-/// buttons.
+/// Whether two lists keep the same trailing `UIBarButtonItem`s: count,
+/// keys (or unkeyed contents), content kind that can update in place, and
+/// whether each has a menu. A label's title or a symbol's image can change
+/// without rebuilding; a system-item change or a content-kind change needs
+/// a new button. Menus' contents, accessibility labels and `disabled` can
+/// change either way.
+#[doc(hidden)]
 pub fn same_right_buttons(a: &[crate::HeaderItem], b: &[crate::HeaderItem]) -> bool {
     a.len() == b.len()
         && a.iter()
             .zip(b)
-            .all(|(x, y)| identity(x) == identity(y) && x.menu.is_some() == y.menu.is_some())
+            .all(|(x, y)| keepable(x, y) && x.menu.is_some() == y.menu.is_some())
 }
 
-#[derive(PartialEq, Eq)]
-enum Identity<'a> {
-    Key(&'a str),
-    Content(&'a HeaderItemContent),
+/// Whether UIKit can keep `a`'s `UIBarButtonItem` and apply `b` in place.
+fn keepable(a: &crate::HeaderItem, b: &crate::HeaderItem) -> bool {
+    match (a.key.as_deref(), b.key.as_deref()) {
+        (Some(ka), Some(kb)) if ka == kb => content_keeps_button(&a.content, &b.content),
+        (None, None) => a.content == b.content,
+        _ => false,
+    }
 }
 
-fn identity(item: &crate::HeaderItem) -> Identity<'_> {
-    match item.key.as_deref() {
-        Some(key) => Identity::Key(key),
-        None => Identity::Content(&item.content),
+/// Label and symbol content update in place; a system item only when it is
+/// the same item (UIKit cannot change a system item on an existing button).
+fn content_keeps_button(a: &HeaderItemContent, b: &HeaderItemContent) -> bool {
+    match (a, b) {
+        (HeaderItemContent::Label(_), HeaderItemContent::Label(_)) => true,
+        (HeaderItemContent::Symbol(_), HeaderItemContent::Symbol(_)) => true,
+        (HeaderItemContent::SystemItem(x), HeaderItemContent::SystemItem(y)) => x == y,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{HeaderItem as PlatformHeaderItem, HeaderSystemItem};
+
+    fn keyed(key: &str, content: HeaderItemContent) -> PlatformHeaderItem {
+        PlatformHeaderItem {
+            key: Some(Arc::from(key)),
+            content,
+            label: None,
+            disabled: false,
+            press_id: 0,
+            menu: None,
+        }
+    }
+
+    #[test]
+    fn keyed_label_change_keeps_button() {
+        let a = keyed("edit", HeaderItemContent::Label(Arc::from("Edit")));
+        let b = keyed("edit", HeaderItemContent::Label(Arc::from("Done")));
+        assert!(
+            same_right_buttons(&[a], &[b]),
+            "same key + Label→Label: update title in place"
+        );
+    }
+
+    #[test]
+    fn keyed_symbol_change_keeps_button() {
+        let a = keyed("star", HeaderItemContent::Symbol(Arc::from("star")));
+        let b = keyed("star", HeaderItemContent::Symbol(Arc::from("star.fill")));
+        assert!(
+            same_right_buttons(&[a], &[b]),
+            "same key + Symbol→Symbol: update image in place"
+        );
+    }
+
+    #[test]
+    fn keyed_system_item_change_rebuilds() {
+        let a = keyed("x", HeaderItemContent::SystemItem(HeaderSystemItem::Edit));
+        let b = keyed("x", HeaderItemContent::SystemItem(HeaderSystemItem::Done));
+        assert!(
+            !same_right_buttons(&[a], &[b]),
+            "UIKit cannot change a system item in place"
+        );
+    }
+
+    #[test]
+    fn keyed_content_kind_change_rebuilds() {
+        let a = keyed("x", HeaderItemContent::Label(Arc::from("Edit")));
+        let b = keyed("x", HeaderItemContent::Symbol(Arc::from("pencil")));
+        assert!(
+            !same_right_buttons(&[a], &[b]),
+            "Label→Symbol needs a new UIBarButtonItem"
+        );
     }
 }

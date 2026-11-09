@@ -291,8 +291,11 @@ On iOS, several trailing system bar buttons (with optional native menus) stand i
 In Rust, build the same list with `nsh_core::element::header::HeaderItem` and `nsh_core::element::desktop::MenuItem`:
 
 ```rust
+use nsh_base::nav_page;
+use nsh_core::element::{desktop::MenuItem, header::HeaderItem, HeaderSystemItem};
+
 nav_page()
-    .header_right_items([
+    .header_right_items(vec![
         HeaderItem::system(HeaderSystemItem::Edit)
             .key("edit")
             .on_press(on_edit),

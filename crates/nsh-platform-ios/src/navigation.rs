@@ -934,66 +934,107 @@ fn make_menu(
     items: &[MenuItem],
     mounter: &SharedMounter,
 ) -> Retained<UIMenu> {
-    let children = menu_children(mtm, items, mounter);
+    let children = menu_children(mtm, items, mounter, true);
     UIMenu::menuWithTitle_children(&NSString::from_str(""), &children, mtm)
 }
 
-/// Menu children for a list of [`MenuItem`]s.
+/// One menu element from a non-separator [`MenuItem`].
+fn menu_element(
+    mtm: MainThreadMarker,
+    entry: &MenuItem,
+    mounter: &SharedMounter,
+    enabled: bool,
+) -> Option<Retained<UIMenuElement>> {
+    match entry {
+        MenuItem::Separator => None,
+        MenuItem::Action(action) => {
+            let mut action = action.clone();
+            if !enabled {
+                action.enabled = false;
+            }
+            Some(Retained::into_super(make_menu_action(
+                mtm,
+                &action,
+                mounter.clone(),
+            )))
+        }
+        MenuItem::Submenu {
+            label,
+            enabled: submenu_enabled,
+            items,
+            icon: _,
+            symbol,
+            inline,
+        } => {
+            let child_enabled = enabled && *submenu_enabled;
+            let nested = menu_children(mtm, items, mounter, child_enabled);
+            let image = symbol.as_deref().and_then(system_image);
+            let options = if *inline {
+                UIMenuOptions::DisplayInline
+            } else {
+                UIMenuOptions::empty()
+            };
+            let submenu = UIMenu::menuWithTitle_image_identifier_options_children(
+                &NSString::from_str(label),
+                image.as_deref(),
+                None,
+                options,
+                &nested,
+                mtm,
+            );
+            Some(Retained::into_super(submenu))
+        }
+    }
+}
+
+/// Menu children for a list of [`MenuItem`]s. Separators split the list into
+/// consecutive inline `UIMenu` groups (UIKit draws separators between those);
+/// with no separators the elements stay flat. A disabled submenu has no
+/// enabled state of its own, so its children are disabled instead.
 fn menu_children(
     mtm: MainThreadMarker,
     entries: &[MenuItem],
     mounter: &SharedMounter,
+    enabled: bool,
 ) -> Retained<NSArray<UIMenuElement>> {
-    let mut children: Vec<Retained<UIMenuElement>> = Vec::with_capacity(entries.len());
+    let has_separator = entries.iter().any(|e| matches!(e, MenuItem::Separator));
+    if !has_separator {
+        let children: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| menu_element(mtm, entry, mounter, enabled))
+            .collect();
+        return NSArray::from_retained_slice(&children);
+    }
+    let mut children: Vec<Retained<UIMenuElement>> = Vec::new();
+    let mut group: Vec<Retained<UIMenuElement>> = Vec::new();
+    let flush = |group: &mut Vec<Retained<UIMenuElement>>,
+                 children: &mut Vec<Retained<UIMenuElement>>| {
+        if group.is_empty() {
+            return;
+        }
+        let elems = NSArray::from_retained_slice(group);
+        let section = UIMenu::menuWithTitle_image_identifier_options_children(
+            &NSString::from_str(""),
+            None,
+            None,
+            UIMenuOptions::DisplayInline,
+            &elems,
+            mtm,
+        );
+        children.push(Retained::into_super(section));
+        group.clear();
+    };
     for entry in entries {
         match entry {
-            MenuItem::Action(action) => {
-                children.push(Retained::into_super(make_menu_action(
-                    mtm,
-                    action,
-                    mounter.clone(),
-                )));
-            }
-            MenuItem::Separator => {
-                // Separators are expressed as empty inline sections.
-                let empty = NSArray::<UIMenuElement>::array();
-                let section = UIMenu::menuWithTitle_image_identifier_options_children(
-                    &NSString::from_str(""),
-                    None,
-                    None,
-                    UIMenuOptions::DisplayInline,
-                    &empty,
-                    mtm,
-                );
-                children.push(Retained::into_super(section));
-            }
-            MenuItem::Submenu {
-                label,
-                enabled: _,
-                items,
-                icon: _,
-                symbol,
-                inline,
-            } => {
-                let nested = menu_children(mtm, items, mounter);
-                let image = symbol.as_deref().and_then(system_image);
-                let options = if *inline {
-                    UIMenuOptions::DisplayInline
-                } else {
-                    UIMenuOptions::empty()
-                };
-                let submenu = UIMenu::menuWithTitle_image_identifier_options_children(
-                    &NSString::from_str(label),
-                    image.as_deref(),
-                    None,
-                    options,
-                    &nested,
-                    mtm,
-                );
-                children.push(Retained::into_super(submenu));
+            MenuItem::Separator => flush(&mut group, &mut children),
+            other => {
+                if let Some(el) = menu_element(mtm, other, mounter, enabled) {
+                    group.push(el);
+                }
             }
         }
     }
+    flush(&mut group, &mut children);
     NSArray::from_retained_slice(&children)
 }
 
@@ -1055,7 +1096,8 @@ fn make_right_item_content(
     }
 }
 
-/// Menu, label, enabled and press id on an existing trailing bar button.
+/// Title / image, menu, label, enabled and press id on an existing trailing
+/// bar button (label and symbol content only: system items are rebuilt).
 fn update_right_item(
     mtm: MainThreadMarker,
     item: &HeaderItem,
@@ -1063,8 +1105,30 @@ fn update_right_item(
     target: Option<&HeaderItemTarget>,
     mounter: &SharedMounter,
 ) {
+    match &item.content {
+        HeaderItemContent::Label(title) => {
+            button.setTitle(Some(&NSString::from_str(title)));
+            button.setImage(None);
+        }
+        HeaderItemContent::Symbol(name) => match system_image(name) {
+            Some(image) => {
+                button.setImage(Some(&image));
+                button.setTitle(None);
+            }
+            None => {
+                let fallback = item.label.as_deref().unwrap_or(name.as_ref());
+                button.setTitle(Some(&NSString::from_str(fallback)));
+                button.setImage(None);
+            }
+        },
+        // Kept only when the system item is unchanged; nothing to set.
+        HeaderItemContent::SystemItem(_) => {}
+        _ => {}
+    }
     if let Some(menu) = &item.menu {
         button.setMenu(Some(&make_menu(mtm, menu, mounter)));
+    } else {
+        button.setMenu(None);
     }
     if let Some(target) = target {
         // The previous binding's handlers are gone; take this binding's id

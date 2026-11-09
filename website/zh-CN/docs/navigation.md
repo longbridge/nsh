@@ -295,8 +295,11 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 在 Rust 里用 `nsh_core::element::header::HeaderItem` 和 `nsh_core::element::desktop::MenuItem` 构建同样的列表：
 
 ```rust
+use nsh_base::nav_page;
+use nsh_core::element::{desktop::MenuItem, header::HeaderItem, HeaderSystemItem};
+
 nav_page()
-    .header_right_items([
+    .header_right_items(vec![
         HeaderItem::system(HeaderSystemItem::Edit)
             .key("edit")
             .on_press(on_edit),

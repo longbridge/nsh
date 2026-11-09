@@ -1266,18 +1266,12 @@ pub enum HeaderItemContent {
     Label(Arc<str>),
 }
 
-impl Default for HeaderItemContent {
-    fn default() -> Self {
-        Self::SystemItem(HeaderSystemItem::Add)
-    }
-}
-
 /// A trailing iOS navigation-bar button (`ios={{ headerRightItems }}`), as
 /// the platform sees it: numeric ids for presses and menu actions report
 /// the root's [`EventKind::Menu`]. Rust apps build one with
 /// [`crate::element::header::HeaderItem`] (handlers included); JS sets
 /// `onPress` / `MenuItem.onSelect` and the runtime assigns the ids.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct HeaderItem {
     /// Optional key for keeping a `UIBarButtonItem` across updates; without
@@ -1299,9 +1293,10 @@ pub struct HeaderItem {
 }
 
 impl HeaderItem {
-    /// A platform header button with the given fields (for the JS runtime
-    /// and tests). Prefer [`crate::element::header::HeaderItem`] in Rust
-    /// apps so handlers are registered.
+    /// Builds a platform header button from its fields. `#[non_exhaustive]`
+    /// keeps a struct literal off other crates; prefer
+    /// [`crate::element::header::HeaderItem`] in Rust apps.
+    #[doc(hidden)]
     pub fn from_parts(
         key: Option<Arc<str>>,
         content: HeaderItemContent,
