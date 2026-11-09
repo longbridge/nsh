@@ -148,11 +148,11 @@ impl Fill {
 
 /// An opaque background placed first in `view` (under its content). A
 /// [`Container`] (an "own" view for [`NshView::insert_before`]), so the
-/// app's views keep going above it, below the hosted AppKit views.
+/// app's views keep going above it, below the hosted AppKit views; made by
+/// [`Container::new`], as a container's tracking mark must be set before
+/// AppKit sees it.
 fn new_backdrop(view: &NshView) -> Retained<Container> {
-    // SAFETY: NSView's designated initializer.
-    let c: Retained<Container> =
-        unsafe { msg_send![Container::alloc(view.mtm()), initWithFrame: NSRect::ZERO] };
+    let c = Container::new(view.mtm(), NSRect::ZERO);
     c.setWantsLayer(true);
     view.ns()
         .addSubview_positioned_relativeTo(&c, NSWindowOrderingMode::Below, None);

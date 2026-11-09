@@ -19,6 +19,8 @@ cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targ
 cargo test -p nsh-platform-macos --features dev   # needs no window server: tests do not start AppKit
 cargo build -p nsh-macos-host                     # ./target/debug/nsh-macos-host
 cargo test -p nsh-platform-macos --test native -- --ignored # desktop session required
+# Mounting rows that are not virtualized, measured alone (tests/native/mount.rs):
+NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 ```
 
 Features: `js` (default; JS apps; without it the crate only runs Rust apps and links no QuickJS) and `dev` (the dev
@@ -64,6 +66,11 @@ belong to the app, which owns retention and its storage budget.
   their children and cast a shadow also use containers (clipping a layer clips its shadow). Hosted AppKit views
   (text fields, videos, web views) are `ViewState::natives`, above the children; hit testing follows the AppKit order
   of hosted views and children.
+  An appended child goes below the lowest subview that is not NSH's (a hosted view, or one a host app added itself),
+  which a scan of the subviews finds; the view or container remembers whether such a view can have come in since a
+  scan last found none (`didAddSubview:`, and `setSubviews:` / `replaceSubview:with:` whatever they bring), and appends
+  skip the scan until then (`view.rs` `first_foreign`), so mounting N children no longer scans N² subviews. Backdrops use a mutable
+  `identifier`, so their holders conservatively keep scanning, as do holders of hosted views.
 - **Web views and videos are views among the others**, so window composition needs no surfaces of its own (unlike
   Windows' child windows): a `WKWebView` is a layer-backed subview of its node's view, and the layer WebKit's process
   draws into is composited by Core Animation with the rest. What is above it in the view tree draws over it (later
