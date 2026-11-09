@@ -89,8 +89,8 @@ public final class MainActivity extends Activity {
         top.setText("Back to top");
         top.setOnClickListener(v -> {
             if (scroll == null) return;
-            scroll.stopFling();
-            scroll.smoothScrollBy(-scroll.getScrollY());
+            scroll.stopScrolling();
+            scroll.scrollBy(0, -scroll.getScrollY(), true);
         });
         column.addView(top);
 
@@ -106,12 +106,12 @@ public final class MainActivity extends Activity {
         nsh.watchScroll("embedded.scroll", new NshView.ScrollWatcher() {
             private final NshScrollListener follow = new NshScrollListener() {
                 @Override
-                public void onScroll(int scrollY, int dy) {
+                public void onScroll(int scrollX, int scrollY, int dx, int dy) {
                     show();
                 }
 
                 @Override
-                public void onContentSizeChanged(int contentHeight) {
+                public void onContentSizeChange(int contentWidth, int contentHeight) {
                     show();
                 }
             };

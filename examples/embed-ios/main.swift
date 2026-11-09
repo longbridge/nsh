@@ -116,14 +116,14 @@ final class EmbedController: UIViewController, NshScrollWatcher {
     /// Scrolls the app's page back to the top from here, also mid-fling.
     @objc private func backToTop() {
         guard let scroll else { return }
-        scroll.stopDeceleration()
-        scroll.scroll(by: -scroll.contentOffsetY, animated: true)
+        scroll.stopScrolling()
+        scroll.scrollBy(dx: 0, dy: -scroll.scrollY, animated: true)
     }
 
     private func showOffset() {
         guard let scroll else { return }
         let range = max(scroll.contentHeight - scroll.viewportHeight, 0)
-        offset.text = "the app's page: \(Int(scroll.contentOffsetY.rounded())) of \(Int(range.rounded())) pt scrolled"
+        offset.text = "the app's page: \(Int(scroll.scrollY.rounded())) of \(Int(range.rounded())) pt scrolled"
     }
 
     /// An event the app hears with `host.on("message", ...)`.
@@ -150,14 +150,14 @@ final class EmbedController: UIViewController, NshScrollWatcher {
         }
     }
 
-    func scrollAttached(_ handle: NshScrollHandle) {
+    func onAttached(_ handle: NshScrollHandle) {
         scroll = handle
-        handle.onScroll { [weak self] _, _ in self?.showOffset() }
-        handle.onContentSizeChange { [weak self] _ in self?.showOffset() }
+        handle.onScroll { [weak self] _, _, _, _ in self?.showOffset() }
+        handle.onContentSizeChange { [weak self] _, _ in self?.showOffset() }
         showOffset()
     }
 
-    func scrollDetached() {
+    func onDetached() {
         scroll = nil
         offset.text = "the app's page is gone"
     }

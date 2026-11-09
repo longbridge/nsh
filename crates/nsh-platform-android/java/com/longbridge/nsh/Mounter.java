@@ -728,7 +728,7 @@ final class Mounter {
         }
     }
 
-    // Scroll views the host watches (`NshView.watchScroll`), by `testID`.
+    // Scroll views the host watches (`NshView.watchScroll`), by `nativeID`.
     private final java.util.Map<String, NshView.ScrollWatcher> scrollWatchers = new java.util.HashMap<>();
     private final java.util.Map<String, ScrollBox> keyedScrolls = new java.util.HashMap<>();
 
@@ -742,7 +742,7 @@ final class Mounter {
         if (box != null) watcher.onAttached(new NshScrollHandle(box, key));
     }
 
-    /** A scroll view's props were applied, with {@code key} its {@code testID} (null: none). */
+    /** A scroll view's props were applied, with {@code key} its {@code nativeID} (null: none). */
     private void keyScroll(ScrollBox box, String key) {
         if (java.util.Objects.equals(box.hostKey, key)) return;
         unkeyScroll(box);
@@ -1605,6 +1605,7 @@ final class Mounter {
             a.actionLabels[i] = string(objects, b.getInt());
         }
         a.testId = string(objects, b.getInt());
+        String nativeId = string(objects, b.getInt());
         float longPressDelay = b.getFloat();
         int ripple = b.getInt();
         Integer rippleColor = null;
@@ -1644,7 +1645,7 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
         a11y.put(id, a);
         a.apply(v);
-        if (v instanceof ScrollBox) keyScroll((ScrollBox) v, a.testId);
+        if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
     private static String string(Object[] objects, int index) {

@@ -1,10 +1,10 @@
 //! Scroll views the embedding app watches ([`crate::AppView::watch_scroll`]):
 //! native UI of the host that moves with the app's content in every frame (a
 //! sheet the end of the content pulls up) follows a `<Scroll>` by its
-//! `testID`, on the main thread, in the frame of the scroll. `onScroll`
+//! `nativeID`, on the main thread, in the frame of the scroll. `onScroll`
 //! through JS would be a frame late.
 //!
-//! The mounter keys a scroll view by the `testID` of its props (the newest of
+//! The mounter keys a scroll view by the `nativeID` of its props (the newest of
 //! an id wins) and unkeys it when it is deleted, loses the id or its app
 //! stops; unkeying tells the watcher and kills the handle. The event target
 //! calls the handle's listeners from `scrollViewDidScroll`, after the core's
@@ -20,7 +20,7 @@ use std::{
 
 use nsh_core::NodeId;
 use objc2::rc::{Retained, Weak};
-use objc2_core_foundation::{CGFloat, CGPoint};
+use objc2_core_foundation::{CGFloat, CGPoint, CGSize};
 use objc2_ui_kit::{UIScrollView, UIView};
 use rustc_hash::FxHashMap;
 
@@ -30,14 +30,14 @@ use crate::target::EventTarget;
 pub trait ScrollWatcher {
     /// The scroll view is there: at once when it already is, and again with
     /// a new handle when the app replaces the element or another app loads.
-    fn attached(&self, handle: ScrollHandle);
+    fn on_attached(&self, handle: ScrollHandle);
 
-    /// The scroll view is gone (deleted, its `testID` changed or its app
+    /// The scroll view is gone (deleted, its `nativeID` changed or its app
     /// stopped): its handle is dead.
-    fn detached(&self);
+    fn on_detached(&self);
 }
 
-/// The watchers of a view's apps, by `testID`, and the scroll views keyed
+/// The watchers of a view's apps, by `nativeID`, and the scroll views keyed
 /// now (shared by the view's options and its surface's mounter).
 #[derive(Clone, Default)]
 pub struct ScrollWatchers(Rc<RefCell<Registry>>);
@@ -57,64 +57,68 @@ struct Registry {
 }
 
 impl ScrollWatchers {
-    /// Watches the scroll view with `test_id` (`None`: stops watching).
-    pub(crate) fn watch(&self, test_id: &str, watcher: Option<Rc<dyn ScrollWatcher>>) {
+    /// Watches the scroll view with `native_id` (`None`: stops watching).
+    pub(crate) fn watch(&self, native_id: &str, watcher: Option<Rc<dyn ScrollWatcher>>) {
         let attach = {
             let mut registry = self.0.borrow_mut();
             match watcher {
                 None => {
-                    registry.watchers.remove(test_id);
+                    registry.watchers.remove(native_id);
                     None
                 }
                 Some(watcher) => {
-                    registry.watchers.insert(test_id.into(), watcher.clone());
-                    registry.keyed.get(test_id).cloned().map(|h| (watcher, h))
+                    registry.watchers.insert(native_id.into(), watcher.clone());
+                    registry.keyed.get(native_id).cloned().map(|h| (watcher, h))
                 }
             }
         };
         // Outside the borrow: the watcher may watch again.
         if let Some((watcher, handle)) = attach {
-            watcher.attached(handle);
+            watcher.on_attached(handle);
         }
     }
 
-    /// `handle`'s scroll view now has `test_id`: an older one of the id
+    /// `handle`'s scroll view now has `native_id`: an older one of the id
     /// makes way.
-    fn key(&self, test_id: Arc<str>, handle: &ScrollHandle) {
+    fn key(&self, native_id: Arc<str>, handle: &ScrollHandle) {
         let (previous, watcher) = {
             let mut registry = self.0.borrow_mut();
-            let previous = registry.keyed.insert(test_id.clone(), handle.clone());
-            (previous, registry.watchers.get(&test_id).cloned())
+            let previous = registry.keyed.insert(native_id.clone(), handle.clone());
+            (previous, registry.watchers.get(&native_id).cloned())
         };
         if let Some(previous) = previous {
             previous.kill();
             if let Some(w) = &watcher {
-                w.detached();
+                w.on_detached();
             }
         }
         if let Some(w) = watcher {
-            w.attached(handle.clone());
+            w.on_attached(handle.clone());
         }
     }
 
-    /// `handle`'s scroll view is gone or lost `test_id`.
-    fn unkey(&self, test_id: &str, handle: &ScrollHandle) {
+    /// `handle`'s scroll view is gone or lost `native_id`.
+    fn unkey(&self, native_id: &str, handle: &ScrollHandle) {
         handle.kill();
         let watcher = {
             let mut registry = self.0.borrow_mut();
-            if !registry.keyed.get(test_id).is_some_and(|h| h.same(handle)) {
+            if !registry
+                .keyed
+                .get(native_id)
+                .is_some_and(|h| h.same(handle))
+            {
                 return;
             }
-            registry.keyed.remove(test_id);
-            registry.watchers.get(test_id).cloned()
+            registry.keyed.remove(native_id);
+            registry.watchers.get(native_id).cloned()
         };
         if let Some(w) = watcher {
-            w.detached();
+            w.on_detached();
         }
     }
 }
 
-/// The keyed scroll views of a surface: their `testID` and handle, by node id.
+/// The keyed scroll views of a surface: their `nativeID` and handle, by node id.
 type Keyed = FxHashMap<NodeId, (Arc<str>, ScrollHandle)>;
 
 /// The scroll views of one surface the host may watch, by node id (its
@@ -123,41 +127,41 @@ type Keyed = FxHashMap<NodeId, (Arc<str>, ScrollHandle)>;
 pub(crate) struct SurfaceScrolls(Rc<RefCell<Keyed>>);
 
 impl SurfaceScrolls {
-    /// Scroll view `id`'s props were applied, with `test_id`.
+    /// Scroll view `id`'s props were applied, with `native_id`.
     pub(crate) fn props(
         &self,
         watchers: &ScrollWatchers,
         id: NodeId,
         scroll: &Retained<UIScrollView>,
         target: &Retained<EventTarget>,
-        test_id: Option<Arc<str>>,
+        native_id: Option<Arc<str>>,
     ) {
         let current = self.0.borrow().get(&id).map(|(k, _)| k.clone());
-        if current == test_id {
+        if current == native_id {
             return;
         }
         self.remove(watchers, id);
-        let Some(test_id) = test_id else { return };
+        let Some(native_id) = native_id else { return };
         let handle = ScrollHandle::new(scroll, target);
         self.0
             .borrow_mut()
-            .insert(id, (test_id.clone(), handle.clone()));
-        watchers.key(test_id, &handle);
+            .insert(id, (native_id.clone(), handle.clone()));
+        watchers.key(native_id, &handle);
     }
 
     /// Scroll view `id` is deleted, or lost its id.
     pub(crate) fn remove(&self, watchers: &ScrollWatchers, id: NodeId) {
         let removed = self.0.borrow_mut().remove(&id);
-        if let Some((test_id, handle)) = removed {
-            watchers.unkey(&test_id, &handle);
+        if let Some((native_id, handle)) = removed {
+            watchers.unkey(&native_id, &handle);
         }
     }
 
     /// The app stopped: every keyed scroll view goes.
     pub(crate) fn clear(&self, watchers: &ScrollWatchers) {
         let all: Vec<_> = self.0.borrow_mut().drain().collect();
-        for (_, (test_id, handle)) in all {
-            watchers.unkey(&test_id, &handle);
+        for (_, (native_id, handle)) in all {
+            watchers.unkey(&native_id, &handle);
         }
     }
 
@@ -182,28 +186,28 @@ impl SurfaceScrolls {
 
 /// A listener of a [`ScrollHandle`].
 enum Listener {
-    Scroll(Rc<dyn Fn(CGFloat, CGFloat)>),
-    ContentSize(Rc<dyn Fn(CGFloat)>),
+    Scroll(Rc<dyn Fn(CGPoint, CGPoint)>),
+    ContentSize(Rc<dyn Fn(CGSize)>),
 }
 
 struct HandleState {
     scroll: Weak<UIScrollView>,
     target: Weak<EventTarget>,
     alive: Cell<bool>,
-    /// The offset and content height last reported.
-    offset: Cell<CGFloat>,
-    height: Cell<CGFloat>,
+    /// The offset and content size last reported.
+    offset: Cell<CGPoint>,
+    size: Cell<CGSize>,
     listeners: RefCell<Vec<(u64, Listener)>>,
     next: Cell<u64>,
 }
 
 /// A `<Scroll>` of the app ([`crate::AppView::watch_scroll`]), for native UI
-/// of the host that follows or drives the app's vertical scrolling in the
-/// frame of the scroll, without JS. Lengths are points, offsets from the top
-/// of the content (the scroll view's top inset is not counted). Main
-/// thread.
+/// of the host that follows or drives the app's scrolling in the frame of the
+/// scroll, without JS. Both axes; lengths are points, offsets from the start
+/// of the content (the scroll view's insets are not counted). Main thread.
+/// The same API as Android's `NshScrollHandle`.
 ///
-/// Once the scroll view is deleted, loses its `testID` or its app stops,
+/// Once the scroll view is deleted, loses its `nativeID` or its app stops,
 /// [`ScrollHandle::is_alive`] is false, reads give 0 and the rest does
 /// nothing.
 #[derive(Clone)]
@@ -223,13 +227,13 @@ impl ScrollHandle {
             scroll: Weak::from_retained(scroll),
             target: Weak::from_retained(target),
             alive: Cell::new(true),
-            offset: Cell::new(0.0),
-            height: Cell::new(0.0),
+            offset: Cell::new(CGPoint::ZERO),
+            size: Cell::new(CGSize::ZERO),
             listeners: RefCell::default(),
             next: Cell::new(1),
         }));
-        handle.0.offset.set(handle.content_offset_y());
-        handle.0.height.set(handle.content_height());
+        handle.0.offset.set(handle.offset());
+        handle.0.size.set(handle.content_size());
         handle
     }
 
@@ -250,31 +254,64 @@ impl ScrollHandle {
     }
 
     /// Whether the scroll view is still the app's, with the watched
-    /// `testID`.
+    /// `nativeID`.
     pub fn is_alive(&self) -> bool {
         self.scroll().is_some()
     }
 
+    fn offset(&self) -> CGPoint {
+        self.scroll().map_or(CGPoint::ZERO, |s| {
+            let (offset, inset) = (s.contentOffset(), s.adjustedContentInset());
+            CGPoint::new(offset.x + inset.left, offset.y + inset.top)
+        })
+    }
+
+    fn content_size(&self) -> CGSize {
+        self.scroll().map_or(CGSize::ZERO, |s| {
+            let (size, viewport) = (s.contentSize(), Self::viewport(&s));
+            CGSize::new(
+                size.width.max(viewport.width),
+                size.height.max(viewport.height),
+            )
+        })
+    }
+
+    fn viewport(s: &UIScrollView) -> CGSize {
+        let (inset, size) = (s.adjustedContentInset(), s.bounds().size);
+        CGSize::new(
+            (size.width - inset.left - inset.right).max(0.0),
+            (size.height - inset.top - inset.bottom).max(0.0),
+        )
+    }
+
+    /// The horizontal offset.
+    pub fn scroll_x(&self) -> CGFloat {
+        self.offset().x
+    }
+
     /// The vertical offset.
-    pub fn content_offset_y(&self) -> CGFloat {
-        self.scroll()
-            .map_or(0.0, |s| s.contentOffset().y + s.adjustedContentInset().top)
+    pub fn scroll_y(&self) -> CGFloat {
+        self.offset().y
+    }
+
+    /// The content's width (at least the viewport's).
+    pub fn content_width(&self) -> CGFloat {
+        self.content_size().width
     }
 
     /// The content's height (at least the viewport's).
     pub fn content_height(&self) -> CGFloat {
-        self.scroll()
-            .map_or(0.0, |s| s.contentSize().height.max(Self::viewport(&s)))
+        self.content_size().height
+    }
+
+    /// The visible width (inside the scroll view's insets).
+    pub fn viewport_width(&self) -> CGFloat {
+        self.scroll().map_or(0.0, |s| Self::viewport(&s).width)
     }
 
     /// The visible height (inside the scroll view's insets).
     pub fn viewport_height(&self) -> CGFloat {
-        self.scroll().map_or(0.0, |s| Self::viewport(&s))
-    }
-
-    fn viewport(s: &UIScrollView) -> CGFloat {
-        let inset = s.adjustedContentInset();
-        (s.bounds().size.height - inset.top - inset.bottom).max(0.0)
+        self.scroll().map_or(0.0, |s| Self::viewport(&s).height)
     }
 
     /// The view the app's content is laid out in: the positions of the views
@@ -283,19 +320,22 @@ impl ScrollHandle {
         self.scroll().map(Retained::into_super)
     }
 
-    /// Scrolls by `dy`, clamped to the content, as the user's scroll would
-    /// (the app's `onScroll` hears it); `animated` uses UIKit's animation.
-    pub fn scroll_by(&self, dy: CGFloat, animated: bool) {
+    /// Scrolls by `dx`, `dy`, clamped to the content, as the user's scroll
+    /// would (the app's `onScroll` hears it); `animated` uses UIKit's
+    /// animation.
+    pub fn scroll_by(&self, dx: CGFloat, dy: CGFloat, animated: bool) {
         let Some(s) = self.scroll() else { return };
-        let inset = s.adjustedContentInset();
-        let offset = s.contentOffset();
-        let max = (s.contentSize().height + inset.bottom - s.bounds().size.height).max(-inset.top);
-        let y = (offset.y + dy).clamp(-inset.top, max);
-        s.setContentOffset_animated(CGPoint::new(offset.x, y), animated);
+        let (inset, offset) = (s.adjustedContentInset(), s.contentOffset());
+        let (size, bounds) = (s.contentSize(), s.bounds().size);
+        let max_x = (size.width + inset.right - bounds.width).max(-inset.left);
+        let max_y = (size.height + inset.bottom - bounds.height).max(-inset.top);
+        let x = (offset.x + dx).clamp(-inset.left, max_x);
+        let y = (offset.y + dy).clamp(-inset.top, max_y);
+        s.setContentOffset_animated(CGPoint::new(x, y), animated);
     }
 
     /// Ends a fling or an animated scroll where it is; nothing at rest.
-    pub fn stop_deceleration(&self) {
+    pub fn stop_scrolling(&self) {
         let Some(s) = self.scroll() else { return };
         let gliding = s.isDecelerating();
         // Setting the current offset without animation ends UIKit's motion.
@@ -305,15 +345,16 @@ impl ScrollHandle {
         }
     }
 
-    /// Calls `f(offset_y, dy)` on every offset change (`dy` positive: the
-    /// content moved up). Returns an id for [`ScrollHandle::remove_listener`].
-    pub fn on_scroll(&self, f: impl Fn(CGFloat, CGFloat) + 'static) -> u64 {
+    /// Calls `f(offset, delta)` on every offset change (`delta` positive:
+    /// the content moved left / up). Returns an id for
+    /// [`ScrollHandle::remove_listener`].
+    pub fn on_scroll(&self, f: impl Fn(CGPoint, CGPoint) + 'static) -> u64 {
         self.add(Listener::Scroll(Rc::new(f)))
     }
 
-    /// Calls `f(content_height)` when the content gets taller or shorter
+    /// Calls `f(content_size)` when the content gets larger or smaller
     /// without a scroll. Returns an id for [`ScrollHandle::remove_listener`].
-    pub fn on_content_size_change(&self, f: impl Fn(CGFloat) + 'static) -> u64 {
+    pub fn on_content_size_change(&self, f: impl Fn(CGSize) + 'static) -> u64 {
         self.add(Listener::ContentSize(Rc::new(f)))
     }
 
@@ -333,9 +374,10 @@ impl ScrollHandle {
     }
 
     fn scrolled(&self) {
-        let y = self.content_offset_y();
-        let dy = y - self.0.offset.replace(y);
-        if dy == 0.0 {
+        let offset = self.offset();
+        let old = self.0.offset.replace(offset);
+        let delta = CGPoint::new(offset.x - old.x, offset.y - old.y);
+        if delta.x == 0.0 && delta.y == 0.0 {
             return;
         }
         // Outside the borrow: a listener may scroll or remove itself.
@@ -350,13 +392,13 @@ impl ScrollHandle {
             })
             .collect();
         for f in listeners {
-            f(y, dy);
+            f(offset, delta);
         }
     }
 
     fn resized(&self) {
-        let height = self.content_height();
-        if self.0.height.replace(height) == height {
+        let size = self.content_size();
+        if self.0.size.replace(size) == size {
             return;
         }
         let listeners: Vec<_> = self
@@ -370,7 +412,7 @@ impl ScrollHandle {
             })
             .collect();
         for f in listeners {
-            f(height);
+            f(size);
         }
     }
 }

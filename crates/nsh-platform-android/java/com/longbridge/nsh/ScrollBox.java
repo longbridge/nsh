@@ -88,7 +88,7 @@ final class ScrollBox extends FrameLayout implements Node {
     int frames;
 
     // The host's handle (`NshScrollHandle`, `NshView.watchScroll`).
-    /** The {@code testID} the host watches it by (null: none). */
+    /** The {@code nativeID} the host watches it by (null: none). */
     String hostKey;
     /** It was deleted, or its app stopped. */
     boolean unmounted;
@@ -177,7 +177,7 @@ final class ScrollBox extends FrameLayout implements Node {
             mounter.scroll(id, x / d, y / d, applied);
             removeCallbacks(settled);
             postDelayed(settled, 120);
-            if (y != oy) for (NshScrollListener l : hostListeners) l.onScroll(y, y - oy);
+            if (x != ox || y != oy) for (NshScrollListener l : hostListeners) l.onScroll(x, y, x - ox, y - oy);
         });
         addView(scroller, 0, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }
@@ -197,7 +197,7 @@ final class ScrollBox extends FrameLayout implements Node {
             rescaledContent = true;
             requestLayout();
         }
-        int oldHeight = content.contentHeight;
+        int oldWidth = content.contentWidth, oldHeight = content.contentHeight;
         content.contentWidth = width;
         content.contentHeight = height;
         if (scroller instanceof ZScroll) {
@@ -211,7 +211,9 @@ final class ScrollBox extends FrameLayout implements Node {
             content.layout(0, 0, w, h);
             content.requestLayout();
         }
-        if (height != oldHeight) for (NshScrollListener l : hostListeners) l.onContentSizeChanged(hostContentHeight());
+        if (width != oldWidth || height != oldHeight) {
+            for (NshScrollListener l : hostListeners) l.onContentSizeChange(hostContentWidth(), hostContentHeight());
+        }
     }
 
     /** Sticky cells: node ids and their travel (px), from `StickyCells`. */
@@ -606,12 +608,24 @@ final class ScrollBox extends FrameLayout implements Node {
 
     // --- The host's handle (`NshScrollHandle`) ---------------------------
 
+    int hostScrollX() {
+        return scroller.getScrollX();
+    }
+
     int hostScrollY() {
         return scroller.getScrollY();
     }
 
+    int hostContentWidth() {
+        return Math.max(content.contentWidth, scroller.getWidth());
+    }
+
     int hostContentHeight() {
         return Math.max(content.contentHeight, scroller.getHeight());
+    }
+
+    int hostViewportWidth() {
+        return scroller.getWidth();
     }
 
     int hostViewportHeight() {
@@ -619,14 +633,17 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     /** Scrolls as the user would: not one of the core's scrolls (`applied`). */
-    void hostScrollBy(int dy, boolean animated) {
+    void hostScrollBy(int dx, int dy, boolean animated) {
         if (scroller instanceof ZScroll) {
-            ((ZScroll) scroller).scrollToPx(scroller.getScrollX(), scroller.getScrollY() + dy, animated);
+            ((ZScroll) scroller).scrollToPx(scroller.getScrollX() + dx, scroller.getScrollY() + dy, animated);
         } else if (animated && scroller instanceof ScrollView) {
             hostAnimating = true;
-            ((ScrollView) scroller).smoothScrollBy(0, dy);
+            ((ScrollView) scroller).smoothScrollBy(dx, dy);
+        } else if (animated && scroller instanceof HorizontalScrollView) {
+            hostAnimating = true;
+            ((HorizontalScrollView) scroller).smoothScrollBy(dx, dy);
         } else {
-            scroller.scrollBy(0, dy);
+            scroller.scrollBy(dx, dy);
         }
     }
 

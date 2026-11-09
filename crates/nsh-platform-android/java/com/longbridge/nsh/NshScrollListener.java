@@ -6,21 +6,25 @@ package com.longbridge.nsh;
  */
 public interface NshScrollListener {
     /**
-     * The vertical offset changed: the user's scroll, a fling, the app's or
-     * the host's.
+     * The offset changed: the user's scroll, a fling, the app's or the
+     * host's.
      *
-     * @param scrollY the offset, in px
-     * @param dy the change since the last call, in px (positive: the content
-     *     moved up)
+     * @param scrollX the horizontal offset, in px
+     * @param scrollY the vertical offset, in px
+     * @param dx the horizontal change since the last call, in px (positive:
+     *     the content moved left)
+     * @param dy the vertical change since the last call, in px (positive:
+     *     the content moved up)
      */
-    void onScroll(int scrollY, int dy);
+    void onScroll(int scrollX, int scrollY, int dx, int dy);
 
     /**
-     * The content got taller or shorter without a scroll (data arrived, a
+     * The content got larger or smaller without a scroll (data arrived, a
      * section opened): what depends on where the content ends moves.
      *
+     * @param contentWidth the content's width, in px (at least the viewport's)
      * @param contentHeight the content's height, in px (at least the
      *     viewport's)
      */
-    default void onContentSizeChanged(int contentHeight) {}
+    default void onContentSizeChange(int contentWidth, int contentHeight) {}
 }

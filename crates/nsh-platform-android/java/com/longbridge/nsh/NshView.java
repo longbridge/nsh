@@ -492,23 +492,23 @@ public class NshView extends FrameLayout {
          */
         void onAttached(NshScrollHandle handle);
 
-        /** The scroll view is gone (deleted, its {@code testID} changed or its app stopped): its handle is dead. */
+        /** The scroll view is gone (deleted, its {@code nativeID} changed or its app stopped): its handle is dead. */
         void onDetached();
     }
 
     /**
-     * Watches the app's {@code <Scroll>} whose {@code testID} is
-     * {@code testId}, for native UI of the host that follows or drives the
+     * Watches the app's {@code <Scroll>} whose {@code nativeID} is
+     * {@code nativeId}, for native UI of the host that follows or drives the
      * app's scrolling in the frame of the scroll, without JS (a sheet under
      * the content, say): {@code watcher} gets a {@link NshScrollHandle} when
-     * the scroll view is there. With several of the same {@code testID}, the
-     * newest one is watched. One watcher per {@code testID}.
+     * the scroll view is there. With several of the same {@code nativeID},
+     * the newest one is watched. One watcher per {@code nativeID}.
      *
-     * @param testId the scroll view's {@code testID}
+     * @param nativeId the scroll view's {@code nativeID}
      * @param watcher the watcher (UI thread), or null to stop watching
      */
-    public void watchScroll(String testId, ScrollWatcher watcher) {
-        mounter.watchScroll(testId, watcher);
+    public void watchScroll(String nativeId, ScrollWatcher watcher) {
+        mounter.watchScroll(nativeId, watcher);
     }
 
     /**

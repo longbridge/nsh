@@ -3938,6 +3938,46 @@ fn a_changing_label_is_sent_alone() {
     );
 }
 
+/// `nativeID` names any view for the embedding app (a scroll view it
+/// watches, `watchScroll`): it reaches the platforms apart from `testID`.
+#[test]
+fn native_id_reaches_the_platform() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::NativeId(Some("page".into())),
+            },
+            Op::Insert {
+                parent: 1,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(i, MountItem::ViewProps { id: 2, props } if props.native_id.as_deref() == Some("page") && props.test_id.is_none())));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::NativeId(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch.items.iter().any(
+            |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.native_id.is_none())
+        )
+    );
+}
+
 #[test]
 fn screens_fill_their_stack_below_the_header() {
     let mut c = core();

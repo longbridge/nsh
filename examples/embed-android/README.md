@@ -20,13 +20,14 @@ nsh.registerComponent("embed.badge", context -> new Badge(this, context));  // B
 The component gets its props (`setProp`, JSON as maps and lists) and commands, emits events with
 `context.emit("tap", data)` and may report its size (dp) with `context.setSize(w, h)`.
 
-Scroll views: native UI that moves with the app's content in every frame watches a `<Scroll>` by its `testID`.
+Scroll views: native UI that moves with the app's content in every frame watches a `<Scroll>` by its `nativeID`.
 `MainActivity` follows `embedded.scroll`, the app's page, and scrolls it back to the top:
 
 ```java
 nsh.watchScroll("embedded.scroll", watcher);  // watcher.onAttached(NshScrollHandle) / onDetached()
-handle.addScrollListener(listener);           // onScroll(scrollY, dy), onContentSizeChanged(height): UI thread, same frame
-handle.smoothScrollBy(-handle.getScrollY());
+handle.addScrollListener(listener);           // onScroll(x, y, dx, dy), onContentSizeChange(w, h): UI thread, same frame
+handle.stopScrolling();
+handle.scrollBy(0, -handle.getScrollY(), true);
 ```
 
 The app and its host also talk without a view, through the view's channel (`nsh/host` in the app):

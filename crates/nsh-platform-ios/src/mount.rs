@@ -646,7 +646,7 @@ pub(crate) struct Mounter {
     sticky: rustc_hash::FxHashMap<NodeId, Vec<StickyCell>>,
     /// The native components the app registered.
     components: crate::component::Components,
-    /// The scroll views the embedding app watches, by `testID`
+    /// The scroll views the embedding app watches, by `nativeID`
     /// ([`crate::scroll_watch`]), and those of this surface it may watch.
     scroll_watchers: crate::ScrollWatchers,
     scrolls: crate::scroll_watch::SurfaceScrolls,
@@ -3698,7 +3698,7 @@ impl Mounter {
     /// Touch, accessibility and test properties.
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
         let (control, mtm) = (self.control.clone(), self.mtm);
-        let test_id = props.test_id.clone();
+        let native_id = props.native_id.clone();
         let Some(s) = self.slot_mut(id) else { return };
         s.long_press_delay = props.long_press_delay;
         s.pan_scroll_handoff = props.pan_scroll_handoff;
@@ -3779,7 +3779,7 @@ impl Mounter {
             }
             _ => {}
         }
-        // A scroll view the host may watch by its `testID`.
+        // A scroll view the host may watch by its `nativeID`.
         if let Some(Slot {
             native: Native::Scroll(scroll),
             ..
@@ -3787,7 +3787,7 @@ impl Mounter {
         {
             let scroll = scroll.clone();
             self.scrolls
-                .props(&self.scroll_watchers, id, &scroll, &self.target, test_id);
+                .props(&self.scroll_watchers, id, &scroll, &self.target, native_id);
         }
     }
 

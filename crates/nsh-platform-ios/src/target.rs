@@ -715,7 +715,7 @@ impl EventTarget {
         self.keyboard_tap(view) != Some(KeyboardTaps::Never) || on_input(view)
     }
 
-    /// The host stopped `scroll`'s glide ([`crate::ScrollHandle::stop_deceleration`]):
+    /// The host stopped `scroll`'s glide ([`crate::ScrollHandle::stop_scrolling`]):
     /// UIKit reports no end of it, so the app hears it here.
     pub(crate) fn glide_stopped(&self, scroll: &UIScrollView) {
         self.scroll_event(scroll, EventKind::MomentumEnd);

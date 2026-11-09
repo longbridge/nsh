@@ -890,7 +890,7 @@ pub struct SurfaceOptions {
     pub cache: nsh_engine::CacheOptions,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
-    /// The scroll views the embedding app watches by `testID`
+    /// The scroll views the embedding app watches by `nativeID`
     /// ([`crate::AppView::watch_scroll`]).
     pub scroll_watchers: crate::ScrollWatchers,
     /// The embedding app's channel with the apps (`nsh/host`): launch

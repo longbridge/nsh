@@ -8,7 +8,7 @@
 // `setOpenUrlHandler`), else the system opens it. `App.test.tsx` plays the
 // host app's part.
 // The theme pill takes the host's brand through setThemeOverrides.
-// The page scrolls in `embedded.scroll`, which the host app watches
+// The page scrolls in `nativeID="embedded.scroll"`, which the host app watches
 // (`NshView.watchScroll`): a native label follows its offset in the frame of
 // the scroll and a native button scrolls it back to the top.
 
@@ -46,7 +46,7 @@ function App() {
     }
   };
   return (
-    <Scroll testID="embedded.scroll" style={{ flex: 1, backgroundColor: "#f6f8fa" }}>
+    <Scroll nativeID="embedded.scroll" testID="embedded.scroll" style={{ flex: 1, backgroundColor: "#f6f8fa" }}>
       <View style={{ padding: 20, paddingTop: "calc(env(safe-area-inset-top) + 20px)", paddingRight: "calc(env(safe-area-inset-right) + 20px)", paddingBottom: "calc(env(safe-area-inset-bottom) + 20px)", paddingLeft: "calc(env(safe-area-inset-left) + 20px)", gap: 16, backgroundColor: "#f6f8fa" }}>
         <Text style={{ fontSize: 22, fontWeight: "700" }}>{`Hello, ${user}`}</Text>
         <Text style={{ color: "#57606a" }}>
