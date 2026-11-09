@@ -437,7 +437,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
-- **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
+- **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
 
 ### 页面的宿主
