@@ -5,6 +5,7 @@
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
+    PressEvent,
     element::{ElementRef, Os},
     keymap::{Modifiers, When},
     prelude::*,
@@ -45,11 +46,13 @@ pub(crate) struct Geo {
     pub(crate) header: f32,
     /// The width of the row header column.
     pub(crate) lead: f32,
-    /// The width of the fixed columns.
+    /// The width of the columns fixed at the start.
     pub(crate) fixed: f32,
+    /// The width of the columns fixed at the end.
+    pub(crate) end: f32,
     /// The rows' axis: the rows' extent and the height below the titles.
     pub(crate) y: Axis,
-    /// The scrolling columns' axis: their extent and the width right of the
+    /// The scrolling columns' axis: their extent and the width between the
     /// fixed columns.
     pub(crate) x: Axis,
     /// The content offsets (the scroll offsets, scaled).
@@ -61,6 +64,14 @@ pub(crate) struct Geo {
     /// as the bar is not drawn over content. Elsewhere none, the bar lying
     /// over the rows.
     pub(crate) bar: f32,
+}
+
+impl Geo {
+    /// The width the columns are shown in: the fixed ones and the view of
+    /// the scrolling ones between them.
+    pub(crate) fn columns_view(&self) -> f64 {
+        self.fixed as f64 + self.x.viewport + self.end as f64
+    }
 }
 
 /// The state that is not a signal.
@@ -127,6 +138,45 @@ pub(crate) struct Dt {
     /// The column whose handle was last pressed without a drag, and when:
     /// a second press within `DOUBLE_PRESS` fits the column.
     handle_tap: Rc<RefCell<Option<(usize, nsh_core::time::Instant)>>>,
+    /// The cells `renderCell` draws, which the hit layer passes presses
+    /// on to ([`Dt::press_with`]).
+    pub(crate) custom_cells: Rc<RefCell<CustomCells>>,
+}
+
+/// A cell `renderCell` draws: its view, and the row and column it shows
+/// now (its view is reused for others as the table scrolls).
+#[derive(Clone, Copy)]
+pub(crate) struct CustomCell {
+    pub(crate) view: ElementRef,
+    pub(crate) row: Memo<Option<usize>>,
+    pub(crate) def: Memo<Option<usize>>,
+}
+
+/// The cells `renderCell` draws, by a key of their own.
+#[derive(Default)]
+pub(crate) struct CustomCells {
+    cells: Vec<(u64, CustomCell)>,
+    next: u64,
+}
+
+impl CustomCells {
+    pub(crate) fn add(&mut self, cell: CustomCell) -> u64 {
+        self.next += 1;
+        self.cells.push((self.next, cell));
+        self.next
+    }
+
+    pub(crate) fn remove(&mut self, key: u64) {
+        self.cells.retain(|(k, _)| *k != key);
+    }
+
+    /// The view of the cell showing `row` of column `def`.
+    fn showing(&self, row: usize, def: usize) -> Option<ElementRef> {
+        self.cells.iter().find_map(|(_, c)| {
+            (c.row.get_untracked() == Some(row) && c.def.get_untracked() == Some(def))
+                .then_some(c.view)
+        })
+    }
 }
 
 fn spec_of(column: &DataTableColumn) -> Spec {
@@ -184,6 +234,7 @@ impl Dt {
             cols_window: RowWindow::following(1),
             resizing: Rc::default(),
             handle_tap: Rc::default(),
+            custom_cells: Rc::default(),
         };
         dt.sync_columns();
         dt.sync_selection();
@@ -450,9 +501,13 @@ impl Dt {
         let header = self.header_row_height() * self.header_levels() as f32;
         let lead = self.lead_width();
         let rows = self.row_count();
-        let (fixed, scroll_width) = {
+        let (fixed, end, scroll_width) = {
             let st = self.st.borrow();
-            (st.columns.fixed_width() as f32, st.columns.scroll_width())
+            (
+                st.columns.fixed_width() as f32,
+                st.columns.end_width() as f32,
+                st.columns.scroll_width(),
+            )
         };
         let y = Axis::new(
             rows as f64 * row_height as f64,
@@ -464,7 +519,10 @@ impl Dt {
             .rows_width
             .get()
             .map_or(0.0, |rows| (width - rows.0).max(0.0));
-        let x = Axis::new(scroll_width, (width - lead - fixed - bar).max(0.0) as f64);
+        let x = Axis::new(
+            scroll_width,
+            (width - lead - fixed - end - bar).max(0.0) as f64,
+        );
         let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x, self.drag_x);
         let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y, self.drag_y);
         Geo {
@@ -472,6 +530,7 @@ impl Dt {
             header,
             lead,
             fixed,
+            end,
             y,
             x,
             cx,
@@ -514,7 +573,7 @@ impl Dt {
             return Vec::new();
         }
         let window = self.cols_window.rows(visible, n);
-        (window.start.max(fixed)..window.end)
+        (window.start.max(fixed)..window.end.min(st.columns.end_start()))
             .map(|d| st.columns.def(d))
             .collect()
     }
@@ -765,7 +824,7 @@ impl Dt {
                 return;
             };
             // Fixed columns never scroll out.
-            if display < st.columns.fixed_len() {
+            if st.columns.is_fixed(display) {
                 return;
             }
             let start = st.columns.start(display) - st.columns.fixed_width();
@@ -799,7 +858,7 @@ impl Dt {
             let Some(display) = st.columns.display_of(def) else {
                 return;
             };
-            if display < st.columns.fixed_len() {
+            if st.columns.is_fixed(display) {
                 return;
             }
             st.columns.start(display) - st.columns.fixed_width()
@@ -966,7 +1025,7 @@ impl Dt {
         let column = {
             let st = self.st.borrow();
             st.columns
-                .display_at(vx - g.lead as f64, g.cx)
+                .display_at(vx - g.lead as f64, g.cx, g.columns_view())
                 .map(|d| st.columns.def(d))
         };
         Hit {
@@ -976,16 +1035,33 @@ impl Dt {
         }
     }
 
-    /// A press (or tap) of the body at `position` with the modifier keys
-    /// held; `clicks` counts the presses in a row.
-    pub(crate) fn press_with(&self, position: Point<Points>, clicks: u32, modifiers: Modifiers) {
-        let hit = self.target_at(position);
-        self.press_hit(hit, clicks, modifiers);
+    /// A press (or tap) of the body, at `press.position` in the hit layer's
+    /// content. On a cell `renderCell` draws, a view of the app's there
+    /// that hears presses takes it (the body under the hit layer takes no
+    /// pointer); else it presses the row or cell.
+    pub(crate) fn press_with(&self, press: &PressEvent) {
+        let hit = self.target_at(press.position);
+        let (clicks, modifiers) = (press.clicks, press.modifiers);
+        let cell = match (hit.row, hit.column) {
+            (Some(row), Some(def)) if !hit.header => self.custom_cells.borrow().showing(row, def),
+            _ => None,
+        };
+        let Some(cell) = cell else {
+            self.press_hit(hit, clicks, modifiers);
+            return;
+        };
+        let taken = cell.press_at(*press);
+        let dt = self.clone();
+        spawn(async move {
+            if !taken.await {
+                dt.press_hit(hit, clicks, modifiers);
+            }
+        });
     }
 
     /// A press of a made row, the views that show the cells (a platform's
-    /// pointer reaches the hit layer instead; assistive technologies and
-    /// tests press what they see). `x` is in the row, whose left is where
+    /// pointer reaches the hit layer instead, as headless tests' presses
+    /// do; assistive technologies press what they see). `x` is in the row, whose left is where
     /// the region's cells start from: for the scrolling columns, the first
     /// of the chunk they are placed from (`origin`).
     pub(crate) fn press_row_with(
@@ -1031,6 +1107,9 @@ impl Dt {
             let at = match region {
                 PressRegion::Lead => None,
                 PressRegion::Fixed => st.columns.display_at_table(x.0 as f64),
+                PressRegion::End => st
+                    .columns
+                    .display_at_table(st.columns.start(st.columns.end_start()) + x.0 as f64),
                 PressRegion::Scroll { origin } => st
                     .columns
                     .display_at_table(st.columns.start(origin.min(st.columns.len())) + x.0 as f64),
@@ -1250,7 +1329,7 @@ impl Dt {
             let Some(display) = st.columns.display_of(def) else {
                 return;
             };
-            if display < st.columns.fixed_len() {
+            if st.columns.is_fixed(display) {
                 return;
             }
             st.columns.start(display) - st.columns.fixed_width()
@@ -1386,20 +1465,13 @@ impl Dt {
         let g = untracked(|| self.geo());
         let to = {
             let st = self.st.borrow();
-            let n = st.columns.len();
-            let fixed = st.columns.fixed_len();
             let table_x = (x - g.lead) as f64;
-            let at = if table_x < g.fixed as f64 {
-                st.columns.display_at(table_x.max(0.0), 0.0)
-            } else {
-                st.columns.display_at(table_x, g.cx)
-            };
+            let at = st
+                .columns
+                .display_at(table_x.max(0.0), g.cx, g.columns_view());
             // Within the zone the column is in.
-            let (low, high) = if drag.from < fixed {
-                (0, fixed.saturating_sub(1))
-            } else {
-                (fixed, n.saturating_sub(1))
-            };
+            let zone = st.columns.zone_of(drag.from);
+            let (low, high) = (zone.start, zone.end.saturating_sub(1).max(zone.start));
             at.unwrap_or(if table_x < 0.0 { low } else { high })
                 .clamp(low, high)
         };
@@ -1513,6 +1585,8 @@ impl Dt {
 pub(crate) enum PressRegion {
     Lead,
     Fixed,
+    /// The columns fixed at the end.
+    End,
     /// The scrolling columns, placed from the column at display index
     /// `origin`.
     Scroll {

@@ -640,6 +640,9 @@ pub(super) struct Components {
     /// Elements whose transitions' time to tell once this commit is
     /// styled ([`crate::element::ElementRef::transition_time`]).
     pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
+    /// Presses to pass on inside elements once this commit is laid out
+    /// ([`crate::element::ElementRef::press_at`]).
+    pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
@@ -741,6 +744,7 @@ impl Default for Components {
             animations: FxHashMap::default(),
             measures: Vec::new(),
             transition_times: Vec::new(),
+            presses: Vec::new(),
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
@@ -5405,6 +5409,7 @@ impl<M: TextEngine> Core<M> {
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
+            Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
             Action::ImageInfo(_, answer)

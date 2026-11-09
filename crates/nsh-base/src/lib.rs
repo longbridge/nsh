@@ -29,7 +29,7 @@ mod collapsible;
 mod color_picker;
 mod combobox;
 mod command;
-mod data_table;
+pub mod data_table;
 mod date_picker;
 #[cfg(feature = "editor")]
 mod diff;

@@ -1627,6 +1627,51 @@ impl Screen {
         }
     }
 
+    /// Where a press on `target` at `at` (in its window's root) goes when
+    /// `target` takes no pointer (it or a view around it has
+    /// `pointerEvents: none`): the view around what a pointer there reaches
+    /// that hears presses, and the point in it. `None` for a target that
+    /// takes a pointer, or when the press would reach it all the same.
+    pub(crate) fn routed_press(
+        &self,
+        target: NodeId,
+        at: Point<Points>,
+    ) -> Option<(NodeId, Point<Points>)> {
+        if self.receives_pointer(target) {
+            return None;
+        }
+        let hit = self.hit_pointer(at, self.window_of(target));
+        let to = self.up_to(hit, |v| v.events.contains(EventKind::Press))?;
+        if to == target {
+            return None;
+        }
+        let origin = self.bounds_in_root(to)?.origin;
+        Some((
+            to,
+            nsh_core::geometry::point(at.x - origin.x, at.y - origin.y),
+        ))
+    }
+
+    /// Whether a pointer can reach `id`: neither it nor a view around it
+    /// has `pointerEvents: none` or is hidden, and no view around it takes
+    /// touches only for itself (`box-only`).
+    fn receives_pointer(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(current) = at {
+            let Some(view) = self.nodes.get(&current) else {
+                break;
+            };
+            if view.pointer_events == PointerEvents::None
+                || view.hidden
+                || (current != id && view.pointer_events == PointerEvents::BoxOnly)
+            {
+                return false;
+            }
+            at = view.parent;
+        }
+        true
+    }
+
     /// The view a pointer at `at` (in the root of `window`, a window's
     /// root) reaches in that window: the topmost, innermost one there that
     /// receives touches. Canvas nodes are not views, and the windows of the
