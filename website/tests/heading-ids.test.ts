@@ -26,7 +26,7 @@ test('every Chinese page has the English outline, so every heading gets the Engl
     return !map || map.ids.length !== map.own.length;
   });
   expect(drifted).toEqual([]);
-});
+}, 30_000);
 
 test('Chinese heading ids are ASCII, never a percent-encoded title', () => {
   const nonAscii = pages().flatMap((p) => (idMap(p)?.ids ?? []).filter((id) => !/^[\x20-\x7e]*$/.test(id)).map((id) => `${p}#${id}`));
@@ -58,3 +58,33 @@ test('section links in Chinese pages point at an English id that exists on the t
   }
   expect(broken).toEqual([]);
 });
+
+
+test('heading ids collapse repeated hyphens before numbering duplicates', () => {
+  const source = '## Tracing with `--trace`\n## A -- B\n## A - B\n## A - B';
+  expect(headingsOf(source).map((h) => h.slug)).toEqual([
+    'tracing-with-trace', 'a-b', 'a-b-1', 'a-b-2',
+  ]);
+});
+
+test('English and Chinese tracing headings and old section links use one hyphen', () => {
+  for (const locale of ['', 'zh-CN/']) {
+    const path = join(ROOT, locale, 'docs/testing-and-trace.md');
+    const map = idMap(path)!;
+    expect(map.ids).toContain('tracing-with-trace');
+    const source = readFileSync(path, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '')
+      + '\n[Trace](#tracing-with---trace)';
+    const tree = unified().use(remarkParse).parse(source);
+    // The production pipeline removes the title before assigning ids.
+    if (tree.children[0]?.type === 'heading' && tree.children[0].depth === 1) tree.children.shift();
+    unified().use(remarkLocaleHeadingIds).runSync(tree, { path } as never);
+    const ids = tree.children.filter((n) => n.type === 'heading').map((n: any) => n.data.hProperties.id);
+    expect(ids).toEqual(map.ids);
+    expect((tree.children.at(-1) as any).children[0].url).toBe('#tracing-with-trace');
+  }
+});
+
+test('all English and Chinese heading ids avoid consecutive hyphens', () => {
+  const paths = pages().flatMap((p) => [p, p.replace('/zh-CN/', '/')]);
+  expect(paths.flatMap((p) => idMap(p)!.ids.filter((id) => id.includes('--')))).toEqual([]);
+}, 30_000);

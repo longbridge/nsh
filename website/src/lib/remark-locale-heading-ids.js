@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import Slugger from 'github-slugger';
+import Slugger, { slug } from 'github-slugger';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { toString } from 'mdast-util-to-string';
 
 // A translated page gives its headings the English page's ids, so a copied
 // section link is short, readable and the same in every language
 // (`/zh-CN/docs/fonts#fallbacks`, not `#%E5%9B%9E%E9%80%80…`). Headings pair up
-// by position: a translation keeps the English outline (`tests/content.test.ts`
+// by position: a translation keeps the English outline (`tests/heading-ids.test.ts`
 // checks the Chinese pages). Links to a section of a translated page, written
 // with the translated heading (`./text.md#文字样式`, `#回退列表`), are rewritten
 // to the English id too, so existing pages and machine translations keep working.
@@ -33,7 +33,8 @@ function stripFrontmatter(source) {
 
 /**
  * The headings of a Markdown source, h1 title dropped as `remarkStripTitle`
- * does, each with the id Astro's `rehypeHeadingIds` would give it.
+ * does, with consecutive hyphens collapsed before duplicate ids are numbered.
+ * `original` retains the GitHub-style id used by existing links.
  */
 export function headingsOf(source) {
   const tree = fromMarkdown(stripFrontmatter(source));
@@ -42,10 +43,15 @@ export function headingsOf(source) {
     tree.children.splice(first, 1);
   }
   const slugger = new Slugger();
+  const original = new Slugger();
   const out = [];
   const walk = (node) => {
-    if (node.type === 'heading') out.push({ depth: node.depth, slug: slugger.slug(toString(node)), node });
-    else for (const child of node.children ?? []) walk(child);
+    if (node.type === 'heading') {
+      const text = toString(node);
+      // Normalize before deduplication: `A -- B` and `A - B` must stay unique.
+      const id = slugger.slug(slug(text).replace(/-+/g, '-'));
+      out.push({ depth: node.depth, slug: id, original: original.slug(text), node });
+    } else for (const child of node.children ?? []) walk(child);
   };
   walk(tree);
   return out;
@@ -58,7 +64,7 @@ function read(path) {
 }
 
 /**
- * For a translated page: its own heading ids in order and the English id at
+ * For each page: its original heading ids in order and the English id at
  * each position. Pairing stops at the first heading whose level differs, so a
  * page whose outline drifted keeps its own ids past that point.
  */
@@ -67,17 +73,17 @@ export function idMap(path) {
   if (cache.has(key)) return cache.get(key);
   let result;
   const page = translatedPage(key);
-  const own = page && read(key);
-  const english = page && read(join(SITE_ROOT, page.section, page.name));
+  const own = read(key);
+  const english = page ? read(join(SITE_ROOT, page.section, page.name)) : own;
   if (own !== undefined && english !== undefined) {
     const mine = headingsOf(own);
-    const theirs = headingsOf(english);
+    const theirs = own === english ? mine : headingsOf(english);
     const ids = [];
     for (let i = 0; i < mine.length; i++) {
       if (i < theirs.length && theirs[i].depth === mine[i].depth && ids.length === i) ids.push(theirs[i].slug);
       else break;
     }
-    result = { own: mine.map((h) => h.slug), ids };
+    result = { own: mine.map((h) => h.original), english: theirs.map((h) => h.original), ids };
   }
   cache.set(key, result);
   return result;
@@ -91,7 +97,8 @@ function translate(path, fragment) {
   try {
     decoded = decodeURIComponent(fragment);
   } catch {}
-  const at = map.own.indexOf(decoded);
+  const ownAt = map.own.indexOf(decoded);
+  const at = ownAt !== -1 ? ownAt : map.english.indexOf(decoded);
   return at !== -1 && at < map.ids.length ? map.ids[at] : fragment;
 }
 
@@ -100,17 +107,15 @@ export function remarkLocaleHeadingIds() {
     const from = file?.path ?? file?.history?.[0];
     if (!from) return;
     const fromPath = resolve(from);
-    const page = translatedPage(fromPath);
-
-    const map = page && idMap(fromPath);
+    const map = idMap(fromPath);
+    const fallback = new Slugger();
     let index = 0;
     const walk = (node) => {
-      if (map && node.type === 'heading') {
+      if (node.type === 'heading') {
         // Same order as `headingsOf`: the leading h1 is already stripped.
-        if (index < map.ids.length) {
-          node.data ??= {};
-          node.data.hProperties = { ...node.data.hProperties, id: map.ids[index] };
-        }
+        const id = map?.ids[index] ?? fallback.slug(slug(toString(node)).replace(/-+/g, '-'));
+        node.data ??= {};
+        node.data.hProperties = { ...node.data.hProperties, id };
         index++;
       }
       if ((node.type === 'link' || node.type === 'definition') && node.url) {
@@ -120,7 +125,7 @@ export function remarkLocaleHeadingIds() {
           const target = url.slice(0, hashAt);
           const fragment = url.slice(hashAt + 1);
           const targetPath = target ? resolve(dirname(fromPath), target.replace(/\?.*$/, '')) : fromPath;
-          if (fragment && translatedPage(targetPath)) node.url = `${target}#${translate(targetPath, fragment)}`;
+          if (fragment) node.url = `${target}#${translate(targetPath, fragment)}`;
         }
       }
       for (const child of node.children ?? []) walk(child);

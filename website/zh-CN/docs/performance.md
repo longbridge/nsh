@@ -180,7 +180,7 @@ const scrollY = createAnimatedValue(0);
 
 ### 无界面运行：`--trace`
 
-在 Rust 测试中，`EngineConfig::trace` 记录同样的 `perf` 行，`Headless::observe` 能看到每个批次（[测试](./testing-and-trace.md#tracing-with---trace)）。
+在 Rust 测试中，`EngineConfig::trace` 记录同样的 `perf` 行，`Headless::observe` 能看到每个批次（[测试](./testing-and-trace.md#tracing-with-trace)）。
 `nsh test --trace` 为 TSX 打印它们：
 
 ```sh

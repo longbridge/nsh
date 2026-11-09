@@ -194,7 +194,7 @@ frame that binds one new row of the gallery's photo list is 4 operations and 4 m
 ### Headless: `--trace`
 
 In a Rust test, `EngineConfig::trace` logs the same `perf` lines and `Headless::observe` sees every batch
-([Testing](./testing-and-trace.md#tracing-with---trace)). `nsh test --trace` prints them for TSX:
+([Testing](./testing-and-trace.md#tracing-with-trace)). `nsh test --trace` prints them for TSX:
 
 ```sh
 echo 'await app.press("Add")' | nsh test App.tsx --trace                 # first frame + a press
