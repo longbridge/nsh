@@ -245,6 +245,31 @@ const recent = signal<string[] | null>(null);
 </Submenu>
 ```
 
+## 长列表
+
+条目很多、或条数由数据决定（模型、账号、最近的文件）的菜单，把它们放进 `MenuList`（Rust）：一个虚拟化列表，只建出视口附近的行。它的行是菜单的条目，与前后的条目排在一起：Up、Down、Home 和 End 在列表的每一行之间移动，先滚到某一行再聚焦它，并跳过禁用的行，然后接着走到列表前后的条目，包括 `Submenu` 的条目。`render_item` 按行号画出每一行，每行一个 `MenuItem` 或 `Submenu`；请给列表设一个高度。
+
+```rust
+use nsh_base::{MenuListEntry, menu, menu_item, menu_list, submenu};
+use nsh_core::prelude::*;
+
+let models = signal(vec![/* … */]);
+menu()
+    .trigger(text("Model"))
+    .child(
+        menu_list()
+            .count(move || models.with(|m: &Vec<Model>| m.len() as u32))
+            .render_item(move |e: &MenuListEntry| {
+                let index = e.index as usize;
+                menu_item()
+                    .on_select(move || choose(index))
+                    .child(text(move || models.with(|m| m[index].name.clone())))
+            })
+            .h(px(240.0)),
+    )
+    .child(submenu().trigger(text("Reasoning")).child(/* … */))
+```
+
 <a id="props"></a>
 
 ## 属性
@@ -299,6 +324,14 @@ const recent = signal<string[] | null>(null);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
 | `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
+
+### MenuList（Rust）
+
+| Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `.count(..)` | `u32` | `0` | 行数。 |
+| `.render_item(\|e: &MenuListEntry\| ..)` | `MenuListEntry { index }` | 无 | 按行号画出一行：一个 `MenuItem` 或 `Submenu`。 |
+| 样式方法 | | 无 | 列表的外观；请给它一个高度（`.h(..)`）。 |
 
 `MenuSeparator` 是一个由你设置样式（`class`、`style`）的视图，与所在层级的条目一起显示。
 

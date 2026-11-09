@@ -269,6 +269,35 @@ const recent = signal<string[] | null>(null);
 </Submenu>
 ```
 
+## Long lists
+
+A menu of many items, or of as many as the data has (models, accounts, recent files), puts them in a `MenuList`
+(Rust): a virtualized list whose rows are made only near its viewport. Its rows are items of the menu among the ones
+around it: Up, Down, Home and End walk every row of the list, scrolling to a row before focusing it and passing over
+disabled ones, then go on to the items before and after the list, a `Submenu`'s item among them. `render_item` draws
+each row from its index, one `MenuItem` or `Submenu` per row; give the list a height.
+
+```rust
+use nsh_base::{MenuListEntry, menu, menu_item, menu_list, submenu};
+use nsh_core::prelude::*;
+
+let models = signal(vec![/* … */]);
+menu()
+    .trigger(text("Model"))
+    .child(
+        menu_list()
+            .count(move || models.with(|m: &Vec<Model>| m.len() as u32))
+            .render_item(move |e: &MenuListEntry| {
+                let index = e.index as usize;
+                menu_item()
+                    .on_select(move || choose(index))
+                    .child(text(move || models.with(|m| m[index].name.clone())))
+            })
+            .h(px(240.0)),
+    )
+    .child(submenu().trigger(text("Reasoning")).child(/* … */))
+```
+
 ## Props
 
 ### Menu
@@ -322,6 +351,14 @@ const recent = signal<string[] | null>(null);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It does not open. |
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the menu around it and its popup. |
 | `children` | `.child(..)` | `JSX.Element` | none | Its items. |
+
+### MenuList (Rust)
+
+| Rust | Type | Default | Description |
+|---|---|---|---|
+| `.count(..)` | `u32` | `0` | How many rows. |
+| `.render_item(\|e: &MenuListEntry\| ..)` | `MenuListEntry { index }` | none | Draws a row from its index: one `MenuItem` or `Submenu`. |
+| style methods | | none | The list's look; give it a height (`.h(..)`). |
 
 `MenuSeparator` is a view you style (`class`, `style`), shown with the items of its level.
 
