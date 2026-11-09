@@ -104,6 +104,10 @@ const BAR_HOLD = 700;
  * FADE_MS, both easing out cubically (1 - (1 - t)^3, exactly). */
 const SLIDE_MS = 300;
 const FADE_MS = 200;
+/** How long a back that popped pages waits for the app's answer (a page's
+ * `onDismiss` follows its slide; an app's own motion may last longer)
+ * before its address is the app's `change` (`settlePop`). */
+const POP_ANSWER_MS = 1500;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
 // Browsers that order Tab and screen readers by `reading-order`
@@ -5038,8 +5042,14 @@ class Player {
     }
     stack._top = below ?? null;
     screen._popping = true;
-    // The screen goes, then the app is told (and removes it).
-    const dismissed = () => this.event(screen._id, "onDismiss");
+    // The screen goes, then the app is told (and removes it); an address
+    // the browser's back moved waits for the app's answer (`settlePop`).
+    this.dismissing = (this.dismissing ?? 0) + 1;
+    const dismissed = () => {
+      this.dismissing -= 1;
+      this.event(screen._id, "onDismiss");
+      if (this.popAnswer) setTimeout(() => this.settlePop(), 0);
+    };
     // Through its shader, with its own motion, or at once.
     this.moveScreens(screen, below, false, dismissed);
     this.syncHistorySoon();
@@ -5217,7 +5227,11 @@ class Player {
   // History: one entry per screen over the bottom one of each shown stack
   // and per presented modal, so that the browser's back button goes back
   // in the app. Entries the app takes away itself are gone back over
-  // (`history.go`), their `popstate` ignored.
+  // (`history.go`), their `popstate` ignored. Each entry has its depth
+  // (`nsh`) and its place among this load's entries (`nshIndex`): an
+  // address the user typed is an entry at the depth it was typed at, and
+  // a back or forward between entries of one depth moves the app's
+  // address (`change`).
 
   installHistory() {
     this.historyDepth = 0;
@@ -5225,6 +5239,10 @@ class Player {
     // Entries are this page load's: those of an earlier load (a reload
     // keeps them, with their depths) are foreign, below this one's.
     this.historySession = newHistorySession();
+    // The current entry's place, and the depth of each entry up to the
+    // newest (what a back of the app's own goes back over).
+    this.historyIndex = 0;
+    this.historyDepths = [0];
     history.replaceState(this.historyState(0), "");
     // The address of the app's first entry, where every run starts, and of
     // the entry shown (a page the app keeps on a back keeps it).
@@ -5232,18 +5250,38 @@ class Player {
     window.addEventListener("popstate", (e) => this.popState(e));
   }
 
-  historyState(depth) {
-    return { ...(history.state ?? {}), nsh: depth, nshSession: this.historySession };
+  historyState(depth, index = this.historyIndex) {
+    return { ...(history.state ?? {}), nsh: depth, nshSession: this.historySession, nshIndex: index };
   }
 
   /** A new run starts at the app's first entry. */
   resetHistory() {
     if (!this.history) return;
     this.pageUrl = null;
-    if (!this.historyDepth) return;
-    this.ignoredPops++;
-    history.go(-this.historyDepth);
+    this.endPopAnswer();
+    const index = this.historyIndex;
+    this.historyIndex = 0;
+    this.historyDepths = [0];
     this.historyDepth = 0;
+    if (!index) return;
+    this.ignoredPops++;
+    history.go(-index);
+  }
+
+  /** A new entry after the current one, at `depth`: those after it go. */
+  pushEntry(depth) {
+    const index = this.historyIndex + 1;
+    this.historyDepths.length = index;
+    this.historyDepths.push(depth);
+    this.historyIndex = index;
+    history.pushState(this.historyState(depth, index), "");
+  }
+
+  /** The newest entry before the current one at most `depth` deep: where
+   * a back of the app's own to `depth` goes. */
+  entryAtDepth(depth) {
+    for (let i = this.historyIndex - 1; i > 0; i--) if (this.historyDepths[i] <= depth) return i;
+    return 0;
   }
 
   /** `UrlScheme.setUrl` / `set_app_url`: the current entry's address, once
@@ -5290,12 +5328,19 @@ class Player {
   syncHistory() {
     const depth = this.backDepth();
     const have = this.historyDepth;
-    for (let i = have + 1; i <= depth; i++) history.pushState(this.historyState(i), "");
+    for (let i = have + 1; i <= depth; i++) this.pushEntry(i);
     if (depth < have) {
+      // Back over the entries above `depth`, the addresses the user typed
+      // at those depths included; a level that has no entry left gets one
+      // once the traversal lands.
+      const to = this.entryAtDepth(depth);
       this.ignoredPops++;
-      history.go(depth - have);
+      history.go(to - this.historyIndex);
+      this.historyIndex = to;
+      this.historyDepth = Math.min(depth, this.historyDepths[to] ?? 0);
+    } else {
+      this.historyDepth = depth;
     }
-    this.historyDepth = depth;
     // The address goes to the entry the traversal lands on (its
     // `popstate` syncs again).
     if (this.pageUrl != null && !this.ignoredPops) {
@@ -5318,17 +5363,35 @@ class Player {
       if (--this.ignoredPops) return;
       // A traversal of the player's own landed: the address waiting for it
       // goes to the entry, or the core takes the entry's (the app did not
-      // set one).
+      // set one). Levels the entry lacks get theirs.
+      if (this.historyDepth < this.backDepth()) this.syncHistorySoon();
       if (this.pageUrl != null) this.syncHistorySoon();
       else this.tellAddress(false);
       return;
     }
+    // A move of the user's: an answer the app owed for the one before is
+    // not waited for any more.
+    this.endPopAnswer();
     const have = this.historyDepth;
     if (e.state?.nshSession !== this.historySession) {
+      if (e.state?.nsh == null && location.href !== this.shownUrl) {
+        // An address the user gave the page (a `#fragment` typed in the
+        // address bar): an entry after the current one, at its depth, as
+        // if the app had pushed it. The app's pages stay; it shows what
+        // the address names (`change`).
+        const index = this.historyIndex + 1;
+        this.historyDepths.length = index;
+        this.historyDepths.push(have);
+        this.historyIndex = index;
+        history.replaceState(this.historyState(have, index), "");
+        this.tellAddress("address");
+        return;
+      }
       // Back past the app's first entry: the app goes back to its start.
       // An earlier load's entries (a reload keeps them) are passed over,
       // as if the page had been left from its first screen.
       this.historyDepth = 0;
+      this.historyIndex = 0;
       for (let i = 0; i < have; i++) if (!this.back()) break;
       if (e.state?.nsh == null) return;
       // An earlier load's entry (a reload keeps them): an address the app
@@ -5336,12 +5399,18 @@ class Player {
       // app's first, in a session of its own, so this load's entries after
       // it are an earlier load's too.
       this.historySession = newHistorySession();
+      this.historyDepths = [0];
       history.replaceState(this.historyState(0), "");
       this.firstUrl = location.href;
       this.tellAddress(true);
       return;
     }
     const at = e.state.nsh ?? 0;
+    // This load's entries all have their place; which way the user went.
+    const index = Number.isInteger(e.state.nshIndex) ? e.state.nshIndex : at;
+    const cause = index < this.historyIndex ? "back" : "forward";
+    this.historyIndex = index;
+    this.historyDepths[index] = at;
     if (at > have) {
       // Forward to a screen the stack no longer has: an address the app is
       // handed from outside, as a link (`open`), and its pages' entries go
@@ -5352,9 +5421,18 @@ class Player {
       this.syncHistorySoon();
       return;
     }
+    if (at === have) {
+      // Between entries of one depth (addresses the user typed): the app's
+      // pages are as the entry has them, and it shows what the address
+      // names.
+      if (!index) this.firstUrl = location.href;
+      this.tellAddress(location.href !== this.shownUrl ? cause : false);
+      return;
+    }
     // A pop the app hears at once (no motion, a modal) may give the address
     // itself from `onChange`, before the entry's below.
     const sets = this.pageUrlSets;
+    const before = this.shownUrl;
     if (at < have) {
       // Back (several entries from the back button's menu): what the app
       // does not let go back gets its entry again.
@@ -5372,16 +5450,56 @@ class Player {
     // The app went back: the address is the entry's (`UrlScheme.url()`),
     // with no `open`, as its stack went back already; a `setUrl` from its
     // `onChange` wins, whether it came during the pops or comes after.
-    if (!at) this.firstUrl = location.href;
-    if (this.pageUrlSets === sets) this.tellAddress(false);
-    else this.shownUrl = location.href;
+    if (!index) this.firstUrl = location.href;
+    if (this.pageUrlSets !== sets) {
+      this.shownUrl = location.href;
+      return;
+    }
+    this.tellAddress(false);
+    // An app whose pages do not set the address (no `onChange` for them)
+    // hears an entry's address that differs from the one it had
+    // (`change`), once the pages it popped are dismissed: it answers the
+    // dismissal after their slide, and an address it sets then wins.
+    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, cause });
+  }
+
+  /** Waits for the app's answer to a back that popped its pages (`popped`:
+   * `sets`, `url`, `cause`), at most `POP_ANSWER_MS`. */
+  awaitPopAnswer(popped) {
+    this.popAnswer = popped;
+    popped.timer = setTimeout(() => {
+      popped.expired = true;
+      this.settlePop();
+    }, POP_ANSWER_MS);
+    setTimeout(() => this.settlePop(), 0);
+  }
+
+  /** Once the pages a back popped are dismissed: the address is a
+   * `change` unless the app set one meanwhile. */
+  settlePop() {
+    const popped = this.popAnswer;
+    if (!popped || (this.dismissing > 0 && !popped.expired)) return;
+    this.endPopAnswer();
+    if (this.pageUrlSets !== popped.sets || location.href !== popped.url) return;
+    this.tellAddress(popped.cause);
+  }
+
+  endPopAnswer() {
+    clearTimeout(this.popAnswer?.timer);
+    this.popAnswer = null;
   }
 
   /** Tells the core the entry's address: with `open` when the app is handed
-   * it from outside, else as the address only (`quiet`). */
-  tellAddress(open) {
+   * it from outside (`true`), as a move the app did not make when `how` is
+   * its cause (`"back"`, `"forward"`, `"address"`: `change`), else as the
+   * address only (`quiet`). */
+  tellAddress(how) {
     this.shownUrl = location.href;
-    this.event(ROOT_ID, "onUrlScheme", open ? { url: this.shownUrl, page: true } : { url: this.shownUrl, page: true, quiet: true });
+    const url = this.shownUrl;
+    const payload = how === true
+      ? { url, page: true }
+      : typeof how === "string" ? { url, page: true, change: how } : { url, page: true, quiet: true };
+    this.event(ROOT_ID, "onUrlScheme", payload);
   }
 
   stackChanged(stack, added) {

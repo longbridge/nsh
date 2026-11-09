@@ -1,15 +1,22 @@
 //! `nsh`'s `UrlScheme`: the links that open the app ([`crate::url_scheme`]),
 //! URLs of the schemes it claims in `nsh.json`, and the app's address
 //! (`url`, `setUrl`): on the web the page's. The core keeps the address
-//! (Rust's `app_url`), and `url()` reads it where it is (`System::app_url`).
-//! Needs no capability: the app's own claim is what lets them in.
+//! (Rust's `app_url`), and `url()` reads it where it is (`System::app_url`);
+//! the moves of it the app did not make come as `change`. Needs no
+//! capability: the app's own claim is what lets them in.
 
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
 };
 
-use crate::element::{CallCx, Callback, JsError, JsObject, Local, PropEnum, Stop, System, module};
+use crate::{
+    element::{
+        CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, PropEnum,
+        PropError, Stop, System, TsTypes, module,
+    },
+    url_scheme::{AppUrlChange, AppUrlChangeCause},
+};
 
 /// The links that open the app.
 #[module]
@@ -24,26 +31,46 @@ impl UrlScheme {
     /// most 16, the oldest dropped). Nothing navigates on its own: what a
     /// link opens is the app's. Anyone can make a link of the app's scheme,
     /// so its URL is untrusted input: check it before acting on it.
-    /// Returns a function that stops listening.
+    /// `change`: the app's address moved without the app moving it (on the
+    /// web, the browser's back or forward to an entry its pages do not
+    /// account for, `cause` `"back"` or `"forward"`, or an address the user
+    /// typed, `"address"`); `url()` reads it already, and the app shows
+    /// what it names. A back that pops a page is the stack's (`onChange`),
+    /// and a forward to a page the stack no longer has is `open`. Moves
+    /// while nothing listened are not kept. Returns a function that stops
+    /// listening.
+    #[overload(fn(event: UrlSchemeOpenEvent, #[args(open)] listener: Callback<UrlSchemeOpen>) -> Stop)]
+    #[overload(fn(event: UrlSchemeChangeEvent, #[args(change)] listener: Callback<UrlSchemeChange>) -> Stop)]
     pub(crate) fn on(
         event: UrlSchemeEvent,
-        #[args(open)] listener: Callback<UrlSchemeOpen>,
+        #[args(payload)] listener: Callback<Payload>,
         sys: System,
         cx: crate::element::CallCx<'_>,
     ) -> Result<Stop, JsError> {
-        let UrlSchemeEvent::Open = event;
         let links = sys.locals.get::<Links>();
         let id = links.next.get();
         links.next.set(id.wrapping_add(1));
-        for url in links.unheard.take() {
-            listener.post(UrlSchemeOpen { url });
+        match event {
+            UrlSchemeEvent::Open => {
+                for url in links.unheard.take() {
+                    listener.post(Payload::Open(UrlSchemeOpen { url }));
+                }
+                links.listeners.borrow_mut().push((id, listener));
+                links.start(&cx);
+            }
+            UrlSchemeEvent::Change => {
+                links.change_listeners.borrow_mut().push((id, listener));
+                links.start_changes(&cx);
+            }
         }
-        links.listeners.borrow_mut().push((id, listener));
-        links.start(&cx);
         let links = Rc::downgrade(&links);
         Ok(Stop::new(move || {
             if let Some(links) = links.upgrade() {
                 links.listeners.borrow_mut().retain(|(i, _)| *i != id);
+                links
+                    .change_listeners
+                    .borrow_mut()
+                    .retain(|(i, _)| *i != id);
             }
         }))
     }
@@ -77,6 +104,20 @@ pub(crate) enum UrlSchemeEvent {
     /// The system handed the app a link.
     #[default]
     Open,
+    /// The app's address moved without the app moving it.
+    Change,
+}
+
+/// The event a link comes with (`on`'s first overload).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum UrlSchemeOpenEvent {
+    Open,
+}
+
+/// The event an address move comes with (`on`'s second overload).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum UrlSchemeChangeEvent {
+    Change,
 }
 
 /// A link that opened the app (the `open` event).
@@ -86,14 +127,86 @@ pub(crate) struct UrlSchemeOpen {
     url: String,
 }
 
-/// The VM's `open` listeners.
+/// What moved the app's address (the `change` event's `cause`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub(crate) enum UrlSchemeChangeCause {
+    /// The browser's back.
+    #[default]
+    Back,
+    /// The browser's forward.
+    Forward,
+    /// An address of the app's the user gave the page (a `#fragment` typed
+    /// in the address bar).
+    Address,
+}
+
+impl From<AppUrlChangeCause> for UrlSchemeChangeCause {
+    fn from(cause: AppUrlChangeCause) -> Self {
+        match cause {
+            AppUrlChangeCause::Back => Self::Back,
+            AppUrlChangeCause::Forward => Self::Forward,
+            AppUrlChangeCause::Address => Self::Address,
+        }
+    }
+}
+
+/// An address the app moved to without moving it (the `change` event).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct UrlSchemeChange {
+    /// The address now, as `url()` reads it.
+    url: String,
+    /// What moved it.
+    cause: UrlSchemeChangeCause,
+}
+
+impl From<AppUrlChange> for UrlSchemeChange {
+    fn from(change: AppUrlChange) -> Self {
+        Self {
+            url: change.url,
+            cause: change.cause.into(),
+        }
+    }
+}
+
+/// What a listener gets.
+#[derive(Debug, Clone)]
+pub(crate) enum Payload {
+    Open(UrlSchemeOpen),
+    Change(UrlSchemeChange),
+}
+
+impl JsValue for Payload {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!(
+            "{} | {}",
+            <UrlSchemeOpen as JsValue>::ts_type(types),
+            <UrlSchemeChange as JsValue>::ts_type(types)
+        )
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        Err(value.expected("no value (a payload goes to JS only)"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Payload::Open(open) => open.to_js(host),
+            Payload::Change(change) => change.to_js(host),
+        }
+    }
+}
+
+/// The VM's `open` and `change` listeners.
 #[derive(Default)]
 struct Links {
-    listeners: RefCell<Vec<(u32, Callback<UrlSchemeOpen>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    change_listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
     next: Cell<u32>,
     /// The task waiting for the core's links started; it lasts as the VM
     /// does.
     started: Cell<bool>,
+    /// The task waiting for the core's address moves started.
+    changes_started: Cell<bool>,
     /// Links that came while no listener was left, for the next one.
     unheard: RefCell<Vec<String>>,
 }
@@ -105,11 +218,19 @@ impl Links {
             cx.start(deliver(Rc::downgrade(self)));
         }
     }
+
+    /// Starts taking the core's address moves, once.
+    fn start_changes(self: &Rc<Self>, cx: &CallCx<'_>) {
+        if !self.changes_started.replace(true) {
+            cx.start(deliver_changes(Rc::downgrade(self)));
+        }
+    }
 }
 
 impl Local for Links {
     fn close(&self) {
         self.listeners.borrow_mut().clear();
+        self.change_listeners.borrow_mut().clear();
     }
 }
 
@@ -130,7 +251,21 @@ async fn deliver(links: Weak<Links>) {
             continue;
         }
         for (_, listener) in &*listeners {
-            listener.post(UrlSchemeOpen { url: url.clone() });
+            listener.post(Payload::Open(UrlSchemeOpen { url: url.clone() }));
+        }
+    }
+}
+
+/// Posts the core's address moves to the listeners there are, while the VM
+/// lasts: one with none listening is not kept (`url()` has it).
+async fn deliver_changes(links: Weak<Links>) {
+    loop {
+        let change = UrlSchemeChange::from(crate::prelude::next_app_url_change().await);
+        let Some(links) = links.upgrade() else {
+            return;
+        };
+        for (_, listener) in &*links.change_listeners.borrow() {
+            listener.post(Payload::Change(change.clone()));
         }
     }
 }

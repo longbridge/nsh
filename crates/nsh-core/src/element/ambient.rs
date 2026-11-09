@@ -835,6 +835,19 @@ pub fn next_url_scheme_open() -> Answer<String> {
     answer
 }
 
+/// The next address the app moves to without making the move itself (TS:
+/// `UrlScheme.on("change", ...)`): on the web, the browser's back or
+/// forward to an entry the app's pages do not account for, or an address
+/// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
+/// it already. Moves while nothing listened since the app started are not
+/// kept; once something listened, at most
+/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextAppUrlChange(slot));
+    answer
+}
+
 /// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
 /// the native platforms the last link that opened the app; what
 /// [`set_app_url`] set after it; `None` when there is none

@@ -510,6 +510,15 @@ struct UrlScheme {
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
     next: Option<AnswerSlot<String>>,
+    /// Address moves no listener took yet
+    /// ([`crate::url_scheme::AppUrlChange`]), kept once something listened
+    /// ([`Self::hears_changes`]), at most [`crate::url_scheme::MAX_PENDING`].
+    changes: std::collections::VecDeque<crate::url_scheme::AppUrlChange>,
+    /// The listener waiting for an address move.
+    next_change: Option<AnswerSlot<crate::url_scheme::AppUrlChange>>,
+    /// Something listens to address moves: those before it are stale (the
+    /// address has them), those after it wait between its answers.
+    hears_changes: bool,
     /// The app's address: the last link taken, the page's on the web, or
     /// what the app set (`UrlScheme.setUrl`, `set_app_url`). The one copy,
     /// which every VM's `System` shares ([`Core::app_url_cell`]).
@@ -5111,8 +5120,16 @@ impl<M: TextEngine> Core<M> {
     /// Hands `url`, a link the system gave the app, to the listener, or
     /// keeps it for the next; drops it when the app does not claim it.
     /// `page`: the address of the page the app is (the web), which needs
-    /// no scheme of the app's; `quiet` only takes it as the address.
-    fn url_scheme(&mut self, url: String, page: bool, quiet: bool) {
+    /// no scheme of the app's; `quiet` only takes it as the address;
+    /// `change`, an address the app moved to without making the move,
+    /// goes to the change listener instead of `open`.
+    fn url_scheme(
+        &mut self,
+        url: String,
+        page: bool,
+        quiet: bool,
+        change: Option<crate::url_scheme::AppUrlChangeCause>,
+    ) {
         let links = &mut self.components.url_schemes;
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
@@ -5128,6 +5145,21 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let links = &mut self.components.url_schemes;
+        if let Some(cause) = change {
+            if !links.hears_changes {
+                return;
+            }
+            let change = crate::url_scheme::AppUrlChange { url, cause };
+            if let Some(answer) = links.next_change.take() {
+                answer.borrow_mut().deliver(change);
+                return;
+            }
+            if links.changes.len() == crate::url_scheme::MAX_PENDING {
+                links.changes.pop_front();
+            }
+            links.changes.push_back(change);
+            return;
+        }
         if let Some(answer) = links.next.take() {
             answer.borrow_mut().deliver(url);
             return;
@@ -5588,6 +5620,14 @@ impl<M: TextEngine> Core<M> {
                     None => links.next = Some(answer),
                 }
             }
+            Action::NextAppUrlChange(answer) => {
+                let links = &mut self.components.url_schemes;
+                links.hears_changes = true;
+                match links.changes.pop_front() {
+                    Some(change) => answer.borrow_mut().deliver(change),
+                    None => links.next_change = Some(answer),
+                }
+            }
             Action::AppUrl(answer) => {
                 let address = self.components.url_schemes.address.get();
                 answer.borrow_mut().deliver(address);
@@ -6042,6 +6082,20 @@ impl<M: TextEngine> Core<M> {
                 };
                 let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
                 let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
+                // An address move the app did not make (the web's back or
+                // forward), by its cause; one of a newer platform's causes
+                // is still the address, quietly.
+                let change = entries.iter().find_map(|(k, v)| match v {
+                    crate::PayloadValue::Str(s) if *k == crate::url_scheme::CHANGE => {
+                        Some(crate::url_scheme::AppUrlChangeCause::parse(s))
+                    }
+                    _ => None,
+                });
+                let (quiet, change) = match change {
+                    Some(None) => (true, None),
+                    Some(cause) => (quiet, cause),
+                    None => (quiet, None),
+                };
                 // The page's base URL (the web), which Rust's `set_app_url`
                 // resolves against.
                 if let Some(base) = entries.iter().find_map(|(k, v)| match v {
@@ -6052,7 +6106,7 @@ impl<M: TextEngine> Core<M> {
                 }) {
                     self.components.url_schemes.address.set_page_base(base);
                 }
-                self.url_scheme(url.clone(), page, quiet);
+                self.url_scheme(url.clone(), page, quiet, change);
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

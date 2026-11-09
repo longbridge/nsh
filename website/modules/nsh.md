@@ -2021,6 +2021,8 @@ An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.op
 ```ts
 const UrlScheme: {
   on(event: "open", listener: (event: { url: string }) => void): () => void;
+  /** The address moved without the app moving it (the web's back and forward, an address the user typed). */
+  on(event: "change", listener: (event: { url: string; cause: "back" | "forward" | "address" }) => void): () => void;
   /** The app's address, or null when it has none. */
   url(): string | null;
   /** Sets the address of the page shown; the app's pages stay as they are. */
@@ -2083,6 +2085,27 @@ export function App() {
 Rust code awaits `app_url()` and calls `set_app_url(url)` of `nsh_core::prelude`, beside `next_url_scheme_open()`; the
 same address as `url()` and `setUrl`, and `set_app_url` returns an error for the URLs `setUrl` throws for. On the web it
 resolves a URL against the page's base, as `setUrl` does, and one of another origin than the page's is an error.
+
+### UrlScheme.on("change")
+
+`change` reports a move of the app's address that the app did not make and that its pages do not account for, with the
+address and what moved it. `url()` reads the address already, and the app shows what it names:
+
+```tsx
+// The tab is in the address (`?tab=live`); a back or forward to another tab's entry shows that tab.
+UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
+```
+
+| `cause` | When (on the web, the app the whole page) |
+| --- | --- |
+| `"back"`, `"forward"` | The browser's back or forward went to an entry of the same pages with another address (an address the user typed), or a back popped pages and left an address the app did not set as it answered (no `onChange` sets one) |
+| `"address"` | The user gave the page an address of the app's, a `#fragment` typed in the address bar: a new entry after the current one, with the app's pages as they are |
+
+What the stack accounts for stays as it is: a back that pops pages is the stack's (`onChange`), a forward to a page the
+stack no longer has is `open`, and the app's own `setUrl` is no `change`. Moves that come while nothing listens are not
+kept: `url()` has them. The native platforms, GPUI hosts and terminals have no history of addresses, so `change` comes
+only on the web. Rust code awaits `next_app_url_change()` of `nsh_core::prelude`, an `AppUrlChange` with the `url` and
+its `cause`.
 
 ## Speech
 
