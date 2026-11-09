@@ -1046,6 +1046,10 @@ fn handle(
             return Some(LRESULT(1));
         }
         WM_SIZE => {
+            // Filled first: the frame below waits for the layout, and DWM
+            // shows the area the window grew by meanwhile (`WM_ERASEBKGND`
+            // comes after it).
+            fill_background(surface, hwnd);
             sync_size(surface, hwnd);
             // Drawn now, so that the window never shows stretched or
             // stale pixels while it is resized.
