@@ -27,7 +27,7 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, EditMenuActions, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
     geometry::{Bounds, Percentage, Point, Points},
 };
 
@@ -179,17 +179,24 @@ impl ElementRef {
         self.send(Command::SetSelection { start, end });
     }
 
-    /// Shows the system's edit menu of a focused input over `bounds` (in
-    /// the root view), offering what `actions` allows
-    /// ([`Command::ShowEditMenu`]): the actions come back as
-    /// [`super::EventKind::EditMenu`], a paste as the input's `on_paste`.
-    pub fn show_edit_menu(&self, bounds: Bounds<Points>, actions: EditMenuActions) {
-        self.send(Command::ShowEditMenu { bounds, actions });
+    /// Opens the system's edit menu over `bounds` (in the root view) on a
+    /// focused input, offering `actions` ([`Command::OpenEditMenu`]): a
+    /// chosen action comes back as [`super::EventKind::EditAction`], a
+    /// paste as the input's `on_paste`.
+    pub fn open_edit_menu(
+        &self,
+        bounds: Bounds<Points>,
+        actions: impl IntoIterator<Item = EditAction>,
+    ) {
+        self.send(Command::OpenEditMenu {
+            bounds,
+            actions: actions.into_iter().collect(),
+        });
     }
 
-    /// Hides the edit menu [`ElementRef::show_edit_menu`] showed.
-    pub fn hide_edit_menu(&self) {
-        self.send(Command::HideEditMenu);
+    /// Closes the edit menu [`ElementRef::open_edit_menu`] opened.
+    pub fn close_edit_menu(&self) {
+        self.send(Command::CloseEditMenu);
     }
 
     /// Scrolls a scroll view to a content offset.

@@ -51,7 +51,7 @@ test("cut and paste from the edit menu, and undo takes the paste back", async ()
   await app.press(`text:${SECOND}`);
   await app.wait(600);
   await app.press(`text:${SECOND}`);
-  expect(labels(app)).toEqual(["Paste", "Select", "Select All"]);
+  expect(labels(app)).toEqual(["Paste", "Select All"]);
   await app.chooseMenuItem("Paste");
   await app.waitFor(`text:${SECOND}`, { state: "gone" });
   expect(app.texts().some((t) => t.startsWith("Then") && t.includes(word))).toBe(true);
@@ -64,5 +64,6 @@ test("Select All from the menu selects the whole document", async () => {
   await app.longPress(`text:${FIRST}`);
   await app.chooseMenuItem("Select All");
   expect(selected(app)).toBe(`${FIRST} ${SECOND}`);
-  expect(labels(app)).toEqual(["Cut", "Copy", "Select All"]);
+  // Everything is selected: no Select All.
+  expect(labels(app)).toEqual(["Cut", "Copy"]);
 });

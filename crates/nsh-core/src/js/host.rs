@@ -967,7 +967,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::UrlScheme,
     EventKind::Audio,
     EventKind::Window,
-    EventKind::EditMenu,
+    EventKind::EditAction,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

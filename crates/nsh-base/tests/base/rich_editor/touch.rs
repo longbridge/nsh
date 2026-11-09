@@ -1,8 +1,8 @@
 //! Touch selection on a phone: a long press selects the word under the
 //! finger and opens the system's edit menu, whose actions edit through the
 //! editor's own transactions (undo takes them back); a long press on blank
-//! space places the caret with the caret's menu, whose Select takes the
-//! nearest word.
+//! space places the caret with the caret's menu. The menu leaves out what
+//! cannot apply.
 
 use super::*;
 
@@ -58,8 +58,8 @@ fn select_all_from_the_menu_selects_the_document() {
     app.long_press(&format!("text:{LINE}")).unwrap();
     app.choose_menu_item("Select All").unwrap();
     see(&mut app, &format!("Sel 0-{}", LINE.len() + 2 + 5));
-    // The menu opens again over everything.
-    assert_eq!(labels(&app), ["Cut", "Copy", "Select All"]);
+    // The menu opens again over everything, without Select All.
+    assert_eq!(labels(&app), ["Cut", "Copy"]);
 }
 
 #[test]
@@ -73,8 +73,9 @@ fn a_long_press_on_blank_space_places_the_caret_with_its_menu() {
         from == to && from > 3 && from < 13,
         "the caret in the spaces: {from}-{to}"
     );
-    assert_eq!(labels(&app), ["Select", "Select All"]);
-    app.choose_menu_item("Select").unwrap();
-    see(&mut app, "Sel 1-3");
-    assert_eq!(labels(&app), ["Cut", "Copy", "Select All"]);
+    // Nothing on the clipboard: no Paste.
+    assert_eq!(labels(&app), ["Select All"]);
+    app.choose_menu_item("Select All").unwrap();
+    see(&mut app, &format!("Sel 0-{}", line.len() + 2));
+    assert_eq!(labels(&app), ["Cut", "Copy"]);
 }

@@ -559,17 +559,17 @@ final class InputBox extends FrameLayout implements Node {
         }
     }
 
-    /** The edit menu a component drawing its own selection showed (`Command::ShowEditMenu`), while it shows. */
+    /** The edit menu a component drawing its own selection opened (`Command::OpenEditMenu`), while it is open. */
     private android.view.ActionMode editMenu;
-    /** What it points at, in the root view (dp), and the actions' bits (cut 1, copy 2, paste 4, select all 16). */
+    /** What it points at, in the root view (dp), and the actions' bits (cut 1, copy 2, paste 4, select all 8). */
     private float menuX, menuY, menuWidth, menuHeight;
     private int menuActions;
 
     /**
-     * Shows the system's floating text toolbar over {@code x, y, width, height} in the root view, offering
-     * {@code actions}: Cut, Copy and Select all are reported (`onEditMenu`), Paste is the field's own paste.
+     * Opens the system's floating text toolbar over {@code x, y, width, height} in the root view, offering
+     * {@code actions}: Cut, Copy and Select all are reported (`onEditAction`), Paste is the field's own paste.
      */
-    void showEditMenu(float x, float y, float width, float height, int actions) {
+    void openEditMenu(float x, float y, float width, float height, int actions) {
         menuX = x;
         menuY = y;
         menuWidth = width;
@@ -598,7 +598,7 @@ final class InputBox extends FrameLayout implements Node {
                 menu.findItem(android.R.id.cut).setVisible((menuActions & 1) != 0);
                 menu.findItem(android.R.id.copy).setVisible((menuActions & 2) != 0);
                 menu.findItem(android.R.id.paste).setVisible((menuActions & 4) != 0 && pastes);
-                menu.findItem(android.R.id.selectAll).setVisible((menuActions & 16) != 0);
+                menu.findItem(android.R.id.selectAll).setVisible((menuActions & 8) != 0);
                 return true;
             }
 
@@ -609,7 +609,7 @@ final class InputBox extends FrameLayout implements Node {
                         : itemId == android.R.id.copy ? "copy"
                         : itemId == android.R.id.selectAll ? "selectAll" : null;
                 if (action != null) {
-                    mounter.event(id, Native.EDIT_MENU, action, 0, 0, 0);
+                    mounter.event(id, Native.EDIT_ACTION, action, 0, 0, 0);
                 } else if (itemId == android.R.id.paste) {
                     edit.onTextContextMenuItem(android.R.id.paste);
                 } else {
@@ -639,8 +639,8 @@ final class InputBox extends FrameLayout implements Node {
         }, android.view.ActionMode.TYPE_FLOATING);
     }
 
-    /** Hides the menu {@link #showEditMenu} showed. */
-    void hideEditMenu() {
+    /** Closes the menu {@link #openEditMenu} opened. */
+    void closeEditMenu() {
         android.view.ActionMode m = editMenu;
         editMenu = null;
         if (m != null) m.finish();

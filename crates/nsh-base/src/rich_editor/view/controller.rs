@@ -2091,7 +2091,7 @@ impl Rv {
         if !focused {
             self.drag.borrow_mut().take();
             self.drop_at.set(None);
-            self.hide_edit_menu();
+            self.close_edit_menu();
         }
         self.restart_blink();
     }

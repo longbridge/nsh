@@ -4,12 +4,13 @@
 //! finger's sweep after it goes on by words; a double tap selects a word,
 //! a triple tap the paragraph. The selection a touch made carries a handle
 //! at each end, which a finger drags to move that end. The system's edit
-//! menu opens on the sink ([`ElementRef::show_edit_menu`]): Cut, Copy,
-//! Paste and Select All over the selection after each of those gestures
-//! and a tap on it; Paste, Select and Select All at the caret after a long
-//! press on blank space or a tap on the caret. Paste is the sink's own
-//! paste (its `on_paste`); the other actions come back as
-//! [`EventKind::EditMenu`] and run as the editor's own transactions, so
+//! menu opens on the sink ([`ElementRef::open_edit_menu`]) over the
+//! selection after each of those gestures and a tap on it, and at the
+//! caret after a long press on blank space or a tap on the caret. As
+//! gpui-kit's input does, it offers Cut, Copy, Paste and Select All,
+//! leaving out what cannot apply rather than disabling it. Paste is the
+//! sink's own paste (its `on_paste`); the other actions come back as
+//! [`EventKind::EditAction`] and run as the editor's own transactions, so
 //! undo takes them back.
 //!
 //! The touch selection remembers the range it made. As soon as the
@@ -18,10 +19,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use nsh_core::{
-    EditMenuAction, EditMenuActions, PayloadValue, element::EventPayload, keymap::Modifiers,
-    prelude::*,
-};
+use nsh_core::{EditAction, PayloadValue, element::EventPayload, keymap::Modifiers, prelude::*};
 
 use super::{
     controller::{Rv, word_at},
@@ -30,7 +28,7 @@ use super::{
     render::parts,
 };
 use crate::{
-    rich_editor::state::{Affinity, NodeSelection, Selection, TextSelection},
+    rich_editor::state::{Affinity, AllSelection, NodeSelection, Selection, TextSelection},
     theme,
 };
 
@@ -71,10 +69,10 @@ struct HandleDrag {
     scroll: Points,
 }
 
-/// What the edit menu was last asked to show.
+/// Where the edit menu was last opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Menu {
-    Hidden,
+    Closed,
     /// Over the selection `from..to`.
     Selection(usize, usize),
     /// At the caret.
@@ -109,7 +107,7 @@ impl Default for Inner {
             sweep: None,
             last_tap: None,
             tap_timer: None,
-            menu: Menu::Hidden,
+            menu: Menu::Closed,
             menu_on_lift: false,
             sweeping: false,
         }
@@ -212,18 +210,20 @@ pub(crate) fn handle_box(edge: Edge, caret: Bounds<Points>) -> Bounds<Points> {
     )
 }
 
-/// What the edit menu offers over a selection, or at the caret.
-pub(crate) fn menu_actions(selection: bool, editable: bool, has_text: bool) -> EditMenuActions {
-    let mut actions = EditMenuActions::default();
-    if selection {
-        actions.cut = editable;
-        actions.copy = true;
-    } else {
-        actions.select = has_text;
-    }
-    actions.paste = editable;
-    actions.select_all = has_text;
-    actions
+/// What the edit menu offers: Cut and Copy over a selection (Cut only
+/// where the text can change), Paste where the text can change (without
+/// reading the clipboard, which iOS announces), Select All unless all of
+/// the text is selected.
+pub(crate) fn menu_actions(selection: bool, editable: bool, all_selected: bool) -> Vec<EditAction> {
+    [
+        (selection && editable, EditAction::Cut),
+        (selection, EditAction::Copy),
+        (editable, EditAction::Paste),
+        (!all_selected, EditAction::SelectAll),
+    ]
+    .into_iter()
+    .filter_map(|(offered, action)| offered.then_some(action))
+    .collect()
 }
 
 impl Rv {
@@ -254,12 +254,12 @@ impl Rv {
             self.touch.bump();
         }
         let stale = match menu {
-            Menu::Hidden => false,
+            Menu::Closed => false,
             Menu::Selection(from, to) => (from, to) != (s.from(), s.to()),
             Menu::Caret(at) => !s.empty() || s.head() != at,
         };
         if stale {
-            self.hide_edit_menu();
+            self.close_edit_menu();
         }
     }
 
@@ -287,7 +287,7 @@ impl Rv {
                 .any(|edge| self.handle_at(edge).is_some_and(|b| contains(b, at, 0.0)));
             let inside = matches!(self.hit(at), Some(Hit::Text(p, _)) if p > from && p < to);
             if on_handle || inside {
-                self.show_edit_menu();
+                self.open_edit_menu();
                 return;
             }
         }
@@ -296,14 +296,14 @@ impl Rv {
             let s = state.selection();
             (self.focused.get_untracked() && s.empty() && s.as_text().is_some()).then(|| s.head())
         };
-        let shown = self.touch.inner.borrow().menu != Menu::Hidden;
-        self.hide_edit_menu();
+        let open = self.touch.inner.borrow().menu != Menu::Closed;
+        self.close_edit_menu();
         self.press(at, page, modifiers, 1);
         // A tap on the caret toggles its menu, as UIKit's text views do.
         let state = self.session.state();
         let s = state.selection();
-        if !shown && before.is_some() && s.empty() && Some(s.head()) == before {
-            self.show_edit_menu();
+        if !open && before.is_some() && s.empty() && Some(s.head()) == before {
+            self.open_edit_menu();
         }
     }
 
@@ -336,7 +336,7 @@ impl Rv {
             },
         };
         self.set_selection(selection, false);
-        self.hide_edit_menu();
+        self.close_edit_menu();
         let range = {
             let state = self.session.state();
             let s = state.selection();
@@ -380,7 +380,7 @@ impl Rv {
         };
         self.touch.inner.borrow_mut().range = range;
         self.touch.bump();
-        self.show_edit_menu();
+        self.open_edit_menu();
     }
 
     /// Whether a long press armed the sweep: the finger's moves extend the
@@ -406,7 +406,7 @@ impl Rv {
             std::mem::take(&mut inner.menu_on_lift) && !inner.sweeping
         };
         if lifted {
-            self.show_edit_menu();
+            self.open_edit_menu();
         }
     }
 
@@ -417,7 +417,7 @@ impl Rv {
             inner.sweeping = true;
             inner.menu_on_lift = false;
         }
-        self.hide_edit_menu();
+        self.close_edit_menu();
     }
 
     /// The finger sweeping after a long press moved to `page`.
@@ -522,7 +522,7 @@ impl Rv {
             Edge::Start => near(to, -1),
             Edge::End => near(from, 1),
         };
-        self.hide_edit_menu();
+        self.close_edit_menu();
         self.touch.inner.borrow_mut().drag = Some(HandleDrag {
             fixed,
             anchor: Point::new(caret.origin.x, caret.origin.y + caret.size.height / 2.0),
@@ -572,14 +572,17 @@ impl Rv {
             return;
         }
         self.touch.bump();
-        self.show_edit_menu();
+        self.open_edit_menu();
     }
 
-    /// Shows the system's edit menu over the selection, or at the caret.
-    fn show_edit_menu(&self) {
+    /// Opens the system's edit menu over the selection, or at the caret.
+    fn open_edit_menu(&self) {
         let state = self.session.state();
         let s = state.selection();
-        let has_text = !state.doc().text_content().is_empty();
+        let all: Selection = AllSelection::new(state.doc()).into();
+        // An empty document has nothing to select either.
+        let all_selected =
+            (s.from(), s.to()) == (all.from(), all.to()) || state.doc().text_content().is_empty();
         let selection = !s.empty();
         let (menu, bounds) = if selection {
             let bounds = self
@@ -593,17 +596,20 @@ impl Rv {
         let (Some(bounds), Some(shift)) = (bounds, self.page_shift()) else {
             return;
         };
-        let actions = menu_actions(selection, self.editable(), has_text);
+        let actions = menu_actions(selection, self.editable(), all_selected);
+        if actions.is_empty() {
+            return self.close_edit_menu();
+        }
         let page = Bounds::new(bounds.origin - shift, bounds.size);
         self.touch.inner.borrow_mut().menu = menu;
-        self.input.show_edit_menu(page, actions);
+        self.input.open_edit_menu(page, actions);
     }
 
-    /// Hides the edit menu, if the editor showed one.
-    pub(crate) fn hide_edit_menu(&self) {
-        let shown = std::mem::replace(&mut self.touch.inner.borrow_mut().menu, Menu::Hidden);
-        if shown != Menu::Hidden {
-            self.input.hide_edit_menu();
+    /// Closes the edit menu, if the editor opened one.
+    pub(crate) fn close_edit_menu(&self) {
+        let open = std::mem::replace(&mut self.touch.inner.borrow_mut().menu, Menu::Closed);
+        if open != Menu::Closed {
+            self.input.close_edit_menu();
         }
     }
 
@@ -643,61 +649,36 @@ impl Rv {
         Some(Bounds::new(origin, frame.size))
     }
 
-    /// An action of the edit menu: as the keyboard's commands do it.
-    pub(crate) fn edit_menu_action(&self, payload: &EventPayload) {
+    /// An action chosen from the edit menu: as the keyboard's commands do
+    /// it.
+    pub(crate) fn edit_action(&self, payload: &EventPayload) {
         let EventPayload::Map(fields) = payload else {
             return;
         };
         let action = fields.iter().find_map(|(key, value)| match value {
-            PayloadValue::Str(name) if *key == "action" => EditMenuAction::from_name(name),
+            PayloadValue::Str(name) if *key == "action" => {
+                [EditAction::Cut, EditAction::Copy, EditAction::SelectAll]
+                    .into_iter()
+                    .find(|a| a.js_name() == name.as_str())
+            }
             _ => None,
         });
         // The platform closed its menu as the action was chosen.
-        self.touch.inner.borrow_mut().menu = Menu::Hidden;
+        self.touch.inner.borrow_mut().menu = Menu::Closed;
         match action {
-            Some(EditMenuAction::Copy) => self.copy(),
-            Some(EditMenuAction::Cut) => {
+            Some(EditAction::Copy) => self.copy(),
+            Some(EditAction::Cut) => {
                 self.copy();
                 if self.editable() {
                     self.delete_selection();
                 }
             }
-            Some(EditMenuAction::Select) => self.select_word_at_caret(),
-            Some(EditMenuAction::SelectAll) => {
+            Some(EditAction::SelectAll) => {
                 self.select_all();
                 self.take_touch_selection();
             }
             _ => {}
         }
-    }
-
-    /// Select: the word at the caret, else the nearest before it in its
-    /// textblock, else the nearest after it.
-    fn select_word_at_caret(&self) {
-        let state = self.session.state();
-        let doc = state.doc().clone();
-        let head = state.selection().head();
-        let Ok(at) = doc.resolve(head) else { return };
-        if !at.parent().inline_content() {
-            return;
-        }
-        let (start, end) = (at.start(at.depth), at.end(at.depth));
-        let word = |pos: usize| {
-            word_at(&doc, pos).filter(|&(a, b)| {
-                a < b
-                    && !doc
-                        .text_between(a, b, Some(""), None)
-                        .chars()
-                        .all(char::is_whitespace)
-            })
-        };
-        let found = (start..=head)
-            .rev()
-            .find_map(word)
-            .or_else(|| (head..=end).find_map(word));
-        let Some((a, b)) = found else { return };
-        self.set_selection(TextSelection::create(&doc, a, Some(b)), false);
-        self.take_touch_selection();
     }
 }
 
@@ -822,20 +803,20 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_offers_what_the_platforms_text_views_do() {
-        // Over a selection in an editable document: Cut, Copy, Paste and
-        // Select All.
-        let a = menu_actions(true, true, true);
-        assert!(a.cut && a.copy && a.paste && a.select_all && !a.select);
-        // At the caret: Paste, Select and Select All.
-        let a = menu_actions(false, true, true);
-        assert!(!a.cut && !a.copy && a.paste && a.select && a.select_all);
+    fn the_menu_leaves_out_what_cannot_apply() {
+        use EditAction::*;
+        // Over a selection in an editable document.
+        assert_eq!(
+            menu_actions(true, true, false),
+            [Cut, Copy, Paste, SelectAll]
+        );
+        // At the caret.
+        assert_eq!(menu_actions(false, true, false), [Paste, SelectAll]);
         // Read-only: nothing that edits.
-        let a = menu_actions(true, false, true);
-        assert!(!a.cut && a.copy && !a.paste);
-        // An empty document: only Paste.
-        let a = menu_actions(false, true, false);
-        assert!(a.paste && !a.select && !a.select_all);
+        assert_eq!(menu_actions(true, false, false), [Copy, SelectAll]);
+        // Everything selected, or nothing to select.
+        assert_eq!(menu_actions(true, true, true), [Cut, Copy, Paste]);
+        assert_eq!(menu_actions(false, true, true), [Paste]);
     }
 
     #[test]

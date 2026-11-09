@@ -171,12 +171,13 @@ The range a gesture made is the touch selection; while it is the selection and t
 (a 32-point wide hit area holding the `selectionHandle` knob, above the start's line and below the end's) stands at
 each end and moves that end as a finger drags it, scrolling the end into view. Anything else that changes the
 selection drops it (`Rv::touch_follow`, from `take_state`). The system's edit menu opens on the sink
-(`ElementRef::show_edit_menu`, `Command::ShowEditMenu`: `UIEditMenuInteraction` on iOS, a floating `ActionMode`
+(`ElementRef::open_edit_menu`, `Command::OpenEditMenu`: `UIEditMenuInteraction` on iOS, a floating `ActionMode`
 on Android) over the selection when the long press's finger lifts, after a sweep, a double tap, a handle let go and
-a tap on the selection (Cut, Copy, Paste, Select All), and at the caret after a long press on blank space or a tap
-on the caret (Paste, Select, Select All); read-only editors offer what does not edit. The bounds are the session's
-selection, which the view may not have rendered yet. Paste is the sink's own (its `onPaste`, with HTML and files);
-Cut, Copy, Select and Select All come back as `EventKind::EditMenu` and run as the keys' commands do.
+a tap on the selection, and at the caret after a long press on blank space or a tap on the caret. As gpui-kit's
+input, it offers Cut, Copy, Paste and Select All and leaves out what cannot apply (`touch::menu_actions`): Cut and
+Copy without a selection, Cut and Paste in a read-only editor, Select All when everything is selected. The bounds
+are the session's selection, which the view may not have rendered yet. Paste is the sink's own (its `onPaste`, with
+HTML and files); Cut, Copy and Select All come back as `EventKind::EditAction` and run as the keys' commands do.
 
 The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
 content box so it scrolls with the text, anchors an `overlay()` holding the app's content (`bubbleMenuPlacement`,

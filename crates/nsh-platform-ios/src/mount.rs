@@ -1754,7 +1754,7 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
-            (Command::ShowEditMenu { bounds, actions }, Native::Input(input)) => {
+            (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
                 let view = input.editor_view();
                 let rect = CGRect::new(
                     CGPoint::new(bounds.origin.x.0.into(), bounds.origin.y.0.into()),
@@ -1766,10 +1766,10 @@ impl Mounter {
                     Some(root) => view.convertRect_fromView(rect, Some(&root)),
                     None => rect,
                 };
-                crate::input::show_edit_menu(view, rect, actions);
+                crate::input::open_edit_menu(view, rect, actions);
             }
-            (Command::HideEditMenu, Native::Input(input)) => {
-                crate::input::hide_edit_menu(input.editor_view())
+            (Command::CloseEditMenu, Native::Input(input)) => {
+                crate::input::close_edit_menu(input.editor_view())
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),

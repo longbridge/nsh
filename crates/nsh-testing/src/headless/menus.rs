@@ -1,12 +1,12 @@
 //! The context menu steps: `rightClick(<selector>)`, the mouse's secondary
 //! button over a view, and choosing from (or closing) the menu the app
 //! then shows with `Menu.popup`, as a user does on a desktop; and the
-//! system's edit menu an editor shows over the selection it draws
-//! (`Command::ShowEditMenu`), with the platform's labels.
+//! system's edit menu an editor opens over the selection it draws
+//! (`Command::OpenEditMenu`), with the platform's labels.
 
 use nsh_core::{
-    ContextMenuEvent, EditMenuAction, EditMenuActions, EventKind, EventPayload, PasteEvent,
-    PayloadValue, PointerType, ROOT_ID, geometry::point, platform::Os,
+    ContextMenuEvent, EditAction, EventKind, EventPayload, PasteEvent, PayloadValue, PointerType,
+    ROOT_ID, element::PropEnum, geometry::point, platform::Os,
 };
 
 use super::Headless;
@@ -71,40 +71,33 @@ impl Headless {
     }
 
     /// What the platform's edit menu shows of `actions`, labelled as the
-    /// system labels them: a paste only with something on the clipboard,
-    /// Android's without Select. `None` is Paste, the input's own.
-    fn edit_menu_items(
-        &self,
-        actions: EditMenuActions,
-    ) -> Vec<(&'static str, Option<EditMenuAction>)> {
+    /// system labels them: Paste only with something on the clipboard.
+    fn edit_menu_items(&self, actions: &[EditAction]) -> Vec<(&'static str, EditAction)> {
         let android = self.environment.os == Os::Android;
         let pastes = self.screen.clipboard().is_some_and(|text| !text.is_empty());
-        [
-            (actions.cut, "Cut", Some(EditMenuAction::Cut)),
-            (actions.copy, "Copy", Some(EditMenuAction::Copy)),
-            (actions.paste && pastes, "Paste", None),
-            (
-                actions.select && !android,
-                "Select",
-                Some(EditMenuAction::Select),
-            ),
-            (
-                actions.select_all,
-                if android { "Select all" } else { "Select All" },
-                Some(EditMenuAction::SelectAll),
-            ),
-        ]
-        .into_iter()
-        .filter(|(shown, _, _)| *shown)
-        .map(|(_, label, action)| (label, action))
-        .collect()
+        actions
+            .iter()
+            .filter_map(|&action| {
+                let label = match action {
+                    EditAction::Cut => "Cut",
+                    EditAction::Copy => "Copy",
+                    EditAction::Paste if pastes => "Paste",
+                    EditAction::SelectAll if android => "Select all",
+                    EditAction::SelectAll => "Select All",
+                    _ => return None,
+                };
+                Some((label, action))
+            })
+            .collect()
     }
 
-    /// Chooses `label` from the open edit menu: its action goes to the
-    /// input (`onEditMenu`), Paste pastes the clipboard into it.
+    /// Chooses `label` from the open edit menu: Paste pastes the clipboard
+    /// into the input, the other actions go to it (`onEditAction`).
     fn choose_edit_menu_item(&mut self, label: &str) -> Result<(), String> {
-        let (input, actions) = self.screen.edit_menu().ok_or("no menu is open")?;
-        let items = self.edit_menu_items(actions);
+        let (input, items) = {
+            let (input, actions) = self.screen.edit_menu().ok_or("no menu is open")?;
+            (input, self.edit_menu_items(actions))
+        };
         let Some(&(_, action)) = items.iter().find(|(l, _)| *l == label) else {
             let shown: Vec<&str> = items.iter().map(|(l, _)| *l).collect();
             return Err(format!(
@@ -113,16 +106,15 @@ impl Headless {
             ));
         };
         self.screen.edit_menu_closed();
-        match action {
-            Some(action) => self.send(
+        if action == EditAction::Paste {
+            let text = self.screen.clipboard().unwrap_or_default().to_owned();
+            self.paste_into(input, &PasteEvent::new(text));
+        } else {
+            self.send(
                 input,
-                EventKind::EditMenu,
-                EventPayload::Map(vec![("action", PayloadValue::Str(action.name().into()))]),
-            ),
-            None => {
-                let text = self.screen.clipboard().unwrap_or_default().to_owned();
-                self.paste_into(input, &PasteEvent::new(text));
-            }
+                EventKind::EditAction,
+                EventPayload::Map(vec![("action", PayloadValue::Str(action.js_name().into()))]),
+            );
         }
         Ok(())
     }

@@ -1499,9 +1499,9 @@ fn sink(rv: Rv) -> impl IntoElement {
         })
         .on_key_press(move |k: &str| key.sink_key(k))
         .on_paste(move |p: &PasteEvent| paste.paste_event(p))
-        // The touch selection's edit menu, which the sink shows.
-        .on(EventKind::EditMenu, move |p: &EventPayload| {
-            menu.edit_menu_action(p)
+        // The touch selection's edit menu, which the sink opens.
+        .on(EventKind::EditAction, move |p: &EventPayload| {
+            menu.edit_action(p)
         })
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))

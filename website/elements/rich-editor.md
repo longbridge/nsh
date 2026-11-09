@@ -82,7 +82,8 @@ finger, and moving the finger after it extends the selection by whole words; a l
 caret. A double tap selects a word, a triple tap the paragraph. The selection a touch made has a handle at each end
 (`selectionHandle`, a dot in the theme's `primary`), which the finger drags to move that end. When the finger lifts,
 the system's edit menu opens over the selection with Cut, Copy, Paste and Select All; a tap on the selection opens it
-again, and a tap on the caret opens Paste, Select and Select All. Each action is a transaction of the editor, so the
+again, and a tap on the caret opens Paste and Select All. The menu offers only what applies: Select All is left out
+once everything is selected, and a read-only editor offers Copy and Select All. Each action is a transaction of the editor, so the
 toolbar's `isActive` follows the selection, `toggleMark` formats it, and undo takes a cut or a paste back. Taps,
 keys, input methods and the mouse select as before.
 
