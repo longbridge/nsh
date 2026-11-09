@@ -14874,7 +14874,7 @@ mod views {
         prelude::*,
     };
 
-    fn texts(batch: &MountBatch) -> Vec<String> {
+    pub(super) fn texts(batch: &MountBatch) -> Vec<String> {
         batch
             .items
             .iter()
@@ -14885,7 +14885,7 @@ mod views {
             .collect()
     }
 
-    fn root_host(batch: &MountBatch) -> NodeId {
+    pub(super) fn root_host(batch: &MountBatch) -> NodeId {
         batch
             .items
             .iter()
@@ -19672,6 +19672,126 @@ mod rust_windows {
         );
         let _entered = c.components.runtime.enter();
         assert_eq!(handle.title_bar(), area);
+    }
+
+    /// Escape bound in the main window and in two windows of the app's own
+    /// (#1343), Mod+K only in the main window; a press closes "about".
+    #[component]
+    fn WindowKeys() -> impl IntoElement {
+        let main = signal(0);
+        let settings = signal(0);
+        let about = signal(0);
+        let about_open = signal(true);
+        on_key("escape", move |_| main.update(|n| *n += 1));
+        on_key("mod+k", move |_| main.update(|n| *n += 10));
+        view()
+            .on_press(move |_: &()| about_open.set(false))
+            .child(text(move || {
+                format!("{} {} {}", main.get(), settings.get(), about.get())
+            }))
+            .child(
+                window()
+                    .id("settings")
+                    .default_size(size(px(300.0), px(100.0)))
+                    .content(move || {
+                        on_key("escape", move |_| settings.update(|n| *n += 1));
+                        view()
+                    }),
+            )
+            .child(
+                window()
+                    .id("about")
+                    .open(about_open)
+                    .default_size(size(px(300.0), px(100.0)))
+                    .content(move || {
+                        on_key("escape", move |_| about.update(|n| *n += 1));
+                        view()
+                    }),
+            )
+    }
+
+    #[test]
+    fn a_shortcut_fires_only_in_the_window_that_bound_it() {
+        use super::views::{root_host, texts};
+        use crate::keymap::{KeyMatch, Keymap, Keystroke};
+        let last_table = |batch: &MountBatch| {
+            batch.items.iter().rev().find_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+        };
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        c.mount_root(&Root::of::<WindowKeys>());
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let windows: Vec<NodeId> = desktop_commands(&batch)
+            .iter()
+            .filter(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
+            .map(|(id, _)| *id)
+            .collect();
+        let [settings, about] = windows[..] else {
+            panic!("two windows open: {windows:?}");
+        };
+        // The table may come in a later commit, once the windows' roots
+        // are mounted.
+        let mut table: Option<std::sync::Arc<Keymap>> = last_table(&batch);
+        for _ in 0..3 {
+            if let Some(b) = c.commit() {
+                table = last_table(&b).or(table);
+            }
+        }
+        let table = table.expect("a table");
+        let escape = Keystroke::parse_with("escape", true).unwrap();
+        let mod_k = Keystroke::parse_with("mod+k", true).unwrap();
+        let tab = Keystroke::parse_with("tab", true).unwrap();
+        let fired = |window: NodeId, key: Keystroke| match table.find_in(window, key, false, false)
+        {
+            KeyMatch::Fire(id) => Some(id),
+            KeyMatch::None => None,
+            other => panic!("{other:?}"),
+        };
+        let in_main = fired(ROOT_ID, escape).expect("the main window's Escape");
+        let in_settings = fired(settings, escape).expect("Settings' Escape");
+        let in_about = fired(about, escape).expect("About's Escape");
+        assert_ne!(in_main, in_settings);
+        assert_ne!(in_settings, in_about);
+        assert_eq!(table.find(escape, false, false), KeyMatch::Fire(in_main));
+        // The main window's Mod+K is not the other windows', and keys no
+        // binding takes go on in every window.
+        assert!(fired(ROOT_ID, mod_k).is_some());
+        assert_eq!(fired(settings, mod_k), None);
+        assert_eq!(fired(about, tab), None);
+        assert_eq!(fired(ROOT_ID, tab), None);
+        // Each runs its own window's handler.
+        let key = |id: u32| EventPayload::Value(crate::PayloadValue::Number(id as f64));
+        for (id, shown) in [
+            (in_settings, "0 1 0"),
+            (in_main, "1 1 0"),
+            (in_about, "1 1 1"),
+        ] {
+            assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &key(id)));
+            assert_eq!(texts(&c.commit().unwrap()), [shown]);
+        }
+        // A closed window's binding goes with it.
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let mut table = None;
+        for _ in 0..3 {
+            if let Some(b) = c.commit() {
+                table = last_table(&b).or(table);
+            }
+        }
+        let table = table.expect("a new table");
+        assert_eq!(table.find_in(about, escape, false, false), KeyMatch::None);
+        assert_eq!(
+            table.find_in(settings, escape, false, false),
+            KeyMatch::Fire(in_settings)
+        );
+        assert_eq!(table.bindings().len(), 3);
     }
 
     /// A popover anchored to a button and a dialog, both in a window's
