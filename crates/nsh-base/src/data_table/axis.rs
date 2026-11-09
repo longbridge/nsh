@@ -13,9 +13,10 @@
 //! (a million rows of 28 points, nine times). Where the scroll bar is not
 //! dragged (touch, or web desktop wheels and keys), the offset is followed
 //! from an [`Anchor`] instead: the content moves as far as the scroll
-//! ([`Axis::content_offset_from`]), and
-//! once the scroll comes to rest the scroll view is moved, unseen, to where
-//! its bar stands for the content ([`Axis::anchor_at`]).
+//! ([`Axis::content_offset_from`]). Once the scroll comes to rest, the scroll
+//! view moves, unseen, to the content's anchor ([`Axis::anchor_at`]): the
+//! proportional bar position in the interior, with native scroll room
+//! reserved near either end for a one-to-one reverse gesture.
 
 use nsh_core::Points;
 
@@ -109,11 +110,13 @@ impl Axis {
         at.clamp(0.0, cmax)
     }
 
-    /// The anchor that shows content offset `content` with the scroll view
-    /// where its bar stands for it: [`Self::scroll_offset`] on a device
-    /// pixel of `pixel_ratio`, where the platforms keep a scroll offset,
-    /// keeping enough native scroll room near either end so a reverse gesture
-    /// follows the content one to one instead of accelerating across it.
+    /// The anchor that shows content offset `content`, on a device pixel
+    /// of `pixel_ratio`, where the platforms keep a scroll offset.
+    /// It follows the proportional bar position ([`Self::scroll_offset`])
+    /// in the interior and reserves native scroll room near either end so
+    /// a reverse gesture follows the content one to one. While the reserve
+    /// clamps that proportional position, successive content offsets can
+    /// share the same native anchor.
     pub(crate) fn anchor_at(&self, content: f64, pixel_ratio: f64) -> Anchor {
         let max = (self.total - self.viewport).max(0.0);
         let content = content.clamp(0.0, max);

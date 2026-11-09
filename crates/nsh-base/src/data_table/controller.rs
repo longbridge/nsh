@@ -883,9 +883,10 @@ impl Dt {
     /// The scroll offset that shows content offset `content`, from `from`.
     /// Followed from an anchor, an animated scroll within reach moves one
     /// to one from where it is (the content glides as far as the scroll);
-    /// any other takes the anchor of `content`, the scroll view going where
-    /// its bar stands for it, and the offset is taken at once so no frame
-    /// shows the new anchor with the old offset.
+    /// any other takes the anchor of `content` ([`Axis::anchor_at`]),
+    /// proportional in the interior with native room reserved near either
+    /// end. The offset is taken at once so no frame shows the new anchor
+    /// with the old offset.
     fn offset_to(
         &self,
         axis: &Axis,
@@ -916,9 +917,10 @@ impl Dt {
         Points(a.scroll as f32)
     }
 
-    /// A scroll came to rest: followed from an anchor, the anchor moves to
-    /// where the bar stands for the content shown, and the scroll views move
-    /// there, unseen, when they are not already ([`settle`]).
+    /// A scroll came to rest: the anchor is retargeted to the content shown
+    /// ([`Axis::anchor_at`]), proportional in the interior with native room
+    /// reserved near either end. The scroll views move to that anchor,
+    /// unseen, when they are not already there ([`settle`]).
     pub(crate) fn rest(&self) {
         if !self.anchored {
             return;
@@ -1565,9 +1567,10 @@ fn from_public(selection: DataTableSelection) -> Selection {
 }
 
 /// A scroll came to rest on `axis` at scroll offset `scroll`, showing
-/// content offset `content`: `anchor` moves to where the bar stands for that
-/// content, and the scroll offset the scroll view moves to, unseen, is
-/// returned when it is not already there.
+/// content offset `content`: `anchor` is retargeted by [`Axis::anchor_at`],
+/// proportional in the interior with native room reserved near either end.
+/// The scroll offset the scroll view moves to, unseen, is returned when it
+/// is not already there.
 ///
 /// The anchor moves even when the scroll view does not. A drag back
 /// to the top ends at offset 0, already where the bar stands for the top;

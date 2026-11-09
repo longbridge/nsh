@@ -13,7 +13,7 @@ use nsh_base::{
     resize_handle,
 };
 use nsh_core::{
-    MountItem, NodeId, Size,
+    Command, MountItem, NodeId, Size,
     element::Root,
     platform::{Environment, Idiom, Os},
     prelude::*,
@@ -387,24 +387,35 @@ fn touch_reverse_scroll_after_settling_near_top_stays_one_to_one() {
         ..EngineConfig::new(Root::of::<HugeWebTable>())
     };
     let mut app = Headless::start(config).unwrap();
-    let vertical = Arc::new(Mutex::new(None));
-    let found = vertical.clone();
+    #[derive(Default)]
+    struct Seen {
+        vertical: Option<NodeId>,
+        scroll_to: Vec<Points>,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
     app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
         for item in &batch.items {
-            if let MountItem::ScrollConfig {
-                id,
-                horizontal: false,
-                ..
-            } = item
-            {
-                *found.lock().unwrap() = Some(*id);
+            match item {
+                MountItem::ScrollConfig {
+                    id,
+                    horizontal: false,
+                    ..
+                } => seen.vertical = Some(*id),
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollTo { y, .. },
+                } if Some(*id) == seen.vertical => seen.scroll_to.push(*y),
+                _ => {}
             }
         }
     });
     app.first_render().unwrap();
-    let id = vertical
+    let id = seen
         .lock()
         .unwrap()
+        .vertical
         .expect("the table's vertical hit layer");
 
     let control = app.engine().control();
@@ -412,16 +423,26 @@ fn touch_reverse_scroll_after_settling_near_top_stays_one_to_one() {
     let down = point(px(0.0), px(1700.0));
     control.scroll(id, down, 0);
     app.wait_for("First row 50").unwrap();
+    seen.lock().unwrap().scroll_to.clear();
     control.dispatch_event(
         id,
         nsh_core::EventKind::ScrollEnd,
         nsh_core::EventPayload::Scroll(down),
     );
+    assert!(app.settle(), "the scroll-end event is processed");
     app.wait_for("First row 50").unwrap();
 
-    // A reverse gesture of 204pt (6 rows) must move up 6 rows to row 44
-    // rather than accelerating across the compressed top interval to row 0.
-    let up = point(px(0.0), px(1496.0));
+    // Follow the native offset chosen at rest. The old mapping recenters
+    // to 75pt, so a fixed 1496pt would scroll forward instead of reversing.
+    let scroll_to = std::mem::take(&mut seen.lock().unwrap().scroll_to);
+    let at_rest = scroll_to.last().copied().unwrap_or(down.y);
+    // Reversing 68pt (2 rows) must show row 48; the old compressed top
+    // interval accelerates across the content and lands on row 9 instead.
+    let up = point(px(0.0), at_rest - px(68.0));
     control.scroll(id, up, 0);
-    app.wait_for("First row 44").unwrap();
+    app.wait_for("First row 48").unwrap();
+    assert!(
+        scroll_to.is_empty(),
+        "a rest within the edge reserve keeps its native offset: {scroll_to:?}"
+    );
 }
